@@ -4,6 +4,9 @@ Each pass writes a receipt. Decisions are recorded at their SCHEDULED time (09:1
 they ran live or as a backfill (`why` says which): a backfilled decision uses only data that was knowable at the
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
+A decision made again (release 1019c, `_scope`): outside the House's re-decision window it writes intents only for the
+programs its last receipt was pending on (A66, owed), and never for a program whose own look already stands over the
+session (A69); the summary's `kept` names each program it left as it was.
 """
 
 from __future__ import annotations
@@ -222,6 +225,64 @@ def _key(prog: P.Program) -> str:
     return prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
 
 
+# ---------------------------------------------------------------------------------------------------- re-decisions
+def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[P.Program], str | None]:
+    """WHAT A DECISION OF SESSION `day` MAY WRITE AGAIN (release 1019c): `kept(prog)` is why it writes (and asks)
+    nothing for `prog`, None when it decides it as before.
+
+    - A66, OWED (the captain's amendment of 13:00Z Oct 19, 2026): a re-decision of a session OUTSIDE the re-decision
+      window (league/events/screen.py `outside_window`: the House decides it again no more; what reaches it is a
+      decision pending on verdicts, inside the House's look-back, or the CLI's catchup) writes intents only for the
+      programs its last finished receipt (`ok` or `pending`) was pending on: that session is final for every other
+      program (A66's second rule), so a look may stand over it, and a late-stored event must never land under a look
+      already written. A last receipt `ok` was pending on none; an unreadable one is read as pending on none (the
+      reading that writes nothing). A session with no finished receipt is decided whole (no look can stand over it).
+    - A69 and A66 alike: a program whose own look is written as of the exit of this session's intents or later (for a
+      control, a look of a program it is the control of: that look read its record) is decided again for nothing,
+      inside the window too (A69's fast path can make a close final while the House still decides it again every
+      hour): the as-of date, the record and the look stay the same.
+    Every program a decision keeps is in its summary's `kept` with why; the shadow's earlier intents stand."""
+    from . import screen as SN
+
+    last = st.db.execute("SELECT started_at, status, summary FROM receipts WHERE job=? AND status IN ('ok', 'pending') "
+                         "ORDER BY id DESC LIMIT 1", (f"decide-{kind}:{day.isoformat()}",)).fetchone()
+    pending: set[str] | None = None     # None: every program may be decided
+    if last is not None and SN.outside_window(st, day, now):
+        pending = set()
+        if str(last["status"]) == "pending":
+            try:
+                body = json.loads(last["summary"] or "{}")
+                pending = {str(k) for k in (body.get("pending") or {})} if isinstance(body, dict) else set()
+            except (TypeError, ValueError, AttributeError):
+                pending = set()
+    looked: dict[tuple[str, int], dt.date | None] = {}
+    for program, version, at in st.db.execute("SELECT program, version, MAX(at) FROM looks GROUP BY program, version"):
+        try:
+            looked[(str(program), int(version))] = S.parse_iso(str(at)).astimezone(C.NY).date()
+        except (TypeError, ValueError):
+            looked[(str(program), int(version))] = None     # (an unreadable as-of: read as over every session)
+    exits: dict[int, dt.date] = {}
+
+    def kept(prog: P.Program) -> str | None:
+        if pending is not None and _key(prog) not in pending:
+            return (f"outside the re-decision window: decided by its run of {last['started_at']}, which was not "
+                    "pending on it")
+        # its own looks, and a control's the looks of every program it is the control of (they read its record)
+        marks = [as_of for (program, version), as_of in looked.items()
+                 if (program, version) == (prog.id, prog.version) or SN.CONTROLS.get(program) == prog.id]
+        if not marks:
+            return None
+        as_of = None if any(m is None for m in marks) else max(m for m in marks if m is not None)
+        sessions = prog.hold if prog.entry_at == "open" else prog.hold + 1
+        if sessions not in exits:
+            out = C.nth(st, day, sessions)
+            exits[sessions] = out.day if out is not None else day
+        if as_of is None or exits[sessions] <= as_of:
+            return f"its look as of {as_of.isoformat() if as_of else 'an unreadable close'} is written over this session"
+        return None
+    return kept
+
+
 # ---------------------------------------------------------------------------------------------------- verdicts
 def doc_verdict(ctx: Context, row: Mapping[str, Any], uni: Mapping[str, Any]) -> int | None:
     st = ctx.store
@@ -310,8 +371,13 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
 
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
+    kept = _scope(st, "open", day, ctx.now())
     for prog in P.PROGRAMS:
         if prog.entry_at != "open":
+            continue
+        reason = kept(prog)
+        if reason is not None:
+            out.setdefault("kept", {})[_key(prog)] = reason     # (A66 owed, A69: its earlier intents stand)
             continue
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
@@ -429,8 +495,13 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
 
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
+    kept = _scope(st, "close", day, ctx.now())
     for prog in P.PROGRAMS:
         if prog.entry_at != "close":
+            continue
+        reason = kept(prog)
+        if reason is not None:
+            out.setdefault("kept", {})[_key(prog)] = reason     # (A66 owed, A69: its earlier intents stand)
             continue
         rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]

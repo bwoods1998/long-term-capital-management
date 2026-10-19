@@ -21,10 +21,12 @@ this book's, e.g. the House's assignment-share closes, and the equity book's). C
 replacement goes only once the old order is terminal (filled, canceled, expired, rejected), sized target minus filled;
 the old order's remaining quantity stays in exposure until then. A cancel is followed by one lookup of the order, so a
 replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): the equity book's orders of a day (sends and
-cancels, as the options book counts its own, exits' included) are counted against `order_path.max_orders_day` (60): an
-ENTRY goes only while one more order leaves room for every open lot's exit and one cancel of it; AN EXIT IS NEVER
-STOPPED BY THAT COUNT (A28: an exit must never be blocked); and no order of either kind goes while the House-wide count
-would leave less than the options book's `exit_reserve()`.
+cancels, as the options book counts its own, exits' included) are counted against their lane's line: the old lanes'
+against `order_path.max_orders_day` (60), THE EVENT KIND'S against its own, `equity_money.event.max_orders_day` (150,
+release 1019c; `event_orders_today`): an ENTRY goes only while one more order leaves room for the exit of every open lot
+of its lane (and one cancel of an old lane's); AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be
+blocked); and no order of any kind goes while the House-wide count (every lane's orders and the options book's) would
+leave less than the options book's `exit_reserve()`.
 
 THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
 wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
@@ -147,7 +149,7 @@ import traceback
 from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal
 from pathlib import Path
-from typing import Any, Callable, Collection, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
 from .. import equity as _pkg
 from ..live import money as M
@@ -579,11 +581,29 @@ def working_buys_worst(rows: Callable[..., list]) -> Decimal:
 def orders_today(rows: Callable[..., list], day: str) -> int:
     """Equity orders sent (or pending) on the New York `day` (ISO), cancels counted as the options book counts its own:
     the shared day order count (A8.3). An order refused before it reached the venue (the House's rate, a gateway cap)
-    is not counted."""
+    is not counted. Every lane's together: the House-wide count's equity part (league/live/real.py `house_count`); the
+    event kind's own part is `event_orders_today`, the old lanes' the rest (release 1019c)."""
     if not _has_table(rows, "eq_orders"):
         return 0
+    return _count_orders(rows("SELECT status, day, answer FROM eq_orders WHERE day=? OR answer LIKE ?",
+                              (day, '%"cancel_day":%')), day)
+
+
+def event_orders_today(rows: Callable[..., list], day: str) -> int:
+    """THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c): `orders_today` of the orders of an event instance
+    (`eq_instances.lane` "event": the kind's auction buys and sales, and its fallback ladder's day sales with their
+    cancels), counted against `equity_money.event.max_orders_day`; the old lanes' orders (`orders_today` less these)
+    count against `order_path.max_orders_day`."""
+    if not _has_table(rows, "eq_orders") or not _has_table(rows, "eq_instances"):
+        return 0
+    return _count_orders(rows("SELECT o.status, o.day, o.answer FROM eq_orders o JOIN eq_instances i ON i.id=o.instance "
+                              "WHERE i.lane=? AND (o.day=? OR o.answer LIKE ?)", (EVENT_LANE, day, '%"cancel_day":%')), day)
+
+
+def _count_orders(found: Iterable[Mapping[str, Any]], day: str) -> int:
+    """The day order count of these order rows: each sent (or pending) on `day`, and each cancel made on `day`."""
     n = 0
-    for r in rows("SELECT status, day, answer FROM eq_orders WHERE day=? OR answer LIKE ?", (day, '%"cancel_day":%')):
+    for r in found:
         answer = loads(r["answer"], {}) or {}
         if r["day"] == day and r["status"] != "refused":
             n += 1
@@ -1701,24 +1721,35 @@ class EquityBook:
                 return f"one order a symbol: a working order on {symbol} that is not the equity book's"
         return None
 
-    def _count_refusal(self, day: str, *, exit_: bool) -> str | None:
-        """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit the
-        equity book's own count (`order_path.max_orders_day`) with room left for the exits of the lots held
-        (`_exit_reserve`: a lot's exit and one cancel of it; an event lot's one auction sale, none once sent). AN EXIT
-        IS NEVER STOPPED BY THE EQUITY BOOK'S OWN COUNT (A28: an exit must never be blocked): it meets the House-wide
-        count alone, which keeps the options book's exits their room (`exit_reserve`) under the
-        gateway's day lines. (Under the equity count an exit was stopped once a held basket's re-priced sales had used
-        it up: each sale that climbs the collar ladder costs a send and a cancel a rung, and every lot climbs at once,
-        so at 8 to 12 basket lots and a fast open the ETF lots' sales stopped below the rung that fills and were
-        carried to the next session; the review of step two, review-live, measured it.) The equity count still bounds
-        the book's NEW risk: entries stop once the day's sends and cancels, exits' included, leave too little room."""
-        et = self._et()
-        cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
+    def _count_refusal(self, day: str, *, exit_: bool, event_line: int | None = None) -> str | None:
+        """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit ITS LANE'S
+        own count with room left for the exits of that lane's lots held (`_exit_reserve`: an old lane's lot's exit and
+        one cancel of it; an event lot's one auction sale, none once sent): an old lane's entry the old lanes' orders
+        against `order_path.max_orders_day` (60); AN EVENT ENTRY (`event_line`, release 1019c) the event kind's orders
+        (`event_orders_today`) against its own line, `equity_money.event.max_orders_day` (150; league/events/book.py
+        `Settings.max_orders_day`). AN EXIT IS NEVER STOPPED BY A LANE'S COUNT (A28: an exit must never be blocked): it
+        meets the House-wide count alone (every lane's orders together, the options book's included), which keeps the
+        options book's exits their room (`exit_reserve`) under the gateway's day lines; every entry meets it too.
+        (Under the equity count an exit was stopped once a held basket's re-priced sales had used it up: each sale that
+        climbs the collar ladder costs a send and a cancel a rung, and every lot climbs at once, so at 8 to 12 basket
+        lots and a fast open the ETF lots' sales stopped below the rung that fills and were carried to the next session;
+        the review of step two, review-live, measured it.) A lane's count still bounds its NEW risk: its entries stop
+        once its day's sends and cancels, exits' included, leave too little room. (Under release 1019b's one count of
+        60 for both, the event kind's entries stopped at about 30 open-entry lots sold the same day.)"""
         mine = orders_today(self.state.rows, day)
         if not exit_:
-            reserve = self._exit_reserve(day)
-            if mine + 1 + reserve > cap:
-                return f"the equity day's order count: {mine} of {cap} sent, {reserve} kept for exiting the lots held"
+            events = event_orders_today(self.state.rows, day)
+            if event_line is not None:
+                cap, reserve = int(event_line), self._exit_reserve(day, event=True)
+                if events + 1 + reserve > cap:
+                    return (f"the event kind's day order count: {events} of {cap} sent, {reserve} kept for exiting its "
+                            "lots held")
+            else:
+                et = self._et()
+                cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
+                reserve, old = self._exit_reserve(day, event=False), mine - events
+                if old + 1 + reserve > cap:
+                    return f"the equity day's order count: {old} of {cap} sent, {reserve} kept for exiting the lots held"
         if self.options_book is not None:
             try:
                 house = int(self.options_book.count_today(day)) + mine
@@ -1730,22 +1761,23 @@ class EquityBook:
                         "the options book's exits")
         return None
 
-    def _exit_reserve(self, day: str) -> int:
-        """The part of the equity day's order count an ENTRY leaves for the exits of the lots held (`_count_refusal`):
-        two for a lot of the old lanes (its sale and one cancel of it: a day sale climbs the collar ladder); ONE for an
-        event lot (release 1019b's review: its exit is one auction order, a market-on-open or market-on-close sale, never
+    def _exit_reserve(self, day: str, *, event: bool | None = None) -> int:
+        """The part of the day's order count an ENTRY leaves for the exits of the lots held (`_count_refusal`): two for a
+        lot of the old lanes (its sale and one cancel of it: a day sale climbs the collar ladder); ONE for an event lot
+        (release 1019b's review: its exit is one auction order, a market-on-open or market-on-close sale, never
         re-priced or cancelled); NONE for an event lot whose sale this book has already sent on `day` (that order is in
         the count already: counted twice, a day's open-entry lots sold at the close left the close's own entries no
-        room)."""
+        room). `event` True: the event lots' part alone (the event kind's line, release 1019c); False: the old lanes'
+        part alone (theirs); None: both."""
         sent = {int(r["lid"]) for r in self.state.rows(
             "SELECT DISTINCT lid FROM eq_orders WHERE side='sell' AND day=? AND lid IS NOT NULL AND status!='refused'",
             (day,))}
         reserve = 0
         for lot in self._lots():
             if lot.lane != EVENT_LANE:
-                reserve += 2
+                reserve += 2 if event is not True else 0
             elif lot.lid not in sent:
-                reserve += 1
+                reserve += 1 if event is not False else 0
         return reserve
 
     def _open_block(self, real_block: Callable[..., str | None], inst: Instance | None,
@@ -5580,7 +5612,8 @@ class EquityBook:
         if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None:
-            why = self._symbol_busy(str(intent.symbol)) or self._count_refusal(day, exit_=False)
+            why = self._symbol_busy(str(intent.symbol)) or \
+                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day))
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why:
@@ -6074,5 +6107,5 @@ def _as_of_equal(old_raw: Mapping[str, tuple], old_all: Mapping[str, tuple], fre
 __all__ = ["SCHEMA", "EQUITY_KIND", "INSTANCE_KIND", "INSTANCE_KIND_DDL", "WORKING", "TERMINAL", "LOT_OPEN", "LOT_CLOSING",
            "LOT_CLOSED", "REAL_SUFFIX", "SHARE_TOLERANCE",
            "CLIENT_PREFIX", "client_id", "ProbeFigures", "probe_figures", "expected_shares_rows", "working_buys_worst",
-           "orders_today", "invested", "EquityBook", "Lot", "Order", "Intent", "Instance", "instance_key", "order_body",
+           "orders_today", "event_orders_today", "invested", "EquityBook", "Lot", "Order", "Intent", "Instance", "instance_key", "order_body",
            "limit_for", "collar_for", "house_minute", "export_row", "qty_text", "HOUSE_REASONS", "EXIT_KINDS"]
