@@ -121,6 +121,22 @@ is deployed before this release), so each is an entry of its own in the notice a
 running release has run and what they keep under it (`stall.json` `elane`: {release, since} and
 `elane_health.KEPT`; `elane_health.release_since`), so a restart that fixes nothing resets no evidence.
 
+THE EVENT LANE'S OWN CAUSES AND ITS DAILY REPORT (release R1, the owner's goal of Oct 19, 2026, item 7;
+league/ops/evl_health.py, which judges them): `evl_record` (no record pass in 30 minutes), `evl_decide` (a scheduled
+decision not done 10 minutes after its time), `evl_verdicts` (over 20% of a session's needed verdicts unanswered) and
+`evl_score` (a session not scored by 23:00 ET), from the lane's own receipts in `<state>/events/events.sqlite`, judged
+only while the lane runs on the House (config.json `events.enabled`) and `ops.json` `stall.evl` is not false; INFO, the
+four before the equity lanes' four in `CAUSES`, worded by the gateway. From 22:00 ET of each session day the lane's
+DAILY ONE-SCREEN REPORT (`evl_health.report_due`: league/events/report.py's figures for the day, counts and figures
+only) rides the notice once (`notice_facts` `report`; with no cause standing the notice carries it alone), told when
+the gateway sends it or answers that it mailed that very notice (its key names the day: `stall.json` `report`). The
+receipt and stall.json carry the report's day, never a figure.
+
+THE RESEARCH SWITCH (release R1): `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and
+drops the direction lane's research alarms (`RESEARCH_ALARMS`) from `dlane`, so no mail and no owner step comes of the
+old lanes' research being off (A60, by settings); no pause file (`PAUSE` holds entries and is an owner step after 6 h).
+A CHEAP DAY IS NEVER A FAILED DAY (budget rule 3, `CHEAP_DAY_RULE`): `underspend` is never judged under it.
+
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
 through the same gateway client the budget's funding notice uses (`budget._notifier`). It is mailed:
