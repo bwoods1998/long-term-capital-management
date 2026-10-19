@@ -181,10 +181,11 @@ def options_live(house: House, root: Path, config: dict[str, Any], *, real_money
     try:
         import numpy  # noqa: F401 - the live path needs it; the rest of the House does not
 
+        from .data_plan import PlanMarketData
         from .live import money as live_money
         from .live.families import MemoryFamilies, SwarmFamilies
         from .live.step import OptionsLive
-        from .live.venue import Account as LiveAccount, MarketData
+        from .live.venue import Account as LiveAccount
     except ImportError as exc:
         house.alert("error", f"the live options path is not running: {exc} (pip install numpy in the House's venv)")
         return None
@@ -200,9 +201,13 @@ def options_live(house: House, root: Path, config: dict[str, Any], *, real_money
     def client(venue: str) -> Any:
         return VenueClient(None, gateway_url=gateway_url, gateway=signer, venue=venue)
 
-    # OPRA/SIP entitlement belongs to the real account even while all execution is shadow/paper.
-    market = MarketData(client("alpaca"), option_feed=str(config.get("alpaca_option_feed", "opra")),
-                        stock_feed=str(config.get("alpaca_feed", "sip")))
+    # The data entitlement belongs to the real account even while all execution is shadow/paper. THE DATA PLAN (release
+    # R0, Oct 19, 2026: Alpaca's Basic plan, league/data_plan.py): snapshots on `alpaca_snapshot_feed` (IEX, real time),
+    # bars on `alpaca_feed` (SIP history, its `end` kept 16 minutes back), option reads off while `alpaca_option_feed`
+    # is "off" (no OPRA on the plan).
+    market = PlanMarketData(client("alpaca"), option_feed=str(config.get("alpaca_option_feed", "opra")),
+                            stock_feed=str(config.get("alpaca_feed", "sip")),
+                            snapshot_feed=str(config.get("alpaca_snapshot_feed", "iex")))
     real = LiveAccount(client("alpaca"), venue="alpaca", max_requests_minute=table.max_requests_minute) if real_money else None
     paper = LiveAccount(client("alpaca-paper"), venue="alpaca-paper", max_requests_minute=table.max_requests_minute)
     families = SwarmFamilies(root) if swarm_on else MemoryFamilies()

@@ -8,6 +8,108 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release R0 (Oct 19, 2026): the Basic data plan: `fix/basic-data-plan`, not deployed
+
+The owner cancelled Alpaca's Algo Trader Plus on Oct 18, 2026 (evening Pacific); the account has been on the free
+**Basic** data plan since: IEX in real time, SIP history up to 15 minutes ago, no OPRA, 200 market-data requests a
+minute. Read through the gateway at 00:21-00:55Z Oct 19 (read-only GETs; the module docstring of `league/data_plan.py`
+keeps the list): SIP snapshots and SIP latest quotes answer HTTP 403 "subscription does not permit querying recent SIP
+data"; a SIP bars, quotes or trades read whose `end` is later than 15 minutes ago is refused the same way, and **a
+date-only `end` is the end of that New York day** (1Min bars with `end=2026-10-16` ran to 23:59Z; `end=2026-10-18` was
+refused at 00:24Z Oct 19, while `end=2026-10-18T23:59:59Z` answered), so an `end` of today's date is refused all day;
+`end` left out answers; a start after its end is HTTP 400; OPRA answers 403 "subscription does not permit querying OPRA
+data", and `feed=indicative` answers (derived and delayed: never a price to trade on). Historical option bars and trades
+answer.
+
+**What the release before refused** (main `62fd070e`, the running release 1017r's code). The live path's market data
+(`league/live/venue.py` `MarketData`, built at `league/service.py:204` with `alpaca_feed` "sip" and
+`alpaca_option_feed` "opra"):
+- `stocks()` (`/v2/stocks/snapshots?feed=sip`, `venue.py:338`): every read. The equity book prices every limit from it
+  (`league/equity/live.py:1679`): each entry would read "no usable quote", each exit "no usable bid" every minute of
+  its windows and be carried to the next open, day after day, so open ETF lots could not be sold by their rules. Also
+  the options path's underlying price each session minute (`league/live/step.py:1481`, `:2208`) and the paper proofs'
+  quotes (`league/live/paper.py:539`).
+- `bars()` with an `end` of a day not yet over (`venue.py:355`): the equity book's 16:20 ET read asks through the next
+  day (`league/equity/live.py:3130`): refused, so no session's bars, no decide and no exit decision; its morning audit
+  (`:4113`) asks through the decision's next day, today when the sessions are consecutive; so do the band record's
+  closes (`:4621`; SPY's, `league/xs/book.py:872`, called at `league/equity/live.py:4078`) and the panel book's fetch
+  (`league/xs/book.py:363`, called at `league/equity/live.py:3663`). The options path's daily history (`step.py:720`)
+  asks through yesterday: it was served.
+- `chain()` and `contracts()` (`feed=opra`, `venue.py:311`, `:329`): every session minute, each root in the real and the
+  observe phases (`step.py:1517`, `:1521`, `:1525`, `:1562`, `:1575`) and the calibration's requote
+  (`league/live/calibration.py:682`).
+- The House's jobs, through the gateway with `feed=sip`: `direction` (`league/ops/direction.py:94`: SIP closes through
+  today's New York date, refused at every run, at the House's start and at 01:00Z); `equity_data` (22:30Z:
+  `league/ops/equity_data.py:516`, through the session just closed, refused until 04:00Z, and the regular-session
+  check's 04:00-20:00 ET minutes of that session, `:255`, ending in the future at 18:30 ET); `equity_panel` and
+  `equity_universe` (01:55Z and 01:40Z, while `elane.panel.mode` is not "off": `league/ops/equity_panel.py:181` through
+  the last closed session). Served as they were: `fill_minutes` (its windows end 40 minutes or more before it reads),
+  `equity_spreads` (Train-era sessions), the nightly's SIP relay (`scripts/data/sip.py:79`, days before today).
+  `economics` (`league/ops/economics.py:360-361`, OPRA snapshots and a SIP window ending 10 minutes before it runs)
+  reads only for an open real options position, of which there is none.
+- Not run by the production House (unchanged): `league/tapes.py` `AlpacaData` (`:294`, `:298`, `:409`; the House's
+  own agents, of which the options House seats none while the swarm runs, and the canary's simulated account, whose
+  fresh state holds no agent), `league/options_history.py` (built only with the live path off), the old books'
+  `ltcm/adapters/alpaca.py` quotes (`:571`, `:582`, `:616`; with the live path off) and `scripts/data_readiness.py`.
+
+**What R0 changes** (`league/data_plan.py`, new: its docstring states each rule):
+- **The SIP window.** A SIP history read whose `end` lies later than 16 minutes before now (a date-only `end` read as the
+  plan reads it, the end of that New York day) is sent with `end` at now - 16 minutes (RFC 3339, UTC, whole seconds); an
+  earlier `end`, or none, goes as it was. The window's past is the one the read asked for: a 1Day bar is stamped at its
+  New York midnight, so the 16:20 ET read (`bars_after_close_s` 1200) still holds the day's bar, its end at 16:04 ET,
+  after the close (13:04 on a half day); a test holds the constitution's offset above the window plus a minute. The live
+  path's market data applies it in `bars()` (a window that starts after its clamped end is answered empty, with no
+  request); `league/ops/context.py` `Gateway` applies it to every job's GET of `/v1/alpaca/v2/stocks/.../bars|quotes|
+  trades` with `feed=sip` (`data_plan.sip_params`; a window that would then be empty is sent as it was, so the plan's
+  own refusal names it). **The cost**: the 16:20 read ends at 16:04 ET, so a print the vendor counts in the day's bar
+  between 16:04 and 16:20 is first read by the morning audit (a volume difference is a note; a price difference its
+  alarm, as for a print after 16:20 before).
+- **The snapshot feed.** `league/config.json` `alpaca_snapshot_feed` (new, "iex"): the live path's snapshots read IEX;
+  `alpaca_feed` stays "sip" for every bar and store. An IEX snapshot's `minuteBar`, `dailyBar` and `prevDailyBar` are
+  one venue's and are dropped, so none reaches a store, the options path's volume reading or a program; the latest
+  quote and trade stay.
+- **Options off.** `alpaca_option_feed` "off": `chain()` and `contracts()` refuse at once with no request. No chain, no
+  snapshot: no live program is asked to decide, so none opens, and the House's own routes find nothing to price (the
+  calibration's requote and slots, the House live test, the incubator, the paper proof all wait on a snapshot or a
+  requote). The refusal is the minute summary's `data_errors` and nothing else: no alert, no refusal row, no notice, no
+  stall cause, and no request spends the plan's 200 a minute. No real options position is open (the published
+  positions table at 00:24Z Oct 19: 44 rows, all closed; the two open structures are the shadow book's), and none can
+  open, so no exit needs an option quote; the indicative feed would price a real limit on derived, delayed quotes.
+- **`league/service.py`** builds the live path's market data as `data_plan.PlanMarketData` (a `MarketData` with the three
+  rules) from those three keys; no byte of `league/live/` changes.
+- **The equity book's limits** (`league/equity/live.py` `_quote`, plumbing: no identity). A buy is a marketable limit at
+  the ask x (1 + collar) rounded up, a sale at the bid x (1 - collar) rounded down (collars 10 bp ETF / 25 bp stock on
+  the first send, widening each re-price to 50 / 100). An entry needs both sides above zero, uncrossed, quoted at or
+  after the session's open and inside a 2% spread; an exit needs this session's bid, else this session's last trade. A
+  SIDE AT ZERO OR BELOW IS NO SIDE now: IEX quotes a side it holds no order on as 0, so a 0 never becomes a limit, and at
+  the widest collar it no longer reads as a quote moved through a working order's limit (which cancelled a resting sale).
+  IEX's spread is at least the national one, so its limits sit at or beyond the national touch and still cross it; a
+  wide IEX quote refuses more entries (the 2% bound), never a worse fill. A quote older than the session's open is
+  refused; a later IEX quote counts as this session's (the universe's ETFs are quoted on IEX all session).
+- **`league/ci.py`**: `league/data_plan.py` joins `PENDING_GATEWAY` (the updater never self-deploys a change to it; the
+  gateway's merge list gains it at its next follow-up deploy, as release E4's did).
+
+**No identity moves**: options execution fingerprint `b60410ad`, equity identity `78022ca6` (`equity-engine-1`), xs
+`2f0083bc`, money digest `5ea6f99f`, constitution digest `82a9a5a4` (`PINNED_DIGEST`), gate contract `397b22b7`, Gym
+bundle `gym-engine-4-e1c896f8d304`, the same before and after on this tree (`execution_fingerprint`, `equity_identity`,
+`xs_identity`, `constitution.digest`/`money_digest`, `gate.gate_contract`, `driver.build_bundle`). So no evidence
+reset, no adoption, no re-ratification, and rule F0 does not apply (nothing under `league/live/` or `league/gym/`
+changes): the options bands keep their proofs and find no chain. No setting changes; no gateway change (the gateway
+pins no feed).
+
+**Deploy**: one owner deploy (`league/config.json`, `league/ops/context.py`, `league/equity/`, `league/ci.py` and
+`CHANGELOG.md` are protected), never 12:55-20:05Z on a trading day; it must be live before Monday's open (13:30Z Oct
+19, 2026) for the equity book's exits and 16:20 read. The release checklist (**Deploy**, below) holds (the nightly
+stopped, CI green on the exact head). The canary builds no live path and reads no market data on its fresh state, so
+it is unchanged.
+**Verify after it** (read-only): the ids above; health `options_live.summary.data_errors` naming "options market data
+is off" in a session minute and nothing else about options; at 09:31 ET the equity book's exits and entries sent (or
+refused for a reason that is not "no usable quote" or "no usable bid"); at 16:21 ET `eq_bars` holding the session's
+rows; the next `direction` receipt ok; the next `equity_data` (22:30Z) receipt ok. **Rollback:** `python3
+scripts/floor_box.py rollback` to the release before (1017r, House `20261016T204140Z-99e7c39c780a`, main `4893d0f8`):
+nothing is migrated, and the data reads are refused again. **Owner follow-up (not blocking):** add
+`league/data_plan.py` to the gateway's `MERGE_FORBIDDEN` in its next deploy.
+
 ## Done at the 15th close, then every 5th (Oct 16, 2026): the owner's new goal (A50): `feat/done-a50`, not deployed
 
 The owner set a new goal at 02:10Z Oct 16, 2026 (`goal-2026-10-10/GOAL-MESSAGE-SPEED.txt`; the captain's amendments

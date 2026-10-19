@@ -284,9 +284,9 @@ class TheEquityLane(unittest.TestCase):
         # effects and the memory tables: secrecy rules and a Train-bar input) since the release itself. Release E4's
         # two (the panel's swarm lane and the universe generator) wait here for the gateway's next follow-up.
         self.assertEqual(ci.PENDING_GATEWAY, ("league/swarm/elane_xs.py", "scripts/gen_universe.py",
-                                              "league/swarm/elane_forward.py"),
+                                              "league/swarm/elane_forward.py", "league/data_plan.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
-                         "the release; E4's two and FWD1-R's seat path wait for its next one")
+                         "the release; E4's two, FWD1-R's seat path and R0's data plan wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
