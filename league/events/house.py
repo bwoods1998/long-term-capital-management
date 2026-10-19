@@ -19,7 +19,9 @@ once an hour per task, so the House's repeat rule never turns it into an error),
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
-   one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass);
+   one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass;
+   so does PREREG-EVL-4'S ROWS' OWN DECISION, `decide-close-evl4`, of every older close a release without them decided:
+   release 1019c's review, `_refill_redecide`);
 2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending (a close
    decision waiting on verdicts only its session's OPEN decision asks, PREREG-EVL-4's PM rows, has those asked by the
    open decision's own code; a wait no call of the pass could answer backs off like one the gateway refused);
@@ -107,6 +109,12 @@ REDECIDE_EVERY = dt.timedelta(hours=1)
 #: LOOKBACK: decisions older than this are the CLI's (`catchup`); BACKFILL_WEEKDAYS: the daily-index backfill's reach.
 REDECIDE_SESSIONS = SN.FINAL_SESSIONS
 LOOKBACK = SN.FINAL_LOOKBACK
+#: PREREG-EVL-4'S ROWS DECIDED BY THEMSELVES (release 1019c's review): the decision kind (its receipt
+#: `decide-close-evl4:<day>`, league/events/run.py `decide_close` with `evl4_only`) the lane runs, once and as a
+#: backfill, for every close since PREREG-EVL-4's registration that a release without its rows decided and the hourly
+#: re-decision no longer reaches (league/events/screen.py `made_without`, the judge's: until it is made the close is not
+#: final for those programs). The earlier rows of such a close are never decided again by it.
+FOUR_KIND = SN.FOUR_KIND
 URGENT_BEFORE = dt.timedelta(minutes=30)
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
@@ -268,6 +276,7 @@ class EventLane:
         self._cut: set[tuple[str, dt.date]] = set()
         self._redecide: set[tuple[str, dt.date]] = set()
         self._redecide_next = self._born
+        self._four: set[dt.date] = set()        # closes whose PREREG-EVL-4 rows wait for their own decision
         self._looks: dict[tuple[str, dt.date], VerdictLook] = {}
         self._events_at = self._born            # when a record pass last stored something new
         self._universe_told: set[dt.date] = set()
@@ -580,7 +589,7 @@ class EventLane:
         session = C.session(st, today)
         latest = self._decide_receipts(st, now)
         if now >= self._redecide_next:
-            self._refill_redecide(st, now, today)
+            self._refill_redecide(st, now, today, latest)
         last_record = self._last_started(st, "record")
         record_due = last_record is None or now >= last_record + RECORD_EVERY
         # a backlog (missed decisions, a long verdict queue) never starves the record pass past a second cadence
@@ -642,20 +651,43 @@ class EventLane:
         return out
 
     def _decision_times(self, st: S.Store, first: dt.date, last: dt.date) -> Iterable[tuple[C.Session, str, dt.datetime, dt.datetime]]:
-        """(session, kind, scheduled time, the time it is run from) for every decision of the sessions in [first, last]."""
+        """(session, kind, scheduled time, the time it is run from) for every decision of the sessions in [first, last],
+        and PREREG-EVL-4's rows' own decision (`FOUR_KIND`) of each close that waits for it (`_four`)."""
         for s in C.sessions(st, first, last):
             yield s, "open", s.open_decide, s.open_decide
             yield s, "close", s.close_decide, s.close_decide + CLOSE_GRACE
+            if s.day in self._four:
+                yield s, FOUR_KIND, s.close_decide, s.close_decide + CLOSE_GRACE
 
-    def _refill_redecide(self, st: S.Store, now: dt.datetime, today: dt.date) -> None:
-        """Once an hour: the last REDECIDE_SESSIONS sessions' decisions again (late events still get their decision)."""
+    def _refill_redecide(self, st: S.Store, now: dt.datetime, today: dt.date,
+                         latest: Mapping[str, tuple[str, dt.datetime]] | None = None) -> None:
+        """Once an hour: the last REDECIDE_SESSIONS sessions' decisions again (late events still get their decision).
+
+        Then PREREG-EVL-4'S ROWS (release 1019c's review): every older close since its registration, back to LOOKBACK,
+        that a release without its rows decided last (league/events/screen.py `made_without`) gets their own decision,
+        `FOUR_KIND`, once, as a backfill: release 1019b's closes from 16:01:05Z Oct 19 to this release's deploy that
+        the hourly re-decision no longer reaches. A close it still reaches is decided again whole by it, and a close
+        whose latest decision is pending is decided again whole by its retry: each names their rows then. One decided
+        by themselves and then again by such a release (stale) is decided again."""
         self._redecide_next = now + REDECIDE_EVERY
         start = P.registered().astimezone(C.NY).date()
         due = [s for s in C.sessions(st, max(start, today - dt.timedelta(days=14)), today) if s.open_decide <= now]
-        for s in due[-REDECIDE_SESSIONS:]:
+        recent = due[-REDECIDE_SESSIONS:]
+        for s in recent:
             self._redecide.add(("open", s.day))
             if s.close_decide + CLOSE_GRACE <= now:
                 self._redecide.add(("close", s.day))
+        reached = {s.day for s in recent}
+        latest = self._decide_receipts(st, now) if latest is None else latest
+        four: set[dt.date] = set()
+        for day, stale in SN.made_without(st, today, first=(now - LOOKBACK).astimezone(C.NY).date()).items():
+            status = latest.get(f"decide-close:{day.isoformat()}", (None, None))[0]
+            if day in reached or status != "ok":
+                continue
+            four.add(day)
+            if stale:
+                self._redecide.add((FOUR_KIND, day))
+        self._four = four
 
     def _due_decision(self, st: S.Store, now: dt.datetime, latest: Mapping[str, tuple[str, dt.datetime]],
                       soon: list[dt.datetime]) -> tuple[int, dt.datetime, str, dt.date, bool] | None:
@@ -671,11 +703,11 @@ class EventLane:
                 continue
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
-            live = R.live_run(scheduled, now)
+            live = kind != FOUR_KIND and R.live_run(scheduled, now)   # PREREG-EVL-4's rows' own: always a backfill
             # (Release 1019b's second review: the receipt's own status first, then this lane's cut: a decision cut once
             # and failing since waits as a failed one does, never every turn.)
             if status is None:
-                rank = 0 if live else 1
+                rank = 3 if kind == FOUR_KIND else (0 if live else 1)   # (a re-decision: after the record pass)
             elif status == "ok":
                 if key not in self._redecide:
                     continue
@@ -717,6 +749,8 @@ class EventLane:
         try:
             if kind == "open":
                 out = R.decide_open(ctx, day, backfill_run=not live)
+            elif kind == FOUR_KIND:
+                out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
             else:
                 out = R.decide_close(ctx, day, backfill_run=not live)
         except LaneDeadline:
@@ -773,6 +807,8 @@ class EventLane:
             pending = sorted((dt.date.fromisoformat(job.split(":", 1)[1]), job[len("decide-"):].split(":", 1)[0])
                              for job, (status, _) in latest.items() if status == "pending")
             for day, kind in pending:
+                if kind == FOUR_KIND and day not in self._four:
+                    continue    # (its close was decided again whole since: that decision's own wait is the one read)
                 if day != today and self._verdicts_due((kind, day), now, soon, fresh=False):
                     urgent = (kind, day, False)
                     break
@@ -799,10 +835,16 @@ class EventLane:
         key = (kind, day)
         before = self._stored_verdicts(ctx.store)
         gw = ctx.gw
-        decide = R.decide_open if kind == "open" else R.decide_close
+        if kind == "open":
+            decide = R.decide_open
+        elif kind == FOUR_KIND:     # PREREG-EVL-4's rows' own decision (a backfill): their verdicts alone
+            def decide(ctx: Any, day: dt.date, *, backfill_run: bool, ask_only: bool) -> dict[str, Any]:
+                return R.decide_close(ctx, day, backfill_run=True, ask_only=ask_only, evl4_only=True)
+        else:
+            decide = R.decide_close
         try:
             out = decide(ctx, day, backfill_run=not live, ask_only=True)
-            if kind == "close" and R.waits_on_open(out):
+            if kind in ("close", FOUR_KIND) and R.waits_on_open(out):
                 session = C.session(ctx.store, day)
                 opened = R.live_run(session.open_decide, ctx.now()) if session is not None else False
                 R.decide_open(ctx, day, backfill_run=not opened, ask_only=True)
@@ -821,7 +863,7 @@ class EventLane:
         if gw.counts.get("cut_cap"):
             self.warn("verdict line", f"the day's ${self.verdict_usd_day:.2f} line for verdicts is reached; READ events "
                                       "wait for the next day's (events.verdict_usd_day)")
-        if day not in self._universe_told and isinstance(out.get("events"), Mapping):
+        if kind != FOUR_KIND and day not in self._universe_told and isinstance(out.get("events"), Mapping):
             self._universe_told.add(day)
             self._receipted(ctx.store, "universe", "ok", {"day": day.isoformat(), "decision": kind,
                                                           **dict(out["events"])})

@@ -749,6 +749,91 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 FINAL_SESSIONS = 3
 FINAL_LOOKBACK = dt.timedelta(days=45)
 FINAL_BACKFILL_WEEKDAYS = 3
+#: A DECISION MADE BY A RELEASE WITHOUT A PROGRAM'S ROWS IS NOT MADE FOR IT (release 1019c's review; PREREG-EVL-4
+#: section 2: "for every event after the registration time that comes before it (backfill included), the programs are
+#: decided by the same rules in shadow only"; PREREG-EVL-1 section 3: "all do"). A decision's receipt names every
+#: program it decided (its key: the id at version 1, `id@vN` after it) or left pending on its verdicts (under
+#: `pending`); one a release without a program's rows made names none of them: release 1019b's receipts of the closes
+#: from PREREG-EVL-4's registration (16:01:05Z Oct 19) to the deploy of release 1019c, outside the reach the House
+#: decides again. For a program of PREREG-EVL-4 or a later file (`NAMED_FROM`), a decision whose latest receipt is
+#: finished `ok` or `pending` and does not name it is NOT MADE for it, unless a later receipt of PREREG-EVL-4's rows
+#: decided BY THEMSELVES (`FOUR_KIND`: league/events/run.py `decide_close` with `evl4_only`, a backfill) names it: then
+#: that receipt is its decision. Those rows alone are decided again, never the earlier files' rows: a close already
+#: final for an earlier program (the rules above) gains nothing, and their receipts are read here exactly as release
+#: 1019b reads them. The House's lane and the CLI's catchup run that decision, once, for every such close
+#: (`made_without`); until it is made, the close is not final for the program, so no look of it reads a record its rows
+#: never decided (the reading that waits: a House that never ran it could only delay the look).
+NAMED_FROM = 4
+FOUR_KIND = "close-evl4"
+
+
+def program_key(program: str, version: int) -> str:
+    """The key a decision's summary gives (program, version): the id at version 1, `id@vN` after it
+    (league/events/run.py `_key`)."""
+    return str(program) if int(version) == 1 else f"{program}@v{int(version)}"
+
+
+def names(summary: Any, key: str) -> bool:
+    """Whether a decision receipt's summary (its JSON text, or the mapping) NAMES the program `key`: decided (its counts
+    under the key) or pending on its verdicts (the key under `pending`). A receipt that ended in anything else (`cut`,
+    `failed`: a reason only) and an unreadable summary name none (the reading that waits)."""
+    if isinstance(summary, (str, bytes, bytearray)):
+        try:
+            summary = json.loads(summary)
+        except ValueError:
+            return False
+    if not isinstance(summary, Mapping):
+        return False
+    pending = summary.get("pending")
+    return key in summary or (isinstance(pending, Mapping) and key in pending)
+
+
+def _latest_receipts(store: S.Store, kinds: Iterable[str]) -> dict[str, tuple[int, str, Any]]:
+    """`decide-<kind>:<day>` -> (id, status, summary) of its latest receipt, for each kind of `kinds`."""
+    out: dict[str, tuple[int, str, Any]] = {}
+    for kind in kinds:
+        for row in store.db.execute("SELECT id, job, status, summary FROM receipts WHERE job>=? AND job<? ORDER BY id",
+                                    (f"decide-{kind}:", f"decide-{kind};")):
+            out[str(row["job"])] = (int(row["id"]), str(row["status"] or ""), row["summary"])
+    return out
+
+
+def four_programs() -> tuple[Any, ...]:
+    """PREREG-EVL-4's programs, every one a close-entry program (`FOUR_KIND` decides them and nothing else)."""
+    from .programs import PROGRAMS
+
+    return tuple(p for p in PROGRAMS if p.prereg == 4)
+
+
+def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None) -> dict[dt.date, bool]:
+    """THE CLOSES WHOSE PREREG-EVL-4 ROWS ARE STILL TO DECIDE BY THEMSELVES: the sessions from the first close after
+    PREREG-EVL-4's registration (from `first`, when later) to `last` whose latest `decide-close` receipt is finished
+    `ok` or `pending` without naming every one of its programs (a release without their rows made it), and with no
+    later `FOUR_KIND` receipt finished `ok`. {day: stale}: stale when the session's latest `FOUR_KIND` receipt is older
+    than that receipt (its rows were decided by themselves, then the session again by such a release: decided again).
+    The House's lane and the CLI's catchup decide each of them (`FOUR_KIND`), once, as a backfill."""
+    four = four_programs()
+    if not four:
+        return {}
+    since = min(p.registered_at for p in four).astimezone(C.NY).date()
+    if first is not None:
+        since = max(since, first)
+    if since > last:
+        return {}
+    latest = _latest_receipts(store, ("close", FOUR_KIND))
+    out: dict[dt.date, bool] = {}
+    for x in C.sessions(store, since, last):
+        rid, status, summary = latest.get(f"decide-close:{x.day.isoformat()}", (0, "", None))
+        if status not in ("ok", "pending"):
+            continue    # not made (none, cut, failed, running): the House decides it again whole, naming them
+        keys = [program_key(p.id, p.version) for p in four if p.registered_at < x.close_decide]
+        if all(names(summary, k) for k in keys):
+            continue
+        rid4, status4, _ = latest.get(f"decide-{FOUR_KIND}:{x.day.isoformat()}", (0, "", None))
+        if rid4 > rid and status4 == "ok":
+            continue
+        out[x.day] = 0 < rid4 < rid
+    return out
 
 
 def _reach() -> tuple[int, dt.timedelta, int]:
@@ -783,14 +868,22 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     horizon: dt.date | None = decided[-(reach_sessions + 1)].day
     why = f"the re-decision window reaches {decided[-reach_sessions].day.isoformat()}"
     kind = prog.entry_at
-    key = prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
-    latest: dict[str, tuple[str, Any]] = {}
-    for row in store.db.execute("SELECT job, status, summary FROM receipts WHERE job>=? AND job<? ORDER BY id",
-                                (f"decide-{kind}:", f"decide-{kind};")):
-        latest[str(row["job"])] = (str(row["status"] or ""), row["summary"])
+    key = program_key(prog.id, prog.version)
+    # (release 1019c's review: a program of PREREG-EVL-4 or later reads a receipt that does not name it as not made,
+    # unless a later receipt of its file's rows decided by themselves names it: `NAMED_FROM`, above)
+    named = prog.prereg >= NAMED_FROM
+    latest = _latest_receipts(store, (kind, FOUR_KIND) if named else (kind,))
     since = max(first, (now - reach_lookback).astimezone(C.NY).date())
     for x in C.sessions(store, since, horizon):
-        status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", ("", None))
+        rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
+        if named and status in ("ok", "pending") and not names(summary, key):
+            rid4, status4, summary4 = latest.get(f"decide-{FOUR_KIND}:{x.day.isoformat()}", (0, "", None))
+            if kind == "close" and rid4 > rid and names(summary4, key):
+                status, summary = status4, summary4        # its rows decided by themselves, after that decision
+            elif kind == "close" and rid4 > rid:
+                status = f"made without its rows ({FOUR_KIND}: {status4 or 'running'})"
+            else:
+                status = "made without its rows"
         if status == "ok":
             continue
         if status == "pending":
@@ -1041,7 +1134,9 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
-           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
+           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "NAMED_FROM", "FOUR_KIND",
+           "program_key", "names", "four_programs", "made_without", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS",
+           "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",

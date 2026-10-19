@@ -26,10 +26,20 @@ def weekdays(start, n):
     return out
 
 
+def decided_summary(kind):
+    """An `ok` decision receipt's summary as this release's code writes it: every program entering at `kind` named (its
+    counts under its key; league.events.screen `names`, release 1019c's review)."""
+    from league.events import programs as P
+
+    return {"pending": {}, **{SC.program_key(p.id, p.version): {"planned": 0, "skipped": 0, "known": 0}
+                              for p in P.PROGRAMS if p.entry_at == kind}}
+
+
 def final_record(store, through, *, wall=dt.time(23, 0)):
     """The House's record made FINAL through session `through` (league.events.screen `final_until`, release 1019b): every
-    session's open and close decisions `ok` and every weekday's daily-index backfill done. Returns the moment the screen
-    then runs at (`now`): `wall` New York time on `through`."""
+    session's open and close decisions `ok` (each receipt naming the programs it decided, as this release's code does:
+    `decided_summary`) and every weekday's daily-index backfill done. Returns the moment the screen then runs at
+    (`now`): `wall` New York time on `through`."""
     from zoneinfo import ZoneInfo
 
     days = [str(r["day"]) for r in store.db.execute("SELECT day FROM sessions WHERE day<=? ORDER BY day",
@@ -37,7 +47,7 @@ def final_record(store, through, *, wall=dt.time(23, 0)):
     for day in days:
         for kind in ("open", "close"):
             rid = store.start_receipt(f"decide-{kind}:{day}")
-            store.finish_receipt(rid, "ok", {})
+            store.finish_receipt(rid, "ok", decided_summary(kind))
     d = dt.date.fromisoformat(days[0]) if days else through
     while d <= through:
         if d.weekday() < 5:

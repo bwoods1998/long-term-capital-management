@@ -87,7 +87,11 @@ a look waits out (three sessions, the 45-day look-back, three backfill weekdays)
 (`screen.py` `FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`, behind the wall), and the House's lane
 takes its own from there (`house.py` imports them; release 1019b's second review): a House change the updater ships by
 itself can use the reach but not widen it, and a wider one would only delay a look (`screen._reach` waits out the
-larger).
+larger). A decision's receipt NAMES the programs it decided or left pending (their keys in its summary); for a program
+of PREREG-EVL-4 a decision whose receipt does not name it (made by a release without its rows) is NOT MADE for it until
+a later receipt of its rows' own decision names it (`screen.names`, `made_without`; release 1019c's review, below
+under "PREREG-EVL-4"), so no look reads a record its rows never decided; the earlier files' programs read their
+receipts as before.
 
 ELIGIBILITY IS DECIDED ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review;
 PREREG-EVL-1 section 2: a live decision reads Alpaca's `status=active` and `tradable: true`, a backfilled one
@@ -163,6 +167,19 @@ no call of a pass could answer backs off (`_look`). THE PROOF that no earlier pr
 test_events_evl4.py decides a synthetic week (league/tests/evl4_world.py) with and without these rows, and the same
 week decided by release 1019b's code gives every earlier program the same intents and real-money picks.
 
+THE CLOSES BEFORE THE DEPLOY (release 1019c's review; section 2: "for every event after the registration time that
+comes before it (backfill included), the programs are decided by the same rules in shadow only"): release 1019b decides
+the closes from 16:01:05Z Oct 19 until this release runs, and its receipts name none of these rows. The judge reads such
+a close as not made for them (`screen.final_until`), and the lane decides THESE ROWS BY THEMSELVES for it, once, as a
+backfill (`run.decide_close` with `evl4_only`, its receipt `decide-close-evl4:<day>`): the House's lane for every such
+close its hourly re-decision no longer reaches, after the record pass, oldest first (`house.py` `_refill_redecide`;
+a close the re-decision still reaches is decided again whole, as before), and the CLI's `catchup` (or `decide-close
+--day D --evl4-only`). The earlier rows of such a close are never decided again: their receipts, intents and finality
+stay release 1019b's, even for an event of theirs stored after the close left the reach. An issuer's eligibility reads
+all 20 of the entry session's sessions' bars and fetches any one missing (`run.eligibility`; before, only the last was
+checked, so an issuer judged first for a later session, an 8-K of D being EVL-8K-READ-O1's at D+1's open, read as
+ineligible for D).
+
 ## The code
 
 `league/events/` (standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
@@ -204,6 +221,7 @@ turn, the most urgent due first.
 | 2 | verdicts a decision will read | its decision within 30 min, or pending | 90 s |
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
+| - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
 | 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report | close + 3 min; 20:30 ET | the score 120 s, resumable |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |

@@ -16,6 +16,7 @@ from . import calendar as C
 from . import edgar as E
 from . import news as N
 from . import programs as P
+from . import screen as SN
 from . import store as S
 from . import universe as U
 from . import verdicts as V
@@ -206,9 +207,12 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
         raise RuntimeError("Alpaca's asset list came back empty: no eligibility is decided on it")
     tickers = ctx.tickers_for(day)
     symbols = sorted({t for c in todo for t, _ in tickers.get(c, []) if U._listed(assets.get(t), live)})
-    have = {r[0] for r in st.db.execute(
-        "SELECT symbol FROM bars WHERE adj='raw' AND day=? GROUP BY symbol", (prior[-1].day.isoformat(),))}
-    missing = [s for s in symbols if s not in have]
+    # EVERY ONE OF THE 20 SESSIONS' BARS, NOT ONLY THE LAST (release 1019c's review): a symbol judged for a LATER entry
+    # session first has the last of these sessions' bars and not the first, so a check of the last alone fetched
+    # nothing and the issuer read as ineligible here (a re-decision of an older session, PREREG-EVL-4's rows decided
+    # by themselves). A symbol with all of them stored is not fetched again, as before.
+    window = [x.day for x in prior]
+    missing = [s for s in symbols if len(U.bars(st, s, window, "raw")) < len(window)]
     if missing:
         U.fetch_daily_bars(st, ctx.gw, missing, prior[0].day, prior[-1].day, now=ctx.now())
     for cik in todo:
@@ -243,8 +247,9 @@ def _first_fetched(st: S.Store, rows: Iterable[Mapping[str, Any]]) -> dict[str, 
 
 
 def _key(prog: P.Program) -> str:
-    """A decision summary's key: the id for version 1 (unchanged), `id@vN` for a later version (PREREG-EVL-3)."""
-    return prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
+    """A decision summary's key: the id for version 1 (unchanged), `id@vN` for a later version (PREREG-EVL-3). The judge
+    reads a receipt by the same key (league/events/screen.py `program_key`, `names`), defined there once."""
+    return SN.program_key(prog.id, prog.version)
 
 
 #: The families whose verdicts the OPEN decision of the same session asks, never their own close decision (PREREG-EVL-4:
@@ -531,7 +536,8 @@ def _skip_excluded(st: S.Store, day: dt.date, excluded: set[str], filed: set[str
     return moved
 
 
-def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False) -> dict[str, Any]:
+def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False,
+                 evl4_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
     REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON), then PREREG-EVL-4's
     (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their two controls: `_rows_4`).
@@ -546,12 +552,21 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     issuer in EXCLUDED or the F8K(D) skip (`_skip_excluded`, build note (ii)).
 
     `ask_only`: as decide_open's (the verdicts the close decision will read, asked during the session: no intent, no
-    receipt, and no reaction, whose 15:29 bar is not on the tape before the decision)."""
+    receipt, and no reaction, whose 15:29 bar is not on the tape before the decision).
+
+    `evl4_only` (release 1019c's review): PREREG-EVL-4'S ROWS DECIDED BY THEMSELVES, for a close a release without them
+    decided (league/events/screen.py `made_without`; the House's lane and the CLI's catchup run it once, as a backfill):
+    the decision's reads and its eligibility call exactly as the whole decision makes them, then their rows as above
+    (reads, verdicts, `_skip_excluded`, intents); NO EARLIER ROW'S verdict is asked or intent written, so a close final
+    for an earlier program gains nothing. Its receipt is `decide-close-evl4:<day>` (screen.FOUR_KIND), which the judge
+    reads for their programs only (`screen.final_until`): the session's `decide-close:<day>` receipts, which the House's
+    lane, its book and the judge read for every earlier row, are left as they are."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    rid = None if ask_only else st.start_receipt(f"decide-close:{day}", now=ctx.now())
+    job = f"decide-{SN.FOUR_KIND if evl4_only else 'close'}:{day}"
+    rid = None if ask_only else st.start_receipt(job, now=ctx.now())
     lo, hi = P.close_window(st, day)
     e8k = [r for r in P.filings_in(st, "8-K", lo, hi) if "2.02" in P.items_of(r)]
     dlo, dhi = P.day_news_window(st, day)
@@ -648,6 +663,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     # THE EARLIER ROWS FIRST, exactly as before PREREG-EVL-4 (their reads, verdicts and intents), then PREREG-EVL-4's,
     # whose own reads come after them: a failure or a time bound in those never holds an earlier row's decision.
     for mine in (False, True):
+        if evl4_only and not mine:
+            continue        # (PREREG-EVL-4's rows by themselves: no earlier row is decided again)
         if mine:
             four.update(_rows_4(ctx, day, (lo, hi), by_ticker, elig, live=not backfill_run))
             elig4.update(four["elig"])

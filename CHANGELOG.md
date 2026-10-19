@@ -81,10 +81,38 @@ until release 1019b (below) brings it onto the House.
   8-K, the re-decisions) with and without the rows and compares every PREREG-EVL-1/2/3 program's intents and the nine's
   real-money picks; the same week decided by `rel/1019b`'s own code `8458ab42` (`python league/tests/evl4_world.py
   OUT.json` with that tree on PYTHONPATH) gives the same 59 intents and picks. The prompts' SHA-256 are unchanged.
-- **After the deploy**: the House decides every close from 16:01:05Z Oct 19 on (backfilled by the shadow rule within
-  its re-decision reach), the new rows in shadow at once; real money at the first decision after the release is live
-  and the auction paper proof's BUY stage has passed (PREREG-EVL-3 section 2). ROLLBACK: the previous release; the new
-  rows' intents and lots stay in the stores, their lots exit by their own plans, and the old code seats none of them.
+- **The deploy gap** (the review's major: league/events/screen.py `made_without`, `names`, `final_until`;
+  run.py `decide_close` with `evl4_only`; house.py `_refill_redecide`; `python -m league.events catchup`): release
+  1019b's receipts of the closes from 16:01:05Z Oct 19 to this release's deploy name none of the new rows, and the
+  hourly re-decision reaches only the last three sessions, so a close older than that would never have been decided for
+  them while the judge read it as final. Now a decision receipt NAMES the programs it decided (or left pending); for a
+  program of PREREG-EVL-4 a close whose latest receipt does not name it is NOT MADE for it (its looks wait) until a
+  later `decide-close-evl4:<day>` receipt does: PREREG-EVL-4's rows decided BY THEMSELVES, once, as a backfill, by the
+  House's lane (after the record pass, oldest first, every close since the registration back to its 45-day look-back
+  that the hourly re-decision no longer reaches; one it still reaches is decided again whole by it, as before) and by
+  the CLI's `catchup` (also `decide-close --day D --evl4-only`). Only those rows are decided: the earlier rows of such a
+  close are never decided again (their receipts, finality and intents stay release 1019b's: an event of theirs stored
+  after the close left the reach is still not decided, where a whole re-decision would decide it).
+  league/tests/test_events_evl4.py `TheDeployGap` (the CLI, after a synthetic week decided by the code without the
+  rows), `TheHouse` (the House started on a Thursday after release 1019b decided Monday) and `TheJudge` (the receipts).
+- **An issuer's 20 sessions' bars, all of them** (league/events/run.py `eligibility`, found by `TheDeployGap`; it
+  predates this file): the bars were fetched only when the LAST of the entry session's 20 sessions had none, so an
+  issuer judged first for a later session (CCC's 8-K of a Tuesday is EVL-8K-READ-O1's at Wednesday's open) read as
+  ineligible when judged afterwards for the earlier one (the deploy gap's backfill; a re-decision of an older session).
+  Now the bars are fetched when any of the 20 is missing. A live decision is never judged after a later session, so
+  real money reads as before; the synthetic week decides the same intents for every earlier program.
+- **After the deploy** (the deploy step): the House decides every close from 16:01:05Z Oct 19 on, the new rows in
+  shadow at once; within its first turns (after the record pass) it runs `decide-close-evl4` for each close release
+  1019b decided that its re-decision no longer reaches. VERIFY (read-only, on the box, an hour after the start):
+  `sqlite3 -readonly /workspace/state/events/events.sqlite "SELECT job, status FROM receipts WHERE job LIKE
+  'decide-close-evl4:%' ORDER BY id"` lists each such close `ok` (`pending` waits on verdicts and is decided again by
+  itself), and from the release's tree `python3 -c "import datetime as d; from league.events import book as EB, screen
+  as SN; print(SN.made_without(EB.Lane('/workspace/state/events/events.sqlite'), d.date.today()))"` (the store opened
+  `mode=ro`) prints `{}` (the hourly re-decision names the last three sessions' closes). Real money at the first
+  decision after the release is live and the auction paper proof's BUY stage has passed (PREREG-EVL-3 section 2).
+  ROLLBACK: the previous release; the new rows' intents and lots stay in the stores, their lots exit by their own
+  plans, and the old code seats none of them; on a later redeploy the closes the old code decided are decided again
+  for the new rows the same way.
 
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 

@@ -17,6 +17,10 @@ rows only (league/tests/evl4_world.py):
   time alone (EXCLUDED read from them too); section 1.3's guard (no buy for a filing knowable from 09:00 ET of D whose
   verdict is `ok` with score >= 2, or not yet answered);
 - the House asking EVL-NEWS-READ-O1's verdicts when only they are missing, and a wait nothing can ask backing off;
+- THE DEPLOY GAP (release 1019c's review): a close a release without these rows decided is not made for them until
+  their own decision (`decide-close-evl4`) names them; the House and the CLI's catchup run it once, as a backfill, for
+  every such close older than the re-decision reach, and decide no earlier row again (an earlier row's late event stays
+  undecided, as release 1019b leaves it); an issuer's eligibility reads all 20 of its sessions' bars;
 - THE PROOF: every PREREG-EVL-1/2/3 program's intents and real-money picks on a synthetic week are the same with and
   without PREREG-EVL-4's rows (the same week decided by release 1019b's own code gives them too: evl4_world.py)."""
 
@@ -46,7 +50,7 @@ from league.events import verdicts as V
 from league.tests import evl4_world as W
 from league.tests import test_events_book as TB
 from league.tests.test_events_house import LaneCase, et as house_et
-from league.tests.test_events_screen import final_record
+from league.tests.test_events_screen import decided_summary, final_record
 
 UTC = dt.timezone.utc
 NEW = ("EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON")
@@ -253,6 +257,52 @@ class TheJudge(unittest.TestCase):
                          "a close decision pending on its own verdicts holds its looks")
         self.assertEqual(SC.final_until(self.st, "EVL-NEWS-READ-ON", 2, self.days[10], now)[0], self.days[7],
                          "an earlier row is not held by PREREG-EVL-4's wait")
+
+    def test_a_close_made_without_its_rows_is_not_made_for_them(self):
+        """Release 1019c's review: a close decision whose receipt names none of PREREG-EVL-4's programs (release
+        1019b's, whatever its status) is NOT MADE for them until their own later decision (`FOUR_KIND`) names them,
+        and `made_without` lists it; every earlier program reads the same receipts exactly as release 1019b does."""
+        now = final_record(self.st, self.days[10])
+        gap = self.days[5]
+        job, four = f"decide-close:{gap.isoformat()}", f"decide-{SC.FOUR_KIND}:{gap.isoformat()}"
+        mine = {k: {"planned": 0, "skipped": 0, "known": 0} for k in FOUR}
+
+        def receipt(name: str, status: str, summary: dict) -> None:
+            rid = self.st.start_receipt(name)
+            self.st.finish_receipt(rid, status, summary)
+
+        def final(program: str = "EVL-8K-READ-ON", version: int = 1) -> tuple:
+            return SC.final_until(self.st, program, version, self.days[10], now)
+
+        self.assertEqual((final()[0], SC.made_without(self.st, self.days[10])), (self.days[7], {}))
+        receipt(job, "ok", {"pending": {}, "events": {"8-K": 1, "day_news": 0, "eligible": 1}})   # release 1019b's
+        self.assertEqual(final(), (self.days[4], f"the close decision of {gap} is made without its rows"))
+        self.assertEqual(SC.made_without(self.st, self.days[10]), {gap: False})
+        self.assertEqual(SC.made_without(self.st, self.days[10], first=self.days[6]), {})
+        for earlier in (("EVL-NEWS-READ-ON", 2), ("EVL-ERN-REACT-ON", 2), ("EVL-NEWS-READ-ON", 1)):
+            self.assertEqual(final(*earlier)[0], self.days[7], f"{earlier}: its receipt read as before")
+        receipt(job, "pending", {"pending": {"EVL-NEWS-READ-ON@v2": 1}})            # release 1019b's, pending
+        self.assertEqual(final()[0], self.days[4])
+        self.assertEqual(final("EVL-NEWS-READ-ON", 2)[0], self.days[4], "its own wait holds it, as before")
+        self.assertEqual(final("EVL-ERN-REACT-ON", 2)[0], self.days[7], "another row's wait does not, as before")
+        self.assertEqual(SC.made_without(self.st, self.days[10]), {gap: False})
+        receipt(four, "cut", {"why": "the lane's time bound; it goes on next turn"})
+        self.assertEqual(final(), (self.days[4], f"the close decision of {gap} is made without its rows "
+                                                 f"({SC.FOUR_KIND}: cut)"))
+        receipt(four, "pending", mine | {"pending": {"EVL-8K-READ-ON": 2}})
+        self.assertEqual(final()[0], self.days[4], "its rows' own decision waits on its verdicts")
+        self.assertEqual(final("EVL-8K-REACT-ON")[0], self.days[7], "made for the rows it decided")
+        self.assertEqual(SC.made_without(self.st, self.days[10]), {gap: False}, "not made until it is ok")
+        receipt(four, "ok", mine | {"pending": {}})
+        self.assertEqual((final()[0], SC.made_without(self.st, self.days[10])), (self.days[7], {}))
+        self.assertEqual(final("EVL-NEWS-READ-ON", 2)[0], self.days[4], "an earlier row never reads FOUR_KIND's")
+        receipt(job, "ok", {"pending": {}})        # a release without the rows decides the session again (a rollback)
+        self.assertEqual(final()[0], self.days[4], "decided again without its rows: not made again")
+        self.assertEqual(SC.made_without(self.st, self.days[10]), {gap: True}, "stale: their own decision again")
+        receipt(job, "ok", decided_summary("close"))                               # this release decides it whole
+        self.assertEqual((final()[0], SC.made_without(self.st, self.days[10])), (self.days[7], {}))
+        for prog in P.PROGRAMS:
+            self.assertEqual(R._key(prog), SC.program_key(prog.id, prog.version), "one key, written and read")
 
 
 # ----------------------------------------------------------------------------------------------------- the windows
@@ -618,6 +668,236 @@ class TheHouse(LaneCase):
         gw.counts.clear()
         gw.counts.update({"asked": 1, "refused": 1})
         self.assertTrue(self.lane._look(key, 2, 0, gw), "refused: stalled, as before")
+
+    def test_an_older_close_made_without_its_rows_gets_their_own_decision(self):
+        """Release 1019c's review, on the House: release 1019b decided Monday Oct 19's close after PREREG-EVL-4's
+        registration (its receipt names none of the new rows: LaneCase's) and Tuesday's and Wednesday's sessions; this
+        release starts Thursday 10:00 ET, when the hourly re-decision reaches back to Tuesday only. After the record
+        pass the lane decides Monday's close for PREREG-EVL-4's rows BY THEMSELVES (`decide-close-evl4`), once, as a
+        backfill, then the hourly re-decisions as before. Monday's earlier rows are never decided again by it (AAA's
+        earnings 8-K, C1's and REACT-ON's event, gets no intent, as release 1019b left it); the judge reads Monday's
+        close as not made for the new rows until then, and for every earlier row exactly as before."""
+        mon, thu = dt.date(2026, 10, 19), dt.date(2026, 10, 22)
+        self.fetched_8k("0000000003-26-000501", "0000000003", "2026-10-19 13:00:00", items=("8.01",))   # F8K(Mon)
+        self.fetched_8k("0000000001-26-000501", "0000000001", "2026-10-19 14:00:00", items=("2.02",))   # ERN(Mon)
+        with self.store() as st:
+            for day in ("2026-10-20", "2026-10-21", "2026-10-22"):
+                for kind in ("open", "close"):
+                    if (day, kind) != ("2026-10-22", "close"):
+                        rid = st.start_receipt(f"decide-{kind}:{day}", now=house_et(day, "09:20"))
+                        st.finish_receipt(rid, "ok", {"pending": {}}, now=house_et(day, "09:21"))
+            for day in ("2026-10-19", "2026-10-20", "2026-10-21"):
+                st.set_meta(f"evl:backfill:{day}", "done")
+        self.at(house_et("2026-10-22", "10:00"))
+        self.lane = self.new_lane(redecide=True)
+        now = self.clock_dt()
+
+        def judged(program: str, version: int) -> tuple:
+            with self.store() as st:
+                return SC.final_until(st, program, version, thu, now)
+
+        def on_monday() -> tuple[set, list]:
+            with self.store() as st:
+                intents = {(r["program"], r["symbol"], r["status"], r["why"]) for r in st.db.execute(
+                    "SELECT program, symbol, status, why FROM intents WHERE entry_day='2026-10-19'")}
+                jobs = [(r["job"], r["status"]) for r in st.db.execute(
+                    "SELECT job, status FROM receipts WHERE job LIKE 'decide-%:2026-10-19' ORDER BY id")]
+            return intents, jobs
+        self.assertEqual(judged("EVL-8K-READ-ON", 1),
+                         (None, "the close decision of 2026-10-19 is made without its rows"))
+        before = {p: judged(p, 2) for p in ("EVL-ERN-REACT-ON", "EVL-ERN-REACT-C1", "EVL-NEWS-READ-ON")}
+        self.assertEqual({v[0] for v in before.values()}, {mon}, "every earlier row: Monday's close is final")
+        self.mark_recorded()
+        last = self.turn()
+        self.assertEqual((last["task"], last["status"]), ("decide-close-evl4", "ok"), "the oldest re-decision first")
+        self.assertEqual(self.lane._four, {mon})
+        intents, jobs = on_monday()
+        self.assertEqual(intents, {("EVL-8K-REACT-ON", "CCC", "planned", "backfill"),
+                                   ("EVL-8K-READ-ON", "CCC", "planned", "backfill"),
+                                   ("EVL-CTRL-8K-ON", "CCC", "planned", "backfill")},
+                         "AAA is EXCLUDED (ERN(Mon)); no earlier row of Monday's close is decided again")
+        self.assertEqual(jobs, [("decide-open:2026-10-19", "ok"), ("decide-close:2026-10-19", "ok"),
+                                ("decide-close-evl4:2026-10-19", "ok")])
+        self.assertEqual(judged("EVL-8K-READ-ON", 1)[0], mon, "made for its rows now")
+        self.assertEqual({p: judged(p, 2) for p in before}, before, "the earlier rows' finality, as before")
+        tasks = [self.turn()["task"] for _ in range(5)]
+        self.assertEqual(tasks, ["decide-open", "decide-close", "decide-open", "decide-close", "decide-open"],
+                         "then the hourly re-decision of Tuesday to Thursday, whole, as before")
+        self.assertNotIn(self.turn().get("task"), ("decide-open", "decide-close", "decide-close-evl4"))
+        self.clock.advance(3600)
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual((self.lane._four, on_monday()[1][-1]), (set(), ("decide-close-evl4:2026-10-19", "ok")),
+                         "once: the next hour finds Monday's close made for its rows")
+        self.assertEqual(len(on_monday()[1]), 3)
+        with self.store() as st:                   # (what deciding Monday's close WHOLE again would have changed)
+            ctx = R.Context(st, self.gw, self.sec, now=self.clock_dt)
+            R.decide_close(ctx, mon, backfill_run=True)
+        self.assertIn(("EVL-ERN-REACT-C1", "AAA", "planned", "backfill"), on_monday()[0])
+
+    def test_its_rows_own_decision_asks_their_verdicts_alone_and_runs_again_when_stale(self):
+        """`decide-close-evl4` on the House: its verdict task asks the new rows' verdicts alone (CCC's PROMPT-DOC,
+        never AAA's, which EVL-ERN-REACT-READ-C1 reads and the whole close asks); a pending receipt of it is the verdict
+        task's only while its close still waits for it (`_four`); and a close its rows' own decision made, then decided
+        again by a release without them (a rollback), gets their own decision again (stale)."""
+        mon, thu = dt.date(2026, 10, 19), dt.date(2026, 10, 22)
+        self.fetched_8k("0000000003-26-000601", "0000000003", "2026-10-19 13:00:00", items=("8.01",))
+        self.fetched_8k("0000000001-26-000601", "0000000001", "2026-10-19 14:00:00", items=("2.02",))
+        with self.store() as st:
+            for day in ("2026-10-20", "2026-10-21", "2026-10-22"):
+                for kind in ("open", "close"):
+                    if (day, kind) != ("2026-10-22", "close"):
+                        rid = st.start_receipt(f"decide-{kind}:{day}", now=house_et(day, "09:20"))
+                        st.finish_receipt(rid, "ok", decided_summary(kind), now=house_et(day, "09:21"))
+            for day in ("2026-10-19", "2026-10-20", "2026-10-21"):
+                st.set_meta(f"evl:backfill:{day}", "done")
+        self.at(house_et("2026-10-22", "10:00"))
+        self.lane = self.new_lane(redecide=True)
+        now = self.clock_dt()
+        with self.store() as st:
+            self.lane._refill_redecide(st, now, thu)
+            self.assertEqual((self.lane._four, (H.FOUR_KIND, mon) in self.lane._redecide), ({mon}, False))
+            gw = H.LaneGateway(self.gw, self.lane, None, cut=False)
+            ctx = H.LaneContext(self.lane, st, gw, self.sec, self.lane.now)
+            out = self.lane._verdicts(ctx, H.FOUR_KIND, mon, False)
+        self.assertEqual((out["decision"], out["missing"]), (H.FOUR_KIND, 0))
+        asked = [c["messages"][0]["content"] for c in self.gw.claude_calls]
+        self.assertEqual([("ticker CCC" in t, "ticker AAA" in t) for t in asked], [(True, False)], "CCC's alone")
+        with self.store() as st:
+            self.assertEqual(st.db.execute("SELECT count(*) FROM intents").fetchone()[0], 0, "asks write no intent")
+            for day in ("2026-10-19", "2026-10-20"):
+                rid = st.start_receipt(f"decide-{H.FOUR_KIND}:{day}", now=now)
+                st.finish_receipt(rid, "pending", {"pending": {"EVL-NEWSPM-READ-ON": 1}}, now=now)
+            latest = self.lane._decide_receipts(st, now)
+            self.lane._looks.clear()                # (the asks above found nothing missing: a fresh lane's look)
+            urgent, _ = self.lane._verdict_targets(st, now, thu, C.session(st, thu), latest, [])
+            self.assertEqual(urgent, (H.FOUR_KIND, mon, False), "Monday's close waits for it")
+            self.lane._four = set()
+            self.assertIsNone(self.lane._verdict_targets(st, now, thu, C.session(st, thu), latest, [])[0],
+                              "a close that no longer waits for it (Tuesday's, decided whole): never the verdicts'")
+            for day in ("2026-10-19", "2026-10-20"):
+                rid = st.start_receipt(f"decide-{H.FOUR_KIND}:{day}", now=now)
+                st.finish_receipt(rid, "ok", {k: {} for k in FOUR} | {"pending": {}}, now=now)
+            rid = st.start_receipt("decide-close:2026-10-19", now=now)      # a release without the rows, again
+            st.finish_receipt(rid, "ok", {"pending": {}}, now=now)
+            self.lane._refill_redecide(st, now, thu)
+            self.assertEqual((self.lane._four, (H.FOUR_KIND, mon) in self.lane._redecide), ({mon}, True), "stale")
+        self.lane._redecide_next = now + H.REDECIDE_EVERY
+        self.mark_recorded()
+        self.assertEqual(self.turn()["task"], "decide-close-evl4")
+        with self.store() as st:
+            self.assertEqual([r[0] for r in st.db.execute("SELECT status FROM receipts WHERE job=? ORDER BY id",
+                                                          (f"decide-{H.FOUR_KIND}:2026-10-19",))],
+                             ["pending", "ok", "ok"])
+            self.assertEqual(SC.made_without(st, thu), {})
+
+
+# ---------------------------------------------------------------------------------------------- the deploy gap
+class TheDeployGap(unittest.TestCase):
+    """Release 1019c's review: release 1019b decides every session from Oct 19 through the synthetic week (its CLI
+    catchup, then the week as the House decides it), and this release first runs on Mon Nov 2 at 17:00 ET, when the
+    re-decision reach is Oct 29 to Nov 2: every close from PREREG-EVL-4's registration that release 1019b decided gets
+    PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`), once, as a backfill, and the judge reads those
+    closes as not made for the new rows until then. GGG's day-news article of Tue Oct 27 (an earlier row's event) is
+    stored only at the deploy (a recorder outage): release 1019b never decides it once Tuesday left its reach, and
+    neither does this release, so every earlier program's intents are the same as release 1019b's throughout; deciding
+    the close WHOLE again would have given EVL-CTRL-NEWS-DAY-ON a new intent."""
+
+    LATE = dt.date(2026, 11, 2)
+
+    def world(self) -> W.World:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        world = W.World(Path(tmp.name) / "lane")
+        self.addCleanup(world.close)
+        return world
+
+    def by_1019b(self, world: W.World) -> None:
+        """Release 1019b's sessions to the deploy: its catchup at Mon Oct 26 07:00 ET (Oct 19-23), the week, and GGG's
+        late article stored at the deploy; every weekday's daily-index backfill done."""
+        from league.events import __main__ as CLI
+
+        rows, reads = without_evl4()
+        with rows, reads:
+            world.at(et(PRIOR, 7, 0))
+            CLI.catchup(world.ctx)
+            W.the_week(world)
+        world.article("n-ggg-late", "GGG", knowable=et(D, 11, 0), stored=et(self.LATE, 16, 0))
+        for day in W.weekdays(dt.date(2026, 10, 19), self.LATE):
+            world.st.set_meta(f"evl:backfill:{day.isoformat()}", "done")
+        world.at(et(self.LATE, 17, 0))
+
+    @staticmethod
+    def taken4(world: W.World) -> set[tuple]:
+        """PREREG-EVL-4's intents not skipped: (program, event, symbol, entry day)."""
+        return {(r[0], r[2], r[3], r[6]) for r in world.intents(lambda p, v: p in FOUR)
+                if not str(r[12]).startswith("skipped")}
+
+    def test_the_older_closes_get_their_rows_decided_by_themselves_and_no_earlier_program_changes(self):
+        from league.events import __main__ as CLI
+
+        a, b, c = self.world(), self.world(), self.world()
+        self.by_1019b(a)
+        rows, reads = without_evl4()
+        with rows, reads:
+            CLI.catchup(a.ctx)                                            # A: release 1019b at the deploy time
+        self.by_1019b(b)
+        now = b.now
+        gap = [dt.date(2026, 10, d) for d in (19, 20, 21, 22, 23, 26, 27, 28)]
+        self.assertEqual(SC.final_until(b.st, "EVL-8K-READ-ON", 1, self.LATE, now),
+                         (None, "the close decision of 2026-10-19 is made without its rows"))
+        self.assertEqual(SC.made_without(b.st, self.LATE), dict.fromkeys(gap, False))
+        out = CLI.catchup(b.ctx)                                          # B: this release at the deploy time
+        jobs = ("SELECT job, status FROM receipts WHERE job LIKE 'decide-open:%' OR job LIKE 'decide-close:%' "
+                "ORDER BY id")
+        self.assertEqual([tuple(r) for r in a.st.db.execute(jobs)], [tuple(r) for r in b.st.db.execute(jobs)],
+                         "the earlier rows' decisions (their receipts) are release 1019b's, one for one")
+        self.assertEqual(sorted(k for k in out if k.startswith(SC.FOUR_KIND)),
+                         [f"{SC.FOUR_KIND}:{day}" for day in gap], "the closes older than the reach, by themselves")
+        self.assertEqual([k for k in out if k.startswith("close:")],
+                         ["close:2026-10-29", "close:2026-10-30", "close:2026-11-02"], "the reach, whole, as before")
+        self.assertEqual(SC.made_without(b.st, self.LATE), {})
+        self.assertEqual([k for k in CLI.catchup(b.ctx) if k.startswith(SC.FOUR_KIND)], [], "once")
+        self.assertEqual(SC.final_until(b.st, "EVL-8K-READ-ON", 1, self.LATE, now)[0], NEXT,
+                         "made for its rows: final up to the re-decision reach")
+        self.assertEqual(a.intents(earlier), b.intents(earlier), "no earlier program changes")
+        self.assertNotIn("GGG", {r[3] for r in b.intents(lambda p, v: p == "EVL-CTRL-NEWS-DAY-ON")})
+        for program, version in (("EVL-NEWS-READ-ON", 2), ("EVL-ERN-REACT-C1", 2), ("EVL-8K-READ-O1", 2)):
+            self.assertEqual(SC.final_until(a.st, program, version, self.LATE, now),
+                             SC.final_until(b.st, program, version, self.LATE, now), program)
+        W.the_week(c)                                                     # C: this release throughout
+        self.assertEqual(self.taken4(b), self.taken4(c), "the same events taken as deciding them live")
+        self.assertEqual({(x[0], x[2], x[3]) for x in self.taken4(b)},
+                         {("EVL-8K-REACT-ON", "CCC", D.isoformat()), ("EVL-8K-REACT-ON", "III", NEXT.isoformat()),
+                          ("EVL-8K-READ-ON", "BBB", D.isoformat()), ("EVL-8K-READ-ON", "CCC", D.isoformat()),
+                          ("EVL-8K-READ-ON", "III", NEXT.isoformat()), ("EVL-CTRL-8K-ON", "BBB", D.isoformat()),
+                          ("EVL-CTRL-8K-ON", "CCC", D.isoformat()), ("EVL-CTRL-8K-ON", "FFF", D.isoformat()),
+                          ("EVL-CTRL-8K-ON", "III", NEXT.isoformat()), ("EVL-NEWSPM-READ-ON", "EEE", D.isoformat()),
+                          ("EVL-NEWSPM-READ-ON", "JJJ", NEXT.isoformat()), ("EVL-CTRL-NEWSPM-ON", "EEE", D.isoformat()),
+                          ("EVL-CTRL-NEWSPM-ON", "JJJ", NEXT.isoformat())})
+        R.decide_close(b.ctx, D, backfill_run=True)        # (what deciding Tuesday's close WHOLE again would change)
+        self.assertIn("GGG", {r[3] for r in b.intents(lambda p, v: p == "EVL-CTRL-NEWS-DAY-ON")})
+
+    def test_an_issuer_judged_for_a_later_session_first_reads_its_own_twenty_sessions(self):
+        """Found by the test above: CCC's 8-K of Tuesday is EVL-8K-READ-O1's event at Wednesday's open, which judges CCC
+        for Wednesday first (its bars Sep 30 - Oct 27); PREREG-EVL-4's rows decided by themselves later judge it for
+        Tuesday (Sep 29 - Oct 26). The bars of every one of Tuesday's 20 sessions are read, the missing first one
+        fetched: CCC is eligible, not read as ineligible because the last one was stored."""
+        w = self.world()
+        cik = W.CIK["CCC"]
+        w.at(et(NEXT, 7, 31))
+        self.assertEqual(R.eligibility(w.ctx, NEXT, [cik], live=True, kind="open")[cik]["symbol"], "CCC")
+        days = [r[0] for r in w.st.db.execute("SELECT day FROM bars WHERE symbol='CCC' AND adj='raw' ORDER BY day")]
+        self.assertEqual((days[0], days[-1]), ("2026-09-30", D.isoformat()))
+        w.at(et(self.LATE, 17, 0))
+        self.assertEqual(R.eligibility(w.ctx, D, [cik], live=False, kind="close")[cik]["symbol"], "CCC")
+        self.assertEqual(w.st.db.execute("SELECT eligible, rule FROM eligibility WHERE day=? AND cik=?",
+                                         (D.isoformat(), cik)).fetchone()[:], (1, "backfill"))
+        gets = len(w.gw.gets)
+        self.assertEqual(R.eligibility(w.ctx, NEXT, [W.CIK["AAA"]], live=True, kind="open")[W.CIK["AAA"]]["symbol"],
+                         "AAA")
+        bars = [p for path, p in w.gw.gets[gets:] if path.endswith("/stocks/bars")]
+        self.assertEqual([p["symbols"] for p in bars], ["AAA"], "a symbol with its 20 sessions stored is not fetched")
 
 
 # ----------------------------------------------------------------------------------------------------- the proof
