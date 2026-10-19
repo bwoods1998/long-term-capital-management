@@ -89,7 +89,9 @@ Market-data reads are spaced 0.5 s apart (Alpaca's Basic plan is shared with the
    `ltcm-evl-*` service to end (`systemctl --user list-units 'ltcm-evl-*'`).
 3. From `~/Work/ltcm-deploy` (the box id comes from `.data/ltcm/box.json`, as for `floor_box.py`):
    `python3 scripts/evl_migrate.py --dry-run` (everything here, nothing sent), then `python3 scripts/evl_migrate.py`.
-   It refuses while a desktop timer is active, when `/workspace/state/events` is not empty, when a document is missing
+   It refuses while a desktop timer is active or on its way (and when `systemctl --user` cannot answer, from a shell
+   without the user bus say: run it from the desktop session's shell, or check by hand and pass `--allow-running`),
+   when `/workspace/state/events` is not empty, when a document is missing
    or does not match its SHA-256 name, or when the box lacks three times the bundle's size free. It uploads 8 MiB chunks,
    reads each one's SHA-256 back from the box (a differing chunk is sent again, twice at most), joins and checks the
    bundle, extracts it into `/workspace/state/.events-incoming-<id>/`, checks every file against its manifest and every
@@ -114,8 +116,11 @@ disk, unread. PAUSE holds only its paid verdicts; recording, decisions and scori
 and the in-box updater never ships one. Release 1019b adds `league/events/bands.py` (PREREG-EVL-3's band rules: Probe
 at a passed look, Sized, demotion, retirement, the bands' reader and the real fills' writer) and release R2's
 `league/events/book.py` and `proof.py` (the event kind's money rules and the auction paper proof).
-`league/events/house.py`, the recorders, `run.py`, `league/service.py` and `scripts/evl_migrate.py` are not: a fix to
-them can ship through the updater. `config.json` is the owner's.
+Release 1019b's review adds the modules that hold the rules' inputs: `league/events/universe.py`, `calendar.py`,
+`edgar.py`, `news.py`, `run.py` and `store.py` (eligibility and the benchmark, the windows and decision times, the
+knowable lag, which program gets which rows, the record's schema). `league/events/house.py`, `gw.py`, `report.py`,
+`league/service.py` and `scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is
+the owner's.
 
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 

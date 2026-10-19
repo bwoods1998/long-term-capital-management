@@ -278,11 +278,13 @@ def open_lane(root: str | Path | None) -> Lane | None:
 
 
 def decided(lane: Lane, day: dt.date, at: str) -> bool:
-    """Whether the lane's own (shadow) decision of `day` at `at` ("open" | "close") has run: its receipt is finished.
-    The book's real-money decision waits for it a few minutes (its universe rows are then written), never longer."""
+    """Whether the lane's own (shadow) decision of `day` at `at` ("open" | "close") has run: its receipt is finished
+    `ok` or `pending` (on verdicts). A decision CUT by the lane's own time bound is finished but not whole (its universe
+    rows are part written; release 1019b's review): the book goes on waiting for it. The book's real-money decision
+    waits a few minutes (its universe rows are then written), never longer."""
     job = f"decide-{at}:{day.isoformat()}"
-    return lane.db.execute("SELECT 1 FROM receipts WHERE job=? AND finished_at IS NOT NULL LIMIT 1", (job,)).fetchone() \
-        is not None
+    return lane.db.execute("SELECT 1 FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', 'pending') "
+                           "LIMIT 1", (job,)).fetchone() is not None
 
 
 def eligible(lane: Lane, day: dt.date) -> list[str]:
@@ -609,12 +611,49 @@ def last_session_before(lane: Lane, moment: dt.datetime) -> dt.date | None:
 
 
 def reaction_reader(lane: Lane, day: dt.date, *, daily: Callable[[str, dt.date], float | None],
-                    minutes: Callable[[str, C.Session], float | None]
+                    minutes: Callable[[str, C.Session], float | None],
+                    minutes_many: Callable[[Sequence[str], C.Session], Mapping[str, float | None]] | None = None
                     ) -> Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]:
     """The REACT rows' ratio for decisions of `day`: the T29 minute close of `day` (the lane's own mark when it stored
-    one, else `minutes(symbol, session)`) over the raw SIP daily close of the last session that closed before the event
-    (an 8-K's acceptance, an article's knowable time; the lane's bars, else `daily(symbol, that day)`)."""
+    one, else the book's own reading) over the raw SIP daily close of the last session that closed before the event
+    (an 8-K's acceptance, an article's knowable time; the lane's bars, else `daily(symbol, that day)`).
+
+    ONE READ A NAME, NEVER ONE A ROW (release 1019b's review: PREREG-EVL-2's day news brings hundreds of articles to a
+    close decision, a read each would spend the market-data plan the House's own book shares, at 15:47 on the minute
+    thread). Each name's T29 close and each (name, day) base is read once a reader (a decision). With `minutes_many`
+    (`minutes_many(symbols, session) -> {symbol: close or None}`, the book's batched reading), the first row with no mark
+    reads EVERY name of the day's universe that has none, together; `minutes(symbol, session)` is then asked only for a
+    name outside that universe."""
     session = C.session(lane, day)
+    closes: dict[str, float | None] = {}
+    bases: dict[tuple[str, dt.date], float | None] = {}
+    batched: list[bool] = []
+
+    def mark_of(symbol: str) -> float | None:
+        mark = lane.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label='1530'", (symbol, day.isoformat())
+                               ).fetchone()
+        return float(mark["px"]) if mark is not None and mark["px"] else None
+
+    def t29_close(symbol: str) -> float | None:
+        if symbol in closes:
+            return closes[symbol]
+        have = mark_of(symbol)
+        if have is not None:
+            closes[symbol] = have
+            return have
+        if minutes_many is not None and not batched:
+            batched.append(True)
+            names = sorted({str(r["symbol"]).upper() for r in lane.db.execute(
+                "SELECT symbol FROM universe WHERE day=?", (day.isoformat(),))} - {
+                str(r["symbol"]).upper() for r in lane.db.execute(
+                    "SELECT symbol FROM marks WHERE day=? AND label='1530' AND px>0", (day.isoformat(),))})
+            if names:
+                got = dict(minutes_many(names, session) or {})
+                for name in names:
+                    closes[name] = got.get(name)
+        if symbol not in closes:
+            closes[symbol] = minutes(symbol, session)
+        return closes[symbol]
 
     def ratio(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
         if session is None:
@@ -627,12 +666,12 @@ def reaction_reader(lane: Lane, day: dt.date, *, daily: Callable[[str, dt.date],
             return None
         if before is None:
             return None
-        got = lane.db.execute("SELECT c FROM bars WHERE symbol=? AND day=? AND adj='raw'", (symbol, before.isoformat())
-                              ).fetchone()
-        base = float(got["c"]) if got is not None and got["c"] else daily(symbol, before)
-        mark = lane.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label='1530'", (symbol, day.isoformat())
-                               ).fetchone()
-        now = float(mark["px"]) if mark is not None and mark["px"] else minutes(symbol, session)
+        if (symbol, before) not in bases:
+            got = lane.db.execute("SELECT c FROM bars WHERE symbol=? AND day=? AND adj='raw'",
+                                  (symbol, before.isoformat())).fetchone()
+            bases[(symbol, before)] = float(got["c"]) if got is not None and got["c"] else daily(symbol, before)
+        base = bases[(symbol, before)]
+        now = t29_close(symbol)
         if not base or not now or base <= 0:
             return None
         return float(now) / float(base)

@@ -224,6 +224,17 @@ PENDING_GATEWAY += ("league/events/bands.py",)
 #: the eligible list) and the auction paper proof that gates its first real buy (league/events/proof.py): money movers
 #: like league/equity/. They wait here for the gateway's merge-list follow-up, as R0's data plan does.
 PENDING_GATEWAY += ("league/events/book.py", "league/events/proof.py")
+#: THE EVENT LANE'S RULE INPUTS (release 1019b's review, Oct 19, 2026): the modules that hold pre-registered rule inputs
+#: beside the judges above, so that no main commit the in-box updater would ship can change what the screen judges or
+#: what real money may buy without the owner's deploy: league/events/universe.py (eligibility, the operating test,
+#: prev_close for the limit, ADV, the benchmark that makes TRADABLE, the cost allowance's inputs), calendar.py (the
+#: 09:00 cut-off and the decision times), edgar.py and news.py (KNOWABLE_LAG: the registration gating and every window;
+#: the EX-99 TEXT a verdict reads), run.py (which program gets which rows, the shadow's 15:30 reaction) and store.py
+#: (the record's schema and its forward-only statuses). The lane's House scheduler (league/events/house.py), its gateway
+#: client (gw.py) and its report stay outside, so their fixes can ship. They wait here for the gateway's merge-list
+#: follow-up, as R1's judges do.
+PENDING_GATEWAY += ("league/events/universe.py", "league/events/calendar.py", "league/events/edgar.py",
+                    "league/events/news.py", "league/events/run.py", "league/events/store.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

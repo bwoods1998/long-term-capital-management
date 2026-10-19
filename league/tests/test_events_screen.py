@@ -26,6 +26,26 @@ def weekdays(start, n):
     return out
 
 
+def final_record(store, through, *, wall=dt.time(23, 0)):
+    """The House's record made FINAL through session `through` (league.events.screen `final_until`, release 1019b): every
+    session's open and close decisions `ok` and every weekday's daily-index backfill done. Returns the moment the screen
+    then runs at (`now`): `wall` New York time on `through`."""
+    from zoneinfo import ZoneInfo
+
+    days = [str(r["day"]) for r in store.db.execute("SELECT day FROM sessions WHERE day<=? ORDER BY day",
+                                                    (through.isoformat(),))]
+    for day in days:
+        for kind in ("open", "close"):
+            rid = store.start_receipt(f"decide-{kind}:{day}")
+            store.finish_receipt(rid, "ok", {})
+    d = dt.date.fromisoformat(days[0]) if days else through
+    while d <= through:
+        if d.weekday() < 5:
+            store.set_meta(f"evl:backfill:{d.isoformat()}", "done")
+        d += dt.timedelta(days=1)
+    return dt.datetime.combine(through, wall, tzinfo=ZoneInfo("America/New_York")).astimezone(UTC)
+
+
 def naive_count(values, seed, draws):
     """The prereg's count written out directly, in exact rationals: bit j of getrandbits(n) set = +1 for value j; a
     vector counts when its mean >= mean(values) - 1e-12."""
@@ -407,7 +427,8 @@ class ScreenJobTest(unittest.TestCase):
 
     def test_looks_are_dated_from_the_first_settled_exit_and_written_once(self):
         self.fill("EVL-ERN-REACT-C1", 40, per_day=5)  # entries on days 0..39 at the close, exits on days 1..40
-        out = SC.run(self.st, self.days[45], draws=999)
+        now = final_record(self.st, self.days[45])
+        out = SC.run(self.st, self.days[45], draws=999, now=now)
         ks = [w["k"] for w in out["written"]]
         # Session 1 is day 1 (the first settled exit), so looks 1..5 are as of days 10, 15, 20, 30 and 40.
         self.assertEqual(ks, [1, 2, 3, 4, 5])
@@ -419,14 +440,15 @@ class ScreenJobTest(unittest.TestCase):
         rec = SC.skew_records(self.st, "EVL-ERN-REACT-C1", 1, 2)
         self.assertEqual(set(rec), {"session", "issuer", "at"})
         self.assertEqual(rows[2]["fp_check"], rec["session"]["f"])
-        again = SC.run(self.st, self.days[45], draws=999)
+        again = SC.run(self.st, self.days[45], draws=999, now=now)
         self.assertEqual(again["written"], [])
         self.assertEqual(SC.next_look(self.st, "EVL-ERN-REACT-C1", 1, self.days[45])["k"], 6)
 
     def test_a_look_waits_for_every_scheduled_exit_and_counts_a_fallback_exit_where_it_was_scheduled(self):
         n = self.fill("EVL-ERN-REACT-C1", 20)
         self.add("EVL-ERN-REACT-C1", n, self.days[5], self.days[6], 0.0, status="entered", settle=False)
-        out = SC.run(self.st, self.days[25], draws=999)
+        now = final_record(self.st, self.days[25])
+        out = SC.run(self.st, self.days[25], draws=999, now=now)
         self.assertEqual(out["written"], [])
         self.assertEqual(out["waiting"][0]["k"], 1)
         # It settles three sessions late (a fallback exit): the look as of day 10 covers its block all the same.
@@ -438,7 +460,7 @@ class ScreenJobTest(unittest.TestCase):
                                                                      json.dumps({"day": self.days[9].isoformat(),
                                                                                  "kind": "close",
                                                                                  "planned": self.days[6].isoformat()})))
-        out = SC.run(self.st, self.days[25], draws=999)
+        out = SC.run(self.st, self.days[25], draws=999, now=now)
         self.assertEqual([w["k"] for w in out["written"]], [1, 2, 3])
         first = SC.look_rows(self.st, "EVL-ERN-REACT-C1", 1)[0]
         self.assertEqual(first["n"], 10 * 6 + 1)
@@ -447,7 +469,7 @@ class ScreenJobTest(unittest.TestCase):
         n = self.fill("EVL-ERN-READ-O1", 40, edge=0.004)
         self.fill("EVL-CTRL-ERN-ALL-O1", 40, edge=0.0, offset=n)
         self.fill("EVL-ERN-READ-O3", 40, edge=0.004, offset=2 * n)
-        out = SC.run(self.st, self.days[45], draws=999)
+        out = SC.run(self.st, self.days[45], draws=999, now=final_record(self.st, self.days[45]))
         self.assertTrue(out["written"])
         self.assertTrue(all(w["program"] == "EVL-ERN-READ-O1" for w in out["written"]))
         detail = SC.look_detail(self.st, "EVL-ERN-READ-O1", 1, 2)

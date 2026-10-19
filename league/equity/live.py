@@ -1666,9 +1666,23 @@ class EquityBook:
             self._absorb(order, row)
 
     # ------------------------------------------------------------------ the rules of a send
-    def _symbol_busy(self, symbol: str) -> str | None:
-        """Why no new order may go on `symbol` now (one working order a symbol across both books), or None."""
-        if symbol in self.busy():
+    def _symbol_busy(self, symbol: str, *, auction_sale: tuple[str, str] | None = None) -> str | None:
+        """Why no new order may go on `symbol` now (one working order a symbol across both books), or None.
+
+        `auction_sale` (day, tif "opg" | "cls"): the order is an event lot's SALE at that auction (release 1019b's review).
+        This book's own working sales of the symbol at that same auction do not stop it: two programs may hold one name
+        (one position per issuer is a per-program rule), and each lot exits at its own scheduled auction (PREREG-EVL-1
+        sections 5 and 6), so both sales go in the one cross. The account sells no more than it holds (the gateway
+        reserves the closes of the same shares together, `gate.reserveStockClose`). Any other working order on the symbol
+        (a buy, a day order, another auction's, the options book's, one that is not this book's) stops it as always."""
+        if auction_sale is None:
+            mine = symbol in self.busy()
+        else:
+            sale_day, sale_tif = auction_sale
+            mine = bool(self.state.rows(
+                "SELECT 1 AS x FROM eq_orders WHERE symbol=? AND status IN ('pending', 'working', 'unknown') AND NOT "
+                "(side='sell' AND tif=? AND day=?) LIMIT 1", (symbol, sale_tif, sale_day)))
+        if mine:
             return f"one order a symbol: an equity order on {symbol} is working"
         if self.options_book is not None:
             try:
@@ -1688,9 +1702,10 @@ class EquityBook:
 
     def _count_refusal(self, day: str, *, exit_: bool) -> str | None:
         """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit the
-        equity book's own count (`order_path.max_orders_day`) with room left for every open lot's exit and one cancel
-        of it. AN EXIT IS NEVER STOPPED BY THE EQUITY BOOK'S OWN COUNT (A28: an exit must never be blocked): it meets
-        the House-wide count alone, which keeps the options book's exits their room (`exit_reserve`) under the
+        equity book's own count (`order_path.max_orders_day`) with room left for the exits of the lots held
+        (`_exit_reserve`: a lot's exit and one cancel of it; an event lot's one auction sale, none once sent). AN EXIT
+        IS NEVER STOPPED BY THE EQUITY BOOK'S OWN COUNT (A28: an exit must never be blocked): it meets the House-wide
+        count alone, which keeps the options book's exits their room (`exit_reserve`) under the
         gateway's day lines. (Under the equity count an exit was stopped once a held basket's re-priced sales had used
         it up: each sale that climbs the collar ladder costs a send and a cancel a rung, and every lot climbs at once,
         so at 8 to 12 basket lots and a fast open the ETF lots' sales stopped below the rung that fills and were
@@ -1700,7 +1715,7 @@ class EquityBook:
         cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
         mine = orders_today(self.state.rows, day)
         if not exit_:
-            reserve = 2 * len(self._lots())
+            reserve = self._exit_reserve(day)
             if mine + 1 + reserve > cap:
                 return f"the equity day's order count: {mine} of {cap} sent, {reserve} kept for exiting the lots held"
         if self.options_book is not None:
@@ -1713,6 +1728,24 @@ class EquityBook:
                 return (f"the House's day order count: {house} sent of {self.table.max_orders_day}, the rest kept for "
                         "the options book's exits")
         return None
+
+    def _exit_reserve(self, day: str) -> int:
+        """The part of the equity day's order count an ENTRY leaves for the exits of the lots held (`_count_refusal`):
+        two for a lot of the old lanes (its sale and one cancel of it: a day sale climbs the collar ladder); ONE for an
+        event lot (release 1019b's review: its exit is one auction order, a market-on-open or market-on-close sale, never
+        re-priced or cancelled); NONE for an event lot whose sale this book has already sent on `day` (that order is in
+        the count already: counted twice, a day's open-entry lots sold at the close left the close's own entries no
+        room)."""
+        sent = {int(r["lid"]) for r in self.state.rows(
+            "SELECT DISTINCT lid FROM eq_orders WHERE side='sell' AND day=? AND lid IS NOT NULL AND status!='refused'",
+            (day,))}
+        reserve = 0
+        for lot in self._lots():
+            if lot.lane != EVENT_LANE:
+                reserve += 2
+            elif lot.lid not in sent:
+                reserve += 1
+        return reserve
 
     def _open_block(self, real_block: Callable[..., str | None], inst: Instance | None,
                     killed: Callable[[], bool] | None = None) -> str | None:
@@ -4811,7 +4844,12 @@ class EquityBook:
     # they meet E1's order path: the windows of the auctions (`schedule.event_moments`), the write-before-POST and
     # client-id discipline (`_send`), one working order a symbol, the day's order count, `size_entry`, the walls.
     #: Seconds after a decision's moment the book waits for the lane's own (shadow) decision of the same auction before
-    #: it decides on the store as it stands (the universe rows of the day's issuers are written by it).
+    #: it decides on the store as it stands (the universe rows of the day's issuers are written by it, and by the
+    #: verdicts asked ahead of it). At the close the book never depends on the lane's own decision (release 1019b's
+    #: review): on the House that decision starts a minute after its time (league/events/house.py `CLOSE_GRACE`) and
+    #: after the book's minute, so the wait ends at 15:47 ET with the lane's universe rows as the passes ahead of it
+    #: wrote them, and the book reads each name's T29 minute itself (`_event_minute_closes`, all the day's names
+    #: together), the T29 bar then a minute inside the plan's SIP window.
     EVENT_DECIDE_WAIT_S = {"open": 240.0, "close": 60.0}
     #: Seconds after an auction its orders' end is waited for before an unfilled one is judged (the venue ends an
     #: auction order at its auction; its last status takes a reading or two to arrive).
@@ -4899,11 +4937,20 @@ class EquityBook:
         except Exception as exc:  # noqa: BLE001 - never the event step's end
             self._error("auction proof", exc, out)
         if em is not None:
-            self._event_finish(now, em, adapter, out)
+            # (Release 1019b's review: a failure of the auctions' ends or of a decision, a lane store that cannot be read
+            # included, never stops the minute's sends: the decision plans its exits before it reads the lane, and the
+            # sends go sales first.)
+            try:
+                self._event_finish(now, em, adapter, out)
+            except Exception as exc:  # noqa: BLE001 - finished again next minute
+                self._error("event finish", exc, out)
             for at, decide, until in (("open", em.open_decide, em.open_until),
                                       ("close", em.close_decide, em.close_until)):
                 if decide <= now < until:
-                    self._event_decide(now, em, at, s, adapter, out)
+                    try:
+                        self._event_decide(now, em, at, s, adapter, out)
+                    except Exception as exc:  # noqa: BLE001 - its exits were planned first; decided again next minute
+                        self._error(f"event decide {at}", exc, out)
             for at, send, until in (("open", em.open_send, em.open_until), ("close", em.close_send, em.close_until)):
                 if send <= now < until:
                     self._event_send(now, em, at, s, adapter, real_block, killed, out)
@@ -4973,11 +5020,15 @@ class EquityBook:
         if self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=?", (day, at)):
             return
         decided_at = em.open_decide if at == "open" else em.close_decide
+        # THE EXITS FIRST, before anything of the lane is read (release 1019b's review: an exit never waits on the lane):
+        # planned at the decision's first minute and again each minute until the decision is made (a lot whose sale is
+        # planned or working is passed over, so this plans each sale once).
+        self._event_exits(em, at, adapter)
         lane = self._event_lane_store()
         if lane is not None and not adapter.decided(lane, em.day, at) and now < decided_at + self.EVENT_DECIDE_WAIT_S[at]:
             out["event_decide"] = f"waiting for the lane's own {at} decision of {day}"
             return
-        exits = self._event_exits(em, at, adapter)
+        exits = self._event_sales(day, at)
         readable = True
         if lane is not None and (self.state.get("eq_event_synced") or "") != day:
             readable = self._event_sync(now, em.day, s, adapter, lane) is not None
@@ -4990,7 +5041,7 @@ class EquityBook:
         if lane is not None and s.enabled and readable:
             moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
             reaction = adapter.reaction_reader(lane, em.day, daily=self._event_daily_close,
-                                               minutes=self._event_minute_close)
+                                               minutes=self._event_minute_close, minutes_many=self._event_minute_closes)
             wanted: dict[str, list[Any]] = {}
             insts = {}
             for inst in self._instances(alive=True):
@@ -4998,6 +5049,12 @@ class EquityBook:
                 if program is None or not inst.live or program.entry_at != at:
                     continue
                 room = s.max_open(inst.band) - self._event_open_count(inst.id)
+                if room <= 0:
+                    # (A program with no room reads nothing: release 1019b's review; its picks would all be dropped.)
+                    wanted[inst.family] = []
+                    insts[inst.family] = (inst, program)
+                    summary["programs"][inst.family] = {"picks": None, "room": 0}
+                    continue
                 held = self._event_held(inst, em.day, adapter)
                 try:
                     got = adapter.picks(lane, program, em.day, decided_at=moment, reaction=reaction,
@@ -5054,6 +5111,11 @@ class EquityBook:
             "exit_at": exit_at, "lid": None, "rung": 0,
             "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None, "created_at": now},
             "iid")
+
+    def _event_sales(self, day: str, at: str) -> int:
+        """The event lots' sales planned at this auction (its exits, `_event_exits`)."""
+        return int(self.state.rows("SELECT COUNT(*) AS n FROM eq_event_intents WHERE side='sell' AND day=? AND at=?",
+                                   (day, at))[0]["n"])
 
     def _event_open_count(self, key: str) -> int:
         """What an event program holds and has on order: its open lots, and its buy intents still to execute."""
@@ -5121,6 +5183,47 @@ class EquityBook:
         except Exception:  # noqa: BLE001
             return None
         return adapter.minute_close(got.get(symbol) or [], session)
+
+    #: THE T29 MINUTES OF A CLOSE DECISION, read together (release 1019b's review): this many names a request, over the
+    #: last `EVENT_MINUTE_SPAN_S` seconds to T29's end (one page of 1-minute bars); a name with no trade in that span is
+    #: read again over its whole session, together too. Its close is the same as one read of its whole session gives.
+    EVENT_MINUTE_BATCH = 200
+    EVENT_MINUTE_SPAN_S = 1800
+
+    def _event_minute_closes(self, symbols: Sequence[str], session: Any) -> dict[str, float | None]:
+        """{symbol: the T29 minute close in `session`} for many names at once (`book.reaction_reader`'s
+        `minutes_many`): SIP 1-minute bars, `EVENT_MINUTE_BATCH` names a request; None for a name with no bar, or whose
+        read failed (that decision does not take its REACT rows; nothing is read again name by name)."""
+        adapter = self._event_adapter()
+        names = sorted({str(x).upper() for x in symbols if x})
+        t29 = adapter.t29(session)
+        stamp = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        end = stamp(t29 + dt.timedelta(minutes=1))
+        narrow = max(session.open_at, t29 - dt.timedelta(seconds=self.EVENT_MINUTE_SPAN_S))
+        out: dict[str, float | None] = {}
+
+        def read(chunk: list[str], start: dt.datetime) -> Mapping[str, Any] | None:
+            try:
+                return self.market.bars(chunk, timeframe="1Min", start=stamp(start), end=end, adjustment="raw") or {}
+            except Exception:  # noqa: BLE001 - unread: those names' REACT rows are not taken this decision
+                return None
+
+        quiet: list[str] = []
+        for i in range(0, len(names), self.EVENT_MINUTE_BATCH):
+            chunk = names[i:i + self.EVENT_MINUTE_BATCH]
+            got = read(chunk, narrow)
+            for name in chunk:
+                px = None if got is None else adapter.minute_close(got.get(name) or [], session)
+                out[name] = px
+                if px is None and got is not None and narrow > session.open_at:
+                    quiet.append(name)
+        for i in range(0, len(quiet), self.EVENT_MINUTE_BATCH):
+            chunk = quiet[i:i + self.EVENT_MINUTE_BATCH]
+            got = read(chunk, session.open_at)
+            if got is not None:
+                for name in chunk:
+                    out[name] = adapter.minute_close(got.get(name) or [], session)
+        return out
 
     def _event_publish(self, day: dt.date, adapter: Any, lane: Any, out: dict) -> bool:
         """THE ELIGIBLE LIST of `day` at the gateway (`book.publish`), sent when the gateway's copy is not today's or the
@@ -5341,7 +5444,8 @@ class EquityBook:
             intent.why = "the gateway's kill switch is engaged (it blocks sells too)"
             self._save_intent(intent)
             return
-        why = self._symbol_busy(lot.symbol) or self._count_refusal(day, exit_=True)
+        tif = "opg" if at == "open" else "cls"
+        why = self._symbol_busy(lot.symbol, auction_sale=(day, tif)) or self._count_refusal(day, exit_=True)
         if why:
             intent.why = why
             self._save_intent(intent)
@@ -5350,7 +5454,7 @@ class EquityBook:
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=qty, limit=ZERO, collar=0, day=day,
                    lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
                    why=f"event exit at the {at} (market-on-{at}, rung {int((side or {}).get('rung') or 0)})",
-                   at=at, tick=now, until=until, tif="opg" if at == "open" else "cls", otype="market")
+                   at=at, tick=now, until=until, tif=tif, otype="market")
 
     def _event_work_entry(self, intent: Intent, side: Mapping[str, Any] | None, now: float, day: str, at: str,
                           until: float, s: Any, adapter: Any, real_block: Callable[..., str | None],
@@ -5395,6 +5499,10 @@ class EquityBook:
                            collar=0, day=day, lid=None, replaces=current.eid if current is not None else None,
                            probe=inst.band != "sized", why=f"event entry at the {at} ({why})"[:300], at=at, tick=now,
                            until=until, tif="opg" if at == "open" else "cls", otype="limit")
+        if order is not None and order.status == "refused" and order.answer.get("cap") == "stock_eligible":
+            # The gateway holds no eligible list of the day (lost or replaced): the list is published again before the
+            # buy goes again next minute (kv `eq_event_list` said it was there).
+            self.state.put("eq_event_list", {})
         self._event_final(intent, order)
 
     def _event_final(self, intent: Intent, current: Order | None) -> bool:

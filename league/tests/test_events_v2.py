@@ -12,6 +12,7 @@ from league.events import score as SCORE
 from league.events import screen as SC
 from league.events import store as S
 from league.tests.test_events_run import FakeGateway
+from league.tests.test_events_screen import final_record
 
 UTC = dt.timezone.utc
 NINE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1", "EVL-ERN-REACT-ON",
@@ -105,7 +106,9 @@ class V2Test(unittest.TestCase):
         days = self.days[:8]
         self._settle("EVL-INS-BUY-O1", 2, 10, days, lambda i: 0.01)            # every block +1%: a pass at 80 events
         self._settle("EVL-ERN-REACT-ON", 2, 10, days, lambda i: -0.01)         # every block -1%: retired
-        out = SC.run(self.st, days[-1], draws=999)
+        # (the look as of days[-1] is computed once that close is final: three later sessions decided, release 1019b)
+        now = final_record(self.st, self.days[10])
+        out = SC.run(self.st, self.days[10], draws=999, now=now)
         by = {(w["program"], w["k"]): w for w in out["written"]}
         win = by[("EVL-INS-BUY-O1", 1)]
         self.assertEqual((win["held"], win["passed"], win["alpha"], win["band"]), (1, 1, 0.018, "probe"))
@@ -122,7 +125,7 @@ class V2Test(unittest.TestCase):
         self.assertFalse(BA.set_band(self.st, "EVL-ERN-REACT-ON", 2, "probe", since="x", why="y"))
         with self.assertRaises(ValueError):
             BA.set_band(self.st, "EVL-INS-BUY-O1", 1, "probe", since="x", why="y")
-        self.assertEqual(SC.run(self.st, days[-1], draws=999)["written"], [])   # written once
+        self.assertEqual(SC.run(self.st, self.days[10], draws=999, now=now)["written"], [])   # written once
 
     # -------------------------------------------------------------------------------------------- real fills
     def _fills(self, program, n, pnl_each, band="probe", start=0):

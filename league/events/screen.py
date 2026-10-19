@@ -418,9 +418,13 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
     return look
 
 
-def write_look(store: S.Store, look: Mapping[str, Any]) -> bool:
+def write_look(store: S.Store, look: Mapping[str, Any], *,
+               apply: Callable[[Any], None] | None = None) -> bool:
     """Write one look (one row per (program, version, k), never rewritten): False when it exists. The issuer-block
-    test, the control comparison, the skew checks and the figures beside go to meta `look:<program>:<version>:<k>`."""
+    test, the control comparison, the skew checks, the figures beside, the retirement test and (version 2) the looks
+    merged into it go to meta `look:<program>:<version>:<k>`. `apply(db)` runs INSIDE the same transaction once the
+    look is new (release 1019b's review: the band move a version 2 look makes, league/events/bands.py `on_look`, is
+    written with the look or not at all, so a look on record has always moved its band)."""
     with store.tx() as db:
         cur = db.execute(f"INSERT OR IGNORE INTO looks({', '.join(LOOK_COLUMNS)}) VALUES({', '.join('?' * len(LOOK_COLUMNS))})",
                          tuple(look[c] for c in LOOK_COLUMNS))
@@ -428,8 +432,12 @@ def write_look(store: S.Store, look: Mapping[str, Any]) -> bool:
             return False
         detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside",
                                                                               "retirement")}
+        if look.get("merged") is not None:
+            detail["merged"] = [int(k) for k in look["merged"]]
         db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                    (f"look:{look['program']}:{look['version']}:{look['k']}", json.dumps(detail, sort_keys=True, default=str)))
+        if apply is not None:
+            apply(db)
     return True
 
 
@@ -707,55 +715,151 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
             "status": status}
 
 
+# --------------------------------------------------------------------------------------- a look's close is final
+#: A LOOK WAITS UNTIL ITS AS-OF CLOSE IS FINAL FOR ITS PROGRAM (release 1019b's review; PREREG-EVL-1 section 7's "late
+#: data delays the computation, never its as-of date", read for version 2's event-counted looks too and recorded as an
+#: amendment). A look is written once and never again, so it reads the record of the sessions it covers only once
+#: nothing more can be added to them; a reading program's session that waits on a verdict has no intent yet, so the
+#: unsettled intents alone (`_pending`) never showed it. A close X is final for a program when:
+#: - the hourly re-decision (league/events/house.py REDECIDE_SESSIONS, the CLI's catchup alike) reaches it no more:
+#:   FINAL_SESSIONS later sessions have had their open decision;
+#: - every decision of the program's entry kind through X is made: its latest receipt `ok`, or `pending` only on
+#:   another program's verdicts (a decision missed, cut, failed, still running or pending on this program's own verdicts
+#:   is made again later and adds intents), back to the House's look-back (house.py LOOKBACK: an older one is never
+#:   made, so nothing waits for it);
+#: - the EDGAR daily-index backfill (house.py BACKFILL_WEEKDAYS) of every weekday through X that the House still
+#:   backfills has run (meta `evl:backfill:<day>` "done": it adds the filings the live pass missed, and decides their
+#:   sessions again).
+FINAL_SESSIONS = 3
+FINAL_LOOKBACK = dt.timedelta(days=45)
+FINAL_BACKFILL_WEEKDAYS = 3
+
+
+def final_until(store: S.Store, program: str, version: int, today: dt.date,
+                now: dt.datetime) -> tuple[dt.date | None, str]:
+    """(the last session close that is final for (program, version) at `now`, None when none is; why the next one is
+    not), by the three rules above."""
+    from .programs import BY_KEY
+
+    prog = BY_KEY.get((str(program), int(version)))
+    if prog is None:
+        return None, f"{program} v{version} is no registered program"
+    first = prog.registered_at.astimezone(C.NY).date()
+    decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
+    if len(decided) <= FINAL_SESSIONS:
+        return None, f"the re-decision window still reaches every session ({len(decided)} decided)"
+    horizon: dt.date | None = decided[-(FINAL_SESSIONS + 1)].day
+    why = f"the re-decision window reaches {decided[-FINAL_SESSIONS].day.isoformat()}"
+    kind = prog.entry_at
+    key = prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
+    latest: dict[str, tuple[str, Any]] = {}
+    for row in store.db.execute("SELECT job, status, summary FROM receipts WHERE job>=? AND job<? ORDER BY id",
+                                (f"decide-{kind}:", f"decide-{kind};")):
+        latest[str(row["job"])] = (str(row["status"] or ""), row["summary"])
+    since = max(first, (now - FINAL_LOOKBACK).astimezone(C.NY).date())
+    for x in C.sessions(store, since, horizon):
+        status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", ("", None))
+        if status == "ok":
+            continue
+        if status == "pending":
+            try:
+                body = json.loads(summary or "{}")
+                waits = dict(body.get("pending") or {}) if isinstance(body, dict) else {key: None}
+            except (TypeError, ValueError):
+                waits = {key: None}     # (unreadable: read as waiting on this program, the reading that waits)
+            if key not in waits:
+                continue
+        before = [y for y in C.previous(store, x.day, 1) if y.day >= first]
+        horizon = before[-1].day if before else None
+        why = f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}"
+        break
+    reach, day = [], today
+    while len(reach) < FINAL_BACKFILL_WEEKDAYS:
+        day -= dt.timedelta(days=1)
+        if day.weekday() < 5:
+            reach.append(day)
+    for day in sorted(reach):
+        if horizon is None:
+            break
+        if day < first or day > horizon or store.meta(f"evl:backfill:{day.isoformat()}") == "done":
+            continue
+        before = [y for y in C.previous(store, day, 1) if y.day >= first]
+        horizon = before[-1].day if before else None
+        why = f"the daily-index backfill of {day.isoformat()} has not run"
+        break
+    return horizon, why
+
+
 def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] | None = None,
         now: dt.datetime | None = None, draws: int = B) -> dict[str, Any]:
     """The screen job: every seatable program's looks whose as-of session is on or before `today` and not yet written,
-    each read from the record as of its session, once every intent (the control's too) scheduled to exit by then has
-    settled. At a held look the skew checks go to meta `skew:<program>:<version>:<k>` before p is computed. Returns
-    {written, waiting}."""
+    each read from the record as of its session, once that close is FINAL for the program (`final_until`) and every
+    intent (the control's too) scheduled to exit by then has settled. At a held look the skew checks go to meta
+    `skew:<program>:<version>:<k>` before p is computed. One program's failure is its own (release 1019b's review):
+    it is in `errors` and the others' looks go on. Returns {written, waiting, errors}."""
     now = now or S.utc_now()
-    written, waiting = [], []
+    written, waiting, errors = [], [], []
     for program, version in programs or program_versions(store):
         if program not in SEATABLE:
             continue
-        if _seating(program, version):
-            out = _run_v2(store, program, version, today, now=now, draws=draws)
-            written += out["written"]
-            waiting += out["waiting"]
-            continue
-        if version != 1:
-            continue
-        rows = settled_rows(store, program, version)
-        anchor = min((r["exited"] for r in rows), default=None)
-        if anchor is None:
-            continue
-        done = {r["k"] for r in look_rows(store, program, version)}
-        pending = _pending(store, program, version)
-        control = CONTROLS.get(program)
-        ctl_pending = _pending(store, control, version) if control else []
-        for k, s_k in LOOKS:
-            session = C.nth(store, anchor, s_k)
-            if session is None or session.day > today:
-                break
-            if k in done:
+        try:
+            if _seating(program, version):
+                out = _run_v2(store, program, version, today, now=now, draws=draws)
+            elif version == 1:
+                out = _run_v1(store, program, version, today, now=now, draws=draws)
+            else:
                 continue
-            as_of = session.day
-            if any(x <= as_of for _, x in pending) or any(x <= as_of for _, x in ctl_pending):
-                waiting.append({"program": program, "version": version, "k": k,
-                                "why": "an intent scheduled to exit by the as-of session has not settled"})
-                break
-            look_set = covered(rows, as_of)
-            first_entry = min((r["entry_day"] for r in rows), default=as_of)
-            days = [s.day for s in C.sessions(store, first_entry, as_of)]
-            ctl_rows = covered(settled_rows(store, control, version), as_of) if control else None
-            have = skew_records(store, program, version, k)
+        except Exception as exc:  # noqa: BLE001 - its looks are computed again at the next run
+            errors.append({"program": program, "version": version, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+            continue
+        written += out["written"]
+        waiting += out["waiting"]
+    return {"written": written, "waiting": waiting, "errors": errors}
 
-            def record(checks: dict[str, Any], program: str = program, version: int = version, k: int = k) -> None:
-                store.set_meta(f"skew:{program}:{version}:{k}", json.dumps(checks | {"at": S.iso(now)}, sort_keys=True))
-            look = judge_look(look_set, days, k, program=program, version=version, at=session.close_at,
-                              control_rows=ctl_rows, alphas=have, record=record, draws=draws)
-            if write_look(store, look):
-                written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")})
+
+def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: dt.datetime,
+            draws: int = B) -> dict[str, Any]:
+    """Version 1's looks (PREREG-EVL-1 section 7): look k as of the close of session S_k from the first settled exit."""
+    written: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+    rows = settled_rows(store, program, version)
+    anchor = min((r["exited"] for r in rows), default=None)
+    if anchor is None:
+        return {"written": written, "waiting": waiting}
+    done = {r["k"] for r in look_rows(store, program, version)}
+    pending = _pending(store, program, version)
+    control = CONTROLS.get(program)
+    ctl_pending = _pending(store, control, version) if control else []
+    final: tuple[dt.date | None, str] | None = None
+    for k, s_k in LOOKS:
+        session = C.nth(store, anchor, s_k)
+        if session is None or session.day > today:
+            break
+        if k in done:
+            continue
+        as_of = session.day
+        if final is None:
+            final = final_until(store, program, version, today, now)
+        if final[0] is None or as_of > final[0]:
+            waiting.append({"program": program, "version": version, "k": k,
+                            "why": f"its as-of close is not final yet: {final[1]}"})
+            break
+        if any(x <= as_of for _, x in pending) or any(x <= as_of for _, x in ctl_pending):
+            waiting.append({"program": program, "version": version, "k": k,
+                            "why": "an intent scheduled to exit by the as-of session has not settled"})
+            break
+        look_set = covered(rows, as_of)
+        first_entry = min((r["entry_day"] for r in rows), default=as_of)
+        days = [s.day for s in C.sessions(store, first_entry, as_of)]
+        ctl_rows = covered(settled_rows(store, control, version), as_of) if control else None
+        have = skew_records(store, program, version, k)
+
+        def record(checks: dict[str, Any], program: str = program, version: int = version, k: int = k) -> None:
+            store.set_meta(f"skew:{program}:{version}:{k}", json.dumps(checks | {"at": S.iso(now)}, sort_keys=True))
+        look = judge_look(look_set, days, k, program=program, version=version, at=session.close_at,
+                          control_rows=ctl_rows, alphas=have, record=record, draws=draws)
+        if write_look(store, look):
+            written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")})
     return {"written": written, "waiting": waiting}
 
 
@@ -778,23 +882,33 @@ def _seating(program: str, version: int) -> bool:
 
 
 def v2_schedule(store: S.Store, rows: Sequence[Mapping[str, Any]], today: dt.date,
-                pending: Sequence[tuple[dt.date, dt.date]] = ()) -> dict[str, Any]:
+                pending: Sequence[tuple[dt.date, dt.date]] = (), *, after: tuple[dt.date, int] | None = None,
+                final: tuple[dt.date | None, str] | None = None) -> dict[str, Any]:
     """PREREG-EVL-3's looks of one program from its settled rows: [(k, as_of day, merged ks)] in order, and where the
-    scan stopped. Look k is at the first session close with >= V2_NS[k-1] settled TRADABLE events, >= 40 issuers among
-    them and >= 8 session blocks (covered: scheduled exits at or before that close); thresholds first reached at the
-    same close are one look (the lowest k; the others merged into it). The scan stops at the first close by which an
-    intent scheduled to exit has not settled (`pending`), so no look reads an incomplete record."""
+    scan stopped and why. Look k is at the first session close with >= V2_NS[k-1] settled TRADABLE events, >= 40
+    issuers among them and >= 8 session blocks (covered: scheduled exits at or before that close); thresholds first
+    reached at the same close are one look (the lowest k; the others merged into it). The scan stops at the first close
+    by which an intent scheduled to exit has not settled (`pending`), and (`final`, `final_until`'s answer) at the
+    first close a look falls due at before that close is final, so no look reads an incomplete record.
+
+    `after` (the last WRITTEN look's as-of day, the highest k written or merged into a written look; release 1019b's
+    review): the looks on record are never derived again from a record that grew since. The scan resumes strictly
+    after that close at the next k: "looks happen in order, at most one at a session close ... No other look exists"
+    (PREREG-EVL-3 section 3), whatever late events of the sessions it covered are settled later."""
     if not rows:
-        return {"looks": [], "stopped": None}
+        return {"looks": [], "stopped": None, "why": None}
     first_entry = min(_day(r["entry_day"]) for r in rows)
     looks: list[tuple[int, dt.date, list[int]]] = []
-    j = 0
-    stopped = None
+    j = 0 if after is None else int(after[1])
+    resume = None if after is None else after[0]
+    stopped = why = None
     for s in C.sessions(store, first_entry, today):
-        if any(x <= s.day for _, x in pending):
-            stopped = s.day
-            break
+        if resume is not None and s.day <= resume:
+            continue
         if j >= len(V2_NS):
+            break
+        if any(x <= s.day for _, x in pending):
+            stopped, why = s.day, f"an intent scheduled to exit by {s.day.isoformat()} has not settled"
             break
         cov = covered(rows, s.day)
         trad = [r for r in cov if _tradable(r)]
@@ -805,29 +919,52 @@ def v2_schedule(store: S.Store, rows: Sequence[Mapping[str, Any]], today: dt.dat
         blk = len({_day(r["entry_day"]) for r in trad})
         if iss < V2_MIN_ISSUERS or blk < V2_MIN_BLOCKS:
             continue
+        if final is not None and (final[0] is None or s.day > final[0]):
+            stopped, why = s.day, f"look {j + 1} falls due at {s.day.isoformat()}, not final yet: {final[1]}"
+            break
         reached = [i for i in range(j, len(V2_NS)) if n >= V2_NS[i]]
         looks.append((reached[0] + 1, s.day, [i + 1 for i in reached[1:]]))
         j = reached[-1] + 1
-    return {"looks": looks, "stopped": stopped}
+    return {"looks": looks, "stopped": stopped, "why": why}
+
+
+def written_v2(store: S.Store, program: str, version: int) -> dict[str, Any]:
+    """The version 2 looks on record: {done: ks written, merged: ks merged into them (the look detail's `merged`),
+    last: the as-of New York day of the latest one, next: the next k (None when all ten are used)}."""
+    done: set[int] = set()
+    merged: set[int] = set()
+    last: dt.date | None = None
+    for r in look_rows(store, program, version):
+        k = int(r["k"])
+        done.add(k)
+        merged |= {int(x) for x in (look_detail(store, program, version, k) or {}).get("merged") or []}
+        day = S.parse_iso(str(r["at"])).astimezone(C.NY).date()
+        last = day if last is None or day > last else last
+    used = done | merged
+    nxt = (max(used) + 1) if used else 1
+    return {"done": done, "merged": merged, "last": last, "next": nxt if nxt <= len(V2_NS) else None}
 
 
 def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: dt.datetime,
             draws: int = B) -> dict[str, Any]:
     from . import bands as BA
 
-    written, waiting = [], []
+    written: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
     rows = settled_rows(store, program, version)
     if not rows:
         return {"written": written, "waiting": waiting}
-    done = {r["k"] for r in look_rows(store, program, version)}
+    on_record = written_v2(store, program, version)
+    if on_record["done"] and on_record["next"] is None:
+        return {"written": written, "waiting": waiting}
+    after = (on_record["last"], on_record["next"] - 1) if on_record["done"] else None
     control = CONTROLS.get(program)
     pending = _pending(store, program, version) + (_pending(store, control, 1) if control else [])
-    plan = v2_schedule(store, rows, today, pending)
+    plan = v2_schedule(store, rows, today, pending, after=after, final=final_until(store, program, version, today, now))
     if plan["stopped"] is not None:
-        waiting.append({"program": program, "version": version, "k": None,
-                        "why": f"an intent scheduled to exit by {plan['stopped']} has not settled"})
+        waiting.append({"program": program, "version": version, "k": None, "why": plan["why"]})
     for k, as_of, merged in plan["looks"]:
-        if k in done:
+        if k in on_record["done"] or k in on_record["merged"]:
             continue
         session = C.session(store, as_of)
         look_set = covered(rows, as_of)
@@ -842,28 +979,31 @@ def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: 
                           control_rows=ctl_rows, alphas=have, record=record, draws=draws, alpha=V2_ALPHA,
                           mins=(V2_NS[k - 1], V2_MIN_ISSUERS, V2_MIN_BLOCKS), sessions_at=len(days), retire=True)
         look["merged"] = merged
-        if write_look(store, look):
-            moved = BA.on_look(store, look, now=now)
+        moved: list[str | None] = [None]
+
+        def apply(db: Any, look: dict[str, Any] = look) -> None:
+            moved[0] = BA.on_look(store, look, now=now, db=db)   # in the look's own transaction
+        if write_look(store, look, apply=apply):
             written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")}
-                           | {"band": moved, "merged": merged})
+                           | {"band": moved[0], "merged": merged})
     return {"written": written, "waiting": waiting}
 
 
 def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> dict[str, Any]:
-    """Version 2's next unwritten look: {k, events_needed, events, issuers, blocks, status}."""
-    done = {r["k"] for r in look_rows(store, program, version)}
-    rows = settled_rows(store, program, version)
-    trad = [r for r in rows if _tradable(r)]
-    nxt = next((i + 1 for i in range(len(V2_NS)) if i + 1 not in done and not any(
-        k in done for k in range(i + 2, len(V2_NS) + 1))), None)
+    """Version 2's next unwritten look: {k, events_needed, events, issuers, blocks, status}: the k after the highest one
+    written or merged into a written look (`written_v2`)."""
+    nxt = written_v2(store, program, version)["next"]
     if nxt is None:
         return {"k": None, "status": "all looks written"}
+    rows = settled_rows(store, program, version)
+    trad = [r for r in rows if _tradable(r)]
     return {"k": nxt, "events_needed": V2_NS[nxt - 1], "events": len(trad),
             "issuers": len({str(r["issuer"]) for r in trad}), "blocks": len({_day(r["entry_day"]) for r in trad}),
             "status": "upcoming"}
 
 
-__all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
+__all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
+           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",

@@ -55,7 +55,16 @@ skew check starts and caps at 0.018 (A65). Room when short: Sized, then Probe, t
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
 with the same module's `bands(store)` and writes every real fill to `real_fills` with its `record_fill` (a posted fee
 updates its row); on the House the lane reviews the real fills after each night's screen (`bands.review`: demotion and
-Sized).
+Sized), whatever the screen did.
+
+A LOOK READS A FINAL RECORD (release 1019b's review; `screen.final_until`, version 1 and version 2 alike): a look as of
+a close is computed once nothing more can be added to the sessions it covers: the hourly re-decision of the last three
+sessions has passed that close, every decision of the program's entry kind through it is made (a reading program's
+session that waits on a verdict has no intent yet), and the EDGAR daily-index backfill of the weekdays through it that
+the House still backfills has run. Late data delays the computation, never its as-of date (PREREG-EVL-1 section 7),
+so a look is written about three sessions after its close. A version 2 look on record is never derived again: the
+schedule resumes after the last one at the k after every k written or merged into it (the merged ks are in the look's
+detail), and the band move a look makes (Probe, retired) is written in the look's own transaction.
 
 ## The code
 
@@ -69,7 +78,10 @@ Sized).
 `league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one. Release
 R2's real-money side: `book.py` (the equity book's event kind's rules: the money rows, the bands, the real-money picks,
 the limit, the size target, the open-risk weight, the exit plan, the eligible list) and `proof.py` (the auction paper
-proof).
+proof). Release 1019b adds `bands.py` and the modules holding the rules' inputs: `universe.py` (eligibility, the
+benchmark), `calendar.py` (the windows and decision times), `edgar.py` and `news.py` (the knowable lag, the TEXT a
+verdict reads), `run.py` (which program gets which rows, the shadow's 15:30 reaction) and `store.py` (the record's
+schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can ship through the updater.
 
 ## Where it runs (shadow)
 
@@ -100,7 +112,10 @@ turn, the most urgent due first.
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
 
-A task ends before a decision falls due. Verdicts are asked from 07:30 ET because a session's universe is fixed then
+A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
+next record passes, six passes in all, then left to the daily-index backfill; a decision that raised is closed
+`failed` and run again a minute later while it is live (a cut one goes on at the next turn). Verdicts are asked from
+07:30 ET because a session's universe is fixed then
 (its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
 `ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
 over the lane's own line (`events.verdict_usd_day`, $5 a New York day): a READ event then waits, as PREREG-EVL-1
@@ -128,3 +143,11 @@ proof on the practice account has passed its BUY stage (release 1019b ships the 
 stopped). How it runs, is read, is deployed and is rolled back:
 [operations.md](operations.md), **The event lane's real money on the House (release R2)**. Each real fill is set beside
 the shadow's own auction price, per side (league/ops/twins.py `event_twin`).
+
+How the book meets the auctions (release 1019b's review): each decision plans its EXITS before it reads anything of the
+lane, and a failing decision never stops that minute's sends (sales first); two programs' lots of one name due at one
+auction are both sold in its cross (the book's own sales at that auction do not stop each other; anything else working
+on the name does); the equity day's order count keeps one order for each event lot's exit and none once its sale is
+sent; the close decision reads each name's T29 minute once, all the day's names in batched requests, and the lane's
+own 15:30 marks are used where they exist (on the House the lane's close decision runs a minute after the book's); a
+gateway refusal that it holds no eligible list of the day publishes the list again.

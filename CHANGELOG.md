@@ -66,9 +66,37 @@ until release 1019b (below) brings it onto the House.
   share, limit-on-open, on the practice account), the program's band, and every wall: the book-wide 10% a name, the
   100% book, the loss budget ($400 net in any 20 sessions, $800 net in total, realized plus open risk, an event lot at
   value x max(0.10, 1.65 x sigma60 x sqrt(h))), the kill switch, the daily and drawdown stops, long only, Alpaca only.
+- **The three reviews' fixes** (money, House, judges; each held by a test that fails on the integrated head
+  `a2c0c794`, league/tests/test_events_review_1019b.py). THE MONEY PATH: two programs' lots of one name due at one
+  auction are both sold in its cross (`_symbol_busy(auction_sale=...)`: the book's own working sales of the symbol at
+  that same auction no longer stop the second; any other working order still does); the equity day's order count keeps
+  ONE order for an event lot's exit and none once its sale is sent (`_exit_reserve`; an old lane's lot keeps two), so
+  the open's lots sold at the close no longer starve that close's entries; a gateway 403 `stock_eligible` clears the
+  book's note of the eligible list so it is published again. THE HOUSE: the event step's decision and the auctions'
+  ends are each guarded and the decision plans its EXITS before it reads the lane, so a lane store that cannot be read
+  never stops a market-on-close sale; the close decision reads every name's T29 minute ONCE, all the day's names in
+  batched requests of 200 (`EquityBook._event_minute_closes`, `book.reaction_reader(minutes_many=)`), never one read an
+  article, and a program with no room reads nothing; `book.decided` counts a lane decision CUT by its bound as not made;
+  the record pass fetches a filing whose fetch FAILED again at its next passes (`FETCH_TRIES` 6 in all), before its live
+  decision; a lane decision that raised is closed `failed` and tried again a minute later while live
+  (`DECIDE_RETRY`); the screen task runs the band review whatever the looks did (receipt `partial` on a failure);
+  `scripts/evl_migrate.py` reads a systemctl that cannot answer as a timer running (it failed open). THE JUDGES: a look
+  waits until its as-of close is FINAL for its program (`screen.final_until`: the re-decision window of three sessions
+  has passed it, every decision of the program's entry kind through it is made and not pending on its own verdicts,
+  and the daily-index backfill of the weekdays through it that the House still backfills has run), version 1 and
+  version 2 alike; version 2's schedule resumes strictly after the last look on record at the k after every k written
+  or merged (the merged ks are now in the look's detail), so late events never make a second look at one close; the
+  band move a version 2 look makes (Probe, retired) is written in the look's own transaction (`write_look(apply=)`,
+  `bands.on_look(db=)`), so a look on record has always moved its band; one program's failure in the screen is its own
+  (`errors`). `league/ci.py` `PENDING_GATEWAY` gains the lane's rule inputs: `league/events/universe.py`,
+  `calendar.py`, `edgar.py`, `news.py`, `run.py` and `store.py` (the updater never ships a change to them; `house.py`,
+  `gw.py` and `report.py` stay outside). No identity moves with them.
 - **Tests.** The full league suite on 3.14: 12,393 OK (33 skipped). The events, equity, live, ci, constitution,
   publish, stall and budget modules on 3.11: 2,138 OK (1 skipped). Gateway 489/489 (`STOCK_EVENT_BUYS` pinned "on" as deployed; the event-buy cases
-  run on a baseline with it "off", so the switch's refusals stay tested).
+  run on a baseline with it "off", so the switch's refusals stay tested). After the reviews' fixes: the full league
+  suite on 3.14, 12,417 tests (33 skipped), green but for the one wall-list test the new `PENDING_GATEWAY` entries
+  moved (test_e3_identities' stages, then updated: green); the same 3.11 modules, 2,162 OK (1 skipped); gateway
+  489/489; `python -m league.ci --base origin/main --branch rel/1019b --no-tests` passed.
 - **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019b**): 1. the gateway from this head; 2. the House
   from this head (verify the grant on `285fa7af` and `release.live.equity.events.enabled` true); 3. on blake-desktop
   stop the `ltcm-evl-*` timers, then `scripts/evl_migrate.py --dry-run` and `scripts/evl_migrate.py`; 4. the paper

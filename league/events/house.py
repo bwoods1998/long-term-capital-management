@@ -88,6 +88,7 @@ LIVE_WITHIN = dt.timedelta(minutes=10)        # a decision run this soon after i
 CLOSE_GRACE = dt.timedelta(minutes=1)         # C1 runs a minute after its time: the 15:30 bar is on the tape at 15:46
 PENDING_RETRY = dt.timedelta(minutes=5)       # a decision waiting on verdicts is tried again this often
 STALE_RETRY = dt.timedelta(minutes=10)        # a decision whose run never finished, when it is not this lane's
+DECIDE_RETRY = dt.timedelta(minutes=1)        # a decision that FAILED (an error, not its bound) is tried again this soon
 REDECIDE_EVERY = dt.timedelta(hours=1)
 REDECIDE_SESSIONS = 3                         # league.events.__main__.REDECIDE_SESSIONS
 LOOKBACK = dt.timedelta(days=45)              # decisions older than this are the CLI's (`catchup`)
@@ -111,6 +112,7 @@ IDLE_LOOK = dt.timedelta(minutes=5)           # nothing due: look again at the l
 FAIL_BACKOFF = dt.timedelta(minutes=10)       # a task that failed (record, nightly, tickers, backfill) waits this long
 WAIT_LOOK = 60.0                              # no store yet: look again this often (seconds of the House clock)
 FETCH_WINDOW = dt.timedelta(days=2)           # listed filings the record pass still fetches
+FETCH_TRIES = 6                               # ... and a failed fetch is tried again at this many passes in all
 
 WARN_EVERY = 3600.0
 DATA_INTERVAL = 0.5
@@ -257,6 +259,7 @@ class EventLane:
         self._usd = {"day": None, "usd": 0.0}
         self._paused = False
         self._failed: dict[str, dt.datetime] = {}
+        self._fetch_tries: dict[str, int] = {}  # accession -> the record passes that tried to fetch it (this process)
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -662,6 +665,12 @@ class EventLane:
                     soon.append(retry)
                     continue
                 rank = 0 if live else 2
+            elif status == "failed":   # a run that raised (`_decide`): again a minute later while live, else STALE_RETRY
+                retry = last + (DECIDE_RETRY if live else STALE_RETRY)
+                if now < retry:
+                    soon.append(retry)
+                    continue
+                rank = 0 if live else 2
             else:  # 'running' (a run that never finished), 'cut' or anything else
                 if last >= self._born and now < last + STALE_RETRY:
                     soon.append(last + STALE_RETRY)
@@ -685,6 +694,13 @@ class EventLane:
             self._cut.add(key)
             self._close_running(ctx.store, f"decide-{kind}:{day.isoformat()}", "the lane's time bound; it goes on next turn")
             raise
+        except Exception as exc:
+            # (Release 1019b's review: a run that raised, one gateway 429 in its eligibility reads say, was left
+            # `running` and waited STALE_RETRY, past LIVE_WITHIN: the session's live decision became a backfill. It is
+            # closed `failed` and tried again after DECIDE_RETRY, live while within LIVE_WITHIN.)
+            self._close_running(ctx.store, f"decide-{kind}:{day.isoformat()}",
+                                f"{type(exc).__name__}: {str(exc)[:160]}", status="failed")
+            raise
         self._cut.discard(key)
         missing = sum((out.get("pending") or {}).values())
         self._look(key, missing, self._stored_verdicts(ctx.store) - before, ctx.gw)
@@ -692,11 +708,11 @@ class EventLane:
                 "_status": "pending" if out.get("pending") else "ok"}
 
     @staticmethod
-    def _close_running(st: S.Store, job: str, why: str) -> None:
+    def _close_running(st: S.Store, job: str, why: str, *, status: str = "cut") -> None:
         row = st.db.execute("SELECT id FROM receipts WHERE job=? AND status='running' ORDER BY id DESC LIMIT 1",
                             (job,)).fetchone()
         if row is not None:
-            st.finish_receipt(int(row["id"]), "cut", {"why": why})
+            st.finish_receipt(int(row["id"]), status, {"why": why})
 
     # -- verdicts ---------------------------------------------------------------------------------------------------
     def _verdict_targets(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
@@ -834,25 +850,37 @@ class EventLane:
         out["news"] = self._news(ctx, min(deadline, self._mono() + NEWS_BUDGET))
         new += int((out["news"] or {}).get("stored") or 0)
         cut = False
-        rows = st.db.execute("SELECT accession, form, cik, company, items, accepted_at, index_url FROM filings WHERE "
-                             "status='listed' AND source='current' AND received_at>=? ORDER BY form='4', accepted_at, "
-                             "accession", (S.iso(now - FETCH_WINDOW),)).fetchall()
+        # The listed filings, and those whose fetch FAILED (release 1019b's review: one transient SEC error lost the
+        # filing's live decision, as nothing fetched it again before the next day's daily-index backfill), each tried
+        # again at the next passes, FETCH_TRIES passes in all (`_fetch_tries`, kept by this process); new ones first.
+        rows = st.db.execute("SELECT accession, form, cik, company, items, accepted_at, index_url, status FROM filings "
+                             "WHERE (status='listed' OR status LIKE 'failed:%') AND source='current' AND received_at>=? "
+                             "ORDER BY form='4', status!='listed', accepted_at, accession",
+                             (S.iso(now - FETCH_WINDOW),)).fetchall()
         for row in rows:
             counts = out.setdefault(str(row["form"]), {"new": 0, "fetched": 0, "failed": 0, "unlisted": 0})
             if row["form"] == "8-K" and (listed is None or row["cik"] not in listed):
                 counts["unlisted" if listed is not None else "waiting"] = counts.get(
                     "unlisted" if listed is not None else "waiting", 0) + 1
                 continue
+            again = str(row["status"]).startswith("failed")
+            tries = self._fetch_tries.get(str(row["accession"]), 1 if again else 0)
+            if again and tries >= FETCH_TRIES:
+                continue    # (left to the daily-index backfill)
             if self.late(deadline):
                 cut = True
                 break
+            self._fetch_tries[str(row["accession"])] = tries + 1
             entry = {"form": row["form"], "cik": row["cik"], "accession": row["accession"], "company": row["company"],
                      "items": json.loads(row["items"] or "[]"), "accepted_at": S.parse_iso(row["accepted_at"]),
                      "index_url": row["index_url"]}
             status = E.record_filing(st, ctx.sec, entry, source="current", now=ctx.now(), fetch=True)
+            if again:
+                counts["retried"] = counts.get("retried", 0) + 1
             if status == "fetched":
                 counts["fetched"] += 1
                 new += 1
+                self._fetch_tries.pop(str(row["accession"]), None)
             elif status.startswith("failed"):
                 counts["failed"] += 1
         out["cut"] = cut
@@ -991,22 +1019,33 @@ class EventLane:
         return summary | {"_status": "ok" if complete else "partial"}
 
     def _screen(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
-        """The screen (league.events.screen.run: the looks, and the band moves a look makes: Probe, retired), then
-        PREREG-EVL-3's review of the real fills the House's book wrote back (league.events.bands.review: demotion to
-        learning, Sized). A review that fails is a warning and the screen's receipt says so; it runs again next night."""
+        """The screen (league.events.screen.run: the looks, and the band moves a look makes in its own transaction:
+        Probe, retired), then PREREG-EVL-3's review of the real fills the House's book wrote back
+        (league.events.bands.review: demotion to learning, Sized), WHATEVER THE SCREEN DID (release 1019b's review: a
+        failing look stopped every program's demotion and Sized). A program whose looks failed, or a review that failed,
+        is a warning and the screen's receipt says so (`partial`); it runs again next night."""
         now = ctx.now()
-        out = SN.run(ctx.store, now.astimezone(C.NY).date(), now=now)
+        try:
+            out = SN.run(ctx.store, now.astimezone(C.NY).date(), now=now)
+        except Exception as exc:  # noqa: BLE001 - the review below runs all the same
+            out = {"written": [], "waiting": [], "errors": [{"error": f"{type(exc).__name__}: {str(exc)[:200]}"}]}
         summary: dict[str, Any] = {"day": now.astimezone(C.NY).date().isoformat(),
                                    "written": len(out.get("written") or []), "waiting": len(out.get("waiting") or [])}
+        status = "ok"
+        if out.get("errors"):
+            status = "partial"
+            summary["errors"] = list(out["errors"])[:5]
+            self.warn("screen", f"{len(out['errors'])} program(s) could not be screened, the first: {out['errors'][0]}")
         try:
             moved = BA.review(ctx.store, now=now)
         except Exception as exc:  # noqa: BLE001 - the looks are written; the review is read again next night
+            status = "partial"
             summary["review"] = f"failed: {type(exc).__name__}: {str(exc)[:160]}"
             self.warn("bands", exc)
         else:
             summary["review"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in moved]
-        self._receipted(ctx.store, "screen", "ok", summary)
-        return summary
+        self._receipted(ctx.store, "screen", status, summary)
+        return summary | {"_status": status}
 
     def _report(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
         """The daily one-screen report into `<root>/reports/<day>.txt` and `.json`, as the CLI's `report` writes it."""

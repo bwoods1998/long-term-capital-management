@@ -291,10 +291,13 @@ class TheEquityLane(unittest.TestCase):
                                               "league/events/programs.py", "league/events/verdicts.py",
                                               "league/events/score.py", "league/events/screen.py", "docs/prereg/",
                                               "league/events/bands.py", "league/events/book.py",
-                                              "league/events/proof.py"),
+                                              "league/events/proof.py", "league/events/universe.py",
+                                              "league/events/calendar.py", "league/events/edgar.py",
+                                              "league/events/news.py", "league/events/run.py",
+                                              "league/events/store.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
                          "the release; E4's two, FWD1-R's seat path, R0's data plan, R1's event-lane judges, "
-                         "PREREG-EVL-3's band rules and R2's event kind wait for its next one")
+                         "PREREG-EVL-3's band rules, R2's event kind and the lane's rule inputs wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",
@@ -338,25 +341,31 @@ class TheEquityLane(unittest.TestCase):
         """Release R1 (R1-SPEC WP1): the event lane's judges join the wall: the programs as pre-registered, the verdicts'
         prompts, model and parsing, the settlement the screen's numbers are made of, the screen, and the
         pre-registrations; release 1019b adds PREREG-EVL-3's band rules (league/events/bands.py: promotion, Sized,
-        demotion, retirement, the bands' reader and the real fills' writer). No role may change one and the in-box
-        updater never ships one; the lane's recorders, its decisions' plumbing and its House scheduler stay outside, so
-        their fixes can ship."""
+        demotion, retirement, the bands' reader and the real fills' writer), and its review the modules holding the
+        lane's pre-registered rule inputs (universe.py, calendar.py, edgar.py, news.py, run.py, store.py: eligibility,
+        the benchmark, the windows and decision times, KNOWABLE_LAG, the TEXT a verdict reads, which program gets which
+        rows, the record's schema). No role may change one and the in-box updater never ships one; the lane's House
+        scheduler, its gateway client and its report stay outside, so their fixes can ship."""
         from league.updater import protected_changes
 
         judges = ("league/events/programs.py", "league/events/verdicts.py", "league/events/score.py",
-                  "league/events/screen.py", "docs/prereg/", "league/events/bands.py")
+                  "league/events/screen.py", "docs/prereg/", "league/events/bands.py", "league/events/universe.py",
+                  "league/events/calendar.py", "league/events/edgar.py", "league/events/news.py",
+                  "league/events/run.py", "league/events/store.py")
         for entry in judges:
             self.assertIn(entry, ci.FORBIDDEN)
             self.assertIn(entry, ci.PENDING_GATEWAY)
         for path in ("league/events/programs.py", "League/Events/Programs.py", "league/events/verdicts.py",
                      "league/events/score.py", "league/events/screen.py", "docs/prereg/PREREG-EVL-1.md",
                      "docs/prereg/PREREG-EVL-2.md", "docs/prereg/PREREG-EVL-3.md", "league/events/bands.py",
-                     "League/Events/Bands.py"):
+                     "League/Events/Bands.py", "league/events/universe.py", "league/events/calendar.py",
+                     "league/events/edgar.py", "league/events/news.py", "league/events/run.py",
+                     "league/events/store.py", "League/Events/Universe.py"):
             self.assertTrue(ci.guard([path], None), path)
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
-        for path in ("league/events/house.py", "league/events/run.py", "league/events/edgar.py",
-                     "league/events/news.py", "league/service.py"):
+        for path in ("league/events/house.py", "league/events/gw.py", "league/events/report.py",
+                     "league/service.py"):
             self.assertEqual(ci.guard([path], None), [], path)
         with tempfile.TemporaryDirectory() as tmp:
             running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
@@ -367,8 +376,8 @@ class TheEquityLane(unittest.TestCase):
                     (root / rel).parent.mkdir(parents=True, exist_ok=True)
                     (root / rel).write_text(text)
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
-                             ["league/events/bands.py", "league/events/programs.py", "league/events/score.py",
-                              "league/events/screen.py", "league/events/verdicts.py"])
+                             ["league/events/bands.py", "league/events/programs.py", "league/events/run.py",
+                              "league/events/score.py", "league/events/screen.py", "league/events/verdicts.py"])
 
     def test_the_panel_lane_and_the_universe_generator_are_protected(self):
         """Release E4 (E4-SPEC 2.5, the fixed judges it adds): the panel's evidence and its screen XS1 (league/xs/), its

@@ -48,9 +48,11 @@ def bands(store: S.Store) -> dict[tuple[str, int], str]:
     return out
 
 
-def set_band(store: S.Store, program: str, version: int, band: str, *, since: str, why: str, now: Any = None) -> bool:
+def set_band(store: S.Store, program: str, version: int, band: str, *, since: str, why: str, now: Any = None,
+             db: Any = None) -> bool:
     """Move (program, version) to `band` (a seating version only). A retired program never moves again. Returns
-    whether anything changed."""
+    whether anything changed. `db`: a transaction of `store` already open (the screen's look, `screen.write_look`),
+    written in it; else in a transaction of its own."""
     if band not in BANDS:
         raise ValueError(f"{band!r} is not one of {BANDS}")
     key = (program, int(version))
@@ -60,11 +62,17 @@ def set_band(store: S.Store, program: str, version: int, band: str, *, since: st
     if current == band or current == "retired":
         return False
     written = S.iso(now or S.utc_now())
-    with store.tx() as db:
-        db.execute("INSERT OR REPLACE INTO bands(program, version, band, since, why) VALUES(?, ?, ?, ?, ?)",
+
+    def write(tx: Any) -> None:
+        tx.execute("INSERT OR REPLACE INTO bands(program, version, band, since, why) VALUES(?, ?, ?, ?, ?)",
                    (program, int(version), band, since, why))
-        db.execute("INSERT INTO band_history(program, version, band, since, why, written_at) VALUES(?, ?, ?, ?, ?, ?)",
+        tx.execute("INSERT INTO band_history(program, version, band, since, why, written_at) VALUES(?, ?, ?, ?, ?, ?)",
                    (program, int(version), band, since, why, written))
+    if db is not None:
+        write(db)
+    else:
+        with store.tx() as tx:
+            write(tx)
     return True
 
 
@@ -78,19 +86,21 @@ def retire_test(session_values: Iterable[float], mean_a: float | None, seed_text
     return {"retire": bool(mean_a < 0 and p_below <= RETIRE_P), "p_below": p_below}
 
 
-def on_look(store: S.Store, look: Mapping[str, Any], *, now: Any = None) -> str | None:
-    """After the screen wrote a version 2 look: retire, promote a learning program to probe, or nothing. Returns the
-    new band or None."""
+def on_look(store: S.Store, look: Mapping[str, Any], *, now: Any = None, db: Any = None) -> str | None:
+    """With the screen's write of a version 2 look: retire, promote a learning program to probe, or nothing. Returns
+    the new band or None. `db`: the look's own transaction (release 1019b's review: the move is written with the look
+    or not at all, so a lost move can never leave a retired program trading)."""
     key = (str(look["program"]), int(look["version"]))
     if key not in seating() or not int(look.get("held") or 0):
         return None
     if (look.get("retirement") or {}).get("retire"):
-        if set_band(store, key[0], key[1], "retired", since=str(look["at"]), now=now,
+        if set_band(store, key[0], key[1], "retired", since=str(look["at"]), now=now, db=db,
                     why=f"look {look['k']}: mean a < 0, reversed p {look['retirement']['p_below']:.4f} <= {RETIRE_P}"):
             return "retired"
         return None
     if int(look.get("passed") or 0) and bands(store)[key] == "learning":
-        if set_band(store, key[0], key[1], "probe", since=str(look["at"]), now=now, why=f"look {look['k']} passed"):
+        if set_band(store, key[0], key[1], "probe", since=str(look["at"]), now=now, db=db,
+                    why=f"look {look['k']} passed"):
             return "probe"
     return None
 

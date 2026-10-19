@@ -84,11 +84,21 @@ def sha256_file(path: Path) -> str:
 
 
 def desktop_timers_running() -> list[str]:
-    """The `ltcm-evl-*` systemd user units now active (timers waiting, services running); none without systemd."""
+    """The `ltcm-evl-*` systemd user units now active or on their way (timers waiting; services starting, running or
+    stopping); none without systemd. A systemctl that cannot answer (no user bus from a non-login shell, say) reads as
+    one unit running, never as none (release 1019b's review: it failed open), so the migration refuses unless
+    `--allow-running` says the operator checked."""
     if not shutil.which("systemctl"):
         return []
-    out = subprocess.run(["systemctl", "--user", "list-units", "ltcm-evl-*", "--state=active", "--no-legend", "--plain"],
-                         capture_output=True, text=True, timeout=30)
+    try:
+        out = subprocess.run(["systemctl", "--user", "list-units", "ltcm-evl-*",
+                              "--state=active,activating,deactivating,reloading", "--no-legend", "--plain"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [f"(systemctl could not be asked: {type(exc).__name__})"]
+    if out.returncode != 0:
+        why = (out.stderr or out.stdout or "").strip().splitlines()
+        return [f"(systemctl --user failed with status {out.returncode}: {(why[0] if why else '')[:120]})"]
     return [line.split()[0] for line in out.stdout.splitlines() if line.strip()]
 
 
