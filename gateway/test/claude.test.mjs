@@ -44,14 +44,20 @@ async function call(payload, answer, { env = settings(), gate = null, headers = 
   return { response, seen, gate, meter: gate.claudeStatus(), bytes: new TextEncoder().encode(JSON.stringify(payload)).length };
 }
 
-test('the deployed price table is exactly Opus 5.5, Sonnet 5 and Sonnet 5.5 at the list prices, and the funded total is $100', () => {
+test('the deployed price table is exactly Opus 5.5, Sonnet 5, Sonnet 5.5 and Haiku 4.5 at the list prices, and the funded total is $265', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const variable = name => JSON.parse(new RegExp(`"${name}":\\s*("(?:[^"\\\\]|\\\\.)*")`).exec(config)[1]);
   const table = priceTable({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
   // Sonnet 5.5 (Sept 29, 2026): platform.claude.com/docs/en/about-claude/pricing lists it at Sonnet 5's prices. Every
   // row carries the US-only inference multiplier (1.1x on every rate for Claude 4.6 and later, "Data residency pricing").
   const us = { geo: { us: 1.1 } };
-  assert.deepEqual(table, { 'claude-opus-5-5': { ...OPUS, ...us }, 'claude-sonnet-5': { ...SONNET, ...us }, 'claude-sonnet-5-5': { ...SONNET, ...us } });
+  // Haiku 4.5 (Oct 19, 2026, the event lane): $1 / $1.25 / $0.10 / $5, and no geo row (the multiplier is Claude 4.6 and later).
+  const HAIKU = { input: 1, cache_write: 1.25, cache_read: 0.1, output: 5 };
+  assert.deepEqual(table, { 'claude-opus-5-5': { ...OPUS, ...us }, 'claude-sonnet-5': { ...SONNET, ...us }, 'claude-sonnet-5-5': { ...SONNET, ...us },
+    'claude-haiku-4-5-20251001': HAIKU });
+  // 2,000 x $1 + 10,000 x $1.25 + 30,000 x $0.10 + 6,000 x $5, per million: 0.002 + 0.0125 + 0.003 + 0.03 = $0.0475.
+  assert.equal(actualCost(table['claude-haiku-4-5-20251001'], USAGE), 47500n);
+  assert.equal(admit(body({ model: 'claude-haiku-4-5-20251001' }), settings({ CLAUDE_MODELS: variable('CLAUDE_MODELS') })).model, 'claude-haiku-4-5-20251001');
   const deployed = settings({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
   assert.deepEqual(admit(body({ model: 'claude-sonnet-5-5' }), deployed),
     { model: 'claude-sonnet-5-5', price: { ...SONNET, ...us }, maxTokens: 16000, stream: false });
@@ -103,6 +109,9 @@ test('admission: inline text, adaptive thinking, an effort and a JSON-schema for
   assert.equal(admit(body({ messages: [{ role: 'user', content: [{ type: 'text', text: 'a', cache_control: { type: 'ephemeral', ttl: '5m' } }] }] }), env).model,
     'claude-opus-5-5');
   assert.equal(admit(body({ model: 'claude-opus-5' }), env).status, 403, 'unpriced');
+  // temperature exactly 0 is admitted (the event lane's deterministic verdicts); any other value is refused below.
+  assert.equal(admit(body({ temperature: 0 }), env).model, 'claude-opus-5-5');
+  for (const t of [0.0001, -0, '0', null, 1]) if (!Object.is(t, -0)) assert.equal(admit(body({ temperature: t }), env).status, 400, String(t));
   assert.equal(admit(body({ model: 'gpt-6-astra' }), env).status, 403);
   const mark = { type: 'ephemeral' };
   for (const change of [

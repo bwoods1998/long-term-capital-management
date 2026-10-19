@@ -32,6 +32,17 @@ reads unreleased; before it, `20261016T024305Z-e90d75adb36b`, main `d6bcf0cd`, P
 02:43Z Oct 16), the gateway is `a6026308` (20:54Z Oct 15), and the box's updater is on. What is built and not deployed
 is on branches.
 
+### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (unreleased; a gateway deploy only, no House code, no money rule, no order path)
+
+- `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
+  $5 output; no `geo` row): the model PREREG-EVL-1 pins for its verdicts on EDGAR filings and news headlines.
+- `VENUE_PATHS.alpaca` admits `GET v1beta1/news` (read only; routed to data.alpaca.markets by the existing
+  `v1beta1/` data prefix): the ENEWS events. Nothing else under news is signed.
+- `/v1/claude/messages` admits `temperature` when it is exactly 0 (PREREG-EVL-1's deterministic verdicts); any other
+  value, and every other sampling field, is still refused.
+- Tests: claude.test.mjs pins the new row, its cost and the temperature rule; caps.test.mjs pins the one news path.
+  Gateway suite 465/465.
+
 ### The old lanes are exits only: `equity_money.enabled` False (PREREG-EVL-1 section 8), on `fix/equity-opens-off` (unreleased; stacks on release R0, PR #567, and ships with its deploy or the one after it; one owner deploy, never 12:55-20:05Z on a trading day; THE MONEY DIGEST MOVES `5ea6f99f` -> `f4fc39ff` and the constitution `82a9a5a4` -> `34bbe7a5`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal of Oct 19, 2026 and the frozen pre-registration PREREG-EVL-1, section 8 (registration
