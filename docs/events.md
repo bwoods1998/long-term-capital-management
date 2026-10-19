@@ -186,11 +186,45 @@ failing waits as a failed one). Verdicts are asked from
 07:30 ET because a session's universe is fixed then
 (its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
 `ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
-over the lane's own line (`events.verdict_usd_day`, $3 a New York day from release 1019b's second review: the goal's
-cost rule, metered compute at most $5 a day plus half the trailing week's realized net profit, with the House box at
-about $1.29 a day, until budget rule 3 ships): a READ event then waits, as PREREG-EVL-1 section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
-How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
-[operations](operations.md), "The event lane on the House".
+over the lane's own line of a day: from release 1019c the lower of `events.verdict_usd_day` ($3, from release
+1019b's second review: the goal's cost rule, metered compute at most $5 a day plus half the trailing week's realized
+net profit, with the House box at about $1.29 a day) and budget rule 3's
+allowance for the lane (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`,
+$3 a day at no profit, half as much again after a day held at it, never more than the cap's room, 0 under the cap
+breach hold; `lane.json` `verdict_line_usd`), held on the UTC day (00:00-24:00 UTC, 20:00 ET to 20:00 ET in summer),
+the day every other line of the rule is held and the cap judged on (New York days before 1019c): a READ event then
+waits, as PREREG-EVL-1 section 4 lets it. The lane writes a receipt
+for every task in the store (their contract with the House is league/events/__init__.py, THE EVENT LANE'S RECEIPTS) and
+its health to `<state>/events/lane.json`. How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`)
+and stop it: [operations](operations.md), "The event lane on the House".
+
+## Alarms and the daily report (release 1019c)
+
+The House's `stall` job (every 30 minutes, league/ops/stall.py) judges the lane's PROGRESS from its store, read-only
+(league/ops/evl_health.py), never a receipt's status alone; each cause is INFO (no owner step) and goes in the stall
+mail at its pace:
+
+| cause | stands when |
+|---|---|
+| `evl_record` | no clean record pass in 30 minutes: one finished `ok` whose 8-K, Form 4 and news reads ran without error (the failing feeds are named) |
+| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed |
+| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
+| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
+| `evl_fills` | the real fills off the shadow's own auction prints by more than 15 bp either way (worse or better, said), the signed mean of a side over the last 20 priced fills (the House's event twins) |
+| `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |
+
+None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while
+the House's `PAUSE` stands (no verdict is asked then).
+
+THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after the lane's own nightly report job
+(league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured
+metered costs beside it, by program and band (to date as far as `metered.json` covers it: "since <day>, partly
+measured" when it began after the first fill); the measured costs of the UTC day of the same date against its cap with
+its lines labelled the allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
+fees, the fill gap against the auction prints); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
+controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
+or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
 ## Real money (release R2, shipped switched on in release 1019b; not yet deployed)
 

@@ -48,6 +48,16 @@ from league.tests import elane_e24_house as E24
 from league.tests import test_ops_stall as TS
 
 NOW, HOUR = TS.NOW, TS.HOUR
+
+
+def setUpModule() -> None:
+    """E2's figures here were set on the budget floor of before release 1019c (league/tests/elane_e2_fakes.py
+    `PRE_1019C_FLOOR_USD_DAY`): the module's House keeps it."""
+    patch = fx.pre_1019c_floor()
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
+
 REPO = Path(__file__).resolve().parents[2]
 ROUTE = "sail:pro_asap"
 #: The card checks themselves (league/swarm/cards.py), kept before any test's fakes stand in for them (`fx.switch_on`).

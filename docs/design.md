@@ -88,13 +88,28 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   it): at once and every 12 h while some cause needs the owner, else at most once a day; each cause is also a House
   warning every 12 h. It never acts. The daily page carries the funnel: births, versions, Gym runs by window,
   validations, looks, the bands, real orders and closes by route, research spend, braked hours, for the last 24 hours
-  and since the release.
-- **The budget rule (D4).** Research dollars a day per meter (Sail, Claude) = the floor (at most $5 a day in all, and
-  only what a meter's balance sustains for 90 days) plus half the trailing 30-day realized options profit, capped so no
-  meter falls under 60 days of runway; after 60 sessions from Oct 5 with no promotion by the forward ladder, the floor
-  alone. The realized profit is the live book's own read, which the close economics can only cut; unknown earns
-  nothing. Applied last and tighten-only to the spend knobs; the burst is gone and OpenAI is closed. One `funding` mail
-  per meter when a prefund is short at the rate the meter wants, with the exact amount. (**Compute**, below.)
+  and since the release. From release 1019c (the goal of Oct 19, 2026, item 5) it also judges the event lane's own four
+  causes by PROGRESS while the lane runs on the House (`league/ops/evl_health.py`: no clean record pass in 30 minutes, a
+  decision not made in its window, verdicts unanswered past their decision, intents left open after the night's score,
+  real fills off the shadow's auction prints by more than 15 bp either way; quiet while the lane's STOP stands),
+  `cap_breach` (the UTC day's MEASURED metered compute over the cap the rule set for it, `league/ops/metered.py`; while
+  today is over it the cap breach hold holds every line at 0 until 00:00 UTC), and mails the lane's DAILY ONE-SCREEN REPORT once a New York day after the lane's report job
+  (`league/ops/daily_report.py`: account-shown profit first, Net after costs beside it, by program and band; costs
+  measured against the cap; events, intents, fills, settled n, evidence; figures only). `ops.json` `stall.research`
+  false stops the old lanes' research causes and research alarms from being judged while their research is off, and
+  `underspend` is never judged under budget rule 3 (a cheap day is never a failed day).
+- **The budget rule (D4; rule version 3 from release 1019c, the goal of Oct 19, 2026, item 4).** Every metered compute
+  dollar of a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to min($25, $5 + 0.5 x the
+  trailing week's realized net profit / 7): the trailing week is the last 5 sessions' realized net of every real book
+  (options and equity lots alike, the event lane's among them), and its half is spread over the 7 days a week of compute
+  runs. The fixed costs count inside it, the event lane's verdicts ride the Claude line first (at least $3 a day) and the
+  old research roles share the remainder (Sail 0.8, Claude 0.2). Every line is held, all on the UTC day the cap is judged
+  on: research by the Sail guard and the router, the lane's verdicts by the House's lane itself (its allowance in
+  budget.json); a measured breach holds them all at 0 for the rest of the day. A cheap day is never a failed
+  day. Each prefunded meter still tapers by itself as its balance falls; unknown earns nothing; no usable budget.json is
+  the rule's own no-profit lines (fails closed); applied last and tighten-only to the spend knobs; OpenAI is closed. One
+  `funding` mail per meter two days before research on it runs out, with the exact amount. (**Compute**, below; the
+  rule's text is `league/ops/budget.py`'s docstring.)
 - **The standing grant (D5).** The grant re-ratifies itself after an owner deploy that moves the money digest and after
   a deposit, at the lower of equity and the owner's ceiling; never loosens.
 - **Settings as code.** `league/swarm/policy.json` sits between `config.json` and the box's `swarm.json`, which keeps
@@ -882,23 +897,32 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 | Gym | Sail boxes | 4-8 sealed size-l boxes by default; 2-6 live from Release A, 1 in `policy.json` since Oct 2, and the budget's box count when lower | $0.10-0.40 an hour each while busy; asleep when idle |
 | Data | Sail box + ThetaData | one size-l box, asleep when idle | $5-15 a day while running |
 | The House | Sail box | one size-s box | about $0.03 an hour |
-| History, the nightly forward day, fill calibration | ThetaData | four concurrent requests | $80 a month |
-| Live quotes, SIP bars, paper and real orders | Alpaca | through the gateway | already paid |
+| History, the nightly forward day, fill calibration | ThetaData | four concurrent requests | $80 a month until the owner cancelled it on Oct 18, 2026; the site's costs stop accruing it from Oct 19 (`league/publish.py` `SUBSCRIPTIONS_ENDED_AT`), what accrued before stays |
+| Live quotes, SIP bars, paper and real orders | Alpaca | through the gateway | Algo Trader Plus until the owner cancelled it on Oct 18, 2026, ended in the site's costs the same way; the free Basic plan since (IEX in real time, SIP history 15 minutes back) |
+| The event lane's verdicts | Claude via the gateway | Haiku 4.5, temperature 0 (PREREG-EVL-1 section 4) | the Claude line's first part under budget rule 3: at least $3 a day, held by the House's lane to its allowance |
+| Cloudflare (the gateway and the site) | Workers | one paid plan | $5 a month, a fixed cost inside budget rule 3's cap |
 
-- **Budgets: the budget rule** (V3-A part 1, live since Oct 3; the owner's D4; `league/ops/budget.py`,
-  protected; the details are in [operations](operations.md), "The budget rule"). Research is bought out of what the
-  options book realized, inside money already paid in. For each prefunded meter (Sail and Claude) the House computes a
-  day's research dollars: a floor of at most $5 a day for both together (60% Sail, 40% Claude), never more than the
-  meter's balance sustains for 90 days above a reserve and its fixed cost, plus half of the trailing 30-day realized
-  options P&L when it is positive, and never so much that the meter falls under 60 days of runway. The realized P&L is
-  the live book's own read, which the close economics can only cut. Marks never fund research, and anything unreadable
-  is no research. After 60 sessions from Oct 5, 2026 with no promotion to Probe by the forward ladder the profit share
-  stops ("no forward edge; research at floor") until one. The result only tightens the configured spend: the researcher
-  pace, the Gym boxes, every Claude role's daily line, the population's ceiling and start, and the architect's cadence.
-  When a meter's runway at the rate it wants falls under 60 days the owner gets one mail with the amount that restores
-  90 and both rates, the wanted one and the one the rule holds it to. From its deploy it replaces the training
-  burst (Sept 26 to Oct 5, its last cap $900 of Sail) and the plan's "Sail at most $12 a day until Net is positive",
-  which were settings, not code. OpenAI is not topped up after September, and the rule leaves it no room; Claude also
+- **Budgets: the budget rule** (V3-A part 1, live since Oct 3; the owner's D4; `league/ops/budget.py`, protected; rule
+  version 3 from release 1019c, the owner's goal of Oct 19, 2026, item 4; the details are in [operations](operations.md),
+  "The budget rule"). THE CAP: every metered dollar of a day is at most min($25, $5 + 0.5 x max(0, the trailing week's
+  realized net profit) / 7), "the trailing week" being the last 5 closed sessions (one trading week) of every real book
+  (the options book's closed positions with the broker's fee corrections, the equity book's closed real lots, where the
+  event lane's real lots live) and its half spread over the 7 days a week of compute runs; a losing week lifts nothing
+  and takes nothing from the $5. The fixed costs (the House's and the data box's Sail billing, Cloudflare's $5 a month,
+  market data, $0 since the owner cancelled ThetaData and Alpaca's Algo Trader Plus on Oct 18) count inside it; the
+  event lane's verdicts (Claude Haiku 4.5) are the Claude line's first part, at least $3 or half as much again as their
+  heaviest day of the last 7, never more than the room; the old research roles share the remainder, Sail 0.8 and Claude
+  0.2 (at the $5 cap with no profit and Sail's fixed $1.50: research $0.34 a day, Sail $0.27 and the Claude roles
+  $0.07). EVERY LINE IS HELD: Sail research by the Sail guard, the Claude roles by the router, the lane's verdicts by the
+  House's lane itself (the lower of `events.verdict_usd_day` and its allowance in budget.json); a day whose measured
+  spend still goes over the cap (a fixed cost that rose) is the stall job's `cap_breach`. A cheap day is never a failed
+  day: the cap is what may be spent, never what must be. Each prefunded meter then tapers by itself (it spends at most a
+  fifth of what it holds above its reserve and five days of its fixed cost a day), the day's figure is set once a UTC
+  day and only a top-up or a profit raises it, and anything unreadable is no research; no usable budget.json is the
+  rule's own no-profit lines (it fails closed). The result only tightens the configured spend: the researcher pace, the
+  Gym boxes, every Claude role's daily line (the roles' part only, so no role can spend the lane's), the population's
+  ceiling and start, and the architect's cadence. Rule 2's options-only 30-day profit share and its no-forward-edge stop
+  are recorded and read by nothing. OpenAI is not topped up after September, and the rule leaves it no room; Claude also
   stays within the owner's funded total (`CLAUDE_USD`, the swarm's `claude.usd_cap`).
 - **The Sail guard.** Running out of Sail credits pauses every box, the House included. Gym boxes and
   researchers scale down whenever the balance falls below two days of the House's burn plus $30,

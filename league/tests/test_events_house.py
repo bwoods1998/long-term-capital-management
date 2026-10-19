@@ -629,6 +629,103 @@ class VerdictsEarly(LaneCase):
         self.assertTrue(any("line for verdicts" in text for _, text in self.house.alerts))
 
 
+class TheBudgetsLine(LaneCase):
+    """Release 1019c (the review of r1/alarms, its major 1): the lane's verdicts take their daily line from budget rule 3,
+    the lower of `events.verdict_usd_day` and the budget's allowance for the lane (league/ops/budget.py `lane_allowance`),
+    so they and every other metered dollar stay under the day's cap."""
+
+    def budget(self, lane_usd_day, *, at=None):
+        from league.ops import budget as B
+
+        doc = {"schema": B.SCHEMA, "rule_version": B.RULE_VERSION, "at": self.clock() if at is None else at,
+               "cap_usd_day": 5.0, "meters": {"claude": {"lane_usd_day": lane_usd_day, "limited_by": "ceiling"}}}
+        (self.root.parent / "budget.json").write_text(json.dumps(doc))
+
+    def three_filings(self):
+        self.fetched_8k("0000000001-26-000101", "0000000001", "2026-10-19 17:00:00")
+        self.fetched_8k("0000000002-26-000102", "0000000002", "2026-10-19 18:00:00")
+        self.fetched_8k("0000000003-26-000103", "0000000003", "2026-10-19 19:00:00")
+
+    def test_the_budgets_allowance_holds_the_verdicts_under_the_config(self):
+        self.three_filings()
+        self.budget(0.003)                                               # two calls of $0.002 cross the budget's line
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.assertEqual(self.turn()["task"], "verdicts")
+        self.assertEqual(len(self.gw.claude_calls), 2, "the third waits: the budget's $0.003, under the config's $5")
+        health = self.lane.health()
+        self.assertEqual(health["verdict_line_usd"], 0.003)
+        self.assertTrue(health["verdict_line_source"].startswith("the budget's allowance: budget.json"),
+                        health["verdict_line_source"])
+        self.assertTrue(any(json.loads(r["summary"]).get("cut_cap") for r in self.receipts("verdicts")))
+        self.assertTrue(any("line for verdicts is reached (the budget's allowance" in text for _, text in self.house.alerts))
+
+    def test_the_config_holds_when_it_is_lower_and_no_budget_is_the_rules_floor(self):
+        self.lane = self.new_lane(verdict_usd_day=0.003)
+        self.budget(4.0)
+        self.assertEqual(self.lane.verdict_line(self.clock_dt()), {"usd_day": 0.003, "source": "events.verdict_usd_day"})
+        (self.root.parent / "budget.json").unlink()
+        self.lane = self.new_lane(verdict_usd_day=5.0)                   # a config above the floor, whatever the default
+        line = self.lane.verdict_line(self.clock_dt())
+        self.assertEqual(line["usd_day"], 3.0, "no budget.json: the rule's own no-profit lane line, never the config's $5")
+        self.assertIn("the floor (no budget.json yet)", line["source"])
+        self.budget(0.0)                                                 # the rule could not read the Claude meter
+        self.assertEqual(self.lane.verdict_line(self.clock_dt())["usd_day"], 0.0)
+        with mock.patch("league.ops.budget.lane_allowance", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.lane.verdict_line(self.clock_dt())["usd_day"], 0.0, "no allowance read: no paid call")
+
+    def test_a_line_of_nothing_asks_nothing(self):
+        self.three_filings()
+        self.budget(0.0)
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual(self.gw.claude_calls, [])
+
+    def test_the_line_is_held_on_the_utc_day(self):
+        """The review of r2/alarms, its major 1: the lane holds its line on the UTC day, the day every other line is held
+        and the cap judged on. Verdict dollars answered at 20:30 ET Monday (00:30 UTC Tuesday) are Tuesday's: with them at
+        the line, Tuesday's READ events wait, at 07:31 ET as at 00:00 ET; the next UTC day, from 20:00 ET Tuesday, asks
+        again. (Held on New York days, Monday's evening and Tuesday's morning were two lines in one UTC day.)"""
+        self.three_filings()
+        self.budget(0.003, at=et("2026-10-19", "19:00").timestamp())   # the budget job's run before Tuesday (UTC)
+        at = S.iso(et("2026-10-19", "20:30"))
+        with self.store() as st:
+            st.db.execute("INSERT INTO verdicts(event, prompt_sha, model, asked_at, answered_at, status, usd) VALUES("
+                          "'8k:evening', 'p', 'claude-haiku-4-5-20251001', ?, ?, 'ok', 0.003)", (at, at))
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual(self.gw.claude_calls, [], "Tuesday's UTC line was spent at 20:30 ET Monday")
+        self.assertEqual(self.lane.health()["verdict_usd_today"], 0.003)
+        with self.store() as st:
+            self.lane._spend_today(st, et("2026-10-20", "00:05"))     # 00:05 ET: still Tuesday's UTC day
+            self.assertEqual(self.lane.claude_refusal(None), "cap")
+            self.lane._spend_today(st, et("2026-10-20", "20:05"))     # 00:05 UTC Wednesday: its own line
+            self.assertIsNone(self.lane.claude_refusal(None))
+            self.assertEqual(self.lane._usd["usd"], 0.0)
+
+    def test_the_cap_breach_hold_asks_nothing_until_00_00_utc(self):
+        """THE CAP BREACH HOLD (league/ops/metered.py writes it while today's measured metered spend is over today's cap):
+        the lane's line is 0 for the rest of the UTC day, whatever budget.json says."""
+        from league.ops import budget as B
+
+        self.lane = self.new_lane(verdict_usd_day=5.0)                   # the budget's allowance binds, whatever the default
+        self.three_filings()
+        self.budget(4.0)
+        (self.root.parent / B.HOLD_FILE).write_text(json.dumps({"schema": B.HOLD_SCHEMA, "day": "2026-10-20",
+                                                                "since": "2026-10-20T10:20:00Z", "spent_usd": 6.2,
+                                                                "cap_usd": 5.0}))
+        self.at(et("2026-10-20", "07:31"))
+        self.mark_recorded()
+        self.turn()
+        self.assertEqual(self.gw.claude_calls, [])
+        health = self.lane.health()
+        self.assertEqual(health["verdict_line_usd"], 0.0)
+        self.assertIn("the cap breach hold (cap-hold.json)", health["verdict_line_source"])
+        self.assertEqual(self.lane.verdict_line(et("2026-10-20", "20:05"))["usd_day"], 4.0, "a new UTC day: no hold")
+
+
 class TheRecordPass(LaneCase):
     def test_bounded_and_resumable(self):
         for n in range(1, 4):

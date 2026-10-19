@@ -745,18 +745,45 @@ class PreopenBrake(Base):
         c = PO.check_swarm(h)
         return c.ok, [text for ok, text in c.items if ok is not None][-1]
 
+    def test_research_switched_off_says_the_gym_and_the_floor_and_never_fails_on_them(self):
+        """Release R1: with ops.json `stall.research` false (the old lanes' research off by settings, A60) the Gym off and
+        a population under its floor are said in check 5, never its FAIL; the rest of the check is judged as before."""
+        g, store, reading, beat = self.on_disk()
+        (self.root / "swarm.json").write_text(json.dumps({
+            "live": {"observe": True, "observe_max": 24, "calibration": False}, "population": {"floor": 5},
+            "gym": {"enabled": False, "image_checkpoint": "img", "gate_checkpoint": "gate"}}))
+        g.check()
+        beat()
+        h = PO.collect(self.root, self.base, self.base / "releases" / "r1", FakeGateway(), now=self.now, config={})
+        judged = PO.check_swarm(h)
+        self.assertFalse(judged.ok)
+        self.assertIn("the Gym OFF", judged.headline())
+        off = PO.check_swarm({**h, "research_on": False})
+        self.assertTrue(off.ok, off.row())
+        said = [text for ok, text in off.items if ok is None]
+        self.assertTrue(any(t.startswith("the Gym OFF") and "not judged: research is switched off" in t for t in said))
+        self.assertTrue(any(t.startswith("population 0 alive (floor 5)") for t in said))
+        ctx = Context("preopen", root=self.root, base=self.base, due_at=self.now, config={}, clock=lambda: self.now,
+                      settings_value={"stall": {"research": False}})
+        self.assertFalse(PO.research_on(ctx))
+        self.assertTrue(PO.research_on(Context("preopen", root=self.root, base=self.base, due_at=self.now, config={},
+                                               clock=lambda: self.now, settings_value={})))
+
     def test_through_collect_a_real_guards_heartbeat_passes_on_the_days_brake_alone_and_fails_once_stale(self):
         g, store, reading, beat = self.on_disk()
         g.check()
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
-        store.add_spend("sail_model", 4.0)  # the floor's Sail research dollars a day ($5 x 0.8)
+        from league.ops import budget as B
+
+        floor = B.floor_usd_day("sail")  # the floor's Sail research a day (budget rule 3: its no-profit $0.27)
+        store.add_spend("sail_model", 4.0)  # over it
         self.now += 180
         self.assertEqual(g.check()["causes"], ["research_budget"])
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked by the day's research "
-                                                  "budget alone, as designed (today's Sail research budget is spent (4.00 of 4.00; "
-                                                  "floor))"))
+                                                  f"budget alone, as designed (today's Sail research budget is spent (4.00 of "
+                                                  f"{floor:.2f}; floor))"))
         # The swarm goes on beating while its guard stops checking: the heartbeat is fresh, the reading in it is not.
         self.now += 599
         beat()
@@ -781,8 +808,11 @@ class PreopenBrake(Base):
         beat()
         ok, line = self.collected()
         self.assertTrue(ok, line)
+        from league.ops import budget as B
+
         self.assertIn("braked by the day's account budget alone: Sail's own meter is at the day's cap for the whole account "
-                      "(today's Sail budget is spent by Sail's meter (5.00 of 5.00 for the account", line)
+                      f"(today's Sail budget is spent by Sail's meter (5.00 of {B.floor_usd_day('sail') + 1.0:.2f} for the "
+                      "account", line)
         self.assertNotIn("as designed", line)
 
     def test_a_guard_check_between_the_jobs_now_and_the_heartbeats_read_is_a_fresh_reading(self):

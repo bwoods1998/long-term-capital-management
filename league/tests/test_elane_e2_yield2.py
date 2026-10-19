@@ -413,6 +413,15 @@ class OnTheRealLoop(LoopCase):
                "guard": {"pace_day": False},
                "elane": {"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 100.0, "pace_share": 4.0}}}
         (self.root / "swarm.json").write_text(json.dumps(doc))
+        # The guard's caps, not the budget: a day of $4 of Sail research and $1 of the Claude roles (budget rule 2's floor,
+        # the figures this case was written on; rule 3's own floor is its no-profit $0.34 of research a day).
+        import time
+
+        from league.ops import budget as B
+
+        (self.root / "budget.json").write_text(json.dumps({
+            "schema": B.SCHEMA, "rule_version": B.RULE_VERSION, "at": time.time(),
+            "meters": {"sail": {"research_usd_day": 4.0, "fixed_usd_day": 1.0}, "claude": {"research_usd_day": 1.0}}}))
         sw = self.swarm()
         sw.guard = self.guard = SailGuard(sw.store, sw.settings, lambda: (500.0, None), clock=sw.clock,
                                           disk_free=lambda: 1e12)

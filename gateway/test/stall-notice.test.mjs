@@ -260,3 +260,32 @@ test('the causes of Oct 11, 2026: each equity cause has its own words and keys i
   assert.equal((await (await post(notice(alerts), NOW + 3 * HOUR)).json()).duplicate, true);
   assert.equal(sent.length, 3);
 });
+
+test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and the event lane\'s four have their words, need nothing from the owner and key their own notice', () => {
+  // league/ops/metered.py `cap_check` and league/ops/evl_health.py (invented figures): progress, never a receipt's status.
+  const cap = { ...BIRTHS, cause: 'cap_breach', what: 'Metered compute on 2026-10-20 is $6.36 so far, over that day\'s cap of $5.00.',
+    numbers: { day: '2026-10-20', spent_usd: 6.36, cap_usd: 5, sail_usd: 1.2, claude_usd: 5, whole_day: false, so_far: true } };
+  const record = { ...BIRTHS, cause: 'evl_record', numbers: { minutes_since_clean: 41.5, passes_30m: 15, clean_30m: 0, failing: '8k,form4,news' } };
+  const decide = { ...BIRTHS, cause: 'evl_decide', numbers: { missed: 1, first_missed: 'open:2026-10-20', first_state: 'cut', decided_later: 1 } };
+  const verdicts = { ...BIRTHS, cause: 'evl_verdicts', numbers: { held: 1, unanswered: 15, needed: 40, at_line: true } };
+  const score = { ...BIRTHS, cause: 'evl_score', numbers: { day: '2026-10-20', open_due: 12, waiting_on_tape: 0, last_pass_errors: 12 } };
+  assert.equal(composeNotice(notice(cap)).subject, 'LTCM: stalled: metered compute went over the day\'s cap or could not be measured');
+  assert.equal(composeNotice(notice(record)).subject, 'LTCM: stalled: the event lane read no feed cleanly for 30 minutes');
+  assert.equal(composeNotice(notice(decide)).subject, 'LTCM: stalled: an event-lane decision missed its window');
+  assert.equal(composeNotice(notice(verdicts)).subject, 'LTCM: stalled: event-lane verdicts went unanswered');
+  assert.equal(composeNotice(notice(score)).subject, 'LTCM: stalled: event-lane intents were left unsettled');
+  const all = composeNotice(notice(cap, record, decide, verdicts, score));
+  for (const line of ['- spent_usd: 6.36', '- failing: 8k,form4,news', '- first_state: cut', '- at_line: yes', '- open_due: 12',
+    NONE_NEEDED]) assert.ok(all.text.split('\n').includes(line), line);
+  assert.equal(stallKey(notice(cap, score)), 'stall:info:cap_breach+evl_score');
+  const fills = { ...BIRTHS, cause: 'evl_fills', numbers: { entry_n: 20, entry_mean_bp: 18, worse: 'entry' } };
+  assert.equal(composeNotice(notice(fills)).subject, 'LTCM: stalled: event-lane fills strayed from the auction prices');
+  assert.ok(composeNotice(notice(fills)).text.split('\n').includes('- entry_mean_bp: 18'));
+  // Either way (the review of r2/alarms, its major 3): fills BETTER than the prints by more than 15 bp stand too.
+  const better = { ...BIRTHS, cause: 'evl_fills', numbers: { entry_mean_bp: -40, exit_mean_bp: -40, off: 'entry,exit',
+    worse: 'none', better: 'entry,exit' } };
+  const betterText = composeNotice(notice(better)).text.split('\n');
+  for (const line of ['- entry_mean_bp: -40', '- off: entry,exit', '- better: entry,exit']) assert.ok(betterText.includes(line), line);
+  // The cap breach hold (the review's major 1) is a yes or no among the cause's figures.
+  assert.ok(composeNotice(notice({ ...cap, numbers: { ...cap.numbers, held: true } })).text.split('\n').includes('- held: yes'));
+});

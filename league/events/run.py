@@ -1,6 +1,9 @@
 """The event lane's passes: record, backfill, decide at the open, decide at the close (shadow).
 
-Each pass writes a receipt. Decisions are recorded at their SCHEDULED time (09:15 ET open, close - 14 min) whether
+Each pass writes a receipt; a decision's carries THE VERDICT TALLY, `verdicts: {needed, answered}`: the distinct
+(event, prompt) verdicts its reading programs need, open-entry and close-entry alike, and how many have a stored answer
+(release 1019c: the House's stall job reads it, league/ops/evl_health.py `evl_verdicts`). Decisions are recorded at
+their SCHEDULED time (09:15 ET open, close - 14 min) whether
 they ran live or as a backfill (`why` says which): a backfilled decision uses only data that was knowable at the
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
@@ -454,6 +457,9 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
             return False
         return bool(row.get("text_sha")) and (row.get("text_len") or 0) >= 200
 
+    needed: set[tuple[str, str]] = set()      # THE VERDICT TALLY (release 1019c): (event, prompt) every program needs,
+    unanswered: set[tuple[str, str]] = set()  # and those still without a stored answer (the stall job's evl_verdicts)
+
     def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
         """How many of `prog`'s eligible events still have no stored verdict (PREREG section 4: READ events wait)."""
         if not (prog.reads or prog.family == "news"):
@@ -465,8 +471,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
                 continue
             verdict(row)
             event = f"news:{row['id']}" if prog.family == "news" else f"8k:{row['accession']}"
+            needed.add((event, prompt.sha))
             if V.stored(st, event, prompt) is None:
                 missing += 1
+                unanswered.add((event, prompt.sha))
         return missing
 
     out: dict[str, Any] = {"pending": {}}
@@ -497,6 +505,7 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c), guidance=guidance)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
+    out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
@@ -580,6 +589,9 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         mark = _mark_1530(ctx, uni["symbol"], day, fetch=fetch)
         return None if not base or mark is None else mark / base
 
+    needed: set[tuple[str, str]] = set()      # THE VERDICT TALLY (release 1019c), as decide_open's: the close-entry
+    unanswered: set[tuple[str, str]] = set()  # READ programs' (NEWS-READ-ON, ERN-REACT-READ-C1) verdicts reach evl_verdicts
+
     def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
         """How many of `prog`'s eligible events still have no stored verdict (PREREG-EVL-1 section 4: READ events
         wait), counted only for programs that read or rank by a verdict."""
@@ -598,8 +610,10 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 continue
             verdict(row)
             event = f"news:{row['id']}" if news else f"8k:{row['accession']}"
+            needed.add((event, prompt.sha))
             if V.stored(st, event, prompt) is None:
                 missing += 1
+                unanswered.add((event, prompt.sha))
         return missing
 
     out: dict[str, Any] = {"pending": {}}
@@ -630,6 +644,7 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c),
                                              reaction=lambda r, u: reaction(r, u, fetch=False))
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
+    out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out

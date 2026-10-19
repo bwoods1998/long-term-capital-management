@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 from pathlib import Path
 
 from league.ops import funnel as FN
@@ -49,6 +50,11 @@ class Notify:
     def entry(self, cause):
         """`cause` as the latest notice that told it said it."""
         return next(c for call in reversed(self.calls) for c in call["causes"] if c["cause"] == cause)
+
+
+#: The underspend of budget rule 2, which a rollback to rule 2 runs: from rule 3 on (A CHEAP DAY IS NEVER A FAILED DAY) the
+#: cause is never judged (`ST.CHEAP_DAY_RULE`), so its tests run with the running rule's version at 2.
+RULE2 = mock.patch.object(ST.B, "RULE_VERSION", 2)
 
 
 class Base(unittest.TestCase):
@@ -581,8 +587,11 @@ class Telling(Base):
         self.run_at()
         after = {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}
         # Its own state file and, since release E3, the release receipts' own store (league/ops/release_receipts.py: the
-        # running release's declarations, declared the first time the job sees them; listed, never an act).
-        self.assertEqual(sorted(set(after) - set(before)), [self.root / "release-receipts.sqlite", self.root / ST.STATE_FILE])
+        # running release's declarations, declared the first time the job sees them; listed, never an act); since release
+        # 1019c, the meters' readings (league/ops/metered.py: what each day's metered compute cost, for cap_breach).
+        self.assertEqual(sorted(set(after) - set(before)), [self.root / "metered.json", self.root / "release-receipts.sqlite",
+                                                            self.root / ST.STATE_FILE])
+        self.assertEqual(os.stat(self.root / "metered.json").st_mode & 0o777, 0o600)
         self.assertEqual({p: after[p] for p in before if p.name.startswith("swarm.sqlite")},
                          {p: before[p] for p in before if p.name.startswith("swarm.sqlite")})
         self.assertEqual(db.stat().st_size, size)
@@ -1410,6 +1419,7 @@ class NoCaptain(Base):
         self.ago(hours)
         self.store.add_spend(kind, usd)
 
+    @RULE2
     def test_underspend_names_the_settings_that_bind_research(self):
         """Oct 9, 16:55Z: swarm.json pinned gym.max_boxes 2 under the budget's 7: half the paid Gym sat idle, and nothing
         alarmed (DONE-RULE item 7 reads a day with no taper as at budget)."""
@@ -1436,6 +1446,7 @@ class NoCaptain(Base):
         self.spend("gym_box", 5.0, 1)
         self.assertFalse(self.check("underspend", binds=binds)["stalled"])
 
+    @RULE2
     def test_underspend_reads_the_day_once_six_hours_in_and_a_raise_from_its_hour(self):
         self.healthy()
         self.spend("sail_model", 1.0, 2)
@@ -1450,6 +1461,7 @@ class NoCaptain(Base):
         self.budget(day="2026-10-06")
         self.assertNotIn("sail_share", self.check("underspend")["numbers"])
 
+    @RULE2
     def test_underspend_a_conflict_stands_by_itself_only_while_it_binds(self):
         """The review of the no-captain build: the release's own settings are a class-cap pair (12 x 1 < 24), so a
         conflict that stood by itself stood at every run, and the 24-hour INFO pace then held every new INFO cause back
@@ -1472,6 +1484,7 @@ class NoCaptain(Base):
         self.ago(0)
         self.assertTrue(self.check("underspend", binds=[line], now=NOW + 7 * HOUR)["stalled"], "a line no call can use")
 
+    @RULE2
     def test_underspend_a_brake_of_two_hours_is_the_guards_doing_and_claude_is_not_paced(self):
         """The guard's brake of the day (`UNDERSPEND_BRAKE_HOURS`) explains a short day; Claude's figure is spent by its
         roles' calls as work comes (the release sets the architect's and the researchers' lines to 0): said, never a
@@ -1504,6 +1517,7 @@ class NoCaptain(Base):
                          (False, 0.93, 0.23))
         self.assertIn("Claude (Anthropic) research booked 0.50", check["what"])
 
+    @RULE2
     def test_underspend_reads_the_swarms_own_settings_when_no_binds_are_handed_in(self):
         """The real read (`_binds`: the settings as the swarm loads them, the release's policy.json among them): the
         release's class-cap pair is named and does not stand by itself; a swarm.json cap under what the budget buys is
@@ -1518,10 +1532,13 @@ class NoCaptain(Base):
         patch.start()
         self.addCleanup(patch.stop)
         self.healthy()
-        doc = B.compute({"p30_usd": 0.0, "p30_source": "test", "edge": {"stop": False},
-                         "meters": {"sail": {"balance_usd": 900.0, "fixed_usd_day": 1.0, "need_usd": 0.0},
-                                    "claude": {"balance_usd": 200.0, "fixed_usd_day": 0.0, "need_usd": 0.0}}},
-                        now=at("2026-10-07T00:30:00Z"))
+        from league.tests.test_ops_budget import rule2_shares
+
+        with mock.patch.object(B, "cost_rule", rule2_shares):  # budget rule 2's shares: $20 Sail, $5 Claude
+            doc = B.compute({"p30_usd": 0.0, "p30_source": "test", "edge": {"stop": False},
+                             "meters": {"sail": {"balance_usd": 900.0, "fixed_usd_day": 1.0, "need_usd": 0.0},
+                                        "claude": {"balance_usd": 200.0, "fixed_usd_day": 0.0, "need_usd": 0.0}}},
+                            now=at("2026-10-07T00:30:00Z"))
         doc["at"] = NOW - HOUR
         (self.root / "budget.json").write_text(json.dumps(doc))
         self.spend("gym_box", 8.0, 2)
@@ -1545,6 +1562,7 @@ class NoCaptain(Base):
         self.assertEqual((check["numbers"]["conflicts"], check["numbers"]["under_release"]), (0, 1))
         self.assertIn("researcher.dormant_cycles 6 < the release's 12", check["what"])
 
+    @RULE2
     def test_underspend_prices_each_hour_at_the_figure_that_held_then(self):
         """Two raises in a day (the hourly refresh raises each time a reading rises): the hours before the first at the
         day's first figure, not at the middle one (the review of the no-captain build)."""

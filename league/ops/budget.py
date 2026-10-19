@@ -1,10 +1,65 @@
-"""THE BUDGET RULE (LTCM v3, the owner's D4, Oct 2026; RULE_VERSION 2, the owner's goal of Oct 3, 2026): research may
-spend up to the owner's ceiling of dollars a day while the prefunded meters hold a short runway of it, tapers by itself
-as a balance falls, and the desk asks for a card before the taper starts.
+"""THE BUDGET RULE (LTCM v3, the owner's D4, Oct 2026; RULE_VERSION 3, the owner's goal of Oct 19, 2026, item 4): every
+metered compute dollar a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to $5 plus half
+the trailing week's realized net profit, never above $25; the event lane's verdicts ride the Claude line first and the
+old research roles get the remainder; each prefunded meter still tapers by itself as its balance falls, and the desk
+asks for a card before the taper starts.
 
-THE RULE (pre-registered: the constants below, changed only by the owner's own deploy; this file is FORBIDDEN to the
-updater, `league/ci.py`). The `budget` job (after the close economics, and daily at 00:30 UTC) reads, for each meter m in
-{sail, claude}:
+THE COST RULE (RULE_VERSION 3; the goal of Oct 19, 2026, item 4, word for word: "Cost follows profit: metered compute <=
+$5 a day plus half the trailing week's realized net profit, never above $25; prepaid credit first"). THE ARITHMETIC, a
+day:
+
+    week_net = the realized net profit of EVERY real book (the options book's closed positions, fees in, with the
+               broker's posted fee corrections; the equity book's closed ":r" lots, fees and dividends in, which is where
+               the event lane's real lots live from release R2) closed from 00:00 New York of the first of the last
+               `PROFIT_SESSIONS` (5) NYSE sessions that have closed, to now (`book_net`): THE TRAILING WEEK is one trading
+               week; UNKNOWN (an options position closed but unpriced, an order pending or unknown, reconciliation
+               frozen, a blocking account reading: `book_p30`'s rules) is no profit
+    earned   = PROFIT_SHARE (0.5) x max(0, week_net) / PROFIT_DAYS (7)    HALF the week's profit, spread over the 7
+               calendar days a week of compute runs: seven days at the cap spend at most 7 x $5 plus half the week's
+               profit, never more; a losing week lifts nothing and takes nothing from the $5
+    cap      = min(CEILING_USD_DAY (25), BASE_USD_DAY (5) + earned)       every metered dollar of the day
+    fixed    = Sail's fixed boxes (the House box and the data box, as below) + Cloudflare (`CLOUDFLARE_USD_DAY`, the
+               Workers plan) + market data (`DATA_USD_DAY`: 0 since the owner cancelled ThetaData and Alpaca's Algo
+               Trader Plus on Oct 18, 2026): the fixed costs count INSIDE the cap
+    room     = max(0, cap - fixed)
+    lane     = min(room, max(LANE_USD_DAY (3), LANE_HEADROOM (1.5) x the lane's heaviest UTC day of verdicts over the
+               trailing `LANE_WINDOW_DAYS` (7))): the event lane's verdicts (PREREG-EVL-1 section 4), FIRST on the Claude
+               line; a lane held at its line one day has half as much again the next, up to the room
+    rest     = room - lane, the old research roles' remainder, split SPLIT: Sail 0.8 (models and Gym boxes), Claude 0.2
+               (the gate, the strategist, the post-mortem, the engineer)
+
+so the Claude meter's line is lane + 0.2 x rest and Sail's is 0.8 x rest (each meter's `ceiling_usd_day` in
+budget.json: its share of the day's cap), and every line together with the fixed costs is the cap. With no profit and
+Sail's fixed cost at $1.50 a day: fixed $1.66, the lane $3.00, research $0.34 (Sail $0.27, the Claude roles $0.07), the
+$5 together; THE FLOOR below is exactly these lines.
+
+EVERY LINE IS HELD, so every metered dollar stays under the cap (the review of r1/alarms, its major 1): Sail research by
+the Sail guard (`sail_caps`: the day's research and Sail's own meter), the Claude roles by the router (the settings'
+`budget` block hands it the ROLES' line only, `claude_usd_day`: 0.2 x rest, so no role can spend the lane's part), and
+THE LANE'S VERDICTS by the House's event lane itself (league/events/house.py: a UTC day's verdicts at most the lower of
+`events.verdict_usd_day` and `lane_allowance`, the Claude meter's lane part after its taper; over it a READ event waits,
+PREREG-EVL-1 section 4). EVERY LINE ON ONE DAY (the review of r2/alarms, its major 1): each holder holds its line on the
+UTC day, 00:00-24:00 UTC (the guard and the router from `now - now % 86400`, the lane from 00:00 UTC, this rule's day's
+figure, `lane_spend`'s heaviest day), and the cap is judged on that same day (league/ops/metered.py), so the lines and
+the fixed costs add up to the cap on the day judged; held on two days (the lane once held New York days), one day could
+see two of a line. The fixed costs are measured (Sail's box billing over a week) and cannot be held; a day whose MEASURED
+spend goes over its cap anyway (a fixed cost that rose, a line that leaked) is the stall job's `cap_breach`
+(league/ops/metered.py measures each day's spend from the meters themselves), and THE CAP BREACH HOLD then holds every
+line at 0 for the rest of that UTC day (`cap_hold`: the stall job writes `<state>/cap-hold.json` while what the
+readings put inside today for certain is over today's cap; `lane_allowance`, `sail_caps` and `effective`, which the
+settings' `budget` block of every swarm step comes from, each read it), so the cap holds after a leak instead of only
+raising an alarm. A CHEAP DAY IS NEVER A FAILED DAY: the cap is what may be spent, never what must be (the stall job
+raises no `underspend` under this rule, and no Done item reads spend). PREPAID CREDIT FIRST: the runway taper below spends each meter's prefund at most one part in
+`RUNWAY_DAYS` a day, and nothing here buys anything.
+
+What RULE_VERSION 2 read and this rule does not: the options-only trailing-30-day p30 (`book_p30` over 30 days, cut by
+the close economics) and the no-forward-edge stop (`edge_state`): both are still gathered and written to budget.json's
+`inputs` for the record, and neither moves a dollar. The owner's $25 ceiling of the goal of Oct 3 is the cap's upper
+bound; its split now applies to the remainder only.
+
+THE RUNWAY (unchanged from RULE_VERSION 2; changed only by the owner's own deploy; this file is FORBIDDEN to the
+updater, `league/ci.py`). The `budget` job (after the close economics, and daily at 00:30 UTC) reads, for each meter m
+in {sail, claude}:
 
 - balance_m: Sail's balance as the Sail guard last read it well (its provider reading, kv `guard` in the swarm store:
   `last_good`, else `last`, at most `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway
@@ -19,14 +74,16 @@ updater, `league/ci.py`). The `budget` job (after the close economics, and daily
 
 Then, a day:
 
-    ceiling_m  = CEILING_USD_DAY * SPLIT[m]          (THE OWNER'S CEILING, every meter together, and its split)
+    ceiling_m  = the meter's share of the day's cap (THE COST RULE above: Sail 0.8 x rest; Claude lane + 0.2 x rest)
     runway_m   = max(0, balance_m - reserve_m - RUNWAY_DAYS * fixed_m) / RUNWAY_DAYS
-    research_m = min(ceiling_m, runway_m)
+    research_m = min(ceiling_m, runway_m)            (Claude: the lane first, min(lane, runway_m); the roles get
+                                                      min(0.2 x rest, runway_m - that), and `research_usd_day` is theirs)
 
-so research runs at the ceiling while a meter holds `RUNWAY_DAYS` days of it above its reserve and its fixed cost, and
-below that it tapers by itself: each day a meter may spend one part in `RUNWAY_DAYS` of what it holds above the reserve
-and `RUNWAY_DAYS` days of the House's own fixed cost, neither of which research ever spends. RULE_VERSION 1's two long
-terms (a 90-day target and a 60-day card line) are gone: this one short term is the whole runway rule.
+so research runs at its share of the cap while a meter holds `RUNWAY_DAYS` days of it above its reserve and its fixed
+cost, and below that it tapers by itself: each day a meter may spend one part in `RUNWAY_DAYS` of what it holds above
+the reserve and `RUNWAY_DAYS` days of the House's own fixed cost, neither of which research ever spends. RULE_VERSION
+1's two long terms (a 90-day target and a 60-day card line) are gone: this one short term is the whole runway rule.
+Below, "the ceiling" of a meter is its share of the day's cap, and "THE OWNER'S CEILING" the $25 bound.
 
 THE DAY'S FIGURE IS SET ONCE. The job runs twice on a session day, and its second reading has already paid for the
 day's research: a taper recomputed from it would put the day's cap under what the day has booked, and the guard would
@@ -69,12 +126,14 @@ cost a day, and what cannot be read is nothing added back. So a first run at 20:
 would have. Only the day's figure reads it: a later run's `would_set_usd_day`, the runway, the card line and the
 notice are the reading as it stands.
 
-NEVER ABOVE THE CEILING. Nothing lifts a meter over its share of the ceiling: not the profit share (below), not a
-budget.json that says more (`read` holds each meter to its share), not a setting (the overlay only tightens), not a
+NEVER ABOVE THE CEILING. Nothing lifts a meter over its share of the day's cap, nor the cap over THE OWNER'S CEILING of
+$25: not a budget.json that says more (`read` holds each meter's research to its share of the $25, `ceiling_usd_day`:
+Sail 20, the Claude roles 5, the most rule 3 can ever give either), not a setting (the overlay only tightens), not a
 `budget` block handed to the Sail guard or the router by any other way (`sail_caps` and `paid_model_room` hold what
 they are handed to the same share).
 
-THE PROFIT SHARE. p30 is the trailing-30-day realized options P&L, fees in, every real route: this file's own read of the
+RULE_VERSION 2's PROFIT SHARE (kept for the record in `inputs`; rule 3 reads `week_net` instead, THE COST RULE above). p30 is
+the trailing-30-day realized options P&L, fees in, every real route: this file's own read of the
 live book's closed positions and the broker's posted fee corrections (`book_p30`), or `league.ops.economics.p30` over the
 latest close summary (`economics.latest`) when that module is there, its summary is the latest close (`economics_fresh`)
 and its number is SMALLER. The close economics may only cut what was earned, never raise it (it is FORBIDDEN too, a
@@ -83,12 +142,11 @@ second wall, not the only one); an unreadable book earns nothing whatever the ec
 unknown, reconciliation is frozen or the account reading names an event the book has not settled (`blocking`); so is a
 fresh summary that cannot be inspected or holds no closes by day (`realized.by_close_day`). With no fresh summary the
 book's read stands alone and the job says why (none yet, stale, not a summary, a read that failed). Marks never fund
-research. `earned = PROFIT_SHARE * max(0, p30) / 30`, split across the meters by need (each meter's research spend over
-the trailing `NEED_WINDOW_DAYS` days; `SPLIT` when there was none), is still computed and written (`earned_usd_day`). It
-sits INSIDE the ceiling: RULE_VERSION 1 added it to a floor of $5 a day, and the owner's ceiling replaced that sum, so
-today it lifts no meter's research.
+research. Under RULE_VERSION 2, `earned = PROFIT_SHARE * max(0, p30) / 30` sat INSIDE the ceiling and lifted no meter;
+under rule 3 `earned` is THE COST RULE's (from week_net) and lifts the cap, split across the meters as the cap is.
 
-THE NO-FORWARD-EDGE STOP: once `EDGE_SESSIONS` sessions have closed since `EDGE_START` (or since the day after the last
+RULE_VERSION 2's NO-FORWARD-EDGE STOP (gathered for the record in `inputs.edge`; RETIRED by rule 3, whose cap follows
+realized profit whatever promoted it): once `EDGE_SESSIONS` sessions have closed since `EDGE_START` (or since the day after the last
 promotion to Probe, whichever is later) with no promotion to Probe, earned is 0 and the state says "no forward edge"; a
 promotion lifts it. A promotion to Probe is one of two, each counted at its band move's time:
 - THE LADDER'S: a `ladder_decisions` row (observe.sqlite) with verdict promote, the receipt the ladder settles only once
@@ -100,9 +158,8 @@ promotion lifts it. A promotion to Probe is one of two, each counted at its band
   passed look. A move to probe from any other band (a demotion from Sized), one with no passed look behind it, and a
   return to Probe on a look already counted are none.
 
-UNKNOWN IS NEVER MONEY. An unreadable balance, fixed cost or reserve gives its meter no research. An unreadable p30
-earns nothing; so does an unreadable promotion record once the stop could apply (the sessions are then counted from
-`EDGE_START`, or from the last Probe a look earned when the swarm's record shows one).
+UNKNOWN IS NEVER MONEY. An unreadable balance, fixed cost or reserve gives its meter no research. An unreadable week_net
+earns nothing (the cap is the $5); a lane store that cannot be read sizes the lane's part at `LANE_USD_DAY`.
 
 THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A job run whose first read finds no fresh
 guard reading (a House just started after a long outage, before the guard's first check) waits up to
@@ -115,7 +172,10 @@ added back (`added_back_usd`; 0 on a later run) and what this run's own reading 
 current total rate (fixed + research), its days of research left at the ceiling (`card_runway_days`: what it holds
 above its reserve over `demand_usd_day`, its fixed cost plus its share of the ceiling), its next card action date
 (`card_date`: when those days fall to `RUNWAY_DAYS`, the day the taper starts), the amount that buys `TOPUP_DAYS` more
-days at the ceiling (`topup_usd`) and why.
+days at the ceiling (`topup_usd`) and why. Rule 3 adds `cap` (week_net and its window and source, earned, the cap, each
+fixed line, the room, the lane's part and its measured spend, the remainder) and, on the Claude meter, `lane_usd_day`
+(the lane's part the meter carries, after its taper), `line_usd_day` (lane + roles, its share of the cap) and
+`total_usd_day` (fixed + lane + roles: the rate its runway is read at).
 
 ENFORCEMENT, TIGHTEN-ONLY (`overlay`, the last step of `league.swarm.settings.load` with a state root). The research
 $/day become knob values (`knobs`), applied as min() against the configured `researcher.sail_usd_per_hour` (while that is
@@ -129,8 +189,9 @@ cap: the swarm's booked Sail today under the Sail research $/day, Sail's own met
 `sail_caps`) and to the router (`paid_model_room`: Claude's room, and OpenAI's with it, is also capped by the Claude
 research $/day less today's Claude and OpenAI spend, each model's counted on the day its hold was booked and never under
 0: a hold released after 00:00 UTC lifts no line). A missing, unreadable or malformed budget.json, or one another
-version of the format wrote (`SCHEMA`), is the FLOOR: `FLOOR_CAP * SPLIT` per meter, what research runs on until the
-rule has been read. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never loosens: each meter is the
+version of the format wrote (`SCHEMA`), is the FLOOR: THE COST RULE's own lines at no profit (`floor_lines`: research
+$0.34, Sail $0.27 and the Claude roles $0.07, and the lane's verdicts $3.00), what runs until the rule has been read: it
+FAILS CLOSED, never above what the rule itself gives a day with no profit. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never loosens: each meter is the
 lower of the floor and what the stale file said (0 for a meter it could not read), with a warning. An operator's own
 `budget` key in swarm.json is replaced, never read. The ceiling knob never falls below `population.floor + BIRTH_MARGIN`
 (a ceiling at the floor would freeze births and forks). OpenAI is not a meter of the rule, so the overlay closes it:
@@ -190,15 +251,40 @@ from typing import Any, Callable, Mapping
 REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------------------------- the rule's constants
-#: budget.json's format. 2 with RULE_VERSION 2: a release on either side of the change reads the other's file as no
-#: usable file (the floor) until its own budget job has run, so neither a deploy nor a rollback runs on the other rule's
-#: dollars.
-SCHEMA = 2
-#: The rule's version (the constants below); a change is an owner deploy and a new number here.
-RULE_VERSION = 2
+#: budget.json's format. 3 with RULE_VERSION 3 (2 with RULE_VERSION 2): a release on either side of the change reads the
+#: other's file as no usable file (the floor) until its own budget job has run, so neither a deploy nor a rollback runs
+#: on the other rule's dollars. The House's start runs the refresh, which runs the full job on another rule's file.
+SCHEMA = 3
+#: The rule's version (the constants below); a change is an owner deploy and a new number here. 3: the goal of Oct 19,
+#: 2026, item 5 (THE COST RULE in the module docstring).
+RULE_VERSION = 3
 METERS = ("sail", "claude")
-#: THE OWNER'S CEILING (his goal of Oct 3, 2026): the most research may spend a day, every meter together, and its split.
+#: THE OWNER'S CEILING (his goal of Oct 3, 2026, kept by the goal of Oct 19, 2026: "never above $25"): the most every
+#: metered compute dollar of a day may be, the fixed costs included (RULE_VERSION 2: research only).
 CEILING_USD_DAY = 25.0
+#: THE COST RULE (RULE_VERSION 3; the goal of Oct 19, 2026, item 4): the day's cap with no profit, every metered dollar
+#: together (the fixed costs inside it); half the trailing week's realized net profit is added on top (`PROFIT_SHARE`):
+#: THE TRAILING WEEK is the last `PROFIT_SESSIONS` (5) NYSE sessions that have closed (one trading week), and its half is
+#: spread over the `PROFIT_DAYS` (7) calendar days a week of compute runs, so seven days at the cap spend at most half the
+#: week's profit beyond the $5 a day.
+BASE_USD_DAY = 5.0
+PROFIT_SESSIONS = 5
+PROFIT_DAYS = 7
+#: The fixed metered lines that are not a Sail box (both inside the cap): Cloudflare's Workers plan ($5 a month, the
+#: gateway and the site) a day, and market data a day (0: the owner cancelled ThetaData and Alpaca's Algo Trader Plus on
+#: Oct 18, 2026; Alpaca's Basic plan is free; league/publish.py `SUBSCRIPTIONS_ENDED_AT` ends their past costs).
+CLOUDFLARE_USD_DAY = round(5.0 * 12 / 365, 4)
+DATA_USD_DAY = 0.0
+#: THE LANE'S PART of the Claude line: the event lane's verdicts (PREREG-EVL-1 section 4; about $3 a day at the peak of
+#: earnings season, goal-2026-10-19/EVL-DESIGN.md "Costs"), or `LANE_HEADROOM` times its heaviest UTC day of verdicts
+#: over the trailing `LANE_WINDOW_DAYS` when that is more (the lane is held to its part, so its spend can never show a
+#: need above the part: a day held at its line gives the next day half as much again); never more than the day's room.
+#: The House's lane holds its verdicts to it (`lane_allowance`, league/events/house.py). The lane's store is
+#: `<root>/events/events.sqlite` (league/events/store.py; the gateway's settled cost of each verdict in `verdicts.usd`).
+LANE_USD_DAY = 3.0
+LANE_HEADROOM = 1.5
+LANE_WINDOW_DAYS = 7
+LANE_STORE = Path("events") / "events.sqlite"
 #: THE SPLIT, Sail 0.8 and Claude 0.2 (the operator's decision of Oct 9, 2026, about 16:00Z, an owner deploy; Sail 0.6
 #: and Claude 0.4 from RULE_VERSION 2 of Oct 3 until then): the owner's $25 a day is Sail $20 and Claude $5 (it was $15
 #: and $10). The ceiling itself does not move. Measured in production (read-only, the House's swarm store, Oct 7 19:30Z
@@ -212,18 +298,24 @@ CEILING_USD_DAY = 25.0
 #: boxes and the Flash research. THE COST: Sail drains faster (about $21 a day with its fixed cost at the ceiling, from
 #: about $16), so for the same balance its funding notice (two days before research runs out) comes sooner; Claude's
 #: line is $5 a day, of which the gate's two holds keep $1.95 (`GATE_HOLDS_USD`), so every other Claude role shares at
-#: most $3.05; and the floor (`FLOOR_CAP_USD_DAY` split the same way: no usable budget.json, or a stale one) is Sail $4
+#: most $3.05; and the floor of RULE_VERSION 2 ($5 split the same way: no usable budget.json, or a stale one) was Sail $4
 #: and Claude $1, under the gate's two holds: at the floor the review finds no Claude room and runs on its Sail model,
 #: and the audit does too unless its hold is at most the $1 (a large program's is up to $1.30), each stand-in with the
 #: gate's own "not the plan's reviewer" alert (at the old floor's $2, one review and one audit of any size fitted on
-#: Claude a day).
+#: Claude a day). RULE_VERSION 3 (the goal of Oct 19, 2026): the split applies to THE REMAINDER after the fixed costs and
+#: the lane's part (`rest`, THE COST RULE), so at the $5 cap with no profit and Sail's fixed $1.50 a day the old research
+#: roles share $0.34 a day (Sail $0.27, the Claude roles $0.07); Sail's research is at most 20 and the Claude roles' at
+#: most 5 (the $25 ceiling's split, `ceiling_usd_day`). The floor is the rule's own lines at no profit (`floor_lines`).
 SPLIT = {"sail": 0.8, "claude": 0.2}
 #: The one runway term (days): research runs at the ceiling while a meter holds this many days of it above its reserve and
 #: its fixed cost, and below that spends one part in this many of what it holds above them a day.
 RUNWAY_DAYS = 5
-#: The floor, every meter together, dollars a day (split as the ceiling is): what research runs on with no usable
-#: budget.json, and the most a stale one gives. The rule's own answer is never held to it.
-FLOOR_CAP_USD_DAY = 5.0
+#: THE FLOOR (the review of r1/alarms: it FAILS CLOSED): with no usable budget.json (none, unreadable, malformed, another
+#: rule's) every line is THE COST RULE's own at no profit, on a Sail fixed cost of at least `FLOOR_SAIL_FIXED_USD_DAY`
+#: (above the House box's measured $1.29-$1.50 a day, so the floor's lines and the real fixed cost never pass the $5
+#: together): research $0.34 (Sail $0.27, the Claude roles $0.07) and the lane $3.00 (`floor_lines`); a STALE file gives
+#: the lower of the floor and what it said. The rule's own answer is never held to it.
+FLOOR_SAIL_FIXED_USD_DAY = 1.5
 #: The share of trailing realized profit written as earned (inside the ceiling: the module docstring), and the window it is
 #: read over (calendar days).
 PROFIT_SHARE = 0.5
@@ -320,6 +412,11 @@ ARCHITECT_IDLE_SECONDS = 86400
 
 BUDGET_FILE = "budget.json"
 NOTICES_FILE = "budget-notices.json"
+#: THE CAP BREACH HOLD (release 1019c; the review of r2/alarms, its major 1): the stall job's measured breach of today's
+#: cap (league/ops/metered.py `write_hold`: {schema, day, at, since, spent_usd, cap_usd}), read by every line this rule
+#: holds (`cap_hold`).
+HOLD_FILE = "cap-hold.json"
+HOLD_SCHEMA = 1
 EPSILON = 0.005
 #: THE TOP-UP RAISE: the raises of a day a day's figure keeps (`raises`; the refresh runs hourly, so a day has at most 25).
 RAISES_KEPT = 32
@@ -384,13 +481,60 @@ def _read_only(path: Path) -> sqlite3.Connection:
 
 
 def ceiling_usd_day(meter: str) -> float:
-    """One meter's share of THE OWNER'S CEILING, dollars a day: the most its research ever is."""
+    """One meter's share of THE OWNER'S CEILING, dollars a day: the most its research ever is (RULE_VERSION 3: Sail's
+    research and the Claude ROLES' line at the $25 cap with nothing fixed; the lane's part rides apart, `cost_rule`)."""
     return round(CEILING_USD_DAY * SPLIT[meter], 4)
 
 
+def cost_rule(week_net: Any, sail_fixed: Any, lane_peak: Any = None) -> dict[str, Any]:
+    """THE COST RULE (RULE_VERSION 3; the module docstring's ARITHMETIC) for one reading, pure: from the trailing week's
+    realized net profit of every real book (`week_net`, the last `PROFIT_SESSIONS` sessions', dollars; None is unknown:
+    nothing earned), Sail's fixed cost a day and the lane's heaviest UTC day of verdicts over the trailing week
+    (`lane_peak`; None reads as none):
+
+        earned = 0.5 x max(0, week_net) / 7;  cap = min(25, 5 + earned);  room = max(0, cap - fixed);
+        lane = min(room, max(3, 1.5 x lane_peak));  rest = room - lane, split Sail 0.8 and Claude 0.2
+
+    as {earned_usd_day, cap_usd_day, fixed_usd_day (every fixed line), fixed (each), room_usd_day, lane_usd_day,
+    rest_usd_day, line_usd_day: {sail, claude (lane + roles)}, roles_usd_day: {sail, claude}}. A Sail fixed cost that is
+    not a number is no room at all (unknown is never money): every line is 0."""
+    value = _finite(week_net)
+    earned = 0.0 if value is None else PROFIT_SHARE * max(0.0, value) / PROFIT_DAYS
+    cap = min(CEILING_USD_DAY, BASE_USD_DAY + earned)
+    sail = _amount(sail_fixed)
+    fixed = {"sail": None if sail is None else round(sail, 4), "cloudflare": CLOUDFLARE_USD_DAY, "data": DATA_USD_DAY}
+    total_fixed = None if sail is None else sail + CLOUDFLARE_USD_DAY + DATA_USD_DAY
+    room = 0.0 if total_fixed is None else max(0.0, cap - total_fixed)
+    peak = _amount(lane_peak)
+    want = max(LANE_USD_DAY, LANE_HEADROOM * (peak or 0.0))
+    lane = min(room, want)
+    rest = max(0.0, room - lane)
+    roles = {m: rest * SPLIT[m] for m in METERS}
+    return {"week_net_usd": value, "earned_usd_day": round(earned, 4), "cap_usd_day": round(cap, 4),
+            "base_usd_day": BASE_USD_DAY, "fixed_usd_day": None if total_fixed is None else round(total_fixed, 4),
+            "fixed": fixed, "room_usd_day": round(room, 4), "lane_usd_day": round(lane, 4),
+            "lane_peak_usd_day": None if peak is None else round(peak, 4), "lane_want_usd_day": round(want, 4),
+            "rest_usd_day": round(rest, 4), "roles_usd_day": {m: round(roles[m], 4) for m in METERS},
+            "line_usd_day": {"sail": round(roles["sail"], 4), "claude": round(lane + roles["claude"], 4)}}
+
+
+def floor_lines(house_burn: Any = None) -> dict[str, Any]:
+    """THE FLOOR (no usable budget.json): THE COST RULE's own lines at no profit, on Sail's fixed cost at the larger of
+    `house_burn` (the guard's configured `house_burn_usd_day`, when given) and `FLOOR_SAIL_FIXED_USD_DAY`: never more,
+    with the real fixed cost, than the $5 the rule allows a day with no profit (it FAILS CLOSED)."""
+    burn = _amount(house_burn)
+    return cost_rule(0.0, max(FLOOR_SAIL_FIXED_USD_DAY, burn if burn is not None else 0.0))
+
+
 def floor_usd_day(meter: str) -> float:
-    """The floor's dollars a day for one meter: what it runs on with no usable budget.json."""
-    return round(FLOOR_CAP_USD_DAY * SPLIT[meter], 4)
+    """The floor's dollars a day for one meter's research (`floor_lines`: the roles' no-profit line): what it runs on with
+    no usable budget.json, and the most a stale one gives."""
+    return floor_lines()["roles_usd_day"][meter]
+
+
+def floor_lane_usd_day() -> float:
+    """The floor's line for the event lane's verdicts (`floor_lines`): the lane's part a day with no profit."""
+    return floor_lines()["lane_usd_day"]
 
 
 def gate_reserve(research_usd_day: Any) -> float:
@@ -464,7 +608,8 @@ def _card(balance: float, fixed: float, demand: float, reserve: float, today: dt
     date (when those days fall to `RUNWAY_DAYS`: the day the taper starts) and the amount that buys `TOPUP_DAYS` more of
     them (with what a meter under its reserve lacks to reach it)."""
     room = balance - reserve
-    runway = 0.0 if room <= 0 else room / demand
+    # A meter that wants nothing a day (RULE_VERSION 3: its share of a cap the fixed costs fill) lasts a century.
+    runway = 0.0 if room <= 0 else (room / demand if demand > 0 else 36500.0)
     return {"demand_usd_day": round(demand, 4), "card_runway_days": round(runway, 1),
             "card_date": _date_after(today, runway - RUNWAY_DAYS), "card_runs_out_on": _date_after(today, runway),
             "topup_usd": round(max(0.0, -room) + TOPUP_DAYS * demand, 2)}
@@ -538,32 +683,44 @@ def _day_figure(previous: Any, meter: str, today: dt.date) -> dict[str, Any] | N
 def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """budget.json from the rule's inputs (`gather`'s shape):
 
-        {"p30_usd": float | None, "p30_source": str, "edge": edge_state(...),
+        {"week_net_usd": float | None, "week_net_source": str, "week_net_since": str | None (RULE_VERSION 3: THE COST
+         RULE's trailing week), "lane": {"usd_day": float | None (the lane's measured verdict spend a day, the trailing
+         week's mean), "peak_usd_day": float | None (its heaviest UTC day of them), "today_usd": float, "source": str},
+         "p30_usd", "p30_source", "edge": RULE_VERSION 2's figures, kept for the record and read by nothing here,
          "meters": {m: {"balance_usd": float | None, "fixed_usd_day": float | None, "need_usd": float,
                         "reserve_usd": float | None (Sail: the Sail guard's release line; absent: `RESERVE_USD`),
                         "paid_today_usd": float | None (what the meter has paid since 00:00 UTC; absent: nothing),
                         "notice_balance_usd": float | None (Sail with no guard reading: the card line only), ...sources}}}
 
+    THE COST RULE (`cost_rule`) sets the day's cap and each meter's share of it (its `ceiling_usd_day`: Sail 0.8 x the
+    remainder, Claude the lane's part + 0.2 x the remainder); each meter's runway taper then holds it to what its prefund
+    holds (the Claude meter pays the lane's part first; its `research_usd_day` is the roles' line, what the router reads).
     `previous` is the last budget.json: for the direction, and for THE DAY'S FIGURE (a meter an earlier run of this UTC
     day read keeps that run's research: `_day_figure`; THE TOP-UP RAISE lifts it to this run's reading when that is
-    more). The run that sets a meter's figure ADDS BACK what the meter has
-    paid since 00:00 UTC (`paid_today_usd`, never more than its share of the ceiling plus its fixed cost a day): the
+    more: a top-up, or a close whose profit lifted the cap). The run that sets a meter's figure ADDS BACK what the meter
+    has paid since 00:00 UTC (`paid_today_usd`, never more than its share of the cap plus its fixed cost a day): the
     figure is from the balance as the day began, whenever in the day the first run comes. Pure: no I/O."""
     meters_in = inputs.get("meters") or {}
-    edge = dict(inputs.get("edge") or {"stop": True, "why": "no edge state: earned is 0"})
-    p30 = _finite(inputs.get("p30_usd"))
+    lane_in = inputs.get("lane") if isinstance(inputs.get("lane"), Mapping) else {}
+    sail_fixed = _amount((meters_in.get("sail") or {}).get("fixed_usd_day"))
+    cost = cost_rule(inputs.get("week_net_usd"), sail_fixed, lane_in.get("peak_usd_day"))
+    week_net, earned = cost["week_net_usd"], cost["earned_usd_day"]
     why: list[str] = []
-    if p30 is None:
-        earned = 0.0
-        why.append("p30 unreadable: nothing earned")
-    elif edge.get("stop") is not False:
-        earned = 0.0
-        why.append(str(edge.get("why") or "no forward edge; nothing earned"))
+    if week_net is None:
+        why.append("week_net unreadable: nothing earned, the cap is the base")
+    elif week_net > 0:
+        why.append(f"week_net {week_net:.2f} over the last {PROFIT_SESSIONS} sessions: earned 0.5 x {week_net:.2f} / "
+                   f"{PROFIT_DAYS} = {earned:.4f} a day, the cap {cost['cap_usd_day']:.2f}")
     else:
-        earned = PROFIT_SHARE * max(0.0, p30) / P30_DAYS
-        why.append(f"p30 {p30:.2f}: earned {earned:.4f} a day, inside the ceiling" if p30 > 0
-                   else "p30 is not positive: nothing earned")
+        why.append(f"week_net {week_net:.2f} is not a profit: nothing earned, the cap is the base")
+    if cost["fixed_usd_day"] is None:
+        why.append("Sail's fixed cost could not be read: no room under the cap")
+    why.append(f"the cap {cost['cap_usd_day']:.2f} a day: fixed {cost['fixed_usd_day'] or 0.0:.2f}, the lane's verdicts "
+               f"{cost['lane_usd_day']:.2f}, research {cost['rest_usd_day']:.2f}")
+    lane_measured = _amount(lane_in.get("usd_day")) or 0.0
     needs = {m: _amount((meters_in.get(m) or {}).get("need_usd")) or 0.0 for m in METERS}
+    # The Claude meter's own spend rate includes the lane's verdicts (the swarm books none of them).
+    needs["claude"] += lane_measured * NEED_WINDOW_DAYS
     total_need = sum(needs.values())
     shares = {m: needs[m] / total_need for m in METERS} if total_need > 0 else dict(SPLIT)
     today = _day(now)
@@ -571,16 +728,22 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
     for m in METERS:
         given = meters_in.get(m) or {}
         balance, fixed, reserve = _finite(given.get("balance_usd")), _amount(given.get("fixed_usd_day")), _reserve(given, m)
-        ceiling = CEILING_USD_DAY * SPLIT[m]
+        ceiling = cost["line_usd_day"][m]       # the meter's share of the day's cap (Claude: the lane's part + roles)
+        roles_line = cost["roles_usd_day"][m]   # what research (the old roles) may have of it
+        lane = cost["lane_usd_day"] if m == "claude" else 0.0
         kept = _day_figure(previous, m, today)  # what an earlier run of this UTC day set: it stands
         row: dict[str, Any] = {"balance_usd": balance, "fixed_usd_day": fixed, "reserve_usd": reserve,
                                "ceiling_usd_day": round(ceiling, 4), "day_figure": kept,
                                "need_share": round(shares[m], 4), "earned_usd_day": round(earned * shares[m], 4)}
+        if m == "claude":
+            row["line_usd_day"] = round(ceiling, 4)
         if balance is None or fixed is None or reserve is None:
             # FAIL CLOSED, at once: the day's figure (kept in the row) stands again only when the meter reads again.
             row.update(research_usd_day=0.0, limited_by="unreadable", runway_days=None, card_date=None,
                        total_usd_day=None, topup_usd=None, demand_usd_day=None, card_runway_days=None, would_set_usd_day=None,
                        added_back_usd=None)
+            if m == "claude":
+                row["lane_usd_day"] = 0.0
             what = "balance" if balance is None else "fixed cost" if fixed is None else "reserve"
             why.append(f"{m}: the {what} could not be read: no research")
             seen = _finite(given.get("notice_balance_usd"))
@@ -596,11 +759,13 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         if kept is None:
             # The first run of this UTC day to read the meter sets the day's figure, FROM THE BALANCE AS THE DAY BEGAN:
             # what the meter has paid since 00:00 UTC is added back, so a late first run sets the cap an early one would
-            # have. Unknown is nothing added; never more than a day's own most (its share of the ceiling and its fixed cost).
+            # have. Unknown is nothing added; never more than a day's own most (its share of the cap and its fixed cost).
             added = min(_amount(given.get("paid_today_usd")) or 0.0, ceiling + fixed)
         runway_cap = max(0.0, room + added - RUNWAY_DAYS * fixed) / RUNWAY_DAYS
-        research = min(ceiling, runway_cap)  # never above the ceiling, whatever was earned
-        limited = "ceiling" if runway_cap >= ceiling else "runway"  # the taper: under RUNWAY_DAYS days of the ceiling
+        # THE LANE FIRST (Claude): the lane's part is paid before any role; the roles get what the taper leaves of theirs.
+        lane_paid = min(lane, runway_cap)
+        research = min(roles_line, max(0.0, runway_cap - lane_paid))  # never above its share, whatever was earned
+        limited = "ceiling" if runway_cap >= ceiling else "runway"  # the taper: under RUNWAY_DAYS days of its share
         would_set = research
         raised = None
         if kept is None:
@@ -612,9 +777,9 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
             floor_fixed = max(fixed, _amount(kept.get("fixed_usd_day")) or 0.0)
             floor_reserve = max(reserve, _amount(kept.get("reserve_usd")) or 0.0)
             raise_cap = max(0.0, balance - floor_reserve - RUNWAY_DAYS * floor_fixed) / RUNWAY_DAYS
-            lifted = min(ceiling, raise_cap)
+            lifted = min(roles_line, max(0.0, raise_cap - min(lane, raise_cap)))
             if lifted > kept["usd_day"] + EPSILON:
-                # The figure is raised to it, never above the ceiling (`lifted` is held to it), and never lowered.
+                # The figure is raised to it, never above its share (`lifted` is held to it), and never lowered.
                 raised = kept["usd_day"]
                 at_ = _iso(now)
                 steps = [dict(r) for r in kept.get("raises") or []]
@@ -626,7 +791,7 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
                         "raises": (steps + [{"at": at_, "from": raised, "to": round(research, 4)}])[-RAISES_KEPT:]}
             else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and lowers nothing
                 research, limited = kept["usd_day"], kept["limited_by"]
-        rate = fixed + research
+        rate = fixed + lane_paid + research
         if room <= 0:
             runway = 0.0
         elif rate > 0:
@@ -635,19 +800,22 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
             runway = None  # nothing is spent: no runway to run out
         row.update(runway_cap_usd_day=round(runway_cap, 4), research_usd_day=round(research, 4),
                    would_set_usd_day=round(would_set, 4), day_figure=kept, added_back_usd=round(added, 4),
-                   wanted_research_usd_day=round(ceiling, 4), limited_by=limited, total_usd_day=round(rate, 4),
+                   wanted_research_usd_day=round(roles_line, 4), limited_by=limited, total_usd_day=round(rate, 4),
                    runway_days=None if runway is None else round(runway, 1),
                    runs_out_on=None if runway is None else _date_after(today, runway),
                    **_card(balance, fixed, fixed + ceiling, reserve, today))
+        if m == "claude":
+            row["lane_usd_day"] = round(lane_paid, 4)
         row.update(_burn(room, fixed, rate, needs[m], row["card_runway_days"], today))
         if limited == "runway":
-            why.append(f"{m}: under {RUNWAY_DAYS} days of the ceiling: research {research:.4f} of {ceiling:.2f} a day")
+            why.append(f"{m}: under {RUNWAY_DAYS} days of its share of the cap: research {research:.4f} of "
+                       f"{roles_line:.2f} a day" + (f", the lane's part {lane_paid:.4f} of {lane:.2f}" if lane else ""))
         if added > EPSILON:
             why.append(f"{m}: the day's first run: the {added:.4f} the meter has paid since 00:00 UTC is added back (the "
                        "day's figure is from the balance as the day began)")
         if raised is not None:
             why.append(f"{m}: the top-up raise: today's figure {raised:.4f} is raised to this run's reading, {research:.4f} "
-                       f"a day ({limited}); a raise only, never above the ceiling")
+                       f"a day ({limited}); a raise only, never above its share of the cap")
         if raised is None and abs(would_set - research) > EPSILON:
             why.append(f"{m}: today's figure stands ({research:.4f} a day, set at {kept['set_at']}); this run's reading "
                        f"would set {would_set:.4f}")
@@ -660,29 +828,36 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
             if isinstance(previous, Mapping) else None
         now_m = meters[m]["research_usd_day"]
         meters[m]["direction"] = "same" if was is None or abs(now_m - was) <= EPSILON else ("raise" if now_m > was else "cut")
-    stopped = bool(edge.get("stop") is not False and p30 is not None)
     limits = {meters[m]["limited_by"] for m in METERS}
-    if limits == {"ceiling"}:
-        state = "research at the ceiling"
-    elif total > 0:
-        state = "research under the ceiling"  # a meter tapers (`runway`) or could not be read
+    if total <= 0:
+        state = "no research"  # every meter unreadable or tapered to 0, or the fixed costs and the lane fill the cap
+    elif limits == {"ceiling"}:
+        state = "research at its share of the day's cap"
     else:
-        state = "no research"
-    if stopped:
-        state += "; no forward edge"
+        state = "research under its share of the day's cap"  # a meter tapers (`runway`) or could not be read
+    state += (f" (the cap {cost['cap_usd_day']:.2f} a day: fixed {cost['fixed_usd_day'] or 0.0:.2f}, the lane's verdicts "
+              f"{cost['lane_usd_day']:.2f}, research {cost['rest_usd_day']:.2f})")
     if before is None:
         why.append("no earlier budget to compare")
     else:
         why.append(f"research {direction} ({before:.4f} -> {total:.4f} a day)")
+    cap = {**cost, "week_net_source": inputs.get("week_net_source"), "week_net_since": inputs.get("week_net_since"),
+           "sessions": PROFIT_SESSIONS, "lane_today_usd": _amount(lane_in.get("today_usd")),
+           "lane_source": lane_in.get("source")}
     return {"schema": SCHEMA, "rule_version": RULE_VERSION, "at": float(now), "at_iso": _iso(now),
-            "rule": {"ceiling_usd_day": CEILING_USD_DAY, "split": dict(SPLIT), "runway_days": RUNWAY_DAYS,
-                     "floor_cap_usd_day": FLOOR_CAP_USD_DAY, "notice_days": NOTICE_DAYS, "topup_days": TOPUP_DAYS,
-                     "notice_lead_days": NOTICE_LEAD_DAYS,
-                     "profit_share": PROFIT_SHARE, "p30_days": P30_DAYS, "reserve_usd": dict(RESERVE_USD),
-                     "edge_start": EDGE_START.isoformat(), "edge_sessions": EDGE_SESSIONS},
-            "inputs": {"p30_usd": p30, "p30_source": inputs.get("p30_source"), "edge": edge,
+            "rule": {"ceiling_usd_day": CEILING_USD_DAY, "base_usd_day": BASE_USD_DAY, "profit_share": PROFIT_SHARE,
+                     "profit_sessions": PROFIT_SESSIONS, "cloudflare_usd_day": CLOUDFLARE_USD_DAY,
+                     "data_usd_day": DATA_USD_DAY, "lane_usd_day": LANE_USD_DAY, "lane_window_days": LANE_WINDOW_DAYS,
+                     "split": dict(SPLIT), "runway_days": RUNWAY_DAYS,
+                     "floor_sail_fixed_usd_day": FLOOR_SAIL_FIXED_USD_DAY, "lane_headroom": LANE_HEADROOM,
+                     "profit_days": PROFIT_DAYS,
+                     "notice_days": NOTICE_DAYS, "topup_days": TOPUP_DAYS, "notice_lead_days": NOTICE_LEAD_DAYS,
+                     "reserve_usd": dict(RESERVE_USD)},
+            "inputs": {"week_net_usd": week_net, "week_net_source": inputs.get("week_net_source"), "week_net_since": inputs.get("week_net_since"),
+                       "lane": dict(lane_in), "p30_usd": _finite(inputs.get("p30_usd")),
+                       "p30_source": inputs.get("p30_source"), "edge": inputs.get("edge"),
                        "meters": {m: dict(meters_in.get(m) or {}) for m in METERS}},
-            "earned_usd_day": round(earned, 4), "no_forward_edge": stopped,
+            "cap": cap, "earned_usd_day": earned, "cap_usd_day": cost["cap_usd_day"],
             "state": state, "meters": meters, "research_usd_day": total, "direction": direction,
             "knobs": knobs(meters["sail"]["research_usd_day"], meters["claude"]["research_usd_day"]), "why": why}
 
@@ -709,7 +884,8 @@ def knobs(sail_usd_day: Any, claude_usd_day: Any) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------------------------- enforcement
 def floor_block(why: str) -> dict[str, Any]:
-    """The settings' `budget` block at the FLOOR (no usable budget.json)."""
+    """The settings' `budget` block at the FLOOR (no usable budget.json): THE COST RULE's own lines at no profit
+    (`floor_lines`), FAIL CLOSED."""
     return {"source": "floor", "why": why, "at": None, "state": "research at floor (no usable budget.json)",
             "sail_usd_day": floor_usd_day("sail"), "claude_usd_day": floor_usd_day("claude"), "fixed_sail_usd_day": None}
 
@@ -730,9 +906,46 @@ def stale_block(meters: Any, at: float | None, why: str) -> dict[str, Any]:
             "fixed_sail_usd_day": _amount(sail.get("fixed_usd_day")), "warning": True}
 
 
+def cap_hold(root: str | Path | None, now: float | None = None) -> dict[str, Any] | None:
+    """THE CAP BREACH HOLD (the module docstring, EVERY LINE IS HELD): `<root>/cap-hold.json` (the stall job writes it
+    while today's MEASURED metered spend is over today's cap for certain, league/ops/metered.py) when it names the
+    current UTC day: {schema, day, at, since, spent_usd, cap_usd}. None with no root, no file, one that does not read, or
+    another day's (a new UTC day has no hold). Never raises."""
+    import time
+
+    if root is None:
+        return None
+    try:
+        now = time.time() if now is None else float(now)
+        data = json.loads((Path(root) / HOLD_FILE).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no file (the usual case), or one that does not read: no hold
+        return None
+    if not isinstance(data, Mapping) or data.get("schema") != HOLD_SCHEMA or data.get("day") != _day(now).isoformat():
+        return None
+    return dict(data)
+
+
+def _hold_words(hold: Mapping[str, Any]) -> str:
+    def usd(value: Any) -> str:
+        number = _finite(value)
+        return "unknown" if number is None else f"${number:.2f}"
+    return (f"the cap breach hold ({HOLD_FILE}): the UTC day {hold.get('day')}'s measured metered spend "
+            f"{usd(hold.get('spent_usd'))} is over its cap {usd(hold.get('cap_usd'))}")
+
+
+def held_block(block: Mapping[str, Any], hold: Mapping[str, Any]) -> dict[str, Any]:
+    """The settings' `budget` block under THE CAP BREACH HOLD: no research on either meter (the Sail guard's research, the
+    router's Claude roles) for the rest of the UTC day; the rest of `block` as it was (its fixed cost, its warning)."""
+    return {**block, "source": f"the cap breach hold ({HOLD_FILE})", "why": _hold_words(hold),
+            "state": "no research: today's measured metered spend is over its cap (the cap breach hold, until 00:00 UTC)",
+            "sail_usd_day": 0.0, "claude_usd_day": 0.0, "hold": {"day": hold.get("day"), "since": hold.get("since")}}
+
+
 def effective(root: str | Path, now: float | None = None) -> dict[str, Any]:
-    """The budget block `<root>/budget.json` gives now (`read`; the floor when it gives none): what the Sail guard and the
-    router read for themselves, whatever settings they were handed."""
+    """The budget block `<root>/budget.json` gives now (`read`; the floor when it gives none), under THE CAP BREACH HOLD
+    when one stands today (`cap_hold`: no research on either meter): what the Sail guard and the router read for
+    themselves, whatever settings they were handed, and what every `settings.load` with a state root hands them
+    (`overlay`)."""
     import time
 
     now = time.time() if now is None else float(now)
@@ -740,7 +953,9 @@ def effective(root: str | Path, now: float | None = None) -> dict[str, Any]:
         block, why = read(root, now)
     except Exception as exc:  # noqa: BLE001 - anything unexpected is the floor
         block, why = None, f"budget.json could not be read ({type(exc).__name__})"
-    return block if block is not None else floor_block(why or "no budget.json")
+    block = block if block is not None else floor_block(why or "no budget.json")
+    hold = cap_hold(root, now)
+    return block if hold is None else held_block(block, hold)
 
 
 def read(root: str | Path, now: float) -> tuple[dict[str, Any] | None, str | None]:
@@ -850,7 +1065,8 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     names that brake apart from the budget's own daily stop. NEVER ABOVE THE CEILING: a block that says more research
     than Sail's share of it, however it came, is read as that share. `gate_reserve` is THE GATE'S RESERVE inside the day
     (`gate_reserve`): researcher cycles, births and the architect stop that far under either cap; the tournament's
-    validation round, the gate round and the nightly forward go on to the caps themselves."""
+    validation round, the gate round and the nightly forward go on to the caps themselves. THE CAP BREACH HOLD
+    (`cap_hold`, with `root`): no research while it stands today, whatever the block says."""
     guard = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house = _amount(guard.get("house_burn_usd_day"))
     house = 1.0 if house is None else house
@@ -869,6 +1085,11 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
         fixed = max(house, measured) if measured is not None else house
         source = str(block.get("source") or "budget")
         read = block.get("read", True) is True  # the rule's own blocks say nothing; one that says anything else is unread
+    hold = cap_hold(root, now) if root is not None else None
+    if hold is not None and research > 0:
+        # THE CAP BREACH HOLD, at the guard's own check: whatever block it was handed, no Sail research for the rest of
+        # the UTC day (the settings of the next swarm step carry it too: `effective`).
+        research, source = 0.0, f"the cap breach hold ({HOLD_FILE}, over {source})"
     return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source,
             "read": read, "gate_reserve": gate_reserve(research)}
 
@@ -895,17 +1116,17 @@ def paid_model_room(block: Any, *spent_today: Any, role: Any = None) -> float | 
 
 
 # ---------------------------------------------------------------------------------------------- the inputs
-def book_p30(root: str | Path, now: float, *, days: int = P30_DAYS) -> tuple[float | None, str]:
+def book_p30(root: str | Path, now: float, *, days: int = P30_DAYS, since: float | None = None) -> tuple[float | None, str]:
     """The live book's own trailing realized options P&L: every closed real position opened at or after `PNL_BASIS` and
-    closed in the window, its cash (fees in) plus the broker's posted fee correction for it (the publisher's last
-    activity reading in `<root>/publish.json`, when there is one). UNKNOWN (None), as `league.trading_profit` reads
-    Profit, when a closed row cannot be priced, a position since the basis is closed but unpriced (`unpriced_close`: its
-    result is real, its number not yet), any order is pending or unknown, reconciliation is frozen, or the activity
-    reading names an event the book has not settled (`blocking`)."""
+    closed in the window (the last `days` days, or from `since`), its cash (fees in) plus the broker's posted fee
+    correction for it (the publisher's last activity reading in `<root>/publish.json`, when there is one). UNKNOWN (None),
+    as `league.trading_profit` reads Profit, when a closed row cannot be priced, a position since the basis is closed but
+    unpriced (`unpriced_close`: its result is real, its number not yet), any order is pending or unknown, reconciliation
+    is frozen, or the activity reading names an event the book has not settled (`blocking`)."""
     path = Path(root) / "live.sqlite"
     if not path.exists():
         return 0.0, "no live book: nothing realized"
-    since, basis = now - days * 86400, _epoch(PNL_BASIS) or 0.0
+    since, basis = (now - days * 86400) if since is None else float(since), _epoch(PNL_BASIS) or 0.0
     conn = _read_only(path)
     try:
         conn.execute("BEGIN")  # one read: the rows, the orders and the freeze as of one moment
@@ -952,6 +1173,159 @@ def book_p30(root: str | Path, now: float, *, days: int = P30_DAYS) -> tuple[flo
             return None, f"position {row['pid']} cannot be priced"
         total += cash + fix
     return float(round(total, 2)), f"the live book: {len(rows)} closed positions, {note}"
+
+
+def net_window(now: float, sessions: int = PROFIT_SESSIONS) -> tuple[float, str] | None:
+    """THE COST RULE's window (RULE_VERSION 3): 00:00 New York of the first of the last `sessions` NYSE sessions that have
+    closed by `now` (the repo's calendar, `ltcm.data.us_equity_session`), as (epoch, ISO day); every real close from it to
+    `now` counts (a close earlier today, before today's session has closed, counts too). None when the calendar cannot
+    count (unknown is never money)."""
+    from zoneinfo import ZoneInfo
+
+    from ltcm.data import us_equity_session
+
+    try:
+        day, found, first = _ny_day(now), 0, None
+        for _ in range(sessions * 3 + 15):
+            session = us_equity_session(day)
+            closed = _epoch(session.close_at) if session is not None else None
+            if closed is not None and closed <= now:
+                found, first = found + 1, day
+                if found == sessions:
+                    break
+            day -= dt.timedelta(days=1)
+    except Exception:  # noqa: BLE001 - a calendar that cannot count reads no profit
+        return None
+    if found < sessions or first is None:
+        return None
+    start = dt.datetime.combine(first, dt.time(0, 0), tzinfo=ZoneInfo("America/New_York")).timestamp()
+    return start, first.isoformat()
+
+
+def book_equity(root: str | Path, since: float, now: float) -> tuple[float | None, str]:
+    """The equity book's realized net in the window: every closed real (":r") lot of `<root>/live.sqlite` `eq_lots` whose
+    `closed_at` is in (since, now], its net cash (fees and dividends in, as the book books it; league/equity/live.py), the
+    old ETF and panel programs' lots and, from release R2, the event lane's real lots alike. 0 with no live book or no
+    eq_lots table (a state from before E1); None when a row cannot be read as a number."""
+    path = Path(root) / "live.sqlite"
+    if not path.exists():
+        return 0.0, "no live book: no equity lot"
+    conn = _read_only(path)
+    try:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='eq_lots'").fetchone() is None:
+            return 0.0, "no equity lots table"
+        rows = [dict(r) for r in conn.execute(
+            "SELECT lid, cash FROM eq_lots WHERE status='closed' AND substr(instance, -2)=':r' AND closed_at IS NOT NULL "
+            "AND closed_at>? AND closed_at<=?", (since, now))]
+    finally:
+        conn.close()
+    total = Decimal(0)
+    for row in rows:
+        try:
+            cash = Decimal(str(row["cash"]))
+        except (InvalidOperation, ValueError, TypeError):
+            return None, f"equity lot {row['lid']} cannot be priced"
+        if not cash.is_finite():
+            return None, f"equity lot {row['lid']} cannot be priced"
+        total += cash
+    return float(round(total, 2)), f"the equity book: {len(rows)} closed real lots"
+
+
+def book_net(root: str | Path, now: float, *, sessions: int = PROFIT_SESSIONS) -> tuple[float | None, str, str | None]:
+    """THE COST RULE's week_net (RULE_VERSION 3): the realized net profit of every real book over the last `sessions` sessions
+    (`net_window`): the options book's closed positions (`book_p30` from the window's start, its UNKNOWN rules and the
+    broker's fee corrections included) plus the equity book's closed real lots (`book_equity`). (net, source, the
+    window's first day); None when either book's figure is unknown or the window cannot be counted."""
+    window = net_window(now, sessions)
+    if window is None:
+        return None, "the session calendar could not count the window: no profit", None
+    since, first = window
+    options, said = book_p30(root, now, since=since)
+    if options is None:
+        return None, said, first
+    equity, told = book_equity(root, since, now)
+    if equity is None:
+        return None, told, first
+    return round(options + equity, 2), f"{said}; {told} (from {first})", first
+
+
+#: A verdict whose cost the gateway did not state counts this much (league/events/house.py `VERDICT_USD_UNKNOWN`: the
+#: lane's own line counts it so, and so does its measure here).
+VERDICT_USD_UNKNOWN = 0.01
+
+
+def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) -> dict[str, Any]:
+    """THE LANE'S MEASURED VERDICT SPEND (RULE_VERSION 3): from `<root>/events/events.sqlite` (league/events/store.py,
+    read-only), the gateway's settled cost of every verdict answered over the trailing `days` days, a day (`usd_day`),
+    its heaviest UTC day of them (`peak_usd_day`, today's part included: what sizes the lane's part, `cost_rule`), and
+    since 00:00 UTC (`today_usd`). A verdict with no cost on record counts `VERDICT_USD_UNKNOWN`, as the lane's own line
+    counts it. {usd_day: None, peak_usd_day: None, ...} with no store or one that cannot be read: the lane's part is then
+    `LANE_USD_DAY`."""
+    path = Path(root) / LANE_STORE
+    none = {"usd_day": None, "peak_usd_day": None, "today_usd": 0.0}
+    if not path.exists():
+        return {**none, "source": "no event lane store"}
+    cost = f"COALESCE(SUM(COALESCE(usd, {VERDICT_USD_UNKNOWN})), 0)"
+    try:
+        conn = _read_only(path)
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='verdicts'").fetchone() is None:
+                return {**none, "source": "the event lane store has no verdicts table"}
+            window = conn.execute(f"SELECT {cost}, COUNT(*) FROM verdicts WHERE answered_at>=? AND answered_at<=?",
+                                  (_iso(now - days * 86400), _iso(now))).fetchone()
+            peak = conn.execute(f"SELECT MAX(usd) FROM (SELECT {cost} AS usd FROM verdicts WHERE answered_at>=? AND "
+                                "answered_at<=? GROUP BY substr(answered_at, 1, 10))",
+                                (_iso(_day_start(now) - (days - 1) * 86400), _iso(now))).fetchone()
+            today = conn.execute(f"SELECT {cost} FROM verdicts WHERE answered_at>=? AND answered_at<=?",
+                                 (_iso(_day_start(now)), _iso(now))).fetchone()
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        return {**none, "source": f"the event lane store could not be read ({type(exc).__name__})"}
+    spent, count = _amount(window[0]) or 0.0, int(window[1] or 0)
+    return {"usd_day": round(spent / days, 4), "peak_usd_day": round(_amount(peak[0]) or 0.0, 4),
+            "today_usd": round(_amount(today[0]) or 0.0, 4),
+            "source": f"{count} verdicts answered in the last {days} days, ${spent:.2f}"}
+
+
+def lane_allowance(root: str | Path, now: float | None = None) -> dict[str, Any]:
+    """THE LANE'S ALLOWANCE (the review of r1/alarms, its major 1): what the House's event lane may spend on verdicts a
+    day (league/events/house.py holds them to the lower of this and `events.verdict_usd_day`), from `<root>/budget.json`:
+    the Claude meter's lane part after its taper (`meters.claude.lane_usd_day`: the rule's own figure, 0 when the rule
+    could not read the meter, FAIL CLOSED). With no usable budget.json (none, unreadable, malformed, another rule's, dated
+    in the future) it is THE FLOOR's (`floor_lane_usd_day`: the rule's own lane line at no profit); a STALE one gives the
+    lower of the floor and what it said. Never above `CEILING_USD_DAY`. Under THE CAP BREACH HOLD (`cap_hold`: today's
+    measured metered spend over today's cap) it is 0 until 00:00 UTC, whatever budget.json says. The lane holds it on the
+    UTC day, as every other line (EVERY LINE ON ONE DAY). {usd_day, source, at}. Never raises."""
+    import time
+
+    now = time.time() if now is None else float(now)
+    hold = cap_hold(root, now)
+    if hold is not None:
+        return {"usd_day": 0.0, "source": _hold_words(hold), "at": None, "hold": True}
+    floor = floor_lane_usd_day()
+    try:
+        data = json.loads((Path(root) / BUDGET_FILE).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"usd_day": floor, "source": "the floor (no budget.json yet)", "at": None}
+    except (OSError, ValueError) as exc:
+        return {"usd_day": floor, "source": f"the floor (budget.json cannot be read: {type(exc).__name__})", "at": None}
+    if not isinstance(data, Mapping) or data.get("schema") != SCHEMA or data.get("rule_version") != RULE_VERSION:
+        return {"usd_day": floor, "source": f"the floor (budget.json is not schema {SCHEMA}, rule {RULE_VERSION})", "at": None}
+    at = _finite(data.get("at"))
+    if at is None or at > now + 300:
+        return {"usd_day": floor, "source": "the floor (budget.json is undated or dated in the future)", "at": None}
+    meters = data.get("meters") if isinstance(data.get("meters"), Mapping) else {}
+    row = meters.get("claude") if isinstance(meters.get("claude"), Mapping) else None
+    said = _amount(row.get("lane_usd_day")) if row is not None else None
+    if now - at > STALE_SECONDS:
+        value = 0.0 if said is None else min(floor, said)
+        return {"usd_day": round(min(value, CEILING_USD_DAY), 4), "at": at,
+                "source": f"the lower of the floor and a stale budget.json ({(now - at) / 3600:.0f} h old)"}
+    if said is None:
+        return {"usd_day": floor, "source": "the floor (budget.json's Claude meter names no lane part)", "at": at}
+    return {"usd_day": round(min(said, CEILING_USD_DAY), 4), "at": at,
+            "source": f"budget.json ({row.get('limited_by') or 'the rule'}, cap {_finite(data.get('cap_usd_day')) or 0.0:.2f})"}
 
 
 def economics_fresh(cutoff: float, now: float) -> bool:
@@ -1398,6 +1772,17 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
     # What THE DAY'S FIRST RUN ADDS BACK: what each meter has paid since 00:00 UTC, as of its balance's reading.
     sail_paid, sail_paid_source = _sail_paid_today(swarm, read_at, now, fixed)
     claude_paid, claude_paid_source = _claude_paid_today(swarm, now)
+    # RULE_VERSION 3: the lane's verdicts are paid by the Claude meter too (the swarm books none of them).
+    lane = lane_spend(root, now)
+    if _amount(lane.get("today_usd")):
+        claude_paid += float(lane["today_usd"])
+        claude_paid_source += f" and the event lane's verdicts today ({float(lane['today_usd']):.4f})"
+    try:
+        week_net, week_net_source, week_net_since = book_net(root, now)
+    except Exception as exc:  # noqa: BLE001 - unknown is never money
+        week_net, week_net_source, week_net_since = None, f"the books could not be read ({type(exc).__name__}): no profit", None
+    if week_net is None:
+        errors.append(f"week_net: {week_net_source}")
     claude_balance, claude_source = None, "the gateway's /v1/health could not be read"
     seen, seen_source = None, None
     if health is not None:
@@ -1428,7 +1813,8 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
             edge["why"] += " (the ladder's record could not be read: only the Probes a look earned are counted)"
     except Exception as exc:  # noqa: BLE001 - the stop stands when it cannot be judged
         edge = {"stop": True, "why": f"the forward edge could not be judged ({type(exc).__name__}): earned is 0"}
-    return {"p30_usd": p30, "p30_source": p30_source, "edge": edge,
+    return {"week_net_usd": week_net, "week_net_source": week_net_source, "week_net_since": week_net_since, "lane": lane,
+            "p30_usd": p30, "p30_source": p30_source, "edge": edge,
             "meters": {"sail": {"balance_usd": balance, "balance_source": balance_source, "fixed_usd_day": round(fixed, 4),
                                 "fixed_source": fixed_source, "need_usd": round(swarm["need"]["sail"], 4),
                                 "reserve_usd": None if reserve is None else round(reserve, 4), "reserve_source": reserve_source,
@@ -1749,7 +2135,10 @@ def refresh_changes(previous: Mapping[str, Any], doc: Mapping[str, Any], now: fl
     file stands as the last full run left it), no meter would fall under the file's figure but on the day's first figure
     (a lower figure on a day already set is a hand edit or the full job's: the refresh never lowers one), and some meter
     is RAISED (THE TOP-UP RAISE, or a meter read again after a run that could not read it) or gets the day's FIRST
-    figure (no run of this UTC day has set one: the 00:30 run missed, or a meter it could not read)."""
+    figure (no run of this UTC day has set one: the 00:30 run missed, or a meter it could not read). On the Claude meter
+    THE LANE'S PART counts as its figure does (release R1's review: a run that could not read the meter left the lane no
+    verdicts, `lane_allowance`, until the next full run; the refresh gives them back within the hour, and never lowers
+    them)."""
     today = _day(now).isoformat()
     changes: dict[str, str] = {}
     for m in METERS:
@@ -1761,9 +2150,14 @@ def refresh_changes(previous: Mapping[str, Any], doc: Mapping[str, Any], now: fl
         figure = old.get("day_figure")
         first = not (isinstance(figure, Mapping) and figure.get("day") == today)
         was, now_m = _amount(old.get("research_usd_day")), float(new.get("research_usd_day") or 0.0)
+        lane_was, lane_now = _amount(old.get("lane_usd_day")), _amount(new.get("lane_usd_day"))
+        lane_up = m == "claude" and lane_now is not None and (lane_was is None or lane_now > lane_was + EPSILON)
+        if not first and m == "claude" and lane_now is not None and lane_was is not None and lane_now < lane_was - EPSILON:
+            return {}, (f"the lane's part would fall from {lane_was:.4f} to {lane_now:.4f} a day: the refresh never lowers "
+                        "it (the full job's runs do)")
         if first:
             changes[m] = "first"
-        elif was is None or now_m > was + EPSILON:
+        elif was is None or now_m > was + EPSILON or lane_up:
             changes[m] = "raise"
         elif now_m < was - EPSILON:
             return {}, (f"{m} would fall from {was:.4f} to {now_m:.4f} a day on a day already set: the refresh never "
@@ -1823,16 +2217,18 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
     if meter not in METERS:
         raise ValueError(f"no meter {meter!r}")
     root, now, config = _root(ctx), _now(ctx), _config(ctx)
-    synthetic = {"p30_usd": 0.0, "p30_source": "drill", "edge": {"stop": False, "why": "drill"},
-                 "meters": {m: {"balance_usd": RESERVE_USD[m] + (DRILL_DAYS * (DRILL_FIXED[m] + ceiling_usd_day(m))
-                                                                 if m == meter else 10_000.0),
+    # The meter's wanted rate under THE COST RULE at no profit (fixed + its share of the $5 cap): the cliff holds
+    # `DRILL_DAYS` of it above the reserve.
+    wanted = cost_rule(0.0, DRILL_FIXED["sail"])["line_usd_day"][meter] + DRILL_FIXED[meter]
+    synthetic = {"week_net_usd": 0.0, "week_net_source": "drill", "lane": {"usd_day": None, "today_usd": 0.0, "source": "drill"},
+                 "meters": {m: {"balance_usd": RESERVE_USD[m] + (DRILL_DAYS * wanted if m == meter else 10_000.0),
                                 "fixed_usd_day": DRILL_FIXED[m], "need_usd": 0.0} for m in METERS}}
     doc = compute(synthetic, now=now)
     unreadable = compute({**synthetic, "meters": {**synthetic["meters"],
                                                   meter: {"balance_usd": None, "fixed_usd_day": DRILL_FIXED[meter]}}},
                          now=now)
     checks = {"cliff_seen": meter in short(doc),
-              "throttled_and_still_seen": doc["meters"][meter]["research_usd_day"] < ceiling_usd_day(meter),
+              "throttled_and_still_seen": doc["meters"][meter]["limited_by"] == "runway",
               "unreadable_gives_no_research": unreadable["meters"][meter]["research_usd_day"] == 0.0}
     facts = notice_facts(doc, meter, now, test=True)
     notify = _get(ctx, "notify") or _notifier(config)
@@ -1854,7 +2250,11 @@ __all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "f
            "paid_model_room", "paid_model_reserve", "gate_reserve", "edge_state", "book_p30", "economics_p30",
            "economics_fresh", "ladder_promotions", "gather", "ladder_receipts", "notice_facts", "send_notices", "short",
            "run", "refresh", "refresh_unusable", "refresh_changes", "drill", "floor_usd_day", "ceiling_usd_day", "METERS",
-           "RULE_VERSION", "SCHEMA", "CEILING_USD_DAY",
+           "RULE_VERSION", "SCHEMA", "CEILING_USD_DAY", "BASE_USD_DAY", "PROFIT_SESSIONS", "CLOUDFLARE_USD_DAY",
+           "DATA_USD_DAY", "LANE_USD_DAY", "LANE_WINDOW_DAYS", "LANE_STORE", "cost_rule", "net_window", "book_net",
+           "book_equity", "lane_spend",
            "SPLIT", "RUNWAY_DAYS", "NOTICE_DAYS", "TOPUP_DAYS", "GATE_RESERVE_SHARE", "GATE_RESERVE_MIN_USD",
-           "GATE_HOLDS_USD", "GATE_STAGES", "FLOOR_CAP_USD_DAY", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS",
-           "STALE_SECONDS", "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "LOOK_BAND", "P30_FRESH_SECONDS"]
+           "GATE_HOLDS_USD", "GATE_STAGES", "FLOOR_SAIL_FIXED_USD_DAY", "floor_lines", "floor_lane_usd_day",
+           "lane_allowance", "LANE_HEADROOM", "PROFIT_DAYS", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS",
+           "STALE_SECONDS", "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "LOOK_BAND", "P30_FRESH_SECONDS",
+           "cap_hold", "held_block", "HOLD_FILE", "HOLD_SCHEMA"]

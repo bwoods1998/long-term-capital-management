@@ -189,6 +189,32 @@ class Wave2Test(unittest.TestCase):
         self.assertEqual(again["EVL-NEWS-REACT-ON"]["known"], 2)
         self.assertEqual(len(self.gw.claude_calls), 3)
 
+    def test_the_close_decisions_verdict_tally_names_its_reading_programs(self):
+        """Release 1019c (the review of r1/alarms, its major 3): the close decision's receipt carries the verdict tally
+        `verdicts: {needed, answered}` (the distinct (event, prompt) verdicts its reading programs need), so the stall
+        job's evl_verdicts sees a close-entry READ program (NEWS-READ-ON, versions 1 and 2) wait as it sees the open's."""
+        self._news("n1", "AAA", dt.datetime(2026, 10, 19, 14, 0, tzinfo=UTC))
+        self._news("n3", "BBB", dt.datetime(2026, 10, 19, 16, 0, tzinfo=UTC))
+        self.now = dt.datetime(2026, 10, 19, 19, 46, tzinfo=UTC)
+        answer = self.gw.post_json
+        self.gw.post_json = lambda path, body, headers=None: (400, {"error": "refused by the gateway"})
+        asked = R.decide_close(self.ctx, dt.date(2026, 10, 19), ask_only=True)
+        self.assertEqual(asked["verdicts"], {"needed": 2, "answered": 0}, "two articles, one verdict each, for all programs")
+        self.assertIsNone(self.st.db.execute("SELECT 1 FROM receipts WHERE job='decide-close:2026-10-19'").fetchone(),
+                          "ask_only writes no receipt")
+        out = R.decide_close(self.ctx, dt.date(2026, 10, 19))
+        self.assertEqual(out["pending"], {"EVL-NEWS-READ-ON": 2, "EVL-NEWS-READ-ON@v2": 2, "EVL-CTRL-NEWS-DAY-ON": 2},
+                         "the control ranks by the same verdicts, so it waits too")
+        status, summary = self.st.db.execute("SELECT status, summary FROM receipts WHERE job='decide-close:2026-10-19' "
+                                             "ORDER BY id DESC").fetchone()
+        self.assertEqual((status, json.loads(summary)["verdicts"]), ("pending", {"needed": 2, "answered": 0}))
+        self.gw.post_json = answer
+        out = R.decide_close(self.ctx, dt.date(2026, 10, 19))
+        self.assertEqual(out["pending"], {})
+        status, summary = self.st.db.execute("SELECT status, summary FROM receipts WHERE job='decide-close:2026-10-19' "
+                                             "ORDER BY id DESC").fetchone()
+        self.assertEqual((status, json.loads(summary)["verdicts"]), ("ok", {"needed": 2, "answered": 2}))
+
 
 if __name__ == "__main__":
     unittest.main()

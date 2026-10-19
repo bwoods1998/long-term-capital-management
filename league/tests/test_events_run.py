@@ -118,6 +118,11 @@ class RunTest(unittest.TestCase):
         again = R.decide_open(self.ctx, dt.date(2026, 10, 19))
         self.assertEqual(again["EVL-ERN-READ-O1"]["known"], 2)
         self.assertEqual(len(self.gw.claude_calls), 3)               # replay reads the stored verdicts
+        # Release 1019c: the decision's receipt tallies the distinct verdicts it needed and those stored (the stall job's
+        # `evl_verdicts`): three events, each read once whatever programs read it.
+        summary = json.loads(self.st.db.execute("SELECT summary FROM receipts WHERE job='decide-open:2026-10-19' ORDER BY id "
+                                                "DESC").fetchone()[0])
+        self.assertEqual(summary["verdicts"], {"needed": 3, "answered": 3})
 
 
     def test_read_programs_wait_for_verdicts(self):
@@ -133,8 +138,9 @@ class RunTest(unittest.TestCase):
         self.assertEqual(out["EVL-CTRL-ERN-ALL-O1"]["planned"], 1)       # controls need no verdict
         asked = R.decide_open(ctx, dt.date(2026, 10, 19), ask_only=True)   # the House's verdicts ahead of a decision
         self.assertEqual(asked["pending"], out["pending"], "version 1 and version 2 of one program count apart")
-        status = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()[0]
+        status, summary = self.st.db.execute("SELECT status, summary FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()
         self.assertEqual(status, "pending")
+        self.assertEqual(json.loads(summary)["verdicts"], {"needed": 1, "answered": 0}, "asked, refused: no answer stored")
         self.assertIsNone(self.st.db.execute("SELECT 1 FROM intents WHERE program='EVL-ERN-READ-O1' AND version=1").fetchone())
         later = R.decide_open(self.ctx, dt.date(2026, 10, 19))          # the gateway admits it now
         self.assertEqual(later["pending"], {})

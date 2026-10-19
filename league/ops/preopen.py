@@ -14,7 +14,8 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
  4 account   the account is ACTIVE, readable and not blocked, options level >= 3; the kill switch off; no House stop
              tripped; the real book not frozen (open orders and option positions are listed, not judged)
  5 swarm     swarm.json is an object with a `live` block the live path reads as such; population at or above the
-             floor; heartbeat fresh and on the current release; the Gym on with images named; the Sail guard not
+             floor; heartbeat fresh and on the current release; the Gym on with images named (these two said, never a
+             FAIL, while ops.json `stall.research` is false: release R1's research switch); the Sail guard not
              braked, or braked by THE BUDGET's daily caps alone on a fresh balance above its line (research at its cap
              until 00:00 UTC is the day as designed; Sail's own meter at the account's cap passes and is said as that;
              any other cause, a budget rule that could not be read among them, or one not named, is a FAIL)
@@ -461,9 +462,15 @@ def check_swarm(h: Mapping[str, Any]) -> Check:
           f"swarm.json live: observe {sw['observe']}, observe_max {sw['observe_max']}, calibration {sw['calibration']}"
           + (f" ({sw['why']})" if sw["why"] else ""))
     eg = s.get("eff_gym") or {}
-    c.req(eg.get("enabled") and eg.get("image_checkpoint") and eg.get("gate_checkpoint"),
+    # THE RESEARCH SWITCH (release R1; league/ops/stall.py `RESEARCH_SWITCH`): while the old lanes' research is switched
+    # off (ops.json `stall.research` false, A60), the Gym off and a population under its floor are research's own state,
+    # said and never a FAIL.
+    research = h.get("research_on", True) is not False
+    judge = c.req if research else (lambda ok, text: c.info(f"{text} (not judged: research is switched off, ops.json "
+                                                            "stall.research is false)"))
+    judge(eg.get("enabled") and eg.get("image_checkpoint") and eg.get("gate_checkpoint"),
           f"the Gym {'on' if eg.get('enabled') else 'OFF'}, image {str(eg.get('image_checkpoint') or '-')[:13]}, gate {str(eg.get('gate_checkpoint') or '-')[:13]}")
-    c.req((s.get("alive") or 0) >= (s.get("floor") or 0), f"population {s.get('alive')} alive (floor {s.get('floor')})")
+    judge((s.get("alive") or 0) >= (s.get("floor") or 0), f"population {s.get('alive')} alive (floor {s.get('floor')})")
     age = s.get("heartbeat_age_s")
     c.req(fresh(age, MAX_AGE["heartbeat"]), f"heartbeat {ago(age)} old")
     cur = ((h.get("release") or {}).get("current")) or ""
@@ -672,10 +679,19 @@ def checks(h: Mapping[str, Any], now: float) -> list[Check]:
     return out
 
 
+def research_on(ctx: Any) -> bool:
+    """THE RESEARCH SWITCH (`<state>/ops.json` `stall.research`, league/ops/stall.py `research_judged`): False only when
+    it is false."""
+    settings = getattr(ctx, "settings", None)
+    block = settings.get("stall") if isinstance(settings, Mapping) else None
+    return not (isinstance(block, Mapping) and block.get("research") is False)
+
+
 def run(ctx: Any) -> dict[str, Any]:
     now = ctx.now()
     with guard.readonly():
         h = collect(ctx.root, ctx.base, ctx.release, ctx.gateway, now=now, config=ctx.config, clock=ctx.now)
+    h["research_on"] = research_on(ctx)
     done = checks(h, now)
     failed = [c for c in done if not c.ok]
     for c in failed:
