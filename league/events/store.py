@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS looks(program TEXT NOT NULL, version INTEGER NOT NULL
   sessions INTEGER, n INTEGER, issuers INTEGER, blocks INTEGER, mean_a REAL, mean_r REAL, mean_a_tradable REAL,
   p REAL, alpha REAL, fp_check REAL, held INTEGER NOT NULL, passed INTEGER NOT NULL, why TEXT,
   PRIMARY KEY(program, version, k));
+CREATE TABLE IF NOT EXISTS bars(symbol TEXT NOT NULL, day TEXT NOT NULL, adj TEXT NOT NULL, o REAL, h REAL, l REAL,
+  c REAL, v REAL, fetched_at TEXT NOT NULL, PRIMARY KEY(symbol, day, adj));
+CREATE TABLE IF NOT EXISTS marks(symbol TEXT NOT NULL, day TEXT NOT NULL, label TEXT NOT NULL, px REAL, t TEXT,
+  source TEXT NOT NULL, fetched_at TEXT NOT NULL, PRIMARY KEY(symbol, day, label));
 CREATE TABLE IF NOT EXISTS receipts(id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, started_at TEXT NOT NULL,
   finished_at TEXT, status TEXT, summary TEXT);
 """
