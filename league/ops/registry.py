@@ -84,7 +84,8 @@ JOBS: tuple[Job, ...] = (
              "pause, a refused grant or the kill switch waiting; the equity lanes' own causes (league/ops/elane_health.py: "
              "disqualified versions, barren equity passes, broken lanes, programs refused by one rule); the event lane's "
              "own, by progress (league/ops/evl_health.py: no clean record pass, a decision missed in its window, "
-             "verdicts unanswered past their decision, intents left unsettled); the day's measured metered spend over "
+             "verdicts unanswered past their decision, intents left unsettled, real fills worse than the auction "
+             "prints); the day's measured metered spend over "
              "its cap (league/ops/metered.py); one stall notice listing them all, an owner step's at once and every "
              "12 h, the rest every 24 h; and the event lane's daily one-screen report by mail once a New York day "
              "(league/ops/daily_report.py)"),
