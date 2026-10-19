@@ -46,13 +46,13 @@ def e1_universe():
 
 
 class TheTable(unittest.TestCase):
-    def test_the_block_as_e1_deploys_it_is_inside_its_bounds_and_switched_on(self):
+    def test_the_block_as_e1_deploys_it_is_inside_its_bounds_and_its_switch_is_off_since_the_old_lanes_stop(self):
         self.assertEqual(equity_money_problems(), [])
         t = M.Table.from_constitution()
         e = t.equity
         self.assertIsInstance(e, M.EquityTable)
         self.assertEqual(e, M.EquityTable.from_constitution())
-        self.assertIs(e.enabled, True, "A10.2: the switch ships on (elane.mode off and the stock proof hold the lane)")
+        self.assertIs(e.enabled, False, "the old lanes are exits only (PREREG-EVL-1 section 8): A10.2's switch, off")
         self.assertEqual((e.invested_share, e.cash_reserve, e.min_order_usd), (D("1.00"), D("50"), D("10")))
         from league.tests.equity_design import CANDIDATES, in_force
 
@@ -539,9 +539,11 @@ class ThePreopenEquityCheck(unittest.TestCase):
         on = self.house(money__equity_money__enabled=True, gateway__stock_buys__enabled=False)
         self.assertIn("equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy", self.check(on)[1])
         self.assertTrue(self.check(self.house(money__equity_money__enabled=True))[0])
-        self.assertIs(CONSTITUTION["equity_money"]["enabled"], True, "A10.2: the block as deployed is on")
-        self.assertIn("equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy",
-                      self.check(self.house(gateway__stock_buys__enabled=False))[1], "so the deployed block needs it")
+        # THE OLD LANES ARE EXITS ONLY (PREREG-EVL-1 section 8): the block in force is off, so it agrees with the
+        # gateway on (as deployed) and off alike; its rollback (True) needs the gateway on again.
+        self.assertIs(CONSTITUTION["equity_money"]["enabled"], False, "the old lanes' stop: the block in force is off")
+        self.assertTrue(self.check(self.house())[0], "the block in force beside the gateway's buys on")
+        self.assertTrue(self.check(self.house(gateway__stock_buys__enabled=False))[0], "and beside them off")
         # No book health: reported while the lane is off, a FAIL once it is on.
         ok, _, info = self.check(self.house(release__live__equity=None, money__equity_money__enabled=False))
         self.assertTrue(ok)

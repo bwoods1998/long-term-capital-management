@@ -74,7 +74,9 @@ class TheTableInForce(unittest.TestCase):
         invested cap bounds the lane then."""
         eq = A20.equity
         self.assertEqual((eq.probe_sleeve_share, eq.probe_max_programs), (D("0.50"), 3))
-        self.assertEqual(replace(EQ, probe_sleeve_share=D("0.50"), probe_max_programs=3), eq, "no other row differs")
+        # (The grid's tables carry the switch on, `equity_design.table_at`: the old lanes' stop's rollback.)
+        self.assertEqual(replace(EQ, probe_sleeve_share=D("0.50"), probe_max_programs=3, enabled=True), eq,
+                         "no other row differs")
         lot = eq.probe_sleeve_share * eq.position_share["etf"]
         self.assertEqual(lot, D("0.25"))
         self.assertLess(eq.probe_max_programs * lot, eq.invested_share)

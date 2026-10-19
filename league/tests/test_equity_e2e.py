@@ -25,6 +25,7 @@ invented sessions after it), quoted a half-spread wide, so the twin's gap is the
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import tempfile
 import unittest
@@ -211,7 +212,11 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
         for key, witnesses in ((STOCK_BUY_KEY, STOCK_BUY_WITNESSES), (STOCK_SELL_KEY, STOCK_WITNESSES)):
             state.put(key, {"schema": 1, "status": "passed", **{k: True for k in witnesses}})   # its own tests prove it
         table = M.Table.from_constitution()
-        self.assertTrue(table.equity.enabled, "A10.2: the switch ships on")
+        self.assertFalse(table.equity.enabled, "the old lanes are exits only (PREREG-EVL-1 section 8)")
+        # THE LANE END TO END WITH ITS SWITCH ON (A10.2; the old lanes' stop's rollback, the row alone): the machinery
+        # the stop leaves idle, as it runs again the day the row is True. The stop's own behaviour (no buy goes, every
+        # exit does) is held on the table in force in league/tests/test_equity_opens_off.py.
+        table = dataclasses.replace(table, equity=dataclasses.replace(table.equity, enabled=True))
         events, alerts = [], []
         book = L.EquityBook(state, venue, market, table, EquityFamilies(self.root), decider=InlineDecider(),
                             stock_proof=StockPaperProof(state, None, clock=self.clock), sizing_equity=lambda: E,

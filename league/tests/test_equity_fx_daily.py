@@ -83,7 +83,11 @@ class SwarmCase(E2E.TheEquityLaneEndToEnd):
         for key, witnesses in ((E2E.STOCK_BUY_KEY, E2E.STOCK_BUY_WITNESSES), (E2E.STOCK_SELL_KEY, E2E.STOCK_WITNESSES)):
             state.put(key, {"schema": 1, "status": "passed", **{k: True for k in witnesses}})
         self.alerts: list[tuple[str, str]] = []
-        book = L.EquityBook(state, venue, market, E2E.M.Table.from_constitution(), EquityFamilies(self.root),
+        # The equity opens on (A10.2; the old lanes' stop's rollback, the row alone): these days' seats and buys are the
+        # machinery the stop leaves idle (league/tests/test_equity_opens_off.py holds the stop on the table in force).
+        table = E2E.M.Table.from_constitution()
+        table = T.dataclasses.replace(table, equity=T.dataclasses.replace(table.equity, enabled=True))
+        book = L.EquityBook(state, venue, market, table, EquityFamilies(self.root),
                             decider=InlineDecider(), stock_proof=E2E.StockPaperProof(state, None, clock=self.clock),
                             sizing_equity=lambda: E2E.E, root=self.root, clock=self.clock,
                             alert=lambda level, text: self.alerts.append((level, text)))
@@ -1215,6 +1219,9 @@ class TheSizingUpStepIsParked(T.BookTest):
         from league.live import real as R
 
         in_force = M.EquityTable.from_constitution()                # the table in force, not the harness's invented one
+        # ... with its switch on (the old lanes' stop's rollback): the band rules run only while the opens are on, and
+        # with them off "no band move" would hold for that reason alone.
+        in_force = T.dataclasses.replace(in_force, enabled=True)
         h, inst, row = self.winner(in_force)
         et = h.table.equity
         self.assertEqual((et.sized_min_trades, h.table.probe_loss_basis), (1000, "net"))
@@ -1240,7 +1247,7 @@ class TheSizingUpStepIsParked(T.BookTest):
         """The same program under the rule's own 20 closes: the book's sync moves it to Sized. Parking is the row."""
         from league.live import money as M
 
-        pre_registered = T.dataclasses.replace(M.EquityTable.from_constitution(), sized_min_trades=20)
+        pre_registered = T.dataclasses.replace(M.EquityTable.from_constitution(), sized_min_trades=20, enabled=True)
         h, inst, row = self.winner(pre_registered)
         moves = self.synced(h)
         self.assertEqual([(family, band) for family, band, _ in moves], [(SPY, "sized")])
