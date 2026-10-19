@@ -1187,7 +1187,8 @@ class EquityBook:
                                  for r in self.state.rows("SELECT * FROM eq_event_programs ORDER BY program")],
                     "proof": {name: (stage or {}).get("status") for name, stage in (stages or {}).items()} or None,
                     "list": self.state.get("eq_event_list"),
-                    "decisions": [{"day": r["day"], "at": r["at"], **(loads(r["summary"], {}) or {})} for r in
+                    "decisions": [{"day": r["day"], "at": r["at"], "status": r["status"],
+                                   **(loads(r["summary"], {}) or {})} for r in
                                   self.state.rows("SELECT * FROM eq_event_decisions ORDER BY day DESC, at LIMIT 4")]}
         except Exception as exc:  # noqa: BLE001 - a health line, never the health page's end
             return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
@@ -5009,15 +5010,20 @@ class EquityBook:
 
     # ---------------------------------------------------------------- the decision
     def _event_decide(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
-        """ONE DECISION A SESSION AND AUCTION (`eq_event_decisions`): the lots due to exit at this auction planned
-        first (`_event_exits`, whatever the switch says: an exit never waits on it), then, while the event kind is on,
-        each live program of this auction's entries asked for its real-money picks (`book.picks`), ranked, held to its
-        room (`max_open` less what it holds and has on order) and to one name an auction across programs
-        (`book.one_name_an_auction`), and recorded as buy intents with their side rows (the limit, sigma, the weight,
-        the exit plan). It waits a few minutes for the lane's own decision of the same auction (`EVENT_DECIDE_WAIT_S`),
-        then decides on the store as it stands; with no lane on this House it plans the exits alone."""
+        """ONE DECISION A SESSION AND AUCTION (`eq_event_decisions`, status `done`): the lots due to exit at this auction
+        planned first (`_event_exits`, whatever the switch says: an exit never waits on it), then, while the event kind
+        is on, each live program of this auction's entries asked for its real-money picks (`book.picks`, ranked), and
+        the auction's slots given out IN ROOM'S ORDER (`book.allocate`, release 1019b's second review: Sized, then
+        Probe, then learning, then the tables' order; each program takes its own ranked picks, passing over a name an
+        earlier program was given and a pick `_event_gate` skips whatever the room (no whole share fits by price, or the
+        name is sold at this auction), until its room, `max_open` less what it holds and has on order, is full), and
+        recorded as buy intents with their side rows (the limit, sigma, the weight, the exit plan). It waits a few
+        minutes for the lane's own decision of the same auction (`EVENT_DECIDE_WAIT_S`), then decides on the store as it
+        stands; with no lane on this House it plans the exits alone. A decision that cannot read what it decides on (the
+        close's T29 minutes after a retry, or E) is written `failed` with its errors and made again the next minute of
+        its window."""
         day = em.day.isoformat()
-        if self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=?", (day, at)):
+        if self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=? AND status='done'", (day, at)):
             return
         decided_at = em.open_decide if at == "open" else em.close_decide
         # THE EXITS FIRST, before anything of the lane is read (release 1019b's review: an exit never waits on the lane):
@@ -5040,9 +5046,12 @@ class EquityBook:
             out["event_bands"] = "the lane's band table cannot be read: no event buy is planned this decision"
         if lane is not None and s.enabled and readable:
             moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
-            reaction = adapter.reaction_reader(lane, em.day, daily=self._event_daily_close,
-                                               minutes=self._event_minute_close, minutes_many=self._event_minute_closes)
+            unread: list[str] = []
+            reaction = adapter.reaction_reader(
+                lane, em.day, daily=self._event_daily_close, minutes=self._event_minute_close,
+                minutes_many=lambda names, session: self._event_minute_closes(names, session, failed=unread))
             wanted: dict[str, list[Any]] = {}
+            rooms: dict[str, int] = {}
             insts = {}
             for inst in self._instances(alive=True):
                 program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
@@ -5051,7 +5060,7 @@ class EquityBook:
                 room = s.max_open(inst.band) - self._event_open_count(inst.id)
                 if room <= 0:
                     # (A program with no room reads nothing: release 1019b's review; its picks would all be dropped.)
-                    wanted[inst.family] = []
+                    wanted[inst.family], rooms[inst.family] = [], 0
                     insts[inst.family] = (inst, program)
                     summary["programs"][inst.family] = {"picks": None, "room": 0}
                     continue
@@ -5063,17 +5072,34 @@ class EquityBook:
                     self._error(f"event picks {inst.family}", exc, out)
                     summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
                     continue
-                wanted[inst.family] = got[:max(0, room)]
+                wanted[inst.family], rooms[inst.family] = list(got), room
                 insts[inst.family] = (inst, program)
-                summary["programs"][inst.family] = {"picks": len(got), "room": max(0, room)}
-            chosen = adapter.one_name_an_auction(wanted, {family: insts[family][0].band for family in wanted})
-            symbols = sorted({p.symbol for picks in chosen.values() for p in picks})
+                summary["programs"][inst.family] = {"picks": len(got), "room": room}
+            gate, unreadable = self._event_gate(day, at, s, adapter) if any(wanted.values()) else (None, "")
+            if unread or unreadable:
+                # (Release 1019b's second review: the close's T29 minutes could not be read, a failed request read again
+                # once, or E could not be: no pick is decided on a reading that is missing. The decision is written
+                # `failed` with why, and made again the next minute of its window; its exits are planned already.)
+                summary["errors"] = (unread + ([unreadable] if unreadable else []))[:5]
+                for why in summary["errors"]:
+                    out.setdefault("errors", []).append(f"event decide {at}: {why}"[:300])
+                with self.state.transaction():
+                    self.state.upsert("eq_event_decisions", {"day": day, "at": at, "decided_at": _iso(decided_at),
+                                                             "status": "failed", "summary": dumps(summary),
+                                                             "created_at": now}, "day, at")
+                out["event_decide"] = f"{at} {day}: not decided ({summary['errors'][0][:160]}); decided again next minute"
+                return
+            given, passed = adapter.allocate(wanted, rooms, {family: insts[family][0].band for family in wanted},
+                                             (lambda family, pick: gate(insts[family][0].band, pick)) if gate else None)
+            symbols = sorted({p.symbol for picks in given.values() for p in picks})
             sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
-            for family, picks in chosen.items():
+            for family, picks in given.items():     # (ROOM's order: the sends go in it)
                 inst, program = insts[family]
                 for pick in picks:
                     planned.append((inst, program, pick))
                 summary["programs"][family]["planned"] = len(picks)
+                if passed.get(family):
+                    summary["programs"][family]["skipped"] = dict(passed[family])
         with self.state.transaction():
             for inst, program, pick in planned:
                 self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
@@ -5141,6 +5167,70 @@ class EquityBook:
                 out.add(str(r["cik"]))
         return out
 
+    def _event_gate(self, day: str, at: str, s: Any, adapter: Any) -> tuple[Callable[[str, Any], str | None] | None, str]:
+        """THE RULES THAT SKIP A REAL-MONEY EVENT WHATEVER THE ROOM, applied at the decision BEFORE a pick takes a slot of
+        its program's room (release 1019b's second review: PREREG-EVL-3 section 2 skips such an event, "the shadow keeps
+        the event", and its program's limit of open positions is on positions, never on slots), on the figures
+        `_size_event` sizes the buy on at its send: E the account equity at the previous close (`last_equity`, never
+        above the House's sizing equity), the limit (`book.limit_price`), and the name's book-wide value (the larger of
+        the book's lots and the account's position, plus the working buys of the name). A pick is skipped when:
+        - "name_wall": one share at the limit does not fit under the book-wide 10% a name (`per_name_share` x E less the
+          name's book-wide value), so above 10% of E for a name held nowhere (not TRADABLE, PREREG-EVL-1 section 5);
+        - "one_share": the band's target (`position_share` x E) buys no whole share at the limit and its one-share rule
+          refuses one (learning: one share at the limit above `one_share_max.learning` x E, 5%);
+        - "sale": a sale of the name is planned or working at this same auction (an event lot's exit, planned by this
+          decision before its picks): no buy of the name goes in it (`_event_sales_at`; an exit never waits on an
+          entry, the reading that trades less).
+        The walls that depend on the whole book (the 100% book, the cash, the loss budget) are `_size_event`'s at the
+        send, as before. Returns (skip(band, pick) -> one of those keys or None, "") or (None, why E cannot be read)."""
+        E = self.sizing_equity()
+        if E is None or E <= 0:
+            return None, "no sizing equity (the grant or the account)"
+        account = self._read_account()
+        if account is None:
+            return None, "the account could not be read this minute"
+        last = A.dec(account.get("last_equity"))
+        if last is not None and last > 0:
+            E = min(E, last)     # (the equity at the previous close, as `_size_event` reads it)
+        held: dict[str, tuple[Decimal | None, Decimal]] = {}
+        for r in self._read_positions() or []:
+            if str(r.get("asset_class") or "") == "us_equity":
+                held[str(r.get("symbol") or "").upper()] = (A.dec(r.get("market_value")), A.dec(r.get("qty")) or ZERO)
+        buying: dict[str, Decimal] = {}
+        for o in self._orders(WORKING):
+            if o.side == "buy":
+                buying[o.symbol] = buying.get(o.symbol, ZERO) + o.remaining * o.limit_px
+        selling = self._event_sales_at(day, at)
+        wall = s.per_name * E
+
+        def skip(band: str, pick: Any) -> str | None:
+            symbol = str(pick.symbol).upper()
+            if symbol in selling:
+                return "sale"
+            limit = adapter.limit_price(pick.prev_close, s.limit_ratio)
+            if limit <= 0:
+                return "name_wall"
+            market_value, qty = held.get(symbol, (None, ZERO))
+            account_value = abs(market_value or qty * limit)
+            book_value = sum((lot.value for lot in self._lots(symbol=symbol)), ZERO)
+            if limit > wall - (max(book_value, account_value) + buying.get(symbol, ZERO)):
+                return "name_wall"
+            cap = s.one_share_cap(band)
+            if s.share(band) * E < limit and cap is not None and limit > cap * E:
+                return "one_share"
+            return None
+        return skip, ""
+
+    def _event_sales_at(self, day: str, at: str, symbol: str | None = None) -> set[str]:
+        """The symbols an event lot's SALE is planned or working for at this auction (its intent not finished)."""
+        sql = ("SELECT DISTINCT e.symbol FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE e.side='sell' "
+               "AND e.day=? AND e.at=? AND i.status IN ('planned', 'sent')")
+        args: list[Any] = [day, at]
+        if symbol is not None:
+            sql += " AND e.symbol=?"
+            args.append(symbol)
+        return {str(r["symbol"]).upper() for r in self.state.rows(sql, args)}
+
     def _event_sigmas(self, symbols: Sequence[str], day: dt.date, s: Any) -> dict[str, float | None]:
         """{symbol: the daily return sd of the `sigma_sessions` sessions before `day`} from the adjusted SIP daily bars
         (one read for every pick of an auction); None for a symbol whose bars cannot be read (its lot then weighs the
@@ -5190,10 +5280,13 @@ class EquityBook:
     EVENT_MINUTE_BATCH = 200
     EVENT_MINUTE_SPAN_S = 1800
 
-    def _event_minute_closes(self, symbols: Sequence[str], session: Any) -> dict[str, float | None]:
+    def _event_minute_closes(self, symbols: Sequence[str], session: Any, *,
+                             failed: list[str] | None = None) -> dict[str, float | None]:
         """{symbol: the T29 minute close in `session`} for many names at once (`book.reaction_reader`'s
         `minutes_many`): SIP 1-minute bars, `EVENT_MINUTE_BATCH` names a request; None for a name with no bar, or whose
-        read failed (that decision does not take its REACT rows; nothing is read again name by name)."""
+        read failed (nothing is read again name by name). A request that fails is sent again once (release 1019b's
+        second review); one that fails twice says why in `failed`, and the decision that asked is not made this minute
+        (`_event_decide`: made again the next minute of its window)."""
         adapter = self._event_adapter()
         names = sorted({str(x).upper() for x in symbols if x})
         t29 = adapter.t29(session)
@@ -5203,10 +5296,16 @@ class EquityBook:
         out: dict[str, float | None] = {}
 
         def read(chunk: list[str], start: dt.datetime) -> Mapping[str, Any] | None:
-            try:
-                return self.market.bars(chunk, timeframe="1Min", start=stamp(start), end=end, adjustment="raw") or {}
-            except Exception:  # noqa: BLE001 - unread: those names' REACT rows are not taken this decision
-                return None
+            error: BaseException | None = None
+            for _ in range(2):
+                try:
+                    return self.market.bars(chunk, timeframe="1Min", start=stamp(start), end=end, adjustment="raw") or {}
+                except Exception as exc:  # noqa: BLE001 - read again once, then unread (said in `failed`)
+                    error = exc
+            if failed is not None:
+                failed.append(f"the T29 minutes of {len(chunk)} names could not be read: {type(error).__name__}: "
+                              f"{str(error)[:120]}")
+            return None
 
         quiet: list[str] = []
         for i in range(0, len(names), self.EVENT_MINUTE_BATCH):
@@ -5460,8 +5559,11 @@ class EquityBook:
                           until: float, s: Any, adapter: Any, real_block: Callable[..., str | None],
                           killed: Callable[[], bool], out: dict) -> None:
         """One event BUY at its auction: every gate of a real equity open (`_open_block`: the House's, the kind's switch,
-        the auction proof, the freezes, the program's band), the day's eligible list at the gateway, one working order a
-        symbol, the day's order count, the program's room, then `_size_event`'s whole shares at the limit."""
+        the auction proof, the freezes, the program's band), the day's eligible list at the gateway, no sale of the name
+        at this auction (an exit never waits on an entry: release 1019b's second review; a sale whose send the gateway
+        refused for a reading it could not make, a 424 or 409, goes again next minute, and a buy of the name sent in
+        between would hold it to the cut-off), one working order a symbol, the day's order count, the program's room,
+        then `_size_event`'s whole shares at the limit."""
         if side is None:
             self._finish(intent, "refused", "an event buy with no side row")
             return
@@ -5475,6 +5577,8 @@ class EquityBook:
             lane = self._event_lane_store()
             if lane is None or not self._event_publish(dt.date.fromisoformat(day), adapter, lane, out):
                 why = "the day's eligible list is not at the gateway yet"
+        if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
+            why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or self._count_refusal(day, exit_=False)
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):

@@ -150,17 +150,46 @@ def backfill(ctx: Context, first: dt.date, last: dt.date, *, forms: Iterable[str
 
 
 # ---------------------------------------------------------------------------------------------------- eligibility
-def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool = True) -> dict[str, Mapping[str, Any] | None]:
-    """The universe row (or None) of each CIK for entry session `day`, fetching what it needs."""
+def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool = True, kind: str | None = None,
+                stored: Mapping[str, str | None] | None = None) -> dict[str, Mapping[str, Any] | None]:
+    """The universe row (or None) of each CIK for entry session `day`, ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT
+    MADE IT (release 1019b's second review; league/events/universe.py): a LIVE decision (`live`) reads the live rule's
+    result and checks under the live rule (status=active, tradable) a CIK with none, a CIK the backfill rule judged
+    first included; a BACKFILL decision reads any result of the session (eligible only when none is ineligible,
+    `universe.combined`) and checks under the backfill rule (status=all, the previous session's closing-print exchange)
+    only a CIK no decision has judged; on a session decided before the results were kept, a CIK this decision's
+    `kind` ("open" | "close") live run already judged (`stored` {cik: when its first event here was stored},
+    `universe.seen_live`) is ineligible as it found. Every check's result is kept, eligible or not
+    (`universe.record_result`), as it is made. It fetches what it needs; an empty asset list is unreadable (raised, so
+    no result is kept from it)."""
     st = ctx.store
     want = sorted({c for c in ciks if c})
     out: dict[str, Mapping[str, Any] | None] = {}
     prior = C.previous(st, day, U.ADV_SESSIONS)
     if len(prior) < U.ADV_SESSIONS:
         return {c: None for c in want}
-    cached = {r["cik"]: dict(r) for r in st.db.execute("SELECT * FROM universe WHERE day=?", (day.isoformat(),))}
-    todo = [c for c in want if c not in cached]
+    rule = S.LIVE_RULE if live else S.BACKFILL_RULE
+    known = U.results(st, day)
+    todo = []
+    for cik in want:
+        have = known.get(cik) or {}
+        if live and S.LIVE_RULE in have:
+            out[cik] = have[S.LIVE_RULE]
+        elif not live and have:
+            out[cik] = U.combined(have)
+        else:
+            todo.append(cik)
+    if not live and todo and kind is not None:
+        judged = U.seen_live(st, day, kind, {c: (stored or {}).get(c) for c in todo})
+        for cik in sorted(judged):
+            U.record_result(st, day, cik, S.LIVE_RULE, None, now=ctx.now())
+            out[cik] = None
+        todo = [c for c in todo if c not in judged]
+    if not todo:
+        return out
     assets = ctx.assets(live)
+    if not assets:
+        raise RuntimeError("Alpaca's asset list came back empty: no eligibility is decided on it")
     tickers = ctx.tickers_for(day)
     symbols = sorted({t for c in todo for t, _ in tickers.get(c, []) if U._listed(assets.get(t), live)})
     have = {r[0] for r in st.db.execute(
@@ -168,14 +197,23 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
     missing = [s for s in symbols if s not in have]
     if missing:
         U.fetch_daily_bars(st, ctx.gw, missing, prior[0].day, prior[-1].day, now=ctx.now())
-    for cik in want:
-        if cik in cached:
-            out[cik] = cached[cik]
-            continue
+    for cik in todo:
         ok = U.operating(st, ctx.sec, cik, day, now=ctx.now()) if tickers.get(cik) else False
         listing = None if live else (lambda sym, before=prior[-1]: U.closing_print_exchange(ctx.gw, sym, before))
-        out[cik] = U.eligible(st, cik, day, tickers=tickers, assets=assets, operating_ok=ok, now=ctx.now(), live=live,
-                              listing=listing)
+        row = U.eligible(st, cik, day, tickers=tickers, assets=assets, operating_ok=ok, now=ctx.now(), live=live,
+                         listing=listing)
+        U.record_result(st, day, cik, rule, row, now=ctx.now())
+        out[cik] = row
+    return out
+
+
+def _first_stored(rows: Iterable[Mapping[str, Any]]) -> dict[str, str | None]:
+    """{cik: the earliest `received_at` of its rows} (`eligibility`'s `stored`)."""
+    out: dict[str, str | None] = {}
+    for row in rows:
+        cik, at = row.get("cik"), row.get("received_at")
+        if cik and at and (out.get(cik) is None or S.parse_iso(str(at)) < S.parse_iso(str(out[cik]))):
+            out[str(cik)] = str(at)
     return out
 
 
@@ -224,7 +262,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     by_ticker = {t: cik for cik, rows in ctx.tickers_for(day).items() for t, _ in rows}
     articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, nlo, nhi)]
     elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [r["cik"] for r in ins] + [r["cik"] for r in buys]
-                       + [a["cik"] for a in articles if a["cik"]], live=not backfill_run)
+                       + [a["cik"] for a in articles if a["cik"]], live=not backfill_run, kind="open",
+                       stored=_first_stored([*e8k, *ins, *buys, *articles]))
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -348,7 +387,7 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     articles = [a | {"cik": by_ticker.get(a["symbol"])} for a in P.news_in(st, dlo, dhi)
                 if S.parse_iso(a["knowable_at"]) > S.parse_iso(P.REGISTERED_AT_2)]
     elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [a["cik"] for a in articles if a["cik"]],
-                       live=not backfill_run)
+                       live=not backfill_run, kind="close", stored=_first_stored([*e8k, *articles]))
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:

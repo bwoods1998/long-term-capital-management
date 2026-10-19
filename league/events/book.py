@@ -25,13 +25,18 @@ THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner'
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
   reads the lane's store READ-ONLY (`Lane`), never asks a verdict, never fetches a filing; the one thing it writes
-  there is `real_fills`. Eligibility is the lane's universe row for the entry session; an issuer with no row there is
-  not traded. One position per issuer per program: an issuer the program holds, or held within the last 5 sessions,
+  there is `real_fills`. Eligibility is the lane's universe row for the entry session made by the LIVE rule
+  (`LIVE_ROWS`: release 1019b's second review; a row only the backfill rule made, at a re-decision, never trades); an
+  issuer with no such row is not traded. One position per issuer per program: an issuer the program holds, or held
+  within the last 5 sessions,
   real money's lots or the shadow's intents of earlier decisions alike, is skipped. Ranking when there is less room
   than events: by the program's own rank (verdict score; a reaction for the REACT rows; the purchase value for
   INS-BUY), higher first, then ADV.
 - ROOM (PREREG-EVL-3 section 2): Sized programs first, then Probe, then learning; within a band the tables' order;
-  within a program its own ranking. One name at one auction goes to the first program in that order.
+  within a program its own ranking. One name at one auction goes to the first program in that order that is GIVEN it:
+  each program takes its own ranked picks whose name no earlier program was given, until its room is full
+  (`allocate`, release 1019b's second review), passing over a pick the book's rules skip whatever the room (no whole
+  share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`).
 - SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
   the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
   when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
@@ -287,17 +292,26 @@ def decided(lane: Lane, day: dt.date, at: str) -> bool:
                            "LIMIT 1", (job,)).fetchone() is not None
 
 
+#: THE LIVE RULE'S ELIGIBLE ROWS of an entry session (PREREG-EVL-1 section 2: a live decision reads Alpaca's
+#: `status=active` and `tradable: true`): the universe rows whose result in the lane's `eligibility` is the live rule's
+#: and eligible (league/events/store.py; release 1019b's second review). A row only the backfill rule made (the hourly
+#: re-decision of a session, a backfill) is never real money's: no pick, no name on the gateway's list.
+LIVE_ROWS = ("SELECT u.* FROM universe u JOIN eligibility e ON e.day=u.day AND e.cik=u.cik AND e.symbol=u.symbol "
+             "WHERE u.day=? AND e.rule='live' AND e.eligible=1")
+
+
 def eligible(lane: Lane, day: dt.date) -> list[str]:
-    """THE ELIGIBLE LIST of entry session `day`: every universe row the lane wrote for it (PREREG-EVL-1 section 2, the
-    issuers with events), its symbols sorted. The gateway admits an event buy only for a name on it."""
-    return sorted({str(r["symbol"]).upper() for r in lane.db.execute("SELECT symbol FROM universe WHERE day=?",
-                                                                      (day.isoformat(),))})
+    """THE ELIGIBLE LIST of entry session `day`: the symbols of the live rule's eligible universe rows the lane wrote for
+    it (`LIVE_ROWS`; PREREG-EVL-1 section 2, the issuers with events), sorted. The gateway admits an event buy only for
+    a name on it."""
+    return sorted({str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))})
 
 
 def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
-    """{cik: the universe row of entry session `day`} (the highest ADV when a CIK has two)."""
+    """{cik: the live rule's eligible universe row of entry session `day`} (`LIVE_ROWS`; the highest ADV when a CIK has
+    two)."""
     out: dict[str, dict[str, Any]] = {}
-    for r in lane.db.execute("SELECT * FROM universe WHERE day=?", (day.isoformat(),)):
+    for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),)):
         row = dict(r)
         have = out.get(str(row["cik"]))
         if have is None or float(row.get("adv20") or 0) > float(have.get("adv20") or 0):
@@ -561,24 +575,47 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     return sorted(out, key=lambda p: (-(p.rank if p.rank is not None else float("-inf")), -p.adv20, p.event))
 
 
+def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str, int],
+             band_of: Mapping[str, str] | None = None, skip: Callable[[str, Pick], str | None] | None = None
+             ) -> tuple[dict[str, list[Pick]], dict[str, dict[str, int]]]:
+    """ROOM AT ONE AUCTION (PREREG-EVL-3 section 2) WITH ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8, PREREG-EVL-2
+    section 3), release 1019b's second review: the programs in ROOM's order (Sized, then Probe, then learning, `band_of`
+    {program: band}; within a band the tables' order), and each takes ITS OWN ranked picks, in its order, until its room
+    (`rooms` {program: open positions it may still take}) is full, passing over a name an EARLIER program was given at
+    this auction and a pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever
+    the room: `EquityBook._event_gate`). Only a name GIVEN to a program is taken: a name a program wanted but had no room
+    for (or skipped) goes on to the next program that wants it, which then moves on to its next picks. Returns
+    ({program: the picks given, in its order}, {program: {why passed over: how many}}), both in ROOM's order."""
+    bands_ = dict(band_of or {})
+    taken: set[str] = set()
+    given: dict[str, list[Pick]] = {}
+    passed: dict[str, dict[str, int]] = {}
+    for program in sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND))):
+        room = max(0, int(rooms.get(program, 0)))
+        mine: list[Pick] = []
+        why: dict[str, int] = {}
+        for pick in picks_by_program[program]:
+            if len(mine) >= room:
+                break
+            reason = "name_given" if pick.symbol in taken else (skip(program, pick) if skip is not None else None)
+            if reason:
+                why[reason] = why.get(reason, 0) + 1
+                continue
+            mine.append(pick)
+            taken.add(pick.symbol)
+        given[program] = mine
+        passed[program] = why
+    return given, passed
+
+
 def one_name_an_auction(picks_by_program: Mapping[str, Sequence[Pick]],
                         band_of: Mapping[str, str] | None = None) -> dict[str, list[Pick]]:
-    """ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8; PREREG-EVL-3 section 2's ROOM): when two programs want the same
-    name at one auction, the first in ROOM's order takes it (Sized, then Probe, then learning, `band_of` {program:
-    band}; within a band the earlier row of the tables); the later program's pick of that name is skipped (one order a
-    symbol)."""
-    bands_ = dict(band_of or {})
-    seen: set[str] = set()
-    out: dict[str, list[Pick]] = {}
-    for program in sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND))):
-        mine = []
-        for pick in picks_by_program[program]:
-            if pick.symbol in seen:
-                continue
-            seen.add(pick.symbol)
-            mine.append(pick)
-        out[program] = mine
-    return out
+    """ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8; PREREG-EVL-3 section 2's ROOM) with no room limit: when two
+    programs want the same name at one auction, the first in ROOM's order takes it (Sized, then Probe, then learning,
+    `band_of` {program: band}; within a band the earlier row of the tables); the later program's pick of that name is
+    skipped (one order a symbol). `allocate` with every program's room its whole list."""
+    rooms = {program: len(picks) for program, picks in picks_by_program.items()}
+    return allocate(picks_by_program, rooms, band_of)[0]
 
 
 # ----------------------------------------------------------------------------------------------------------- reaction
@@ -643,8 +680,7 @@ def reaction_reader(lane: Lane, day: dt.date, *, daily: Callable[[str, dt.date],
             return have
         if minutes_many is not None and not batched:
             batched.append(True)
-            names = sorted({str(r["symbol"]).upper() for r in lane.db.execute(
-                "SELECT symbol FROM universe WHERE day=?", (day.isoformat(),))} - {
+            names = sorted({str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))} - {
                 str(r["symbol"]).upper() for r in lane.db.execute(
                     "SELECT symbol FROM marks WHERE day=? AND label='1530' AND px>0", (day.isoformat(),))})
             if names:
@@ -744,7 +780,7 @@ def publish(client: Any, day: dt.date, symbols: Sequence[str], *, timeout: float
 __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS", "LIVE_BANDS", "DEFAULT_BAND",
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
            "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
-           "settings", "Lane", "lane_path", "open_lane", "decided", "eligible", "universe_rows", "Band", "lane_bands",
-           "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "held_recently", "picks", "one_name_an_auction",
-           "t29", "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
-           "publish"]
+           "settings", "Lane", "lane_path", "open_lane", "decided", "LIVE_ROWS", "eligible", "universe_rows", "Band",
+           "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "held_recently",
+           "picks", "allocate", "one_name_an_auction", "t29", "minute_close", "last_session_before", "reaction_reader",
+           "limit_price", "sigma", "weight", "exit_plan", "publish"]

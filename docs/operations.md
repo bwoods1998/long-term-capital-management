@@ -24,6 +24,33 @@ constitution `34bbe7a5` -> `fd38e4e1` (R2's rows; the standing grant re-ratifies
 execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract
 `397b22b7` do not move.
 
+**The second review's fixes** (league/tests/test_events_review_1019b.py, "the second review"; no identity moves):
+- THE ROOM IS GIVEN IN ROOM'S ORDER (league/events/book.py `allocate`, league/equity/live.py `_event_decide`): Sized,
+  Probe, learning, then the tables' order; each program takes its own ranked picks whose name no earlier program was
+  given at the auction, until its room is full; only a name given is taken. REACT-ON takes the C1 events C1 has no room
+  for; GUIDE-O1 the READ-O1 events READ-O1 has no room for.
+- SIZE BEFORE SLOTS (`_event_gate`): before a pick takes a slot, one no whole share of fits by price (one share at the
+  limit above the book-wide 10% a name, or at learning a 2% target of no whole share with one share above 5% of E, on
+  E at the previous close as the send sizes it) and one whose name an event lot sells at the same auction are skipped
+  (the shadow keeps the event; the decision's summary counts them, `skipped`). AN EXIT NEVER WAITS ON AN ENTRY: a buy
+  waits while a sale of its name at its auction is unfinished (`_event_work_entry`).
+- The close decision's batched T29 read sends a failed request again once; when the retry fails too, the decision is
+  written `failed` (its summary and the minute's `errors` say why) and is made again the next minute of its window.
+- ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (league/events/run.py `eligibility`, the store's
+  new `eligibility` table): every result is kept, eligible or not, with its rule; the hourly re-decision never judges
+  again a CIK the live decision judged, and only the live rule's eligible rows reach real money's picks and the
+  gateway's eligible list (`book.LIVE_ROWS`). The migrated desktop store gains the table at the lane's first open of it
+  (each universe row labelled with its session's first decision's rule; meta `evl:eligibility:from`).
+- The House's re-decision reach is the judge's (`screen.FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`,
+  imported by house.py); demotion counts the current Probe stay (league/events/bands.py `probe_since`); a record pass
+  whose feed failed counts beside the error; a cut-then-failing decision waits as a failed one; a failed fetch is
+  tried again 2, 4, 8, 16 and 32 minutes after its first failure (six tries in all); `events.verdict_usd_day` $3.00 (the
+  goal's cost rule until budget rule 3 ships: the box's about $1.29 a day and the verdicts inside the $5 base).
+- Left as readings that trade less (the captain records them): the equity day's order count stays 60 (entries stop at
+  about 30 open-entry lots sold the same day); a program's room counts its lots sold in the same cross; a session
+  pending only on another program's verdicts is final for this one; the one-position-per-issuer rule reads the
+  intents of the sessions up to the entry session only (programs.py, unchanged).
+
 **Deploy, in order** (each never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight;
 CI green on the exact head):
 1. THE GATEWAY from this release's head: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1
@@ -77,7 +104,9 @@ never makes it an error alert, and a release watch never rolls back for it), and
 
 **Paid work.** The only paid calls are Claude Haiku 4.5 verdicts (PREREG-EVL-1 section 4), through the gateway's funded
 Claude total. None is asked while `<state>/PAUSE` exists, nor over the lane's own line, `events.verdict_usd_day` in
-`config.json` ($5 a New York day; the gateway's settled cost per call, $0.01 when it states none): a READ event then
+`config.json` ($3 a New York day from release 1019b's second review, the goal's cost rule until budget rule 3 ships:
+metered compute at most $5 a day plus half the trailing week's realized net profit, the House box about $1.29 of it;
+the gateway's settled cost per call, $0.01 when it states none): a READ event then
 waits for its verdict (no event is lost; the decision is made when the verdict is stored, as a backfill if late). A
 verdict that gets no answer (a refusal, a failure, PAUSE, the line) is asked again after 10 minutes, not every turn.
 Market-data reads are spaced 0.5 s apart (Alpaca's Basic plan is shared with the House's own book).
@@ -3556,9 +3585,9 @@ session):
 
 | moment (full day) | what the book does |
 |---|---|
-| 09:15 ET | THE OPEN DECISION (`_event_decide`), once: it waits up to 4 minutes for the lane's own `decide-open:<day>` receipt, then decides on the store as it stands. First the exits due at this open (below), then the band sync (once a session), then each live program whose entries are at the open |
+| 09:15 ET | THE OPEN DECISION (`_event_decide`), once (`eq_event_decisions` status `done`; one that cannot read its figures is `failed` and made again the next minute): it waits up to 4 minutes for the lane's own `decide-open:<day>` receipt, then decides on the store as it stands. First the exits due at this open (below), then the band sync (once a session), then each live program whose entries are at the open |
 | 09:16-09:27 ET | the `opg` sends (`_event_send`): sales first, then buys in ROOM's order |
-| close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`) |
+| close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; a T29 read that fails twice leaves it `failed`, made again at 15:47 or 15:48) |
 | close - 13 to - 11 min (15:47-15:49) | the `cls` sends |
 | auction + 2 min | the auction's end (`_event_finish`): a buy done or missed; a sale not filled climbs the ladder |
 | every minute | the real fills of event lots written back to the lane (`_event_fills`) |
@@ -3574,19 +3603,26 @@ session):
   only those STORED (`received_at`) and verdicts ANSWERED before the decision time (09:15 ET, close - 14 min); one per
   issuer; an issuer it holds, or held within 5 sessions (real lots, and the lane's intents of EARLIER decisions: the
   lane's own decision of the same auction, which the book waits for, is never a holding), skipped; ranked by the
-  program's own rank (verdict score; the reaction for REACT rows; the purchase value for INS-BUY), then ADV; held to its
-  room (`max_open` less what it holds and has on order: learning 8, Probe 6, Sized 8); ONE NAME AN AUCTION in ROOM's
-  order. Each pick is a buy intent with its side row in `eq_event_intents`: its band, the limit (`limit_ratio` x the
-  universe row's previous SIP close, rounded down to the cent), sigma (60 sessions of adjusted SIP daily closes before
-  the entry session), its open-risk weight and its exit plan. One `eq_event_decisions` row a session and auction.
+  program's own rank (verdict score; the reaction for REACT rows; the purchase value for INS-BUY), then ADV. Only the
+  lane's LIVE-RULE eligible rows are read (`book.LIVE_ROWS`: a row the backfill rule alone made never trades). THE
+  SLOTS (release 1019b's second review, `book.allocate`): the programs in ROOM's order, each taking its own ranked
+  picks, passing over a name an earlier program was given at this auction and a pick `_event_gate` skips (no whole
+  share fits by price on E at the previous close: one share at the limit above the book-wide 10% a name, or at learning
+  a 2% target of no whole share with one share above 5% of E; or its name is sold at this auction), until its room
+  (`max_open` less what it holds and has on order: learning 8, Probe 6, Sized 8) is full; only a name given is taken.
+  Each pick given a slot is a buy intent with its side row in `eq_event_intents`: its band, the limit (`limit_ratio` x
+  the universe row's previous SIP close, rounded down to the cent), sigma (60 sessions of adjusted SIP daily closes
+  before the entry session), its open-risk weight and its exit plan. One `eq_event_decisions` row a session and auction
+  (its summary: each program's picks, room, planned and skipped by why).
 - **ROOM** (PREREG-EVL-3 section 2): Sized programs' buys go first, then Probe's, then learning's; within a band the
   tables' order (PREREG-EVL-1's rows, then PREREG-EVL-2's); within a program its ranking. The walls that run short
   (the book at most 100% invested, the loss budget, the name's 10%) are spent in that order.
 - **A buy** goes through every gate of a real equity open (`_open_block`: the House's real-money block, the kill
   switch, the event kind's switch, the auction proof's BUY stage and no failed SELL stage, the freezes, the program's
   band), then the day's ELIGIBLE LIST at the gateway (`POST /v1/stock/eligible`, sent when a buy is planned and again
-  whenever the lane's universe of the day grew; kv `eq_event_list`), one working order a symbol, the House-wide day
-  count, the program's room. Its size is `size_entry`'s, the one sizing function: a target of the band's
+  whenever the lane's universe of the day grew; kv `eq_event_list`), no sale of the name planned or working at its
+  auction (an exit never waits on an entry), one working order a symbol, the House-wide day count, the program's room.
+  Its size is `size_entry`'s, the one sizing function: a target of the band's
   `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at the previous close
   (`last_equity`, never above the House's sizing equity), at the limit, capped by the name's BOOK-WIDE 10%
   (`per_name_share`: every lot, working buy and account position of the name), the 100% book, the House-wide cash and

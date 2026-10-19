@@ -49,9 +49,12 @@ above 1.25 x the previous close (real money's limit).
 | retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
 
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
-negative mean. LOOKS (version 2): at 60, 90, 135, 200, 300, 450, 675, 1000, 1500 and 2250 settled TRADABLE events,
-each needing at least 40 issuers and 8 session blocks; thresholds first reached at the same close are one look; the
-skew check starts and caps at 0.018 (A65). Room when short: Sized, then Probe, then learning. The lane writes the
+negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
+`band_history`; release 1019b's second review), so a program the next passed look returns to Probe is not demoted again
+on the events that demoted it; Sized counts every Probe+ event. LOOKS (version 2): at 60, 90, 135, 200, 300, 450, 675,
+1000, 1500 and 2250 settled TRADABLE events, each needing at least 40 issuers and 8 session blocks; thresholds first
+reached at the same close are one look; the skew check starts and caps at 0.018 (A65). Room when short: Sized, then
+Probe, then learning (how the book gives it out: "Real money" below). The lane writes the
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
 with the same module's `bands(store)` and writes every real fill to `real_fills` with its `record_fill` (a posted fee
 updates its row); on the House the lane reviews the real fills after each night's screen (`bands.review`: demotion and
@@ -64,7 +67,25 @@ session that waits on a verdict has no intent yet), and the EDGAR daily-index ba
 the House still backfills has run. Late data delays the computation, never its as-of date (PREREG-EVL-1 section 7),
 so a look is written about three sessions after its close. A version 2 look on record is never derived again: the
 schedule resumes after the last one at the k after every k written or merged into it (the merged ks are in the look's
-detail), and the band move a look makes (Probe, retired) is written in the look's own transaction.
+detail), and the band move a look makes (Probe, retired) is written in the look's own transaction. The re-decision reach
+a look waits out (three sessions, the 45-day look-back, three backfill weekdays) is defined once, in the judge
+(`screen.py` `FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`, behind the wall), and the House's lane
+takes its own from there (`house.py` imports them; release 1019b's second review): a House change the updater ships by
+itself can use the reach but not widen it, and a wider one would only delay a look (`screen._reach` waits out the
+larger).
+
+ELIGIBILITY IS DECIDED ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review;
+PREREG-EVL-1 section 2: a live decision reads Alpaca's `status=active` and `tradable: true`, a backfilled one
+`status=all` and the previous session's closing-print exchange). Every result, eligible or not, is kept in the store's
+`eligibility` table with its rule (`live` or `backfill`). A live decision reads the live rule's result and checks under
+the live rule a CIK that has none; a backfill decision (the House's hourly re-decision of the last three sessions among
+them) reads whatever result the session has, eligible only when none is ineligible, and checks under the backfill rule
+only a CIK no decision has judged (a late event). So the re-decision of a live session never admits a name the live
+decision refused (a `tradable: false` one, say), and a row only the backfill rule made never serves a live decision,
+real money's picks or the eligible list the gateway checks. A store from before the table (the desktop's, migrated)
+labels each universe row with the rule of its session's first decision run (live when it started within 10 minutes of
+its time, else backfill); for those sessions a re-decision reads a CIK whose event was stored before the session's live
+run as that run found it, ineligible.
 
 ## The code
 
@@ -113,13 +134,17 @@ turn, the most urgent due first.
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
 
 A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
-next record passes, six passes in all, then left to the daily-index backfill; a decision that raised is closed
-`failed` and run again a minute later while it is live (a cut one goes on at the next turn). Verdicts are asked from
+first record pass 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, then left to the daily-index
+backfill (an SEC outage of half an hour, or SEC's 10-minute rate-limit block, no longer spends every try); a record
+pass whose feed failed counts its retried rows beside the feed's error; a decision that raised is closed `failed` and
+run again a minute later while it is live, then every 10 minutes (a cut one goes on at the next turn; one cut and then
+failing waits as a failed one). Verdicts are asked from
 07:30 ET because a session's universe is fixed then
 (its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
 `ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
-over the lane's own line (`events.verdict_usd_day`, $5 a New York day): a READ event then waits, as PREREG-EVL-1
-section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
+over the lane's own line (`events.verdict_usd_day`, $3 a New York day from release 1019b's second review: the goal's
+cost rule, metered compute at most $5 a day plus half the trailing week's realized net profit, with the House box at
+about $1.29 a day, until budget rule 3 ships): a READ event then waits, as PREREG-EVL-1 section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
 How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
 [operations](operations.md), "The event lane on the House".
 
@@ -151,3 +176,19 @@ on the name does); the equity day's order count keeps one order for each event l
 sent; the close decision reads each name's T29 minute once, all the day's names in batched requests, and the lane's
 own 15:30 marks are used where they exist (on the House the lane's close decision runs a minute after the book's); a
 gateway refusal that it holds no eligible list of the day publishes the list again.
+
+How the book gives out the room (release 1019b's second review). ROOM IN ITS ORDER: at each decision the programs go
+Sized, then Probe, then learning, then the tables' order; each takes ITS OWN ranked picks whose name no earlier program
+was given at that auction, until its room (its open positions left) is full, and only a name given to a program is
+taken (`book.allocate`): REACT-ON takes the C1 events C1 has no room for, GUIDE-O1 the READ-O1 events READ-O1 has no
+room for. SIZE BEFORE SLOTS: before a pick takes a slot, the book skips (the shadow keeps the event) one that no whole
+share of fits by price, on the figures the send sizes on (E the equity at the previous close; the name's book-wide
+value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
+or, at learning, a 2% target that buys no whole share with one share above 5% of E; and one whose name an event lot
+sells at that same auction. AN EXIT NEVER WAITS ON AN ENTRY: no buy of a name goes in the cross that sells it (a sale
+the gateway refused for a reading, a 424 or 409, goes again the next minute, never held by a buy sent in between). The
+close decision's batched T29 read sends a failed request again once; when the retry fails too, the decision is written
+`failed` with why (the minute's `errors` too) and made again the next minute of its window (15:47, then 15:48, before
+the 15:49 cut-off). Still as before: the equity day's order count (60 sends and cancels) binds entries at about 30 open
+lots sold the same day, and a program's room counts its lots being sold in the same cross (both readings trade less;
+the count moves in a later release).

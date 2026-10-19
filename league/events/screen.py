@@ -730,9 +730,28 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 #: - the EDGAR daily-index backfill (house.py BACKFILL_WEEKDAYS) of every weekday through X that the House still
 #:   backfills has run (meta `evl:backfill:<day>` "done": it adds the filings the live pass missed, and decides their
 #:   sessions again).
+#: THE REACH IS DEFINED HERE, ONCE (release 1019b's second review): the House's lane takes its REDECIDE_SESSIONS,
+#: LOOKBACK and BACKFILL_WEEKDAYS from these three (league/events/house.py imports them; this file is behind the wall,
+#: house.py is not), and `_reach` waits out the House's own when it is ever larger: a House change can only delay a
+#: look, never move one earlier.
 FINAL_SESSIONS = 3
 FINAL_LOOKBACK = dt.timedelta(days=45)
 FINAL_BACKFILL_WEEKDAYS = 3
+
+
+def _reach() -> tuple[int, dt.timedelta, int]:
+    """(sessions, look-back, backfill weekdays) a look waits out: the constants above, or the House lane's as it runs
+    when they reach further (league/events/house.py takes these; a copy it widened would only delay looks)."""
+    sessions, lookback, weekdays = FINAL_SESSIONS, FINAL_LOOKBACK, FINAL_BACKFILL_WEEKDAYS
+    try:
+        from . import house as H
+
+        sessions = max(sessions, int(H.REDECIDE_SESSIONS))
+        lookback = max(lookback, H.LOOKBACK)
+        weekdays = max(weekdays, int(H.BACKFILL_WEEKDAYS))
+    except Exception:  # noqa: BLE001 - the House's lane cannot be read here: the judge's own reach
+        pass
+    return sessions, lookback, weekdays
 
 
 def final_until(store: S.Store, program: str, version: int, today: dt.date,
@@ -745,18 +764,19 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     if prog is None:
         return None, f"{program} v{version} is no registered program"
     first = prog.registered_at.astimezone(C.NY).date()
+    reach_sessions, reach_lookback, reach_weekdays = _reach()
     decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
-    if len(decided) <= FINAL_SESSIONS:
+    if len(decided) <= reach_sessions:
         return None, f"the re-decision window still reaches every session ({len(decided)} decided)"
-    horizon: dt.date | None = decided[-(FINAL_SESSIONS + 1)].day
-    why = f"the re-decision window reaches {decided[-FINAL_SESSIONS].day.isoformat()}"
+    horizon: dt.date | None = decided[-(reach_sessions + 1)].day
+    why = f"the re-decision window reaches {decided[-reach_sessions].day.isoformat()}"
     kind = prog.entry_at
     key = prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
     latest: dict[str, tuple[str, Any]] = {}
     for row in store.db.execute("SELECT job, status, summary FROM receipts WHERE job>=? AND job<? ORDER BY id",
                                 (f"decide-{kind}:", f"decide-{kind};")):
         latest[str(row["job"])] = (str(row["status"] or ""), row["summary"])
-    since = max(first, (now - FINAL_LOOKBACK).astimezone(C.NY).date())
+    since = max(first, (now - reach_lookback).astimezone(C.NY).date())
     for x in C.sessions(store, since, horizon):
         status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", ("", None))
         if status == "ok":
@@ -774,7 +794,7 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
         why = f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}"
         break
     reach, day = [], today
-    while len(reach) < FINAL_BACKFILL_WEEKDAYS:
+    while len(reach) < reach_weekdays:
         day -= dt.timedelta(days=1)
         if day.weekday() < 5:
             reach.append(day)

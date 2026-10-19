@@ -6,7 +6,10 @@
 - SIZED: >= 150 settled real-money events at Probe size or above whose 80% session-block bootstrap lower bound of the
   per-event after-cost return is above zero (`review`).
 - DEMOTION to learning: the last 50 settled real-money events at Probe size or above lost more than $150 net, or the
-  last 100 such events have a negative mean after-cost return (`review`); back to Probe at the next passed look.
+  last 100 such events have a negative mean after-cost return (`review`); back to Probe at the next passed look. The
+  two windows count the program's CURRENT Probe stay (release 1019b's second review): the events whose buy came after
+  its latest move to Probe (`probe_since`, from `band_history`), so a program the next passed look returns to Probe
+  is not demoted again on the events that demoted it. Sized counts every Probe+ event.
 - RETIRED, for good: a held look whose mean after-cost abnormal return is below zero and whose one-sided sign-flip p
   for a mean below zero (the session-block test with every value's sign reversed) is at most 0.05 (`on_look`).
 
@@ -125,13 +128,41 @@ def real_events(store: S.Store, program: str, version: int, *, at: Iterable[str]
                                   (program, int(version), event)).fetchone()
         out.append({"event": event, "entry_day": intent["entry_day"] if intent else str(buy["filled_at"])[:10],
                     "issuer": (intent["cik"] or intent["symbol"]) if intent else event, "band": str(buy["band"]),
-                    "pnl": proceeds - cost, "r": (proceeds - cost) / cost, "sold_at": str(sell["filled_at"])})
+                    "pnl": proceeds - cost, "r": (proceeds - cost) / cost, "sold_at": str(sell["filled_at"]),
+                    "bought_at": str(buy["filled_at"])})
     out.sort(key=lambda r: (r["sold_at"], r["event"]))
     return out
 
 
+def probe_since(store: S.Store, program: str, version: int) -> Any:
+    """When (program, version)'s CURRENT Probe stay began: its latest move to probe in `band_history`, at the later of
+    the move's `since` (a look's as-of close) and its write (the band changed then); None when it never moved there."""
+    row = store.db.execute("SELECT since, written_at FROM band_history WHERE program=? AND version=? AND band='probe' "
+                           "ORDER BY id DESC LIMIT 1", (program, int(version))).fetchone()
+    if row is None:
+        return None
+    moments = []
+    for text in (row["since"], row["written_at"]):
+        try:
+            moments.append(S.parse_iso(str(text)))
+        except (TypeError, ValueError):
+            continue
+    return max(moments) if moments else None
+
+
+def _after(event: Mapping[str, Any], since: Any) -> bool:
+    if since is None:
+        return True
+    try:
+        return S.parse_iso(str(event["bought_at"])) > since
+    except (KeyError, TypeError, ValueError):
+        return True     # (a buy whose time cannot be read counts: the reading that demotes)
+
+
 def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
-    """Demotion and Sized from the real fills (PREREG-EVL-3 section 2), for every probe or sized program."""
+    """Demotion and Sized from the real fills (PREREG-EVL-3 section 2), for every probe or sized program. The demotion
+    windows count the current Probe stay (`probe_since`: its events bought after the latest move to Probe); Sized
+    counts every Probe+ event."""
     changes = []
     when = S.iso(now or S.utc_now())
     for (program, version), band in bands(store).items():
@@ -140,10 +171,12 @@ def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
         events = real_events(store, program, version)
         if not events:
             continue
-        last = events[-DEMOTE_LAST:]
+        since = probe_since(store, program, version)
+        stay = [e for e in events if _after(e, since)]
+        last = stay[-DEMOTE_LAST:]
         net = math.fsum(e["pnl"] for e in last)
-        last_mean = events[-DEMOTE_MEAN_LAST:]
-        mean = math.fsum(e["r"] for e in last_mean) / len(last_mean)
+        last_mean = stay[-DEMOTE_MEAN_LAST:]
+        mean = math.fsum(e["r"] for e in last_mean) / len(last_mean) if last_mean else 0.0
         if net < DEMOTE_NET_USD or (len(last_mean) == DEMOTE_MEAN_LAST and mean < 0):
             why = (f"the last {len(last)} Probe+ events lost ${-net:.2f} net" if net < DEMOTE_NET_USD
                    else f"the last {DEMOTE_MEAN_LAST} Probe+ events' mean after-cost return {mean:.5f} < 0")
@@ -178,4 +211,5 @@ def record_fill(store: S.Store, *, program: str, version: int, event: str, side:
         return cur.rowcount == 1
 
 
-__all__ = ["BANDS", "bands", "set_band", "on_look", "retire_test", "real_events", "review", "record_fill", "seating"]
+__all__ = ["BANDS", "bands", "set_band", "on_look", "retire_test", "real_events", "probe_since", "review", "record_fill",
+           "seating"]

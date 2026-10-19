@@ -5,7 +5,24 @@ Records are appended and never rewritten; a row's `status` only moves forward. T
 Documents (the raw bytes a recorder fetched) live gzip-compressed at `<root>/docs/<sha[:2]>/<sha>.gz`, keyed by the
 SHA-256 of the uncompressed bytes, so a verdict can cite exactly what it read.
 
-The schema is pinned in goal-2026-10-19/EVL-DESIGN.md ("The store"); `SCHEMA_VERSION` moves with any change to it.
+The schema is pinned in goal-2026-10-19/EVL-DESIGN.md ("The store"); `SCHEMA_VERSION` moves with any change to it that
+an older release could not read. A new table is additive (the older release never reads it, and a rollback opens the
+store as before): PREREG-EVL-3's `bands`, `band_history` and `real_fills`, and release 1019b's `eligibility` (below),
+leave it at 1.
+
+ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review; PREREG-EVL-1
+section 2: a LIVE decision reads Alpaca's `status=active` and `tradable: true`, a BACKFILLED one `status=all` and the
+previous session's closing-print exchange). `eligibility` keeps every result of the test, eligible (with its universe
+row's symbol: the row's details are the `universe` row (day, symbol)) or not, with its `rule` ("live" or "backfill"),
+one row a (day, cik, rule), written once (league/events/universe.py `record_result`; league/events/run.py
+`eligibility` reads and writes it). A store from before the table is migrated when it is first opened (`_migrate`):
+each universe row gets the result "eligible" under the rule of the decision that wrote it as the receipts tell it, the
+first decision receipt of its entry session (`decide-open:<day>` or `decide-close:<day>`, the lowest id): "live" when
+that run started within `LEGACY_LIVE_WITHIN` (10 minutes) of its scheduled time (09:15 ET, or the close less 14
+minutes), as the House's lane and the CLI's `catchup` judge a run live, else "backfill" (no receipt: "backfill"); the
+receipts do not say which of a session's runs wrote which row, so the first run's rule is every row's. The sessions
+whose decisions ran before the table kept no ineligible result: meta `ELIGIBILITY_FROM` is the first entry session
+after the last one with a decision receipt then, and league/events/universe.py `seen_live` reads a session before it.
 """
 
 from __future__ import annotations
@@ -19,6 +36,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
+from zoneinfo import ZoneInfo
 
 SCHEMA_VERSION = 1
 DB_NAME = "events.sqlite"
@@ -75,7 +93,18 @@ CREATE TABLE IF NOT EXISTS band_history(id INTEGER PRIMARY KEY AUTOINCREMENT, pr
 CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
   side TEXT NOT NULL, qty REAL NOT NULL, price REAL NOT NULL, fee REAL NOT NULL DEFAULT 0, filled_at TEXT NOT NULL,
   band TEXT NOT NULL, PRIMARY KEY(program, version, event, side));
+CREATE TABLE IF NOT EXISTS eligibility(day TEXT NOT NULL, cik TEXT NOT NULL, rule TEXT NOT NULL, eligible INTEGER NOT NULL,
+  symbol TEXT, decided_at TEXT NOT NULL, PRIMARY KEY(day, cik, rule));
 """
+
+#: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).
+LIVE_RULE = "live"
+BACKFILL_RULE = "backfill"
+#: meta: the first entry session whose every eligibility result is in `eligibility` (the module docstring).
+ELIGIBILITY_FROM = "evl:eligibility:from"
+#: A decision run this soon after its scheduled time was live (league/events/house.py LIVE_WITHIN; the CLI's catchup).
+LEGACY_LIVE_WITHIN = dt.timedelta(minutes=10)
+_NY = ZoneInfo("America/New_York")
 
 #: The forward-only order of an intent's status (a `skipped:<why>` is terminal like `exited`).
 INTENT_ORDER = {"planned": 0, "entered": 1, "exited": 2}
@@ -121,6 +150,28 @@ class Store:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
         elif int(have) != SCHEMA_VERSION:
             raise RuntimeError(f"events.sqlite schema {have} is not this code's {SCHEMA_VERSION}")
+        if self.meta(ELIGIBILITY_FROM) is None:
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """The `eligibility` table on a store from before it (the module docstring): each universe row without a
+        result gets "eligible" under its session's first decision's rule, once; then meta `ELIGIBILITY_FROM`."""
+        with self.tx() as db:
+            if db.execute("SELECT 1 FROM meta WHERE key=?", (ELIGIBILITY_FROM,)).fetchone() is not None:
+                return
+            rules: dict[str, str] = {}
+            for row in db.execute("SELECT u.day, u.symbol, u.cik FROM universe u WHERE NOT EXISTS (SELECT 1 FROM "
+                                  "eligibility e WHERE e.day=u.day AND e.cik=u.cik) ORDER BY u.day, u.cik, "
+                                  "u.adv20 DESC").fetchall():
+                day = str(row["day"])
+                if day not in rules:
+                    rules[day] = _legacy_rule(db, day)
+                db.execute("INSERT OR IGNORE INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, ?, "
+                           "1, ?, 'migrated')", (day, str(row["cik"]), rules[day], str(row["symbol"])))
+            last = db.execute("SELECT MAX(substr(job, instr(job, ':') + 1)) FROM receipts WHERE job LIKE 'decide-open:%' "
+                              "OR job LIKE 'decide-close:%'").fetchone()[0]
+            since = (dt.date.fromisoformat(str(last)[:10]) + dt.timedelta(days=1)).isoformat() if last else "0001-01-01"
+            db.execute("INSERT INTO meta(key, value) VALUES(?, ?)", (ELIGIBILITY_FROM, since))
 
     def __enter__(self) -> "Store":
         return self
@@ -205,4 +256,25 @@ class Store:
         return True
 
 
-__all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER"]
+def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
+    """The rule a universe row of entry session `day` from before `eligibility` was made by (the module docstring):
+    "live" when the session's first decision receipt started within LEGACY_LIVE_WITHIN of its scheduled time."""
+    first = db.execute("SELECT job, started_at FROM receipts WHERE job IN (?, ?) ORDER BY id LIMIT 1",
+                       (f"decide-open:{day}", f"decide-close:{day}")).fetchone()
+    session = db.execute("SELECT close_at FROM sessions WHERE day=?", (day,)).fetchone()
+    if first is None or session is None:
+        return BACKFILL_RULE
+    try:
+        if str(first["job"]).startswith("decide-open:"):
+            scheduled = dt.datetime.combine(dt.date.fromisoformat(day), dt.time(9, 15), tzinfo=_NY).astimezone(
+                dt.timezone.utc)
+        else:
+            scheduled = parse_iso(session["close_at"]) - dt.timedelta(minutes=14)
+        late = parse_iso(first["started_at"]) - scheduled
+    except (TypeError, ValueError):
+        return BACKFILL_RULE
+    return LIVE_RULE if dt.timedelta(0) <= late <= LEGACY_LIVE_WITHIN else BACKFILL_RULE
+
+
+__all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
+           "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN"]

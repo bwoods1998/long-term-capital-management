@@ -119,10 +119,17 @@ class Lane:
         self.st.db.execute("INSERT INTO form4_tx(accession, seq, security, tx_date, code, shares, price, acquired, "
                            "owned_after) VALUES(?, 1, 'Common', ?, 'P', ?, 10.0, 'A', 1)", (accession, day, usd / 10.0))
 
-    def universe(self, day: dt.date, symbol: str, cik: str, prev_close: float, *, adv20: float = 5e6) -> None:
+    def universe(self, day: dt.date, symbol: str, cik: str, prev_close: float, *, adv20: float = 5e6,
+                 rule: str | None = "live") -> None:
+        """A universe row and its eligibility result as the lane's decision keeps them (league/events/run.py
+        `eligibility`): eligible under `rule` ("live" by default: the live decision of the session made it; "backfill":
+        only the backfill rule did, which real money never reads; None: no result kept)."""
         self.st.db.execute("INSERT OR REPLACE INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, "
                            "sigma60) VALUES(?, ?, ?, 'Invented Co', 'NASDAQ', ?, ?, 'IWM', NULL)",
                            (day.isoformat(), symbol, cik, prev_close, adv20))
+        if rule is not None:
+            self.st.db.execute("INSERT OR REPLACE INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, "
+                               "?, ?, 1, ?, 'x')", (day.isoformat(), cik, rule, symbol))
 
     def band(self, program: str, band: str, *, version: int = 2, why: str = "invented") -> None:
         """The lane's band of a program (PREREG-EVL-3 section 2): league/events/bands.py `set_band` for a seating version
@@ -662,10 +669,13 @@ class TheDay(EventTest):
         h.tick(9, 16)
         sent = {b["symbol"]: (b["qty"], b["limit_price"]) for b in h.bodies()}
         self.assertEqual(sent, {"ACME": ("1", "75.00"), "GAMA": ("1", "187.50")})
-        refused = {r["symbol"]: r for r in h.event_intents("buy") if r["status"] == "refused"}
-        self.assertEqual(sorted(refused), ["BETA", "DELT"])
-        self.assertIn("above 0.05 x E", refused["BETA"]["why"], "learning's one share at most 5% of E")
-        self.assertIn("no whole share fits", refused["DELT"]["why"], "the book-wide 10% a name")
+        # (Release 1019b's second review: a pick no whole share of fits by price is skipped AT THE DECISION, before it
+        # takes a slot of its program's room; the shadow keeps the event. `_size_event` still refuses one at the send.)
+        self.assertEqual(sorted(r["symbol"] for r in h.event_intents("buy")), ["ACME", "GAMA"])
+        summary = json.loads(h.state.rows("SELECT summary FROM eq_event_decisions WHERE at='open'")[0]["summary"])
+        self.assertEqual(summary["programs"]["EVL-ERN-READ-O1"]["skipped"], {"one_share": 1},
+                         "learning's one share at most 5% of E")
+        self.assertEqual(summary["programs"]["EVL-8K-READ-O1"]["skipped"], {"name_wall": 1}, "the book-wide 10% a name")
 
     def test_learning_is_held_to_eight_open_a_program(self):
         h = self.harness()

@@ -9,6 +9,14 @@ $50,000,000, else SPY.
 
 SIP daily bars on Alpaca's free Basic plan: `end` must be at least 15 minutes old, so a request's `end` is the day
 after its last wanted session (a past instant) or now - 16 minutes, whichever is earlier.
+
+ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (release 1019b's second review; league/events/store.py
+`eligibility`): every result, eligible or not, is kept with its rule (`record_result`), and a decision reads them
+(league/events/run.py `eligibility`): a LIVE decision the live rule's result, checking under the live rule an issuer
+that has none (one the backfill rule judged first included); a BACKFILL decision (the House's hourly re-decision of the
+last sessions among them) any result there is, eligible only when none is ineligible (`combined`: the reading that
+trades less), and checks under the backfill rule only an issuer no decision of the session has judged. The House's real
+money reads the live rule's eligible results alone (league/events/book.py).
 """
 
 from __future__ import annotations
@@ -206,5 +214,67 @@ def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, li
     return best
 
 
+# ---------------------------------------------------------------------------------------------------- the results
+def results(store: S.Store, day: dt.date) -> dict[str, dict[str, dict[str, Any] | None]]:
+    """{cik: {rule: its universe row when eligible, None when not}} of entry session `day` (`eligibility`). An eligible
+    result whose universe row is gone (its symbol's row since written for another issuer) reads as no result."""
+    rows = {str(r["symbol"]): dict(r) for r in store.db.execute("SELECT * FROM universe WHERE day=?", (day.isoformat(),))}
+    out: dict[str, dict[str, dict[str, Any] | None]] = {}
+    for r in store.db.execute("SELECT cik, rule, eligible, symbol FROM eligibility WHERE day=?", (day.isoformat(),)):
+        cik, rule = str(r["cik"]), str(r["rule"])
+        if not r["eligible"]:
+            out.setdefault(cik, {})[rule] = None
+            continue
+        row = rows.get(str(r["symbol"]))
+        if row is not None and str(row["cik"]) == cik:
+            out.setdefault(cik, {})[rule] = row
+    return out
+
+
+def record_result(store: S.Store, day: dt.date, cik: str, rule: str, row: Mapping[str, Any] | None, *,
+                  now: dt.datetime | None = None) -> None:
+    """Keep one result of the test (`eligible`'s row, or None), once: the first result of a (day, cik, rule) stands."""
+    if rule not in (S.LIVE_RULE, S.BACKFILL_RULE):
+        raise ValueError(rule)
+    store.db.execute("INSERT OR IGNORE INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, ?, ?, ?, "
+                     "?)", (day.isoformat(), str(cik), rule, 1 if row else 0, str(row["symbol"]) if row else None,
+                            S.iso(now or S.utc_now())))
+
+
+def combined(have: Mapping[str, Mapping[str, Any] | None]) -> Mapping[str, Any] | None:
+    """A BACKFILL decision's reading of an issuer's results for one session: eligible only when no result is
+    ineligible (the reading that trades less; two results exist when a live decision checked again an issuer the
+    backfill rule judged first), with the live rule's row when there is one."""
+    if not have or any(v is None for v in have.values()):
+        return None
+    return have.get(S.LIVE_RULE) or have.get(S.BACKFILL_RULE)
+
+
+def seen_live(store: S.Store, day: dt.date, kind: str, stored: Mapping[str, str | None]) -> set[str]:
+    """THE SESSIONS DECIDED BEFORE THE `eligibility` TABLE (`day` before meta `ELIGIBILITY_FROM`; league/events/store.py)
+    kept no ineligible result. Of the issuers in `stored` ({cik: when this decision's first event of it was stored},
+    none with a result), those whose event was stored BEFORE the session's first finished live `kind` decision (its
+    receipt `ok` or `pending`, started within `LEGACY_LIVE_WITHIN` of its time) were judged by that decision under the
+    live rule, which kept every eligible one: they were ineligible, and a re-decision does not judge them again."""
+    since = store.meta(S.ELIGIBILITY_FROM)
+    if not stored or since is None or day.isoformat() >= since:
+        return set()
+    session = C.session(store, day)
+    if session is None:
+        return set()
+    scheduled = session.open_decide if kind == "open" else session.close_decide
+    started = None
+    for r in store.db.execute("SELECT started_at FROM receipts WHERE job=? AND status IN ('ok', 'pending') ORDER BY id",
+                              (f"decide-{kind}:{day.isoformat()}",)):
+        at = S.parse_iso(r["started_at"])
+        if dt.timedelta(0) <= at - scheduled <= S.LEGACY_LIVE_WITHIN:
+            started = at
+            break
+    if started is None:
+        return set()
+    return {cik for cik, when in stored.items() if when and S.parse_iso(when) < started}
+
+
 __all__ = ["sip_end", "fetch_daily_bars", "bars", "sec_tickers", "alpaca_assets", "operating", "eligible", "EXCHANGES",
-           "EXCHANGE_CODES", "CODE_EXCHANGES", "closing_print_exchange"]
+           "EXCHANGE_CODES", "CODE_EXCHANGES", "closing_print_exchange", "results", "record_result", "combined",
+           "seen_live"]

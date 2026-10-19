@@ -28,8 +28,9 @@ def _day(text: str) -> dt.date:
 
 #: Sessions re-decided on every catchup (idempotent: known events are skipped and stored verdicts reused), so an event
 #: that reached the store late (a recorder outage, news backfilled after the gateway could read it) still gets its
-#: shadow decision (PREREG-EVL-1 section 3: an outage removes nothing from the shadow record).
-REDECIDE_SESSIONS = 3
+#: shadow decision (PREREG-EVL-1 section 3: an outage removes nothing from the shadow record). The judge's reach
+#: (league/events/screen.py FINAL_SESSIONS, as the House's lane takes it).
+REDECIDE_SESSIONS = SN.FINAL_SESSIONS
 
 
 def catchup(ctx: R.Context) -> dict:

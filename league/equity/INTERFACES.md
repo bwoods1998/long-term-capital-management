@@ -1517,9 +1517,14 @@ path.
   move) into the lane's `real_fills` through `book.write_fills`.
 - **The adapter** (league/events/book.py; standard library only; plumbing, in no identity): `settings`, `seatable()`,
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
-  `decided(lane, day, at)`, `eligible(lane, day)`, `lane_bands(lane)`, `bands(lane, s=None) -> [Band] | None`,
-  `picks(lane, program, day, *, decided_at, reaction=None, held=None)`, `held_recently`, `one_name_an_auction(picks,
-  band_of)`, `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program, day) -> (day, "open" | "close")`,
+  `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
+  `LIVE_ROWS`: release 1019b's second review), `lane_bands(lane)`, `bands(lane, s=None) -> [Band] | None`,
+  `picks(lane, program, day, *, decided_at, reaction=None, held=None)`, `held_recently`, `allocate(picks, rooms,
+  band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
+  each program its own ranked picks whose name no earlier program was given, until its room is full; the book's skip
+  is `EquityBook._event_gate`: no whole share by price, or the name sold at the same auction), `one_name_an_auction(picks,
+  band_of)` (`allocate` with no room limit), `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program,
+  day) -> (day, "open" | "close")`,
   `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
   changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2, `BANDS`,
   `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5,

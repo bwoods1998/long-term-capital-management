@@ -35,8 +35,9 @@ stop at their bound and the next turn goes on from what was stored (universe row
 as they are read). `<state>/events/STOP` idles the lane without a deploy.
 
 Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under the lane's own line of
-`events.verdict_usd_day` dollars a New York day (default $5): over it, READ events wait (PREREG-EVL-1 section 4), as
-they do for any call with no answer. Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
+`events.verdict_usd_day` dollars a New York day ($3, the default too: the goal's cost rule, the House box's about $1.29
+a day and the verdicts inside its $5 base until budget rule 3 ships): over it, READ events wait (PREREG-EVL-1 section
+4), as they do for any call with no answer. Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
 with the House's own book).
 """
 
@@ -90,8 +91,14 @@ PENDING_RETRY = dt.timedelta(minutes=5)       # a decision waiting on verdicts i
 STALE_RETRY = dt.timedelta(minutes=10)        # a decision whose run never finished, when it is not this lane's
 DECIDE_RETRY = dt.timedelta(minutes=1)        # a decision that FAILED (an error, not its bound) is tried again this soon
 REDECIDE_EVERY = dt.timedelta(hours=1)
-REDECIDE_SESSIONS = 3                         # league.events.__main__.REDECIDE_SESSIONS
-LOOKBACK = dt.timedelta(days=45)              # decisions older than this are the CLI's (`catchup`)
+#: THE RE-DECISION REACH IS THE JUDGE'S (release 1019b's second review): a look waits until its close is out of the
+#: sessions the House still decides again (league/events/screen.py `final_until`), so the House takes its reach from
+#: the protected judge (league/events/screen.py, behind league/ci.py's wall), defined there once: a change of this file
+#: the updater ships by itself can only use the reach, never widen it (and `final_until` waits out the larger reach if
+#: one ever did). REDECIDE_SESSIONS: the last sessions decided again every hour (league.events.__main__'s catchup too);
+#: LOOKBACK: decisions older than this are the CLI's (`catchup`); BACKFILL_WEEKDAYS: the daily-index backfill's reach.
+REDECIDE_SESSIONS = SN.FINAL_SESSIONS
+LOOKBACK = SN.FINAL_LOOKBACK
 URGENT_BEFORE = dt.timedelta(minutes=30)
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
@@ -101,7 +108,7 @@ SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 EQUITY_AFTER = dt.timedelta(minutes=3)
 EQUITY_RETRY = dt.timedelta(minutes=10)
-BACKFILL_WEEKDAYS = 3
+BACKFILL_WEEKDAYS = SN.FINAL_BACKFILL_WEEKDAYS
 BACKFILL_AT = dt.time(5, 0)                   # a weekday's daily index is read from 05:00 ET the next day
 BACKFILL_RETRY = dt.timedelta(hours=1)
 CALENDAR_EVERY = dt.timedelta(hours=20)
@@ -112,12 +119,16 @@ IDLE_LOOK = dt.timedelta(minutes=5)           # nothing due: look again at the l
 FAIL_BACKOFF = dt.timedelta(minutes=10)       # a task that failed (record, nightly, tickers, backfill) waits this long
 WAIT_LOOK = 60.0                              # no store yet: look again this often (seconds of the House clock)
 FETCH_WINDOW = dt.timedelta(days=2)           # listed filings the record pass still fetches
-FETCH_TRIES = 6                               # ... and a failed fetch is tried again at this many passes in all
+FETCH_TRIES = 6                               # ... and a failed fetch is tried this many times in all,
+#: ... again at the first record pass this long after its FIRST failure (release 1019b's second review: tried at every
+#: pass, an SEC outage of about 12 minutes, or SEC's 10-minute rate-limit block, spent every try): 2, 4, 8, 16 and 32
+#: minutes, then left to the daily-index backfill.
+FETCH_BACKOFF = tuple(dt.timedelta(minutes=2 ** k) for k in range(1, FETCH_TRIES))
 
 WARN_EVERY = 3600.0
 DATA_INTERVAL = 0.5
 ASSETS_TTL = 1800.0
-VERDICT_USD_DAY = 5.0
+VERDICT_USD_DAY = 3.0                         # league/config.json events.verdict_usd_day (the goal's cost rule)
 VERDICT_USD_UNKNOWN = 0.01                    # a verdict whose cost the gateway did not state
 
 
@@ -259,7 +270,8 @@ class EventLane:
         self._usd = {"day": None, "usd": 0.0}
         self._paused = False
         self._failed: dict[str, dt.datetime] = {}
-        self._fetch_tries: dict[str, int] = {}  # accession -> the record passes that tried to fetch it (this process)
+        # accession -> (the fetches tried, when the first one failed), this process's (`_record_steps`)
+        self._fetch_tries: dict[str, tuple[int, dt.datetime | None]] = {}
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -645,10 +657,10 @@ class EventLane:
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
             live = now - scheduled <= LIVE_WITHIN
+            # (Release 1019b's second review: the receipt's own status first, then this lane's cut: a decision cut once
+            # and failing since waits as a failed one does, never every turn.)
             if status is None:
                 rank = 0 if live else 1
-            elif key in self._cut:
-                rank = 0 if live else 2
             elif status == "ok":
                 if key not in self._redecide:
                     continue
@@ -670,6 +682,8 @@ class EventLane:
                 if now < retry:
                     soon.append(retry)
                     continue
+                rank = 0 if live else 2
+            elif key in self._cut:     # cut by this lane's bound: it goes on at once
                 rank = 0 if live else 2
             else:  # 'running' (a run that never finished), 'cut' or anything else
                 if last >= self._born and now < last + STALE_RETRY:
@@ -697,7 +711,9 @@ class EventLane:
         except Exception as exc:
             # (Release 1019b's review: a run that raised, one gateway 429 in its eligibility reads say, was left
             # `running` and waited STALE_RETRY, past LIVE_WITHIN: the session's live decision became a backfill. It is
-            # closed `failed` and tried again after DECIDE_RETRY, live while within LIVE_WITHIN.)
+            # closed `failed` and tried again after DECIDE_RETRY, live while within LIVE_WITHIN; it is no longer a cut
+            # one, whatever it was before: the second review.)
+            self._cut.discard(key)
             self._close_running(ctx.store, f"decide-{kind}:{day.isoformat()}",
                                 f"{type(exc).__name__}: {str(exc)[:160]}", status="failed")
             raise
@@ -852,37 +868,45 @@ class EventLane:
         cut = False
         # The listed filings, and those whose fetch FAILED (release 1019b's review: one transient SEC error lost the
         # filing's live decision, as nothing fetched it again before the next day's daily-index backfill), each tried
-        # again at the next passes, FETCH_TRIES passes in all (`_fetch_tries`, kept by this process); new ones first.
+        # again FETCH_BACKOFF after its first failure, FETCH_TRIES tries in all (`_fetch_tries`, kept by this process);
+        # new ones first. (A form whose feed failed this pass holds its error in `out`: its counts go beside it, the
+        # second review's KeyError.)
         rows = st.db.execute("SELECT accession, form, cik, company, items, accepted_at, index_url, status FROM filings "
                              "WHERE (status='listed' OR status LIKE 'failed:%') AND source='current' AND received_at>=? "
                              "ORDER BY form='4', status!='listed', accepted_at, accession",
                              (S.iso(now - FETCH_WINDOW),)).fetchall()
+
+        def bump(counts: dict[str, Any], key: str) -> None:
+            counts[key] = int(counts.get(key) or 0) + 1
+
         for row in rows:
             counts = out.setdefault(str(row["form"]), {"new": 0, "fetched": 0, "failed": 0, "unlisted": 0})
             if row["form"] == "8-K" and (listed is None or row["cik"] not in listed):
-                counts["unlisted" if listed is not None else "waiting"] = counts.get(
-                    "unlisted" if listed is not None else "waiting", 0) + 1
+                bump(counts, "unlisted" if listed is not None else "waiting")
                 continue
+            accession = str(row["accession"])
             again = str(row["status"]).startswith("failed")
-            tries = self._fetch_tries.get(str(row["accession"]), 1 if again else 0)
+            tries, first = self._fetch_tries.get(accession, (1 if again else 0, None))
             if again and tries >= FETCH_TRIES:
                 continue    # (left to the daily-index backfill)
+            if again and first is not None and now < first + FETCH_BACKOFF[tries - 1]:
+                continue    # (its next try is not due yet: the tries-th after the first failure)
             if self.late(deadline):
                 cut = True
                 break
-            self._fetch_tries[str(row["accession"])] = tries + 1
+            self._fetch_tries[accession] = (tries + 1, first or now)    # (counted before it is tried: a raise counts)
             entry = {"form": row["form"], "cik": row["cik"], "accession": row["accession"], "company": row["company"],
                      "items": json.loads(row["items"] or "[]"), "accepted_at": S.parse_iso(row["accepted_at"]),
                      "index_url": row["index_url"]}
             status = E.record_filing(st, ctx.sec, entry, source="current", now=ctx.now(), fetch=True)
             if again:
-                counts["retried"] = counts.get("retried", 0) + 1
+                bump(counts, "retried")
             if status == "fetched":
-                counts["fetched"] += 1
+                bump(counts, "fetched")
                 new += 1
-                self._fetch_tries.pop(str(row["accession"]), None)
+                self._fetch_tries.pop(accession, None)
             elif status.startswith("failed"):
-                counts["failed"] += 1
+                bump(counts, "failed")
         out["cut"] = cut
         if new:
             self._events_at = self.now()

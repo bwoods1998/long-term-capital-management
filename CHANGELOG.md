@@ -91,12 +91,49 @@ until release 1019b (below) brings it onto the House.
   (`errors`). `league/ci.py` `PENDING_GATEWAY` gains the lane's rule inputs: `league/events/universe.py`,
   `calendar.py`, `edgar.py`, `news.py`, `run.py` and `store.py` (the updater never ships a change to them; `house.py`,
   `gw.py` and `report.py` stay outside). No identity moves with them.
+- **The re-reviews' fixes** (fix round 2 on `18824bca`; each held by a test in league/tests/test_events_review_1019b.py,
+  "the second review", that fails on `18824bca`). THE MONEY PATH: the auction's slots are given IN ROOM'S ORDER
+  (league/events/book.py `allocate`): Sized, Probe, learning, then the tables' order, each program taking its own ranked
+  picks whose name no earlier program was given, until its room is full, and only a name given is taken (EVL-ERN-REACT-ON
+  takes the 4 of 12 C1 events C1 has no room for, EVL-ERN-GUIDE-O1 the 4 READ-O1 has none for); SIZE BEFORE SLOTS
+  (`EquityBook._event_gate`): a pick no whole share of fits by price, on E at the previous close as the send sizes it
+  (one share at the limit above the book-wide 10% a name; at learning, a 2% target of no whole share with one share
+  above 5% of E), and a pick whose name an event lot sells at the same auction are skipped before they take a slot (the
+  shadow keeps the event; the decision's summary counts them); AN EXIT NEVER WAITS ON AN ENTRY: a buy waits while a sale
+  of its name at its auction is unfinished (a sale refused for a reading, 424 or 409, goes again the next minute); the
+  close decision's batched T29 read sends a failed request again once, and when the retry fails too the decision is
+  written `failed` with why (its summary and the minute's `errors`) and made again the next minute of its window. THE
+  JUDGES: ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (league/events/run.py `eligibility`,
+  universe.py `results` / `record_result` / `combined` / `seen_live`, the store's new `eligibility` table): every result
+  is kept, eligible or not, with its rule; a live decision reads the live rule's result and checks under the live rule a
+  CIK with none; a backfill decision (the hourly re-decision) reads whatever result there is (eligible only when none
+  refuses) and checks under the backfill rule only a CIK no decision judged; real money's picks and the gateway's
+  eligible list read only the live rule's eligible rows (`book.LIVE_ROWS`). A store from before the table (the
+  desktop's) is migrated at its first open: each universe row labelled with its session's first decision run's rule
+  (live within 10 minutes of its time, else backfill), meta `evl:eligibility:from` the first session after the last one
+  decided; for those sessions a re-decision reads a CIK its live run saw as ineligible. The House's re-decision reach is
+  the judge's, defined once in `screen.py` (`FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`) and imported
+  by `house.py` and the CLI, and `screen._reach` waits out the House's if it is ever larger; demotion's two windows
+  count the current Probe stay (`bands.probe_since`; Sized counts every Probe+ event), so "back to Probe at its next
+  passed look" holds. THE HOUSE: a record pass whose feed failed counts its retried rows beside the error (no KeyError);
+  a decision cut once and then failing waits as a failed one (`_due_decision` reads the receipt's status before the cut;
+  `_decide` forgets the cut when a run raises); a failed fetch is tried again 2, 4, 8, 16 and 32 minutes after its first
+  failure (`FETCH_BACKOFF`, six tries in all); `events.verdict_usd_day` $3.00 (`league/config.json`, and the House's
+  default): the goal's cost rule (metered compute at most $5 a day plus half the trailing week's realized net profit),
+  the House box's about $1.29 a day beside it, until budget rule 3 ships. LEFT AS READINGS THAT TRADE LESS (the
+  captain's amendments): the equity day's order count of 60 (entries stop at about 30 open-entry lots sold the same
+  day; it moves in a later release), a program's room counting its lots sold in the same cross, a session pending only
+  on another program's verdicts final for this one, and the one-position-per-issuer rule as programs.py reads it. No
+  identity moves.
 - **Tests.** The full league suite on 3.14: 12,393 OK (33 skipped). The events, equity, live, ci, constitution,
   publish, stall and budget modules on 3.11: 2,138 OK (1 skipped). Gateway 489/489 (`STOCK_EVENT_BUYS` pinned "on" as deployed; the event-buy cases
   run on a baseline with it "off", so the switch's refusals stay tested). After the reviews' fixes: the full league
   suite on 3.14, 12,417 tests (33 skipped), green but for the one wall-list test the new `PENDING_GATEWAY` entries
   moved (test_e3_identities' stages, then updated: green); the same 3.11 modules, 2,162 OK (1 skipped); gateway
-  489/489; `python -m league.ci --base origin/main --branch rel/1019b --no-tests` passed.
+  489/489; `python -m league.ci --base origin/main --branch rel/1019b --no-tests` passed. After the re-reviews' fixes:
+  the full league suite on 3.14, 12,442 OK (33 skipped); the same 3.11 modules, 2,195 OK (1 skipped); gateway 489/489;
+  `league.ci` passed; the identities, computed with the tree's own functions on both Pythons, unchanged (options
+  execution `b60410ad`, equity `78022ca6`, money `285fa7af`, constitution `fd38e4e1`, gate `397b22b7`, xs `2f0083bc`).
 - **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019b**): 1. the gateway from this head; 2. the House
   from this head (verify the grant on `285fa7af` and `release.live.equity.events.enabled` true); 3. on blake-desktop
   stop the `ltcm-evl-*` timers, then `scripts/evl_migrate.py --dry-run` and `scripts/evl_migrate.py`; 4. the paper
