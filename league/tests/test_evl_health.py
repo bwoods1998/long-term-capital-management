@@ -1,9 +1,14 @@
-"""Release R1 WP2 (the owner's goal of Oct 19, 2026, item 7): the event lane's own stall causes (league/ops/evl_health.py:
-`evl_record`, `evl_decide`, `evl_verdicts`, `evl_score`), the stall job's research switch (ops.json `stall.research`), the
-cheap-day rule (budget rule 3: no `underspend`) and the daily one-screen report riding the stall notice. Synthetic stores
-only: every event, verdict, intent and outcome here is invented, and no market price is read."""
+"""Release 1019c (the review of r1/alarms, its majors 2 and 3 and its STOP/PAUSE minor; the owner's goal of Oct 19, 2026,
+item 5): the event lane's own stall causes (league/ops/evl_health.py) judge PROGRESS, never a receipt's status alone:
+`evl_record` (a clean pass: its 8-K, Form 4 and news reads without error, the failing feed named), `evl_decide` (a
+decision not made in its window: missing, failed, cut, unfinished), `evl_verdicts` (needed verdicts unanswered past their
+decision, the close decision's reading programs included, through run.py's own tally) and `evl_score` (intents due by the
+latest session still open after its passes), each quiet while the lane is idle by design (events/STOP, the House's
+PAUSE, a weekend); the stall job's research switch and its cheap-day rule. Synthetic stores only: every event, verdict,
+intent and receipt here is invented, and no market price is read."""
 import datetime as dt
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from league.events import calendar as C
 from league.events import programs as P
+from league.events import run as R
 from league.events import store as ES
 from league.ops import evl_health as EV
 from league.ops import stall as ST
@@ -21,7 +27,10 @@ from league.tests.test_ops_stall import Base as StallBase
 NY = ZoneInfo("America/New_York")
 UTC = dt.timezone.utc
 MON, TUE, WED = dt.date(2026, 10, 19), dt.date(2026, 10, 20), dt.date(2026, 10, 21)
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "stall_report.json"
+
+#: A record pass as the House's lane writes it (league/events/house.py `_record_steps`): one block per read, no error.
+CLEAN = {"8-K": {"new": 2, "fetched": 2, "failed": 0, "unlisted": 0}, "4": {"new": 5, "fetched": 5, "failed": 0, "unlisted": 0},
+         "news": {"seen": 3, "stored": 3}, "cut": False, "verdicts": []}
 
 
 def et(day: dt.date, hhmm: str) -> float:
@@ -31,6 +40,18 @@ def et(day: dt.date, hhmm: str) -> float:
 
 def iso(epoch: float) -> str:
     return ES.iso(dt.datetime.fromtimestamp(epoch, UTC))
+
+
+def blocks(**over) -> dict:
+    """CLEAN with some blocks replaced (a block given as None is left out)."""
+    out = {k: dict(v) if isinstance(v, dict) else v for k, v in CLEAN.items()}
+    for key, value in over.items():
+        key = {"k8": "8-K", "f4": "4"}.get(key, key)
+        if value is None:
+            out.pop(key, None)
+        else:
+            out[key] = value
+    return out
 
 
 class Lane(unittest.TestCase):
@@ -50,18 +71,21 @@ class Lane(unittest.TestCase):
         self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES(?, ?, ?, ?, ?)",
                            (job, iso(started), None if end is None else iso(end), status, json.dumps(summary or {})))
 
-    def intent(self, event: str, exit_day: dt.date, status: str = "planned") -> None:
+    def record(self, at: float, summary: dict | None = None, status: str = "ok") -> None:
+        self.receipt("record", at - 20, finished=at, status=status, summary=CLEAN if summary is None else summary)
+
+    def intent(self, event: str, exit_day: dt.date, status: str = "planned", symbol: str = "XYZ") -> None:
         self.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
-                           "exit_day, exit_at, mode, status) VALUES('EVL-ERN-READ-O1', 1, ?, 'XYZ', '0000000009', ?, ?, "
+                           "exit_day, exit_at, mode, status) VALUES('EVL-ERN-READ-O1', 2, ?, ?, '0000000009', ?, ?, "
                            "'open', ?, 'close', 'shadow', ?)",
-                           (event, iso(et(exit_day, "09:15")), exit_day.isoformat(), exit_day.isoformat(), status))
+                           (event, symbol, iso(et(exit_day, "09:15")), exit_day.isoformat(), exit_day.isoformat(), status))
 
     def ctx(self, *, enabled: bool = True, settings: dict | None = None) -> dict:
         return {"config": {"events": {"enabled": enabled}}, "settings": settings or {}}
 
-    def check(self, cause: str, now: float, **kw) -> dict:
+    def check(self, cause: str, now: float, *, idle=None, line=None, **kw) -> dict:
         errors: list[str] = []
-        out = EV.checks(self.ctx(**kw), self.root, now, errors=errors)
+        out = EV.checks(self.ctx(**kw), self.root, now, errors=errors, idle=idle, line=line)
         self.errors = errors
         return out[cause]
 
@@ -95,39 +119,99 @@ class WhenJudged(Lane):
         self.assertTrue(all(not c["stalled"] and c["judged"] is False for c in out.values()))
         self.assertEqual(errors, ["the event lane's store could not be read (DatabaseError): its four causes are not judged"])
 
+    def test_the_lanes_stop_file_idles_all_four_and_excuses_its_window(self):
+        """events/STOP idles the lane by design (league/events/house.py): nothing is judged while it stands, nor for the
+        lane's first half hour after it goes; a decision whose window fell inside it is excused for good."""
+        now = et(TUE, "10:20")
+        (self.root / "events" / "STOP").write_text("maintenance")
+        os.utime(self.root / "events" / "STOP", (now - 3600, now - 3600))  # placed at 09:20 ET
+        idle = EV.idle_windows(None, self.root, now)
+        self.assertIsNone(idle["stop"][-1][1])
+        for cause in EV.CAUSES:
+            check = self.check(cause, now, idle=idle)
+            self.assertEqual((check["stalled"], check["judged"]), (False, False), cause)
+            self.assertIn("the lane is stopped by events/STOP", check["what"])
+        (self.root / "events" / "STOP").unlink()
+        idle = EV.idle_windows(idle, self.root, now + 600)
+        self.assertEqual(idle["stop"][-1][1], now + 600, "a window open at the last run and gone now ends now")
+        self.assertIn("came back from events/STOP", self.check("evl_record", now + 900, idle=idle)["what"])
+        later = now + 3600
+        self.record(later - 60)
+        self.assertFalse(self.check("evl_record", later, idle=idle)["stalled"])
+        decide = self.check("evl_decide", later, idle=idle)
+        self.assertEqual(decide["numbers"]["excused_stop"], 1, "the 09:15 decision fell inside the STOP: excused")
+        self.assertEqual(decide["numbers"]["missed"], 1, "Monday's close was before the STOP: missed all the same")
+        self.receipt("decide-close:2026-10-19", et(MON, "15:47"))
+        self.assertFalse(self.check("evl_decide", later, idle=idle)["stalled"])
+        self.assertTrue(self.check("evl_decide", later)["stalled"], "with no STOP on record it is a missed decision")
+
 
 class Record(Lane):
-    def test_no_record_pass_in_thirty_minutes(self):
+    def test_no_clean_record_pass_in_thirty_minutes(self):
         now = et(TUE, "03:00")  # round the clock: the news recorder never sleeps
         self.assertTrue(self.check("evl_record", now)["stalled"], "none on record")
-        self.receipt("record", now - 12 * 60)
+        self.record(now - 12 * 60)
         fresh = self.check("evl_record", now)
         self.assertFalse(fresh["stalled"])
-        self.assertEqual(fresh["numbers"]["passes_30m"], 1)
+        self.assertEqual((fresh["numbers"]["passes_30m"], fresh["numbers"]["clean_30m"], fresh["numbers"]["failing"]),
+                         (1, 1, "none"))
         late = self.check("evl_record", now + 25 * 60)
         self.assertTrue(late["stalled"])
-        self.assertEqual((late["numbers"]["minutes_since_record"], late["onset"]), (36.5, now - 12 * 60 + 30))
-        self.assertIn("finished no record pass in the last 30 minutes", late["what"])
+        self.assertEqual((late["numbers"]["minutes_since_clean"], late["onset"]), (37.0, now - 12 * 60))
+        self.assertIn("finished no clean record pass in the last 30 minutes", late["what"])
         self.assertIsNone(late["owner_step"])
 
-    def test_failed_passes_and_news_errors_are_counted_and_only_an_ok_pass_counts(self):
-        now = et(TUE, "10:00")
-        self.receipt("record", now - 20 * 60, status="running", finished=None)
-        self.receipt("record", now - 10 * 60, status="failed")
-        self.assertTrue(self.check("evl_record", now)["stalled"], "a pass that failed or never finished is none")
-        self.receipt("record", now - 8 * 60, status="error: TimeoutError")
-        self.receipt("record", now - 5 * 60, summary={"8-K": {"new": 3}, "news": {"error": "GatewayError: HTTP 403"}})
+    def test_an_ok_pass_whose_reads_all_failed_is_no_progress(self):
+        """The review's probe: three hours of `ok` passes with EDGAR's two feeds at HTTP 403 and the news failing stood on
+        no cause. Each such pass is no clean pass, and the cause names the feeds."""
+        now = et(TUE, "13:00")
+        self.record(now - 4 * 3600)  # the last clean pass, four hours ago
+        broken = blocks(k8={"error": "GatewayError: HTTP 403"}, f4={"error": "GatewayError: HTTP 403"},
+                        news={"error": "GatewayError: HTTP 403"})
+        for minutes in range(180, 0, -2):
+            self.record(now - minutes * 60, broken)
         check = self.check("evl_record", now)
-        self.assertFalse(check["stalled"])
-        self.assertEqual((check["numbers"]["failed_passes_30m"], check["numbers"]["news_errors_30m"]), (2, 1))
-        self.receipt("record", now + 60, status="partial")  # a bounded pass that stopped at its 90 s finished all the same
-        self.assertEqual(self.check("evl_record", now + 26 * 60)["numbers"]["passes_30m"], 1)
-        self.assertFalse(self.check("evl_record", now + 26 * 60)["stalled"])
-        self.assertIn("1 of the last 30 minutes' passes could not read the news", check["what"])
+        self.assertTrue(check["stalled"])
+        self.assertEqual(check["numbers"]["failing"], "8k,form4,news")
+        self.assertEqual((check["numbers"]["passes_30m"], check["numbers"]["clean_30m"]), (15, 0))
+        self.assertIn("the 8-K feed and the Form 4 feed and the news could not be read", check["what"])
+        self.assertIn("the last clean one ended", check["what"])
+
+    def test_each_read_on_its_own_and_what_is_no_error(self):
+        now = et(TUE, "13:00")
+        cases = {
+            "news": blocks(news={"error": "GatewayError: HTTP 401"}),
+            "form4": blocks(f4={"error": "URLError"}),
+            "8k": blocks(k8={"new": 3, "fetched": 0, "failed": 3, "unlisted": 0}),     # the feed reads, no document does
+            "8k,news": blocks(k8=None, news={"error": "x"}),                            # a read missing from the pass
+        }
+        for name, summary in cases.items():
+            self.st.db.execute("DELETE FROM receipts")
+            self.record(now - 5 * 60, summary)
+            check = self.check("evl_record", now)
+            self.assertEqual((check["stalled"], check["numbers"]["failing"]), (True, name), name)
+        self.st.db.execute("DELETE FROM receipts")
+        self.record(now - 5 * 60, {**CLEAN, "tickers": {"error": "URLError: no tickers copy"}})
+        self.assertEqual(self.check("evl_record", now)["numbers"]["failing"], "8k", "no tickers copy: no 8-K fetched")
+        # A news read cut by its bound, a partial fetch and a pass with nothing new are all clean.
+        for summary in (blocks(news={"cut": True}), blocks(k8={"new": 4, "fetched": 3, "failed": 1, "unlisted": 0}),
+                        blocks(k8={"new": 0, "fetched": 0, "failed": 0, "unlisted": 0})):
+            self.st.db.execute("DELETE FROM receipts")
+            self.record(now - 5 * 60, summary)
+            self.assertFalse(self.check("evl_record", now)["stalled"], summary)
+
+    def test_failed_and_unfinished_passes_never_count(self):
+        now = et(TUE, "10:00")
+        self.receipt("record", now - 20 * 60, status="running", finished=None, summary=CLEAN)
+        self.receipt("record", now - 10 * 60, status="failed", summary={"error": "LaneDeadline"})
+        check = self.check("evl_record", now)
+        self.assertTrue(check["stalled"])
+        self.assertEqual(check["numbers"]["failed_30m"], 1)
+        self.assertIn("its passes failed", check["what"])
 
 
 class Decide(Lane):
-    def test_a_decision_not_done_ten_minutes_after_its_time(self):
+    def test_a_decision_not_made_in_its_window(self):
         early = self.check("evl_decide", et(TUE, "09:24"))
         self.assertEqual(early["numbers"]["first_missed"], "close:2026-10-19", "the 09:15 is not due until 09:25")
         self.assertEqual(early["numbers"]["decisions_due"], 1)
@@ -135,34 +219,48 @@ class Decide(Lane):
         check = self.check("evl_decide", now)
         self.assertTrue(check["stalled"])
         self.assertEqual((check["numbers"]["decisions_due"], check["numbers"]["missed"]), (2, 2))
-        self.assertIn("close decision of 2026-10-19 (15:46 ET) is not done 10 minutes after its time", check["what"])
-        self.receipt("decide-close:2026-10-19", et(MON, "15:46"))
+        self.assertIn("close decision of 2026-10-19 (15:46 ET) was not made in its 10-minute window: it was never started",
+                      check["what"])
+        self.receipt("decide-close:2026-10-19", et(MON, "15:47"))
         self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="pending", summary={"pending": {"EVL-ERN-READ-O1": 2}})
-        check = self.check("evl_decide", now)
-        self.assertEqual((check["numbers"]["missed"], check["numbers"]["waiting_on_verdicts"]), (1, 1))
-        self.assertIn("(it waits on verdicts)", check["what"])
-        self.assertEqual(check["onset"], et(TUE, "09:15"))
-        self.receipt("decide-open:2026-10-20", et(TUE, "09:22"))  # the verdicts came: a decision done late is done
-        self.assertFalse(self.check("evl_decide", now)["stalled"])
-        # A re-decision that waits on late events is no missed decision once one ran ok.
-        self.receipt("decide-open:2026-10-20", et(TUE, "10:40"), status="pending")
-        self.assertFalse(self.check("evl_decide", et(TUE, "11:00"))["stalled"])
+        self.assertFalse(self.check("evl_decide", now)["stalled"], "pending is made: its verdicts are evl_verdicts'")
+
+    def test_failed_or_cut_in_the_window_and_decided_later_still_stands(self):
+        """A live decision cut by the lane's bound and never finished in its window missed its auction: decided later it
+        is in the shadow record only, and the cause says so."""
+        self.receipt("decide-close:2026-10-19", et(MON, "15:47"))
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="failed", summary={"why": "GatewayError: 429"})
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:16"), status="ok")  # failed, then a minute later: made
+        self.assertFalse(self.check("evl_decide", et(TUE, "09:40"))["stalled"])
+        self.st.db.execute("DELETE FROM receipts WHERE job='decide-open:2026-10-20'")
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="cut", summary={"why": "the lane's time bound"})
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:31"), status="ok")  # a backfill
+        check = self.check("evl_decide", et(TUE, "09:40"))
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["first_state"], check["numbers"]["decided_later"]), ("cut", 1))
+        self.assertIn("it was cut by the lane's time bound; it was decided later, for the shadow record only", check["what"])
+        self.assertEqual(check["onset"], et(TUE, "09:25"))
+        self.st.db.execute("DELETE FROM receipts WHERE job='decide-open:2026-10-20'")
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="running", finished=None)
+        self.assertEqual(self.check("evl_decide", et(TUE, "09:40"))["numbers"]["first_state"], "unfinished")
+        # A day later the missed decision has left the look-back.
+        self.receipt("decide-close:2026-10-20", et(TUE, "15:47"))
+        self.receipt("decide-open:2026-10-21", et(WED, "09:15"))
+        self.assertFalse(self.check("evl_decide", et(WED, "09:40"))["stalled"])
 
     def test_an_early_close_moves_the_close_decision_and_the_weekend_has_none(self):
         friday = dt.date(2026, 11, 27)  # the day after Thanksgiving: a 13:00 close
-        self.receipt("decide-close:2026-11-25", et(dt.date(2026, 11, 25), "15:46"))
+        self.receipt("decide-close:2026-11-25", et(dt.date(2026, 11, 25), "15:47"))
         self.receipt("decide-open:2026-11-27", et(friday, "09:15"))
         check = self.check("evl_decide", et(friday, "12:57"))
         self.assertEqual((check["numbers"]["first_missed"], check["numbers"]["missed"]), ("close:2026-11-27", 1),
                          "12:46 + 10 minutes")
         self.assertFalse(self.check("evl_decide", et(friday, "12:55"))["stalled"], "not due before 12:56")
-        self.receipt("decide-close:2026-11-27", et(friday, "12:46"))
+        self.receipt("decide-close:2026-11-27", et(friday, "12:47"))
         sunday = self.check("evl_decide", et(dt.date(2026, 11, 29), "12:00"))
         self.assertEqual((sunday["stalled"], sunday["numbers"]["decisions_due"]), (False, 0))
 
     def test_the_decisions_judged_are_the_programs_own_rows(self):
-        """Programs are data rows (league/events/programs.py): the entry kinds come from them, so a wave of programs that
-        needs a decision kind is judged with no code here."""
         opens = tuple(p for p in P.PROGRAMS if p.entry_at == "open")
         with mock.patch.object(P, "PROGRAMS", opens):
             self.assertEqual(EV.entry_kinds(), ("open",))
@@ -174,59 +272,163 @@ class Verdicts(Lane):
     def tally(self, at: float, needed: int, answered: int, status: str = "ok", job: str = "decide-open:2026-10-20"):
         self.receipt(job, at, status=status, summary={"verdicts": {"needed": needed, "answered": answered}})
 
-    def test_over_a_fifth_of_the_days_verdicts_unanswered(self):
-        now = et(TUE, "09:30")
-        self.assertIn("carries a verdict tally yet", self.check("evl_verdicts", now)["what"])
-        self.tally(et(TUE, "09:15"), 10, 7, status="pending")
-        check = self.check("evl_verdicts", now)
+    def test_needed_verdicts_unanswered_past_the_decision(self):
+        self.tally(et(MON, "15:47"), 0, 0, job="decide-close:2026-10-19")
+        self.assertIn("No verdict a decision of the last 24 h needed is unanswered", self.check("evl_verdicts", et(TUE, "09:26"))["what"])
+        for minute in ("09:15", "09:20", "09:25"):
+            self.tally(et(TUE, minute), 10, 7, status="pending")
+        early = self.check("evl_verdicts", et(TUE, "09:26"))
+        self.assertFalse(early["stalled"], "11 minutes past: the lane is still asking")
+        check = self.check("evl_verdicts", et(TUE, "09:31"))
         self.assertTrue(check["stalled"])
-        self.assertEqual((check["numbers"]["needed"], check["numbers"]["unanswered"], check["numbers"]["unanswered_share"]),
-                         (10, 3, 0.3))
-        self.assertIn("3 of the 10 verdicts the event lane's decisions of 2026-10-20 needed have no answer (30%, over 20%)",
+        self.assertEqual((check["numbers"]["unanswered"], check["numbers"]["needed"], check["numbers"]["first_held"]),
+                         (3, 10, "open:2026-10-20"))
+        self.assertIn("3 verdicts the event lane's open decision of 2026-10-20 needs have no answer 16 minutes past it",
                       check["what"])
-        self.tally(et(TUE, "09:20"), 10, 8)  # the latest receipt of the decision is the one read
-        self.assertFalse(self.check("evl_verdicts", now)["stalled"], "20% is not over 20%")
-        self.tally(et(TUE, "09:22"), 0, 0)
-        self.assertIn("needed no verdict", self.check("evl_verdicts", now)["what"])
+        self.tally(et(TUE, "09:32"), 10, 10)  # every verdict stored: decided, and the latest receipt is the one read
+        self.assertFalse(self.check("evl_verdicts", et(TUE, "09:40"))["stalled"])
 
-    def test_the_latest_sessions_decisions_are_summed_and_a_bad_tally_is_skipped(self):
-        self.tally(et(MON, "15:46"), 50, 0, job="decide-close:2026-10-19")  # Monday's: not the day judged at 15:57 Tue
+    def test_a_redecision_that_finds_new_verdicts_is_judged_from_its_own_start(self):
         self.tally(et(TUE, "09:15"), 8, 8)
-        self.tally(et(TUE, "15:46"), 12, 8, job="decide-close:2026-10-20")
-        check = self.check("evl_verdicts", et(TUE, "15:57"))
-        self.assertEqual((check["numbers"]["day"], check["numbers"]["needed"], check["numbers"]["answered"]),
-                         ("2026-10-20", 20, 16))
-        self.assertFalse(check["stalled"], "4 of 20")
-        for bad in ({"needed": 5, "answered": 9}, {"needed": "lots", "answered": 1}, {"needed": -1, "answered": 0}, "x"):
-            self.receipt("decide-close:2026-10-20", et(TUE, "15:50"), summary={"verdicts": bad})
-            self.assertEqual(self.check("evl_verdicts", et(TUE, "15:57"))["numbers"]["decisions_read"], "open", bad)
+        self.tally(et(TUE, "11:40"), 9, 8, status="pending")  # the hourly re-decision found a late event's verdict
+        self.assertFalse(self.check("evl_verdicts", et(TUE, "11:50"))["stalled"], "10 minutes into its own run")
+        self.assertTrue(self.check("evl_verdicts", et(TUE, "11:56"))["stalled"])
+
+    def test_a_receipt_from_before_the_tally_is_read_by_its_pending_counts(self):
+        """Release 1019b's receipts carry `pending` (each program's waiting events) and no tally: they are judged too."""
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="pending",
+                     summary={"pending": {"EVL-ERN-READ-O1": 2, "EVL-ERN-READ-O1@v2": 2}})
+        check = self.check("evl_verdicts", et(TUE, "09:40"))
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["unanswered"], check["numbers"]["needed"]), (4, 0))
+
+    def test_the_houses_pause_holds_verdicts_by_design(self):
+        self.tally(et(TUE, "09:15"), 10, 2, status="pending")
+        (self.root / "PAUSE").write_text("maintenance")
+        os.utime(self.root / "PAUSE", (et(TUE, "09:00"), et(TUE, "09:00")))
+        idle = EV.idle_windows(None, self.root, et(TUE, "09:50"))
+        held = self.check("evl_verdicts", et(TUE, "09:50"), idle=idle)
+        self.assertEqual((held["stalled"], held["judged"]), (False, False))
+        self.assertIn("the House is paused (PAUSE)", held["what"])
+        self.assertFalse(self.check("evl_record", et(TUE, "09:50"), idle=idle)["judged"] is False, "the rest is judged")
+        (self.root / "PAUSE").unlink()
+        idle = EV.idle_windows(idle, self.root, et(TUE, "10:20"))
+        self.assertIn("PAUSE ended under 30 minutes ago", self.check("evl_verdicts", et(TUE, "10:30"), idle=idle)["what"])
+        self.tally(et(TUE, "10:40"), 10, 2, status="pending")
+        check = self.check("evl_verdicts", et(TUE, "10:51"), idle=idle)
+        self.assertTrue(check["stalled"])
+        self.assertEqual(check["numbers"]["unanswered_since"], iso(et(TUE, "10:20")),
+                         "counted from the pause's end, not from 09:15")
+        self.tally(et(TUE, "10:52"), 10, 10)
+        self.assertFalse(self.check("evl_verdicts", et(TUE, "10:55"), idle=idle)["stalled"])
+
+    def test_the_lanes_line_reached_is_said(self):
+        self.tally(et(TUE, "09:15"), 40, 25, status="pending")
+        check = self.check("evl_verdicts", et(TUE, "09:45"), line={"line_usd": 3.0, "spent_usd": 3.004})
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["verdict_line_usd"], check["numbers"]["at_line"]), (3.0, True))
+        self.assertIn("the lane's verdict line for the day is reached", check["what"])
+
+
+class CloseDecisionTally(unittest.TestCase):
+    """The review of r1/alarms, its major 3, end to end: the close decision's needed and unanswered verdict sets, of
+    PREREG-EVL-2's close-entry reading program (NEWS-READ-ON, versions 1 and 2), written by league/events/run.py's own
+    `decide_close` into its receipt, reach `evl_verdicts`."""
+
+    def setUp(self):
+        from league.tests.test_events_run import sec_pages
+        from league.tests.test_events_wave2 import DayGateway
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "state"
+        self.st = ES.Store(self.root / "events")
+        self.addCleanup(self.st.close)
+        self.now = dt.datetime(2026, 10, 19, 19, 46, tzinfo=UTC)
+        self.gw = DayGateway({"AAA": 3, "BBB": 1}, {"AAA": 21.0, "BBB": 20.5})
+        self.ctx = R.Context(self.st, self.gw, sec_pages, now=lambda: self.now)
+        C.refresh(self.st, self.gw, dt.date(2026, 8, 1), dt.date(2026, 12, 31))
+        self.st.set_meta("tickers@2026-10-19T01:05:00Z", self.st.put_document(sec_pages("x/company_tickers.json"), "t"))
+        pinned = P.REGISTERED_AT
+        P.REGISTERED_AT = "2026-10-19T01:00:00Z"
+        self.addCleanup(setattr, P, "REGISTERED_AT", pinned)
+        for nid, symbol, hour in (("n1", "AAA", 14), ("n3", "BBB", 16)):
+            knowable = dt.datetime(2026, 10, 19, hour, 0, tzinfo=UTC)
+            created = knowable - dt.timedelta(minutes=2)
+            self.st.db.execute("INSERT INTO news(id, created_at, updated_at, received_at, knowable_at, source, headline, "
+                               "summary, symbols, live) VALUES(?, ?, ?, ?, ?, 'benzinga', 'h', 's', ?, 1)",
+                               (nid, ES.iso(created), ES.iso(created), ES.iso(created), ES.iso(knowable), json.dumps([symbol])))
+        self.answer = self.gw.post_json
+
+    def test_a_close_entry_reading_program_waiting_stands_on_evl_verdicts(self):
+        self.gw.post_json = lambda path, body, headers=None: (503, {"error": "upstream"})
+        out = R.decide_close(self.ctx, dt.date(2026, 10, 19))
+        self.assertIn("EVL-NEWS-READ-ON@v2", out["pending"])
+        self.assertEqual(out["verdicts"], {"needed": 2, "answered": 0})
+        ctx = {"config": {"events": {"enabled": True}}, "settings": {}}
+        at = self.now.timestamp()
+        quiet = EV.checks(ctx, self.root, at + 10 * 60)["evl_verdicts"]
+        self.assertFalse(quiet["stalled"], "the close decision's window has not ended (15:56 ET)")
+        check = EV.checks(ctx, self.root, at + 16 * 60)["evl_verdicts"]
+        self.assertTrue(check["stalled"], check["what"])
+        self.assertEqual((check["numbers"]["first_held"], check["numbers"]["unanswered"], check["numbers"]["needed"]),
+                         ("close:2026-10-19", 2, 2))
+        self.gw.post_json = self.answer
+        self.now = self.now + dt.timedelta(minutes=17)
+        R.decide_close(self.ctx, dt.date(2026, 10, 19))
+        self.assertFalse(EV.checks(ctx, self.root, at + 20 * 60)["evl_verdicts"]["stalled"], "answered: decided")
 
 
 class Score(Lane):
-    def test_a_session_not_scored_by_23_00(self):
+    def test_intents_still_open_after_the_nights_passes(self):
+        """The review's probe: Monday's score `ok` with every settlement raising left 12 intents entered at 12:20 ET the
+        next day, and nothing stood. Now the intents themselves are judged."""
         before = self.check("evl_score", et(TUE, "22:59"))
         self.assertEqual(before["numbers"]["day"], "2026-10-19", "Tuesday's 23:00 has not come")
-        self.intent("8k:a", TUE)
+        for i in range(12):
+            self.intent(f"8k:{i}", TUE, status="entered" if i % 2 else "planned")
+        self.receipt("score", et(TUE, "20:30"), status="ok", summary={"day": "2026-10-20", "complete": True, "due": 12,
+                                                                      "settled": 0, "errors": 12})
+        now = et(TUE, "23:20")
+        check = self.check("evl_score", now)
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["open_due"], check["numbers"]["last_pass_errors"], check["onset"]),
+                         (12, 12, et(TUE, "23:00")))
+        self.assertIn("12 intents due by the session of 2026-10-20 are still open after the night's score passes", check["what"])
+        self.st.db.execute("UPDATE intents SET status='exited'")
+        self.assertFalse(self.check("evl_score", now)["stalled"])
+
+    def test_no_pass_at_all_and_an_exit_the_tape_showed_absent(self):
+        self.intent("8k:a", TUE, symbol="AAA")
+        self.intent("8k:b", TUE, symbol="BBB")
         now = et(TUE, "23:30")
         check = self.check("evl_score", now)
         self.assertTrue(check["stalled"])
-        self.assertEqual((check["numbers"]["unsettled_due"], check["onset"]), (1, et(TUE, "23:00")))
-        self.receipt("score", et(TUE, "16:05"))  # before the tape is 16 minutes old: not this session's scoring
-        self.assertTrue(self.check("evl_score", now)["stalled"])
-        self.receipt("score", et(TUE, "20:30"), status="failed")
-        self.assertTrue(self.check("evl_score", now)["stalled"], "a pass where every due intent failed scores nothing")
-        self.receipt("score", et(TUE, "20:45"))
-        self.assertFalse(self.check("evl_score", now)["stalled"])
+        self.assertIn("no score pass ran after its close", check["what"])
+        # BBB's closing print was absent on its exit day (PREREG-EVL-1 section 5: the next session's close): by design.
+        self.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('BBB', ?, 'close', NULL, "
+                           "NULL, 'none', ?)", (TUE.isoformat(), iso(now)))
+        check = self.check("evl_score", now)
+        self.assertEqual((check["numbers"]["open_due"], check["numbers"]["waiting_on_tape"]), (1, 1))
+        self.st.db.execute("UPDATE intents SET status='exited' WHERE event='8k:a'")
+        check = self.check("evl_score", now)
+        self.assertFalse(check["stalled"])
+        self.assertIn("1 the tape keeps waiting", check["what"])
 
     def test_a_night_with_nothing_due_is_no_stall(self):
         self.intent("8k:b", WED)  # due tomorrow
         self.intent("8k:c", TUE, status="exited")
         check = self.check("evl_score", et(TUE, "23:30"))
-        self.assertEqual((check["stalled"], check["numbers"]["unsettled_due"]), (False, 0))
+        self.assertEqual((check["stalled"], check["numbers"]["open_due"]), (False, 0))
 
 
 class StallHarness(StallBase):
     """The stall job over a swarm store (league/tests/test_ops_stall.py's) and a lane store, the lane on the House."""
+
+    def setUp(self):
+        super().setUp()
+        self.now_ = et(TUE, "12:20")
+        self.health = {"kill_switch": False}
 
     def lane(self, *, record_ago_minutes=None):
         st = ES.Store(self.root / "events")
@@ -234,7 +436,7 @@ class StallHarness(StallBase):
             if record_ago_minutes is not None:
                 at = self.now_ - record_ago_minutes * 60
                 st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, "
-                              "'ok', '{}')", (iso(at - 20), iso(at)))
+                              "'ok', ?)", (iso(at - 20), iso(at), json.dumps(CLEAN)))
         finally:
             st.close()
 
@@ -247,16 +449,13 @@ class StallHarness(StallBase):
         ctx.population_ceiling = ceiling
         ctx.binds = list(binds)
         ctx.lane_on = True  # the direction lane on (its report read), as the swarm's own settings say on the House
+        ctx.health = lambda: self.health
         return ctx
-
-    def setUp(self):
-        super().setUp()
-        self.now_ = et(TUE, "12:20")
 
     def record(self, at: float) -> None:
         st = ES.Store(self.root / "events")
-        st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, 'ok', '{}')",
-                      (iso(at - 20), iso(at)))
+        st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, 'ok', ?)",
+                      (iso(at - 20), iso(at), json.dumps(CLEAN)))
         st.close()
 
 
@@ -272,21 +471,26 @@ class StallJob(StallHarness):
         self.assertIsNone(entry["owner_step"])
         self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info:" + "+".join(sorted(out["stalled"])))
         self.assertIn("evl_record", out["warned"])
-        # Recording again: the cause clears at the next run.
         self.record(self.now_ + 1790)
         again = ST.run(self.ctx(now=self.now_ + 1800))
         self.assertIn("evl_record", again["cleared"])
 
+    def test_the_stop_file_quiets_the_four_through_the_job_and_its_window_is_kept(self):
+        self.lane()
+        (self.root / "events" / "STOP").write_text("x")
+        out = ST.run(self.ctx())
+        self.assertFalse(set(EV.CAUSES) & set(out["stalled"]), out["stalled"])
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())["evl_idle"]
+        self.assertIsNone(kept["stop"][-1][1])
+
     def test_the_research_switch_judges_no_research_cause_and_no_research_alarm(self):
-        """A60 turned the old lanes' research off by settings: with ops.json stall.research false no cause and no notice
-        comes of it, and the money alarms of the direction lane stand as before."""
         self.lane(record_ago_minutes=2)
         st = ES.Store(self.root / "events")
-        for job, start in (("decide-open:2026-10-20", et(TUE, "09:15")), ("decide-close:2026-10-19", et(MON, "15:46"))):
+        for job, start in (("decide-open:2026-10-20", et(TUE, "09:15")), ("decide-close:2026-10-19", et(MON, "15:47"))):
             st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES(?, ?, ?, 'ok', '{}')",
                           (job, iso(start), iso(start + 60)))
         st.close()
-        on = ST.run(self.ctx(settings={}))  # research judged: a store last busy on Oct 7 stands on every research cause
+        on = ST.run(self.ctx(settings={}))
         self.assertTrue({"births", "gym_runs"} <= set(on["stalled"]), on["stalled"])
         self.notify.calls.clear()
         (self.root / ST.STATE_FILE).unlink()
@@ -299,7 +503,6 @@ class StallJob(StallHarness):
             self.assertIn("research is switched off (ops.json stall.research is false)" if cause != "underspend"
                           else "a cheap day is never a failed day", check["what"], cause)
             self.assertEqual((check["stalled"], check["owner_step"], check["numbers"]["judged"]), (False, None, False))
-        # The direction lane's report: its research alarms are not judged; a money alarm stands.
         report = {"at": self.now_ - 600, "lane": {"mode": "gate"},
                   "alarms": [{"id": "A1", "level": "warning", "text": "A1: no direction birth"},
                              {"id": "A3", "level": "warning", "text": "A3: a cleared best waits"}], "k5": {}}
@@ -314,165 +517,11 @@ class StallJob(StallHarness):
         self.assertEqual(loud["checks"]["dlane"]["numbers"]["alarms"], "pl1")
 
     def test_a_cheap_day_is_never_a_failed_day(self):
-        """Budget rule 3: `underspend` is not judged, whatever research booked (the cap is what may be spent)."""
         self.lane(record_ago_minutes=2)
         out = ST.run(self.ctx(settings={}))
         self.assertFalse(out["checks"]["underspend"]["stalled"])
         self.assertIn("a cheap day is never a failed day", out["checks"]["underspend"]["what"])
         self.assertEqual(ST.CHEAP_DAY_RULE, 3)
-
-
-def synthetic_lane(root: Path, day: dt.date = TUE) -> None:
-    """A lane store holding one invented session's figures (league/tests/test_events_report.py's shape): filings, news,
-    verdicts, settled and planned intents with invented returns, and the day's receipts (record, decisions, score), so
-    no cause of the four stands at 22:20 ET."""
-    st = ES.Store(root / "events")
-    try:
-        class Cal:
-            def get_json(self, path, params=None):
-                start, end = dt.date.fromisoformat(params["start"]), dt.date.fromisoformat(params["end"])
-                out, d = [], start
-                while d <= end:
-                    if d.weekday() < 5:
-                        out.append({"date": d.isoformat(), "open": "09:30", "close": "16:00"})
-                    d += dt.timedelta(days=1)
-                return out
-        C.refresh(st, Cal(), dt.date(2026, 10, 1), dt.date(2026, 12, 31))
-        db = st.db
-
-        def t(hhmm):
-            return iso(et(day, hhmm))
-        with st.tx():
-            for acc, form, items in (("0001-26-000001", "8-K", '["2.02"]'), ("0001-26-000003", "8-K", '["8.01"]'),
-                                     ("0001-26-000005", "4", "[]")):
-                db.execute("INSERT INTO filings(accession, form, cik, items, accepted_at, knowable_at, received_at, source, "
-                           "status) VALUES(?, ?, '0000000001', ?, ?, ?, ?, 'current', 'fetched')",
-                           (acc, form, items, t("08:01"), t("08:11"), t("08:03")))
-            db.execute("INSERT INTO news(id, created_at, received_at, knowable_at, source, headline, summary, symbols, live) "
-                       "VALUES('1', ?, ?, ?, 'benzinga', 'ACME SURGES ON MIRACLE CURE', 'secret summary', '[\"ACME\"]', 1)",
-                       (t("07:00"), t("07:01"), t("07:02")))
-            for event, status, usd in (("8k:a", "ok", 0.004), ("8k:b", "ok", 0.006), ("8k:c", "unparsed", 0.003)):
-                db.execute("INSERT INTO verdicts(event, prompt_sha, model, asked_at, answered_at, status, usd) VALUES(?, 'p', "
-                           "'claude-haiku-4-5-20251001', ?, ?, ?, ?)", (event, t("08:20"), t("08:21"), status, usd))
-            for i, (event, sym, status, r, a) in enumerate((("8k:a", "ACME", "exited", 0.012, 0.010),
-                                                            ("8k:b", "BETA", "exited", -0.004, -0.006),
-                                                            ("8k:c", "GAMA", "exited", 0.002, 0.001))):
-                db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
-                           "exit_day, exit_at, mode, status) VALUES('EVL-ERN-READ-O1', 1, ?, ?, ?, ?, ?, 'open', ?, 'close', "
-                           "'shadow', ?)", (event, sym, f"{i:010d}", t("09:15"), day.isoformat(), day.isoformat(), status))
-                db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, r, b, a, tradable, "
-                           "settled_at, status) VALUES('EVL-ERN-READ-O1', 1, ?, 123.45, 124.56, 'SPY', ?, ?, ?, 1, ?, "
-                           "'settled')", (event, r, r - a, a, t("20:31")))
-            for job, hhmm, summary in (("record", "22:15", {}), ("decide-open:" + day.isoformat(), "09:15",
-                                                                 {"verdicts": {"needed": 3, "answered": 3}}),
-                                       ("decide-close:" + day.isoformat(), "15:46", {"verdicts": {"needed": 0, "answered": 0}}),
-                                       ("score", "20:30", {"due": 3, "settled": 3})):
-                db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES(?, ?, ?, 'ok', ?)",
-                           (job, t(hhmm), t(hhmm), json.dumps(summary)))
-    finally:
-        st.close()
-
-
-class DailyReport(StallHarness):
-    """THE DAILY ONE-SCREEN REPORT: the day's figures ride the stall notice once a day from 22:00 ET of a session day,
-    alone when nothing stands; the receipt and stall.json carry its day, never a figure."""
-
-    def setUp(self):
-        super().setUp()
-        synthetic_lane(self.root)
-        self.now_ = et(TUE, "22:20")
-
-    def test_the_days_report_rides_a_notice_even_when_nothing_stands_and_once_a_day(self):
-        out = ST.run(self.ctx())
-        self.assertEqual(out["stalled"], [])
-        self.assertTrue(out["notice"]["sent"])
-        self.assertEqual(out["notice"]["report"], "2026-10-20")
-        facts = self.notify.calls[-1]
-        self.assertEqual((facts["causes"], facts["notice_id"]), ([], "stall:info:report:2026-10-20"))
-        report = facts["report"]
-        self.assertEqual(report["day"], "2026-10-20")
-        self.assertEqual(report["events"], {"8k_202": 1, "8k_other": 1, "form4": 1, "news": 1, "failed": 0})
-        self.assertEqual(report["verdicts"], {"ok": 2, "unparsed": 1, "refused": 0, "usd": 0.01})
-        o1 = next(p for p in report["programs"] if p["id"] == "EVL-ERN-READ-O1")
-        self.assertEqual((o1["settled"], o1["settled_today"], o1["tradable"], o1["real_n"]), (3, 3, 3, None))
-        self.assertEqual(o1["shadow_pnl_usd"], round(100 * (0.012 - 0.004 + 0.002), 2), "at $100 an event")
-        self.assertEqual((o1["mean_r_bp"], o1["mean_a_bp"]), (33.3, 16.7))
-        self.assertEqual((o1["next_look"], o1["next_look_session"], o1["last_look"]), (1, 10, "none"))
-        # No price, headline, symbol or text in the facts; no figure of the report in the receipt or stall.json.
-        sent = json.dumps(facts)
-        for banned in ("ACME", "MIRACLE", "secret summary", "123.45", "124.56", "BETA"):
-            self.assertNotIn(banned, sent)
-        kept = json.dumps(out) + (self.root / ST.STATE_FILE).read_text()
-        for figure in ("shadow_pnl_usd", "mean_r_bp", "8k_202"):
-            self.assertNotIn(figure, kept)
-        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())["report"]["day"], "2026-10-20")
-        # Told: the runs after it the same evening carry none, and mail nothing.
-        self.record(self.now_ + 1700)
-        later = ST.run(self.ctx(now=self.now_ + 1800))
-        self.assertEqual((later["notice"]["sent"], later["notice"]["report"]), (False, None))
-        self.assertEqual(len(self.notify.calls), 1)
-
-    def test_it_rides_with_the_causes_standing_and_not_before_22_00_or_on_a_weekend(self):
-        self.assertIsNone(ST.run(self.ctx(now=et(TUE, "21:50")))["notice"]["report"], "before 22:00 ET")
-        self.assertEqual(self.notify.calls, [])
-        st = ES.Store(self.root / "events")
-        st.db.execute("DELETE FROM receipts WHERE job='record'")  # no record pass: evl_record stands
-        st.close()
-        out = ST.run(self.ctx())
-        self.assertIn("evl_record", out["stalled"])
-        facts = self.notify.calls[-1]
-        self.assertEqual([c["cause"] for c in facts["causes"]], ["evl_record"])
-        self.assertEqual((facts["report"]["day"], facts["notice_id"]), ("2026-10-20", "stall:info:evl_record:report:2026-10-20"))
-        self.assertEqual(EV.report_day(et(dt.date(2026, 10, 24), "22:30")), None, "Saturday: Friday's is too old by then")
-        self.assertEqual(EV.report_day(et(dt.date(2026, 10, 23), "23:59")), "2026-10-23")
-        self.assertIsNone(EV.report_due(self.ctx(events=False), self.root, self.now_), "no lane on the House: no report")
-
-    def test_a_duplicate_answer_tells_it_and_a_failed_send_tries_again(self):
-        self.notify.answer = {"sent": False, "reason": "mail down"}
-        first = ST.run(self.ctx())
-        self.assertFalse(first["notice"]["sent"])
-        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())["report"], {}, "not told: tried again")
-        self.notify.answer = {"sent": True, "duplicate": True}
-        self.record(self.now_ + 1700)
-        ST.run(self.ctx(now=self.now_ + 1800))
-        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())["report"]["day"], "2026-10-20",
-                         "the gateway mailed this very notice already: its key names the day")
-        calls = len(self.notify.calls)
-        self.record(self.now_ + 3500)
-        ST.run(self.ctx(now=self.now_ + 3600))
-        self.assertEqual(len(self.notify.calls), calls)
-
-    def test_a_report_that_does_not_fit_goes_without_and_says_so(self):
-        with mock.patch.object(ST, "NOTICE_BYTES", 600):
-            out = ST.run(self.ctx())
-        self.assertIn("does not fit the notice: sent without it", " ".join(out["errors"]))
-        self.assertEqual(self.notify.calls, [], "nothing stood: no notice without the report")
-
-
-class ReportShape(unittest.TestCase):
-    def test_the_houses_report_facts_are_the_gateways_fixture(self):
-        """league/tests/fixtures/stall_report.json is what the gateway's test composes (gateway/test/
-        stall-notice.test.mjs): the House writes exactly its keys, a program's too."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        root = Path(tmp.name)
-        synthetic_lane(root)
-        ctx = {"config": {"events": {"enabled": True}}, "settings": {}}
-        budget = {"cap": {"cap_usd_day": 5.0, "fixed_usd_day": 1.6644, "lane_usd_day": 3.0}, "research_usd_day": 0.3356,
-                  "meters": {"sail": {"burn_usd_day": 1.2}, "claude": {"burn_usd_day": 2.9}}}
-        facts = EV.report_due(ctx, root, et(TUE, "22:20"), budget=budget)
-        fixture = json.loads(FIXTURE.read_text())
-        fixture.pop("_note")
-
-        def shape(value):
-            if isinstance(value, dict):
-                return {k: shape(v) for k, v in value.items()}
-            if isinstance(value, list):
-                return [shape(value[0])] if value else []
-            return None
-        self.assertEqual(shape({**facts, "programs": facts["programs"][:1]}), shape(fixture))
-        self.assertEqual(facts["costs"], {"cap_usd_day": 5.0, "fixed_usd_day": 1.66, "lane_usd_day": 3.0,
-                                          "research_usd_day": 0.34, "metered_usd_day": 4.1})
 
 
 if __name__ == "__main__":

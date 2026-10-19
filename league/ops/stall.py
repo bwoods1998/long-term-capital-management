@@ -121,16 +121,29 @@ is deployed before this release), so each is an entry of its own in the notice a
 running release has run and what they keep under it (`stall.json` `elane`: {release, since} and
 `elane_health.KEPT`; `elane_health.release_since`), so a restart that fixes nothing resets no evidence.
 
-THE EVENT LANE'S OWN CAUSES AND ITS DAILY REPORT (release R1, the owner's goal of Oct 19, 2026, item 7;
-league/ops/evl_health.py, which judges them): `evl_record` (no record pass in 30 minutes), `evl_decide` (a scheduled
-decision not done 10 minutes after its time), `evl_verdicts` (over 20% of a session's needed verdicts unanswered) and
-`evl_score` (a session not scored by 23:00 ET), from the lane's own receipts in `<state>/events/events.sqlite`, judged
-only while the lane runs on the House (config.json `events.enabled`) and `ops.json` `stall.evl` is not false; INFO, the
-four before the equity lanes' four in `CAUSES`, worded by the gateway. From 22:00 ET of each session day the lane's
-DAILY ONE-SCREEN REPORT (`evl_health.report_due`: league/events/report.py's figures for the day, counts and figures
-only) rides the notice once (`notice_facts` `report`; with no cause standing the notice carries it alone), told when
-the gateway sends it or answers that it mailed that very notice (its key names the day: `stall.json` `report`). The
-receipt and stall.json carry the report's day, never a figure.
+THE EVENT LANE'S OWN CAUSES (release 1019c, the owner's goal of Oct 19, 2026, item 5; league/ops/evl_health.py, which
+judges them by PROGRESS, never a receipt's status alone): `evl_record` (no clean record pass in 30 minutes: the 8-K, Form
+4 and news reads all without error, the failing feed named), `evl_decide` (a session's open or close decision not made in
+its 10-minute window: missing, failed, cut or unfinished), `evl_verdicts` (needed verdicts unanswered 15 minutes past
+their decision, the close decision's reading programs included) and `evl_score` (intents due by the latest session still
+open at 23:00 ET), from the lane's own store, judged only while the lane runs on the House (config.json
+`events.enabled`) and `ops.json` `stall.evl` is not false, and never while the lane's `events/STOP` stands (nor for 30
+minutes after it goes) nor, for `evl_verdicts`, while the House's `PAUSE` stands (the windows the job saw are kept:
+`stall.json` `evl_idle`); INFO, the four before the equity lanes' four in `CAUSES`, worded by the gateway.
+
+THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
+league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
+meters, at `/v1/health`) into `<state>/metered.json`, and `cap_breach` stands while today's MEASURED metered spend so far,
+or yesterday's whole day, is over that day's cap (the lowest budget.json gave; its no-profit $5 when none could be read).
+INFO: the budget holds every line it can, and a fixed cost it cannot.
+
+THE DAILY ONE-SCREEN REPORT (release 1019c, the goal's item 5; league/ops/daily_report.py): once a New York day, at the
+first run after the lane's own nightly report job (from 23:45 ET when that has not run), its own `POST /v1/notify` kind
+`report` (the gateway composes it: figures only, one screen on a phone): events, intents, real fills, settled n,
+account-shown profit and Net after measured costs by program and band, the day's measured costs against the cap, each
+program's evidence, the same-risk buy-and-hold, the expected false passes and the causes standing. Told when the gateway
+sends it or says it already did (its key `report:<day>`; `stall.json` `report`: the day told). The receipt and stall.json
+carry the day, never a figure.
 
 THE RESEARCH SWITCH (release R1): `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and
 drops the direction lane's research alarms (`RESEARCH_ALARMS`) from `dlane`, so no mail and no owner step comes of the
@@ -182,7 +195,9 @@ from typing import Any, Callable, Mapping
 
 from . import budget as B
 from . import elane_health as EH
+from . import daily_report as DR
 from . import evl_health as EV
+from . import metered as MT
 from . import funnel as F
 from . import guard
 from . import schedule as S
@@ -311,7 +326,7 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 #: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
-          "evl_record", "evl_decide", "evl_verdicts", "evl_score",
+          "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score",
           "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
@@ -357,8 +372,8 @@ GUARD_DOING = {
     "no_reading": "the guard releases on its first good reading",
 }
 _OWNER_DEPLOY = re.compile(r"owner's (?:own )?deploy")
-#: The most a notice's facts may weigh (the gateway reads at most 32 KiB of a /v1/notify body): a daily report that would
-#: take it past this rides no notice (the causes go on without it).
+#: The most the daily report's facts may weigh (the gateway reads at most 32 KiB of a /v1/notify body): one that would
+#: pass it is not sent, and the job says so.
 NOTICE_BYTES = 30 * 1024
 #: The grant job's error for a refusal (league/ops/grant.py `failed` after `LiveGrant.standing` answered `refused`).
 _GRANT_REFUSED = "standing grant refused"
@@ -2039,30 +2054,60 @@ def cause_facts(cause: str, check: Mapping[str, Any], since: float | None, now: 
             "doing": str(check.get("doing") or ""), "owner_step": check.get("owner_step") or None}
 
 
-def notice_id(owner: list[str], causes: list[str] | None = None, report_day: str | None = None) -> str:
+def notice_id(owner: list[str], causes: list[str] | None = None) -> str:
     """The gateway's own dedupe key for the notice (gateway/lib/email.mjs `stallKey` keys it the same way, whatever id
     comes): the owner causes it tells, or, when none needs the owner, `stall:info:` and every cause it tells (since the
     review of the no-captain build, Oct 10, 2026: a new cause needing nothing is mailed at once, so the gateway's 24-hour
-    key is the set told, not one key for every such notice). A notice carrying the event lane's daily report (release
-    R1) adds `:report:<day>`, so each day's report is mailed once whatever the causes told before it; with no cause
-    standing it is `stall:info:report:<day>`."""
+    key is the set told, not one key for every such notice)."""
     if owner:
-        base = "stall:owner:" + "+".join(sorted(owner))
-    else:
-        base = "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
-    if report_day:
-        return f"{base}:report:{report_day}" if (owner or causes) else f"stall:info:report:{report_day}"
-    return base
+        return "stall:owner:" + "+".join(sorted(owner))
+    return "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
 
 
-def notice_facts(entries: list[dict[str, Any]], now: float, report: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first, and the event lane's daily
-    report when one rides (`report`, league/ops/evl_health.py `report_facts`; None otherwise)."""
+def notice_facts(entries: list[dict[str, Any]], now: float) -> dict[str, Any]:
+    """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first."""
     ordered = [e for e in entries if e.get("owner_step")] + [e for e in entries if not e.get("owner_step")]
     return {"kind": "stall", "notice_id": notice_id([e["cause"] for e in entries if e.get("owner_step")],
-                                                    [e["cause"] for e in entries],
-                                                    None if report is None else str(report.get("day"))),
-            "causes": ordered, "at": S.iso(now), "report": None if report is None else dict(report)}
+                                                    [e["cause"] for e in entries]),
+            "causes": ordered, "at": S.iso(now)}
+
+
+def send_report(ctx: Any, root: Path, now: float, *, told: Mapping[str, Any], ledger: Mapping[str, Any] | None,
+                budget: Mapping[str, Any] | None, stalled: list[str], errors: list[str]) -> tuple[dict[str, Any], dict]:
+    """THE DAILY ONE-SCREEN REPORT (league/ops/daily_report.py): the day's, when one is due and not told, as its own
+    notice (kind `report`). Returns (the receipt's line: {day, sent, why}, never a figure; the `report` record to keep in
+    stall.json: the day told and when)."""
+    due = DR.due(ctx, root, now, told=told)
+    if due is None:
+        return {"day": None, "sent": False, "why": "none due"}, dict(told)
+    out: dict[str, Any] = {"day": due["day"], "sent": False}
+    try:
+        facts = DR.facts(ctx, root, now, due["day"], ledger=ledger, budget=budget, alarms=stalled,
+                         lane_report=due["lane_report"])
+    except Exception as exc:  # noqa: BLE001 - tried again at the next run
+        errors.append(f"the daily report of {due['day']} could not be built ({type(exc).__name__})")
+        return {**out, "why": f"not built ({type(exc).__name__})"}, dict(told)
+    if len(json.dumps(facts, default=str)) > NOTICE_BYTES:
+        errors.append(f"the daily report of {due['day']} is over {NOTICE_BYTES} bytes: not sent")
+        return {**out, "why": "too large"}, dict(told)
+    notify = _notifier(ctx)
+    if notify is None:
+        errors.append("the daily report not sent: no gateway")
+        return {**out, "why": "no gateway to notify through"}, dict(told)
+    try:
+        answer = notify(facts)
+    except Exception as exc:  # noqa: BLE001 - not told: the next run tries again
+        errors.append(f"the daily report of {due['day']} failed ({type(exc).__name__})")
+        return {**out, "why": f"the notice failed ({type(exc).__name__})"}, dict(told)
+    sent = isinstance(answer, Mapping) and answer.get("sent") is True
+    if not sent:
+        reason = str((answer or {}).get("reason") or "the gateway did not send it")[:200] if isinstance(answer, Mapping) \
+            else "the gateway did not send it"
+        errors.append(f"the daily report of {due['day']} not sent: {reason}")
+        return {**out, "why": reason}, dict(told)
+    # The gateway sent it, or answered that it mailed this very report already (its key names the day): told.
+    return {**out, "sent": True, "why": "duplicate" if answer.get("duplicate") is True else "sent"}, \
+        {"day": due["day"], "at": S.iso(now)}
 
 
 def _sent(answer: Any) -> tuple[bool, str]:
@@ -2192,9 +2237,10 @@ def run(ctx: Any) -> dict[str, Any]:
     # rest.
     done_told = sorted({k for k in state.get("done_told") or [] if isinstance(k, str)}
                        if isinstance(state.get("done_told"), list) else [])
+    health = _health(ctx)  # one read a run: the kill switch, and the gateway's Claude and OpenAI meters
     found = checks(swarm, now=now, ceiling=ceiling, budget=budget if isinstance(budget, Mapping) else None,
                    deploy=owner_deploy(base), heartbeat=read_json(root / HEARTBEAT, None), pause=pause_facts(root),
-                   grant=grant, kill=kill_facts(_health(ctx)), flight=flight, dlane=dlane, lane_on=lane_on,
+                   grant=grant, kill=kill_facts(health), flight=flight, dlane=dlane, lane_on=lane_on,
                    preopen=preopen, forward=forward,
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
                    nightly_error_day=None if nightly_error is None else nightly_error.get("day"),
@@ -2204,13 +2250,26 @@ def run(ctx: Any) -> dict[str, Any]:
     running = EH.release_since(state.get(EH.STATE_KEEP), root, now)
     found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"), kept=running,
                            paused=found["paused"]["numbers"]["paused_since"] is not None))
-    # THE EVENT LANE'S OWN CAUSES (release R1; league/ops/evl_health.py): from the lane's receipts, read-only, while the
-    # lane runs on the House.
-    found.update(EV.checks(ctx, root, now, errors=errors))
-    # THE DAILY ONE-SCREEN REPORT (release R1, the goal of Oct 19, item 7): the day's report rides the notice once a day.
-    told_report = state.get("report") if isinstance(state.get("report"), dict) else {}
-    report = EV.report_due(ctx, root, now, told=told_report, budget=budget if isinstance(budget, Mapping) else None,
-                           errors=errors)
+    # THE CAP BREACH (release 1019c; league/ops/metered.py): this run's readings of the meters themselves into
+    # metered.json, and the day's measured spend against its cap. budget.json's cap counts only from this rule's file.
+    rule_budget = budget if isinstance(budget, Mapping) and budget.get("schema") == B.SCHEMA else None
+    ledger = None
+    try:
+        ledger = MT.update(root, now, health=health, budget=rule_budget)
+        found[MT.CAUSE] = MT.cap_check(ledger, now)
+    except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without the meters
+        errors.append(f"the meters could not be read into metered.json ({type(exc).__name__}): cap_breach is not judged")
+        found[MT.CAUSE] = _not_judged(f"the meters could not be read ({type(exc).__name__})")
+    # THE EVENT LANE'S OWN CAUSES (release 1019c; league/ops/evl_health.py): progress, read-only from the lane's store,
+    # while the lane runs on the House; idle by design under its STOP and the House's PAUSE (the windows kept here).
+    idle = EV.idle_windows(state.get("evl_idle"), root, now)
+    line = None
+    if EV.lane_on(ctx):
+        try:
+            line = EV.verdict_line(ctx, root, now)
+        except Exception as exc:  # noqa: BLE001 - the cause is judged without the line
+            errors.append(f"the event lane's verdict line could not be read ({type(exc).__name__})")
+    found.update(EV.checks(ctx, root, now, errors=errors, idle=idle, line=line))
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -2238,41 +2297,24 @@ def run(ctx: Any) -> dict[str, Any]:
 
     owner = [e["cause"] for e in entries if e["owner_step"]]
     kind = due_notice(stalled, owner, mail, now)
-    if kind is None and report is not None:  # the day's report makes a notice due, the standing causes in it as they are
-        kind = "owner" if owner else "info"
-    notice: dict[str, Any] = {"sent": False, "causes": stalled, "report": None if report is None else report["day"]}
+    notice: dict[str, Any] = {"sent": False, "causes": stalled}
     if kind is None:
         notice["why"] = ("nothing stands" if not stalled else
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(EH.mailed(entries, found), now, report=report)  # the equity causes as the gateway prints them
-        if report is not None and len(json.dumps(facts, default=str)) > NOTICE_BYTES:
-            errors.append(f"the event lane's daily report of {report['day']} does not fit the notice: sent without it")
-            report = None
-            notice["report"] = None
-            facts = notice_facts(EH.mailed(entries, found), now)
-            if not entries:
-                kind = None
+        facts = notice_facts(EH.mailed(entries, found), now)  # the equity causes' entries as the gateway prints them
         notice["notice_id"] = facts["notice_id"]
-        notify = _notifier(ctx) if kind is not None else None
-        if kind is None:
-            notice["why"] = "nothing stands"
-        elif notify is None:
+        notify = _notifier(ctx)
+        if notify is None:
             notice["why"] = "no gateway to notify through"
             errors.append("stall notice not sent: no gateway")
         else:
-            answer: Any = None
             try:
-                answer = notify(facts)
-                ok, words = _sent(answer)
+                ok, words = _sent(notify(facts))
             except Exception as exc:  # noqa: BLE001 - not told: the next run tries again
                 ok, words = False, f"the notice failed ({type(exc).__name__} {getattr(exc, 'code', '') or ''})".replace(" )", ")")
             notice.update(sent=ok, why=words)
-            # The day's report is told once the gateway SENT it, or answered that it mailed this very notice already (its
-            # key names the report's day).
-            if report is not None and (ok or (isinstance(answer, Mapping) and answer.get("duplicate") is True)):
-                told_report = {"day": report["day"], "at": S.iso(now)}
             if ok and "done" in stalled:
                 done_told = sorted(set(done_told) | set(found["done"].get("keys") or []))
             if ok:
@@ -2289,6 +2331,10 @@ def run(ctx: Any) -> dict[str, Any]:
                 mail.update(info_at=S.iso(now), notice_id=facts["notice_id"])
             elif "inside its own window" not in words:
                 errors.append(f"stall notice not sent: {words}")
+    # THE DAILY ONE-SCREEN REPORT (release 1019c; league/ops/daily_report.py): its own notice, once a New York day.
+    told_report = state.get("report") if isinstance(state.get("report"), dict) else {}
+    report, told_report = send_report(ctx, root, now, told=told_report, ledger=ledger, budget=rule_budget,
+                                      stalled=stalled, errors=errors)
     for cause in warned:
         check = found[cause]
         text = f"stall: {cause}: {check['what']} {check['doing']}"
@@ -2305,8 +2351,8 @@ def run(ctx: Any) -> dict[str, Any]:
         receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
                                    "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running,
-                                   "report": told_report})
-    return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
+                                   "report": told_report, "evl_idle": idle})
+    return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice, "report": report,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}
 

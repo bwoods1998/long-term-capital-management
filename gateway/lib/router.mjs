@@ -72,7 +72,7 @@
 // the same router works against both.
 
 import { json, fail, authorized, readBody } from './http.mjs';
-import { composeNotice, NOTICE_KINDS, FROM, TO, stallKey } from './email.mjs';
+import { composeNotice, NOTICE_KINDS, FROM, TO, stallKey, reportKey } from './email.mjs';
 import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
@@ -219,7 +219,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // `stall:info:<the causes>` 24 hours), whatever id the House sent: the same owner causes are mailed at most once
     // every 12 hours and the same causes that need nothing from the owner at most once a day, even when the House's own
     // record is lost.
-    const noticeId = facts.kind === 'stall' ? stallKey(facts)
+    // The daily report (release 1019c) is keyed by its New York day (`report:<day>`, 48 hours): once a day, whatever id.
+    const noticeId = facts.kind === 'stall' ? stallKey(facts) : facts.kind === 'report' ? reportKey(facts)
       : typeof facts.notice_id === 'string' && /^[a-zA-Z0-9:_-]{1,160}$/.test(facts.notice_id) ? facts.notice_id : null;
     if (noticeId && await gate.noticeDelivered(noticeId, now())) return json({ sent: true, duplicate: true });
     if (await gate.noticesToday(now()) >= cap) return fail('The day\'s notice cap is reached.', 429, { 'Retry-After': '3600' });

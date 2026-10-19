@@ -423,8 +423,7 @@ class Telling(Base):
         self.assertEqual(self.notify.causes(), ["births", "gym_runs"])
         facts = self.notify.calls[0]
         self.assertEqual((facts["kind"], facts["notice_id"]), ("stall", "stall:info:births+gym_runs"))
-        self.assertEqual(sorted(facts), ["at", "causes", "kind", "notice_id", "report"])
-        self.assertIsNone(facts["report"], "no event lane on this House: no daily report rides")
+        self.assertEqual(sorted(facts), ["at", "causes", "kind", "notice_id"])
         self.assertEqual(sorted(facts["causes"][0]), sorted(["cause", "what", "numbers", "since", "hours", "doing", "owner_step"]))
         self.assertEqual(len(ctx.alerts), 2)
         self.assertTrue(all(a["level"] == "warning" and a["text"].startswith("stall: ") for a in ctx.alerts))
@@ -588,8 +587,11 @@ class Telling(Base):
         self.run_at()
         after = {p: p.stat().st_mtime_ns for p in self.root.rglob("*") if p.is_file()}
         # Its own state file and, since release E3, the release receipts' own store (league/ops/release_receipts.py: the
-        # running release's declarations, declared the first time the job sees them; listed, never an act).
-        self.assertEqual(sorted(set(after) - set(before)), [self.root / "release-receipts.sqlite", self.root / ST.STATE_FILE])
+        # running release's declarations, declared the first time the job sees them; listed, never an act); since release
+        # 1019c, the meters' readings (league/ops/metered.py: what each day's metered compute cost, for cap_breach).
+        self.assertEqual(sorted(set(after) - set(before)), [self.root / "metered.json", self.root / "release-receipts.sqlite",
+                                                            self.root / ST.STATE_FILE])
+        self.assertEqual(os.stat(self.root / "metered.json").st_mode & 0o777, 0o600)
         self.assertEqual({p: after[p] for p in before if p.name.startswith("swarm.sqlite")},
                          {p: before[p] for p in before if p.name.startswith("swarm.sqlite")})
         self.assertEqual(db.stat().st_size, size)

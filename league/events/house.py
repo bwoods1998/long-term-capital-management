@@ -38,7 +38,8 @@ Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and 
 York day: the lower of `events.verdict_usd_day` (default $5) and the budget rule's allowance for the lane's verdicts
 (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`, its no-profit floor
 when the file is not usable), so the verdicts and every other metered dollar stay under the day's cap (budget rule 3;
-release 1019c). Over it, READ events wait (PREREG-EVL-1 section 4), as they do for any call with no answer. Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
+release 1019c). Over it, READ events wait (PREREG-EVL-1 section 4), as they do for any call with no answer.
+Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
 with the House's own book).
 """
 
