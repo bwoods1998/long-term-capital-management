@@ -283,7 +283,7 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(unload)
 
-    def week(self, root: Path, births: bool) -> list[dict]:
+    def week(self, root: Path, births: bool, *, keep: bool = False):
         s = Synth(root)
         for day in self.DAYS:
             prior = C.previous(s.st, day, 1)[0].day
@@ -319,6 +319,9 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
             R.decide_close(ctx, day)
         self.assertEqual(gw.claude_calls, [], "every verdict read was stored: none asked")
         rows = [dict(r) for r in s.st.db.execute("SELECT * FROM intents ORDER BY program, version, event")]
+        if keep:
+            self.addCleanup(s.st.close)
+            return rows, s.st
         s.st.close()
         return rows
 
@@ -356,6 +359,47 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
         self.assertEqual({r["symbol"] for r in by["EVL-B-ERNREACT-ON"]}, {"AAA", "BBB", "HHH"}, "reaction 1.05 >= 1.02")
         self.assertEqual(sorted({r["entry_day"] for r in by["EVL-B-8K-502"]}), ["2026-11-04", "2026-11-05", "2026-11-06"],
                          "Monday evening's 8-K (17:10 ET, before 20:00 ET) is not the birth's")
+
+    def test_a_birth_that_raises_fails_only_itself(self):
+        """A registered birth whose rule raises (a bug) never fails the decision: every PREREG program's intents and
+        receipts are as without births, the failure is in the summary's `births_failed`, and the screen holds only
+        that birth's looks (league/events/screen.py `final_until`)."""
+        from league.events import births as births_module
+
+        real = births_module.select
+
+        def broken(program, rows, **kw):
+            if program.id == "EVL-B-8K-502":
+                raise KeyError("invented bug")
+            return real(program, rows, **kw)
+        without = self.week(Path(self.tmp.name) / "a", births=False)
+        with mock.patch.object(births_module, "select", side_effect=broken):
+            rows, st = self.week(Path(self.tmp.name) / "b", births=True, keep=True)
+        prereg = {p.id for p in P.PREREG_PROGRAMS}
+        self.assertEqual([r for r in rows if r["program"] in prereg], without)
+        self.assertNotIn("EVL-B-8K-502", {r["program"] for r in rows})
+        self.assertIn("EVL-B-INS-DIR", {r["program"] for r in rows}, "the other births decide")
+        opens = [dict(r) for r in st.db.execute("SELECT status, summary FROM receipts WHERE job LIKE 'decide-open:%'")]
+        self.assertEqual({r["status"] for r in opens}, {"ok"}, "the decision is made, for every PREREG program")
+        failed = [json.loads(r["summary"]).get("births_failed") for r in opens]
+        self.assertTrue(all(f == {"EVL-B-8K-502": "KeyError: 'invented bug'"} for f in failed), failed)
+        now = dt.datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+        later = sessions_between(st, dt.date(2026, 11, 9), dt.date(2026, 11, 12))
+        earlier = sessions_between(st, dt.date(2026, 10, 19), dt.date(2026, 10, 30))   # PREREG-EVL-3's sessions before
+        for day in earlier + later:
+            for kind in ("open", "close"):
+                rid = st.start_receipt(f"decide-{kind}:{day}", now=now)
+                st.finish_receipt(rid, "ok", {}, now=now)
+        for day in ("2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10",
+                    "2026-11-11", "2026-11-12"):
+            st.set_meta(f"evl:backfill:{day}", "done")
+        horizon, why = SN.final_until(st, "EVL-B-8K-502", 1, dt.date(2026, 11, 13), now)
+        self.assertIn("the open decision of 2026-11-02 is failed", why)
+        self.assertIsNone(horizon, "no close of it is final: its looks wait for a pass that decides it")
+        other, _ = SN.final_until(st, "EVL-B-INS-DIR", 1, dt.date(2026, 11, 13), now)
+        prereg_horizon, _ = SN.final_until(st, "EVL-8K-READ-O1", 2, dt.date(2026, 11, 13), now)
+        self.assertEqual((other, prereg_horizon), (dt.date(2026, 11, 9), dt.date(2026, 11, 9)),
+                         "every other program's closes are final as before")
 
 
 # ======================================================================================================== the facts

@@ -53,7 +53,9 @@ until release 1019b (below) brings it onto the House.
   later of GitHub's commit time and the House's receipt is the registration time, kept in the store's new `births`
   table; an answer that never came is posted again the next night). `league/events/programs.py` `load_births` adds each
   registered birth as a Program row (its own registration time, PREREG-EVL-3's learning band, screen, minimums and limit
-  at entry) AFTER every PREREG program; `select` hands a birth to its own rule. `league/events/screen.py` judges a
+  at entry) AFTER every PREREG program; `select` hands a birth to its own rule; `league/events/run.py` keeps a birth
+  whose part of a decision raised in the summary's `births_failed` (never the PREREG programs' decision, whose receipt
+  and finality stay as they were; the screen holds that birth's looks). `league/events/screen.py` judges a
   seatable birth by PREREG-EVL-3's looks (`control_of` finds a READ birth's control) and never a record or a control;
   `expected_false_passes` counts each seatable birth. `league/events/book.py` seats a registered seatable birth at its
   version 1 and puts every birth after every PREREG program in ROOM's order (`BIRTH_ROOM`); it loads the births when it

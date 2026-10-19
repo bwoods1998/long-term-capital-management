@@ -779,6 +779,8 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     since = max(first, (now - reach_lookback).astimezone(C.NY).date())
     for x in C.sessions(store, since, horizon):
         status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", ("", None))
+        if status in ("ok", "pending") and prog.spec is not None and key in _births_failed(summary):
+            status = "failed"       # (R3: this birth's own part of the decision raised; never a PREREG program's)
         if status == "ok":
             continue
         if status == "pending":
@@ -897,6 +899,16 @@ def expected_false_passes(store: S.Store) -> dict[str, Any]:
     versions = {(p.id, p.version) for p in SEATING} | {(p, v) for p, v in program_versions(store)
                                                        if p in SEATABLE and v > 2}
     return {"versions": len(versions), "expected": round(FALSE_PASS_RATE * len(versions), 3)}
+
+
+def _births_failed(summary: Any) -> dict[str, Any]:
+    """The registered births whose own part of a decision raised (league/events/run.py `BIRTHS_FAILED`), {} when none
+    or unreadable."""
+    try:
+        body = json.loads(summary or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return dict(body.get("births_failed") or {}) if isinstance(body, dict) else {}
 
 
 def _born(program: str, version: int) -> Any:

@@ -262,7 +262,9 @@ with and without births and finds every PREREG program's intents identical). The
 moves by PREREG-EVL-3's rules, and the House's event book (which reads `SEATING` and `BY_KEY`) trades a seated birth at
 learning size from its first event at its own version 1, like any version 2 program. When room is short, every PREREG
 program goes first (Sized, Probe, learning, then the tables' order) and the births after them, in registration order
-(R3-SPEC section 4). Expected false passes in the report count every seatable birth.
+(R3-SPEC section 4). Expected false passes in the report count every seatable birth. A birth's failure is its own: a
+birth whose part of a decision raises is kept in the decision's `births_failed` (the decision is made for every other
+program, as before) and the screen holds that birth's looks until a later pass decides it.
 
 **On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
