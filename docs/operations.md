@@ -70,9 +70,10 @@ CI green on the exact head):
    decisions missed since the timers stopped run as backfills. Keep the desktop's store as the backup and never start
    its timers again while the House's lane runs (one writer of the record).
 4. THE FIRST REAL BUY: the auction paper proof's practice KO buy goes in the next 09:16-09:27 ET window and its BUY
-   stage passes by 09:33 ET (kv `paper_proof_auction_buy`; filled, or accepted and ended unfilled at the open: A68); real learning buys follow from that session's close decision
-   (15:46 ET: the close-entry programs), the open-entry programs from the next session's open. At the first decision
-   `eq_event_programs` holds the nine version 2 programs at the lane's bands.
+   stage passes about 09:17 ET once the venue holds the order exactly as sent (kv `paper_proof_auction_buy`; A68 bis);
+   the open-entry programs' real learning buys go in that same window (09:17-09:27 ET), and the close-entry programs'
+   at that session's 15:46 ET close decision. At the first decision `eq_event_programs` holds the nine version 2
+   programs at the lane's bands.
 
 **Rollback**: `STOCK_EVENT_BUYS` "off" at the gateway (a gateway deploy: the instant stop of event buys; sales go on);
 or `equity_money.event.enabled` False (a constitution-only owner deploy, money `25f5eb21`, constitution `8a6a2160`:
@@ -3682,7 +3683,9 @@ session):
   1.25 x its previous close expired unfilled that morning), so each stage also passes on the venue's ACCEPTANCE of its
   shape: the order was taken (a venue id, never rejected or lost) and ended at its auction `expired` or `canceled` with
   nothing filled, the practice position showing no stray fill (`mode` "accepted"; a fill passes as before, `mode`
-  "filled"). A buy passed on acceptance holds no share: its SELL stage is `mode` "n/a". A rejected or lost order still
+  "filled"); and the BUY stage passes as soon as the venue HOLDS the limit-on-open order exactly as sent (a working
+  state, every field of the body echoed), so that same `opg` window's real buys may go (about 09:17 ET: A68 bis). A buy
+  passed on acceptance holds no share: its SELL stage is `mode` "n/a". A rejected or lost order still
   fails: the buy tries again the next session, a sale's failure stops new real event buys. The fills' calibration is
   the real fills beside the tape (the twins' 15 bp), never the practice venue's.
 - **The twins** (league/ops/twins.py `event_twin`, the `equity_twins` job): a closed event lot beside the shadow's own

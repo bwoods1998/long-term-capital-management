@@ -73,7 +73,9 @@ until release 1019b (below) brings it onto the House.
   simulates no auction (on-open and on-close orders are plain orders at the bid or ask there; a practice limit-on-open
   buy of one F share at 1.25 x its previous close expired unfilled on Oct 19), so a stage whose order the venue took
   and ended at its auction unfilled passes on its shape (`mode` "accepted"; a buy so passed holds no share and its SELL
-  stage is "n/a"); a rejected or lost order still fails (league/events/proof.py; test_events_book.py TheAuctionProof).
+  stage is "n/a"); the BUY stage passes as soon as the venue holds the limit-on-open order exactly as sent (every field
+  echoed), so the same opg window's real buys may go (A68 bis); a rejected or lost order still fails
+  (league/events/proof.py; test_events_book.py TheAuctionProof).
 - **The three reviews' fixes** (money, House, judges; each held by a test that fails on the integrated head
   `a2c0c794`, league/tests/test_events_review_1019b.py). THE MONEY PATH: two programs' lots of one name due at one
   auction are both sold in its cross (`_symbol_busy(auction_sale=...)`: the book's own working sales of the symbol at

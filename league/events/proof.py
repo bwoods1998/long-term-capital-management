@@ -20,7 +20,9 @@ every minute from its event step (league/equity/live.py `_auction_step`):
   its forum, 2021), and on Oct 19 a practice limit-on-open buy of one Ford share at 1.25 x its previous close EXPIRED
   unfilled. So each stage also passes on the venue's ACCEPTANCE of the shape: the order was taken (a venue id, never
   rejected or lost), it ended at its auction `expired` or `canceled` with nothing filled, and the practice position
-  shows no stray fill (`mode` "accepted"; a fill still passes as before, `mode` "filled"). A buy that passed accepted
+  shows no stray fill (`mode` "accepted"; a fill still passes as before, `mode` "filled"). A68 bis: the BUY stage passes
+  as soon as the venue HOLDS the limit-on-open order exactly as sent (a working state, every field of the body echoed:
+  symbol, side, type, time in force, quantity, limit), so that same opg window's real buys may go. A buy that passed accepted
   holds no share, so its SELL stage is "n/a" (passed: nothing to sell). A REJECTED or lost order still fails as
   before: the buy tries again the next session; a sale's failure stops new real event buys. The real calibration is
   the real fills beside the tape (the goal's 15 bp), never the practice venue's.
@@ -62,6 +64,11 @@ BUY_WITNESSES = ("buy_witness", "hold_witness")
 #: The ends of an order the venue took and ended at its auction with nothing filled (A68: the practice venue
 #: simulates no auction): the shape was accepted.
 UNFILLED_ENDS = ("expired", "canceled", "done_for_day")
+#: A working order's states once the venue holds it (A68 bis: the BUY stage passes when the venue holds exactly the
+#: shape sent, so the same opg window's real buys may go).
+WORKING = ("new", "accepted", "pending_new", "accepted_for_bidding")
+#: The fields of the venue's answer that must echo the body sent, for a working order to prove its shape.
+SHAPE = ("symbol", "side", "type", "time_in_force", "qty", "limit_price")
 #: The gaps beside the tape's prints are read at most this many minutes after both stages passed (a report).
 GAP_TRIES = 240
 SELL_WITNESSES = ("sell_witness", "recon_witness")
@@ -208,7 +215,8 @@ class AuctionProof:
             raise ValueError("the lookup returned another client order id")
         filled = _dec(answer.get("filled_qty")) or Decimal(0)
         work.update(id=answer.get("id"), status=str(answer.get("status") or ""), filled=str(filled),
-                    avg=answer.get("filled_avg_price"))
+                    avg=answer.get("filled_avg_price"),
+                    echo={k: (None if answer.get(k) is None else str(answer.get(k))) for k in SHAPE})
         work["terminal"] = work["status"] in ("filled", "canceled", "expired", "rejected", "done_for_day", "replaced",
                                               "stopped", "suspended")
 
@@ -257,6 +265,21 @@ class AuctionProof:
             return row
         work = row["orders"][-1] if row.get("orders") else None
         if status == "buy_sent":
+            if work is not None and not work.get("terminal") and self._holds_shape(work):
+                # A68 bis: the venue holds exactly the limit-on-open shape sent (a venue id, a working state, every field
+                # of the body echoed): the BUY stage passes now, so this same opg window's real buys may go; the practice
+                # order ends at the open on its own (filled or expired), which no real figure reads.
+                if self._held() != Decimal(row["baseline"]):
+                    row["why"] = f"the practice {SYMBOL} is not its baseline: the proof waits for the order's end"
+                    return row
+                row["buy_witness"] = True
+                row["hold_witness"] = True
+                self._pass_buy(row, today, mode="accepted")
+                self._pass_sell_na(row, today)
+                row.update(status="passed", why=f"the venue holds a limit-on-open buy of one {SYMBOL} share exactly as "
+                                                f"sent ({work.get('status')}): the shape is proven (the practice venue "
+                                                "simulates no auction: A68); nothing to sell")
+                return row
             if work is None or not work.get("terminal"):
                 late = row.get("day") != today.isoformat() or (m is not None and now >= m.open_at + SETTLE_S)
                 if late and work is not None and work.get("id") and not work.get("cancel_at"):
@@ -347,6 +370,27 @@ class AuctionProof:
                 row["status"] = "passed"
             return row
         return row
+
+    @staticmethod
+    def _holds_shape(work: Mapping[str, Any]) -> bool:
+        """A68 bis: the venue holds the order (a venue id, a working state, nothing filled) and its answer echoes every
+        field of the body sent (symbol, side, type, time in force, quantity, limit; numbers compared as decimals)."""
+        echo, body = work.get("echo") or {}, work.get("body") or {}
+        if not work.get("id") or str(work.get("status") or "") not in WORKING or work.get("rejected") or work.get("lost"):
+            return False
+        if (_dec(work.get("filled")) or Decimal(0)) != 0:
+            return False
+        for k in SHAPE:
+            want, got = body.get(k), echo.get(k)
+            if want is None:
+                continue
+            if k in ("qty", "limit_price"):
+                a, b = _dec(want), _dec(got)
+                if a is None or b is None or a != b:
+                    return False
+            elif str(got or "").lower() != str(want).lower():
+                return False
+        return True
 
     @staticmethod
     def _accepted(work: Mapping[str, Any] | None) -> bool:

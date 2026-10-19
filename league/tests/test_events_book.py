@@ -1384,6 +1384,33 @@ class TheAuctionProof(unittest.TestCase):
         self.assertEqual([o["side"] for o in self.paper.orders], ["buy"], "nothing to sell: no sale is sent")
         self.assertEqual(self.paper.held, D(0))
 
+    def test_the_buy_stage_passes_while_the_venue_holds_the_exact_shape_so_the_same_window_buys_A68_bis(self):
+        self.minute(DAY, 9, 16)
+        self.assertFalse(self.proof.buy_passed(), "the send minute: the venue's hold is read at the next minute")
+        self.minute(DAY, 9, 17)
+        self.assertTrue(self.proof.buy_passed(), "09:17 ET: the venue holds the limit-on-open buy exactly as sent")
+        self.assertTrue(self.proof.passed())
+        stages = self.proof.status()["stages"]
+        self.assertEqual((stages["buy"]["mode"], stages["buy"]["venue_status"], stages["sell"]["mode"]),
+                         ("accepted", "new", "n/a"))
+        self.minute(DAY, 9, 31)
+        self.minute(DAY, 15, 47)
+        self.assertEqual([o["side"] for o in self.paper.orders], ["buy"], "nothing is sold by the proof")
+        self.assertEqual(self.proof.sell_failed(), "")
+
+    def test_a_held_order_whose_echo_differs_does_not_pass_on_its_shape(self):
+        real = self.paper.order_by_client_id
+
+        def echo_day(cid):
+            o = real(cid)
+            return None if o is None else {**o, "time_in_force": "day"}   # the venue holds another time in force
+
+        self.paper.order_by_client_id = echo_day
+        self.paper.fill = False
+        self.minute(DAY, 9, 16)
+        self.minute(DAY, 9, 17)
+        self.assertFalse(self.proof.buy_passed(), "a working order of another shape proves nothing")
+
     def test_a_rejected_open_buy_tries_again_the_next_session(self):
         self.paper.reject = True
         self.minute(DAY, 9, 16)
