@@ -36,6 +36,53 @@ the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PR
 [docs/events.md](docs/events.md); its code runs in shadow on the captain's workstation from branch `feat/evl-shadow`
 until release 1019b (below) brings it onto the House.
 
+### Release 1019c, alarms and costs: budget rule 3, the event lane's progress alarms, the cap breach, the daily one-screen report by mail, on `r2/alarms` (unreleased; ships in release 1019c on top of release 1019b; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE; never 12:55-20:05Z on a trading day, never with an order in flight; NO IDENTITY MOVES: money `285fa7af`, constitution `fd38e4e1`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b772b3`, release 1019b's)
+
+- **Why.** The owner's goal of Oct 19, 2026, items 4 and 5: "metered compute <= $5 a day plus half the trailing week's
+  realized net profit, never above $25", "alarms on stalls, missed events, fill gaps and cap breaches; a daily
+  one-screen report (events, intents, fills, settled n, P&L by program and band, costs, evidence)" and "Report
+  account-shown profit first, Net after costs beside it"; PREREG-EVL-1 section 9's reporting. Built again on
+  `rel/1019b` (18824bca) from the first build `r1/alarms` (#572, which release 1019b left out), its league/ops and
+  gateway part only, with its review's four majors and its minors fixed, each with a test.
+- **Budget rule 3** (`league/ops/budget.py`, schema 3): cap = min($25, $5 + 0.5 x max(0, the realized net of every real
+  book over the last 5 closed sessions) / 7) a day: the trailing week is one trading week, its half spread over the 7
+  days a week of compute runs (r1 read 7 sessions). Every line is held: Sail research (the Sail guard), the Claude roles
+  (the router) and NOW THE LANE'S VERDICTS, held by league/events/house.py to min(`events.verdict_usd_day`,
+  `budget.lane_allowance`: the Claude meter's lane part; a small change there, and house.py joins `ci.PENDING_GATEWAY`
+  under D4). The lane's part is min(room, max($3, 1.5 x its heaviest UTC day of the trailing week)); the hourly refresh
+  writes a lane part that rose. No usable budget.json is the rule's own no-profit lines (FAILS CLOSED: research $0.34,
+  Sail $0.27 and the Claude roles $0.07, the lane $3.00; r1's floor was $4 + $1 of research). No `underspend` under rule
+  3; the research switch (`ops.json` `stall.research`) and pre-open check 5 under it as r1 built them.
+- **The event lane's four causes judge progress** (`league/ops/evl_health.py`, rewritten): `evl_record` (no clean record
+  pass in 30 minutes: the 8-K, Form 4 and news reads without error; the failing feeds named), `evl_decide` (a decision
+  not made in its 10-minute window: missing, failed, cut, unfinished or late; decided later still stands),
+  `evl_verdicts` (needed verdicts unanswered 15 minutes past their decision), `evl_score` (intents due by the latest
+  session still open at 23:00 ET; an exit the tape showed absent waits by design). Quiet while `events/STOP` stands
+  (and 30 minutes after) and, for verdicts, under the House's `PAUSE`; `stall.json` `evl_idle` keeps the windows.
+- **The close decision's tally** (`league/events/run.py`, the smallest change): `decide_open` and `decide_close` write
+  `verdicts: {needed, answered}` (the distinct (event, prompt) verdicts of every reading program, wave 2's close-entry
+  NEWS-READ-ON included) into their receipts; `league/events/__init__.py` states the receipts' contract.
+- **`cap_breach` and the meters** (new `league/ops/metered.py`): every stall run reads the Sail guard's meter and the
+  gateway's Claude and OpenAI meters into `<state>/metered.json`; the cause stands while today's MEASURED spend so far,
+  or yesterday's whole day, is over that day's lowest cap (the no-profit $5 with no usable budget.json), and while a
+  meter has had no reading for 6 hours (the cap cannot be judged). INFO, worded in the gateway's `STALL_CAUSES` with the
+  event lane's four.
+- **The daily one-screen report by mail** (new `league/ops/daily_report.py`; the gateway's new notice kind `report`,
+  keyed `report:<day>`, composed in `gateway/lib/email.mjs` `composeReport`: one phone screen, no line over 60
+  characters): once a New York day after the lane's nightly report job (from 23:45 ET without it): account-shown profit
+  first (the lane's real fills and posted fees) and Net after the measured costs beside it, by program and band; the
+  day's measured costs against the cap with the allowance labelled, "OVER" above it; events by family, verdicts, shadow
+  intents by program and version, real fills, settled n (shadow TRADABLE and real), each program's next look and events
+  to go, market-direction share and benchmark mean, the same-risk buy-and-hold ("n/a until real fills"), the expected
+  false passes and the alarms open. Figures only; the receipt and stall.json carry the day, never a figure. r1's report
+  riding the stall notice is gone.
+- **Tests:** league/tests/test_evl_health.py (the four causes, STOP and PAUSE, the close decision's tally end to end),
+  test_ops_metered.py, test_daily_report.py (through the stall job with a fake gateway), the CostRule, LaneAllowance and
+  Job tests of test_ops_budget.py, test_events_house.py `TheBudgetsLine`, test_events_run.py and test_events_wave2.py's
+  tallies; gateway/test/report-notice.test.mjs and stall-notice.test.mjs. Docs: docs/operations.md (**Release 1019c,
+  alarms and costs**, the stall table, the budget rule), docs/events.md (**Alarms and the daily report**),
+  docs/design.md, README.md.
+
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable

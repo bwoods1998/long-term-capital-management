@@ -118,10 +118,39 @@ next record passes, six passes in all, then left to the daily-index backfill; a 
 07:30 ET because a session's universe is fixed then
 (its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
 `ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
-over the lane's own line (`events.verdict_usd_day`, $5 a New York day): a READ event then waits, as PREREG-EVL-1
-section 4 lets it. The lane writes a receipt for every task in the store and its health to `<state>/events/lane.json`.
-How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`) and stop it:
-[operations](operations.md), "The event lane on the House".
+over the lane's own line of a New York day: from release 1019c the lower of `events.verdict_usd_day` ($5) and budget
+rule 3's allowance for the lane (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in
+`<state>/budget.json`, $3 a day at no profit, half as much again after a day held at it, never more than the cap's room;
+`lane.json` `verdict_line_usd`): a READ event then waits, as PREREG-EVL-1 section 4 lets it. The lane writes a receipt
+for every task in the store (their contract with the House is league/events/__init__.py, THE EVENT LANE'S RECEIPTS) and
+its health to `<state>/events/lane.json`. How to switch it on, migrate the desktop's store (`scripts/evl_migrate.py`)
+and stop it: [operations](operations.md), "The event lane on the House".
+
+## Alarms and the daily report (release 1019c)
+
+The House's `stall` job (every 30 minutes, league/ops/stall.py) judges the lane's PROGRESS from its store, read-only
+(league/ops/evl_health.py), never a receipt's status alone; each cause is INFO (no owner step) and goes in the stall
+mail at its pace:
+
+| cause | stands when |
+|---|---|
+| `evl_record` | no clean record pass in 30 minutes: one finished `ok` whose 8-K, Form 4 and news reads ran without error (the failing feeds are named) |
+| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed |
+| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
+| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
+| `cap_breach` | today's measured metered compute so far, or yesterday's, over that day's cap (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged) |
+
+None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while
+the House's `PAUSE` stands (no verdict is asked then).
+
+THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after the lane's own nightly report job
+(league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured
+metered costs beside it, by program and band; the day's measured costs against the cap with its lines labelled the
+allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
+fees); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
+controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
+or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
 ## Real money (release R2, shipped switched on in release 1019b; not yet deployed)
 

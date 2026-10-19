@@ -57,7 +57,8 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   // Account-shown profit first; the costs (with the allowance labelled as such) after it; the alarms worded at the end.
   assert.ok(text.indexOf(' today:   +$2.94 | -$0.39') < text.findIndex(line => line.startsWith('Costs, measured')));
   const alarms = text.findIndex(line => line.startsWith('Alarms open:'));
-  assert.ok(alarms > 0 && text.slice(alarms, alarms + 3).join(' ').includes(STALL_CAUSES.cap_breach));
+  const said = text.slice(alarms).join(' ').replace(/\s+/g, ' ');
+  assert.ok(alarms > 0 && said.includes(STALL_CAUSES.cap_breach) && said.includes(STALL_CAUSES.evl_verdicts), said);
   assert.ok(text.includes('Shadow intents today: ERN-READ-O1 v1:9 v2:9;'));
   assert.ok(text.includes('  INS-BUY-O1 v2:4; 4 skipped'));
   assert.ok(text.includes('Records and controls: 17 versions; today 31; settled 140'));
@@ -87,6 +88,10 @@ test('over the cap the report says so in its subject and its costs; with no real
   assert.ok(words.includes('Costs, measured the whole day: $1.20 at least'));
   assert.ok(words.includes(' Sail unknown, Claude $1.97 (verdicts $1.85)'));
   assert.ok(words.some(line => line.startsWith(' Allowance (the floor): cap $5.00')));
+  // The first run after a deploy: no meter read yet in the day.
+  const unread = lines({ ...REPORT, costs: { ...REPORT.costs, from: null, to: null, spent_usd: null, at_least_usd: 0.16,
+    sail_usd: null, claude_usd: null } });
+  assert.ok(unread.includes('Costs, measured with no meter read yet: $0.16 at least'));
   // The lane's own report job did not run: said.
   assert.ok(lines({ ...REPORT, lane_report: false }).includes('The lane\'s own report job did not run for this day.'));
   // A program on real money in two bands has a line for each.
@@ -117,7 +122,7 @@ test('figures only: House text where a figure goes is never echoed; a program, a
   assert.ok(text.includes(' OK v2 unknown: unknown | 2;'));
   assert.ok(text.includes('Events: 8-K 2.02 unknown, other 8-K unknown, Form 4'));
   assert.ok(text.includes('Shadow intents today: none'));
-  assert.ok(text.includes(`Alarms open: ${STALL_CAUSES.cap_breach}`) && !text.includes('toString'));
+  assert.ok(text.replace(/\s+/g, ' ').includes(`Alarms open: ${STALL_CAUSES.cap_breach}`) && !text.includes('toString'));
   assert.ok(text.includes('At: an unknown time.'));
   for (const bad of [undefined, null, 'report', [REPORT], { ...REPORT, day: 'yesterday' }, { ...REPORT, day: undefined }]) {
     assert.equal(composeReport(bad ?? undefined), null, JSON.stringify(bad)?.slice(0, 40));

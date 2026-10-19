@@ -14,9 +14,9 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
   with a tickers copy to fetch 8-Ks by. The numbers name the feeds that failed in the window's passes. The recorder runs
   round the clock (PREREG-EVL-1 section 3), so this is judged at every hour.
 - `evl_decide`: a session's open (09:15 ET) or close (the close - 14 minutes) decision not MADE IN ITS WINDOW (`made`:
-  a receipt `decide-<kind>:<day>` that started by `DECIDE_GRACE_MINUTES` (10) after its time, the lane's own LIVE_WITHIN,
-  and finished `ok` or `pending`: the live decision every real-money auction reads) over the last
-  `DECIDE_LOOKBACK_HOURS` (24): missing, failed, cut by the lane's bound or never finished. One decided later still
+  a receipt `decide-<kind>:<day>` finished `ok` or `pending` by `DECIDE_GRACE_MINUTES` (10) after its time, the lane's
+  own LIVE_WITHIN: the live decision every real-money auction reads) over the last `DECIDE_LOOKBACK_HOURS` (24):
+  missing, failed, cut by the lane's bound, unfinished or finished after its window. One decided later still
   stands (its real-money auction was missed: "missed events"), named so. Which kinds exist comes from the programs' rows.
 - `evl_verdicts`: verdicts a decision needs that stay UNANSWERED PAST THE DECISION: a decision whose time has passed and
   whose latest receipt (its tally, run.py's `verdicts: {needed, answered}`, the close decision's included; a receipt from
@@ -322,9 +322,10 @@ def _record(now: float, f: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def made(rows: list[Mapping[str, Any]], ends: float) -> bool:
-    """A decision MADE IN ITS WINDOW: a receipt that started by `ends` and finished `ok` or `pending`."""
+    """A decision MADE IN ITS WINDOW: a receipt that finished `ok` or `pending` by `ends` (its time and the lane's own
+    LIVE_WITHIN: what the real-money decision of that auction waits for, league/events/book.py `decided`)."""
     return any(str(r.get("status") or "") in ("ok", "pending") and r.get("finished_at")
-               and (S.epoch(r["started_at"]) or float("inf")) <= ends for r in rows)
+               and (S.epoch(r["finished_at"]) or float("inf")) <= ends for r in rows)
 
 
 def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: list) -> dict[str, Any]:
@@ -341,8 +342,8 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
         if not tried:
             state = "missing"
         else:
-            status = str(tried[-1].get("status") or "")
-            state = ("unfinished" if not tried[-1].get("finished_at") or status == "running"
+            status, done = str(tried[-1].get("status") or ""), tried[-1].get("finished_at")
+            state = ("late" if done and status in ("ok", "pending") else "unfinished" if not done or status == "running"
                      else status if status in ("failed", "cut") else "failed")
         later = any(str(r.get("status") or "") in ("ok", "pending") and r.get("finished_at") for r in rows)
         missed.append({**d, "state": state, "later": later})
@@ -352,7 +353,7 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                 if due else f"No decision was due in the last {DECIDE_LOOKBACK_HOURS:g} h.")
     else:
         words = {"missing": "was never started", "failed": "failed", "cut": "was cut by the lane's time bound",
-                 "unfinished": "never finished"}
+                 "unfinished": "never finished", "late": "finished after its window"}
         what = (f"The event lane's {first['kind']} decision of {first['day']} ({_hhmm(first['at'])} ET) was not made in "
                 f"its {DECIDE_GRACE_MINUTES}-minute window: it {words.get(first['state'], first['state'])}"
                 + ("; it was decided later, for the shadow record only" if first["later"] else "")

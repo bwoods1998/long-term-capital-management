@@ -243,6 +243,12 @@ class Decide(Lane):
         self.st.db.execute("DELETE FROM receipts WHERE job='decide-open:2026-10-20'")
         self.receipt("decide-open:2026-10-20", et(TUE, "09:15"), status="running", finished=None)
         self.assertEqual(self.check("evl_decide", et(TUE, "09:40"))["numbers"]["first_state"], "unfinished")
+        # Started in its window and finished after it (09:27): the real-money decision had already gone without it.
+        self.st.db.execute("DELETE FROM receipts WHERE job='decide-open:2026-10-20'")
+        self.receipt("decide-open:2026-10-20", et(TUE, "09:24"), finished=et(TUE, "09:27"))
+        late = self.check("evl_decide", et(TUE, "09:40"))
+        self.assertEqual((late["stalled"], late["numbers"]["first_state"]), (True, "late"))
+        self.assertIn("it finished after its window", late["what"])
         # A day later the missed decision has left the look-back.
         self.receipt("decide-close:2026-10-20", et(TUE, "15:47"))
         self.receipt("decide-open:2026-10-21", et(WED, "09:15"))

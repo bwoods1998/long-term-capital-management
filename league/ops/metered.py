@@ -49,6 +49,9 @@ KEEP_HOURS = 72
 KEEP_DAYS = 400
 #: Spend above the cap by more than this is over it (a cent: the meters' own rounding never alarms).
 OVER_EPSILON = 0.01
+#: A cumulative meter (Sail's, Claude's) with no reading for this long, on a ledger at least this old, is BLIND: the cap
+#: cannot be judged, and `cap_breach` stands for that too (a meter that stopped never hides a breach: it fails closed).
+BLIND_HOURS = 6.0
 
 
 def _num(value: Any) -> float | None:
@@ -326,8 +329,9 @@ DOING = ("The budget holds every line it can to the day's cap: the event lane's 
 def cap_check(ledger: Mapping[str, Any], now: float) -> dict[str, Any]:
     """THE STALL JOB'S `cap_breach` (the goal of Oct 19, 2026, item 5: "alarms on ... cap breaches"): today's measured
     metered spend so far, or yesterday's whole day, over that day's cap (`day_figure` `over`: what the readings show at
-    the least, above the lowest cap budget.json gave that day, its no-profit $5 when none could be read). INFO, no owner
-    step. Not judged before any meter has a reading."""
+    the least, above the lowest cap budget.json gave that day, its no-profit $5 when none could be read); or a meter
+    BLIND (`BLIND_HOURS` with no reading of Sail's or Claude's meter, the ledger older than that): the cap cannot be
+    judged, which never passes for under it. INFO, no owner step. Not judged before any meter has a reading."""
     series = ledger.get("series") if isinstance(ledger.get("series"), Mapping) else {}
     if not any(series.get(m) for m in METERS):
         return {"stalled": False, "judged": False, "what": "Not judged: no meter has a reading yet (metered.json).",
@@ -339,6 +343,9 @@ def cap_check(ledger: Mapping[str, Any], now: float) -> dict[str, Any]:
     figures.append(dict(kept) if isinstance(kept, Mapping) else day_figure(ledger, today - dt.timedelta(days=1), now))
     over = [f for f in figures if f.get("over")]
     shown = over[0] if over else figures[0]
+    began = min(rows[0][0] for rows in series.values() if rows)
+    blind = [m for m in ("sail", "claude") if now - began >= BLIND_HOURS * 3600
+             and (not series.get(m) or now - series[m][-1][0] > BLIND_HOURS * 3600)]
 
     def usd(value: Any) -> str:
         return "unknown" if _num(value) is None else f"${float(value):.2f}"
@@ -354,13 +361,20 @@ def cap_check(ledger: Mapping[str, Any], now: float) -> dict[str, Any]:
         what = (f"Metered compute on {shown['day']} is {usd(shown.get('at_least'))} so far, under the day's cap of "
                 f"{usd(shown.get('cap'))} ({parts})" + (f"; {' and '.join(unknown)} had no reading" if unknown else "")
                 + ".")
+    if blind:
+        what += (f" The cap cannot be judged: {' and '.join(blind)}'s meter has had no reading for {BLIND_HOURS:g} hours "
+                 "or more (the Sail guard's, or the gateway's /v1/health).")
     yesterday = figures[1]
-    return {"stalled": bool(over), "judged": True, "what": what,
+    last = {m: (series.get(m) or [[None]])[-1][0] for m in ("sail", "claude")}
+    return {"stalled": bool(over or blind), "judged": True, "what": what,
             "numbers": {"day": shown["day"], "spent_usd": _num(shown.get("at_least")), "cap_usd": _num(shown.get("cap")),
                         "sail_usd": _num(shown.get("sail")), "claude_usd": _num(shown.get("claude")),
                         "openai_usd": _num(shown.get("openai")), "cloudflare_usd": _num(shown.get("cloudflare")),
                         "whole_day": bool(shown.get("whole")), "so_far": so_far,
-                        "yesterday_usd": _num(yesterday.get("at_least")), "yesterday_cap_usd": _num(yesterday.get("cap"))},
+                        "yesterday_usd": _num(yesterday.get("at_least")), "yesterday_cap_usd": _num(yesterday.get("cap")),
+                        "sail_read_at": None if last["sail"] is None else _iso(last["sail"]),
+                        "claude_read_at": None if last["claude"] is None else _iso(last["claude"]),
+                        "blind": ",".join(blind) or "none"},
             "doing": DOING, "owner_step": None, "onset": None}
 
 
@@ -377,6 +391,6 @@ def update(root: str | Path, now: float, *, health: Any, budget: Mapping[str, An
     return ledger
 
 
-__all__ = ["update", "cap_check", "CAUSE", "load", "save", "observe", "day_figure", "finish_days", "since", "spend", "total_at", "day_bounds",
+__all__ = ["update", "cap_check", "CAUSE", "BLIND_HOURS", "load", "save", "observe", "day_figure", "finish_days", "since", "spend", "total_at", "day_bounds",
            "ny_day", "sail_reading", "claude_reading", "openai_reading", "empty", "FILE", "METERS", "KEEP_HOURS",
            "KEEP_DAYS", "OVER_EPSILON"]

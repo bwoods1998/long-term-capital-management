@@ -101,6 +101,8 @@ class Ledger(unittest.TestCase):
         self.assertIn("Metered compute on 2026-10-20 is $5.36 so far, over that day's cap of $5.00", check["what"])
         self.assertIn("at least: sail had no reading", check["what"])
         self.assertEqual((check["numbers"]["cap_usd"], check["numbers"]["so_far"], check["owner_step"]), (5.0, True, None))
+        self.assertEqual((check["numbers"]["sail_read_at"], check["numbers"]["claude_read_at"]),
+                         (None, "2026-10-20T18:00:00Z"), "when each meter was last read: a stopped one is plain")
 
     def test_yesterdays_whole_day_over_its_cap_stands_the_next_day(self):
         self.see(et(TUE, "00:00") - 600, sail=10.0, claude=10.0, cap=5.0)
@@ -122,6 +124,18 @@ class Ledger(unittest.TestCase):
         self.assertFalse(MT.cap_check(quiet, et(TUE, "13:00"))["stalled"])
         self.assertIn("under the day's cap of $5.00", MT.cap_check(quiet, et(TUE, "13:00"))["what"])
         self.assertFalse(MT.cap_check(MT.empty(), et(TUE, "13:00"))["judged"], "no reading yet: not judged")
+
+    def test_a_meter_that_stopped_reading_never_passes_for_under_the_cap(self):
+        """A missed meter fails closed: six hours with no reading of Sail's or Claude's meter (the ledger at least that
+        old) is no judgement of the cap, and the cause stands for it."""
+        self.see(et(TUE, "01:00"), sail=1.0, claude=1.0)
+        self.see(et(TUE, "03:00"), claude=1.2)                     # the Sail guard has stopped reading
+        early = MT.cap_check(self.ledger, et(TUE, "05:00"))
+        self.assertEqual((early["stalled"], early["numbers"]["blind"]), (False, "none"), "4 hours: not yet")
+        self.see(et(TUE, "07:30"), claude=1.3)
+        blind = MT.cap_check(self.ledger, et(TUE, "07:30"))
+        self.assertEqual((blind["stalled"], blind["numbers"]["blind"]), (True, "sail"))
+        self.assertIn("The cap cannot be judged: sail's meter has had no reading for 6 hours or more", blind["what"])
 
     def test_update_reads_the_guards_meter_and_the_gateway_and_keeps_its_file_private(self):
         store = SwarmStore(self.root, clock=lambda: et(TUE, "10:00"))

@@ -269,7 +269,7 @@ test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and th
   const decide = { ...BIRTHS, cause: 'evl_decide', numbers: { missed: 1, first_missed: 'open:2026-10-20', first_state: 'cut', decided_later: 1 } };
   const verdicts = { ...BIRTHS, cause: 'evl_verdicts', numbers: { held: 1, unanswered: 15, needed: 40, at_line: true } };
   const score = { ...BIRTHS, cause: 'evl_score', numbers: { day: '2026-10-20', open_due: 12, waiting_on_tape: 0, last_pass_errors: 12 } };
-  assert.equal(composeNotice(notice(cap)).subject, 'LTCM: stalled: metered compute went over the day\'s cap');
+  assert.equal(composeNotice(notice(cap)).subject, 'LTCM: stalled: metered compute went over the day\'s cap or could not be measured');
   assert.equal(composeNotice(notice(record)).subject, 'LTCM: stalled: the event lane read no feed cleanly for 30 minutes');
   assert.equal(composeNotice(notice(decide)).subject, 'LTCM: stalled: an event-lane decision missed its window');
   assert.equal(composeNotice(notice(verdicts)).subject, 'LTCM: stalled: event-lane verdicts went unanswered');

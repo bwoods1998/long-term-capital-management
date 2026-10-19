@@ -135,7 +135,15 @@ withdrawals are never profit. The scoreboard reports Net daily (from the V3-A pa
 The plan put the inputs at about $565-740 a month at its steady-state budgets, an estimate made before Claude replaced
 OpenAI on Sept 29 and not yet re-derived ([design.md](docs/design.md)). The bar falls as the account grows, and compute
 drops to its floor whenever the forward record does not pay for it: in V3-A part 1 that is the budget rule, in code.
-A change that cannot say how it raises Net does not ship.
+A change that cannot say how it raises Net does not ship. Under the owner's goal of Oct 19, 2026 (release 1019c, on
+`r2/alarms`, not deployed) the budget rule's version 3 is the goal's cost rule: every metered compute dollar of a day
+(Sail models and boxes, Claude, OpenAI, data, Cloudflare) at most $5 plus half the trailing week's realized net profit
+of every real book (the last 5 sessions' net, its half spread over the week's 7 days), never above $25, the fixed costs
+inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
+failed day. The stall alarm then also watches the event lane by its progress (a clean record pass, each decision made
+in its window, its verdicts, the nightly settling) and the day's measured spend against the cap (`cap_breach`), and the
+owner gets the lane's daily one-screen report by mail ([operations](docs/operations.md), **Release 1019c, alarms and
+costs**).
 
 ## The game
 

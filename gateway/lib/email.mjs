@@ -198,7 +198,7 @@ export const STALL_CAUSES = {
   // (league/ops/evl_health.py), judged by progress: no clean record pass in 30 minutes (a feed erroring), a decision not
   // made in its window, verdicts unanswered past their decision, intents left open after the night's score. Deploy the
   // gateway first, as above.
-  cap_breach: 'metered compute went over the day\'s cap',
+  cap_breach: 'metered compute went over the day\'s cap or could not be measured',
   evl_record: 'the event lane read no feed cleanly for 30 minutes',
   evl_decide: 'an event-lane decision missed its window',
   evl_verdicts: 'event-lane verdicts went unanswered',
@@ -293,7 +293,6 @@ const usd = value => (real(value) === null ? 'unknown' : `$${real(value).toFixed
 const signedUsd = value => (real(value) === null ? 'n/a' : `${real(value) < 0 ? '-' : '+'}$${Math.abs(real(value)).toFixed(2)}`);
 const bp = value => (real(value) === null ? 'n/a' : `${real(value) < 0 ? '' : '+'}${real(value).toFixed(1)} bp`);
 const pct = value => (real(value) === null ? 'n/a' : `${Math.round(real(value))}%`);
-const hhmm = value => (typeof value === 'string' && HHMM.test(value) ? value : '??:??');
 const versionOf = value => (Number.isInteger(value) && value > 0 && value < 1000 ? value : null);
 const programOf = value => (typeof value === 'string' && PROGRAM_ID.test(value) ? value.slice(4) : null);
 const bandOf = value => (BANDS.includes(value) ? value : 'unknown');
@@ -375,7 +374,8 @@ export function composeReport(facts = {}) {
     add(' to date: n/a until real fills');
   }
   out.push('');
-  const whole = costs.whole === true ? 'the whole day' : `${hhmm(costs.from)}-${hhmm(costs.to)} ET`;
+  const read = typeof costs.from === 'string' && HHMM.test(costs.from) && typeof costs.to === 'string' && HHMM.test(costs.to);
+  const whole = costs.whole === true ? 'the whole day' : read ? `${costs.from}-${costs.to} ET` : 'with no meter read yet';
   add(`Costs, measured ${whole}: ${usd(spent)}${known === null ? ' at least' : ''}`);
   add(over ? ` OVER the day's cap of ${usd(costs.cap_usd)}` : ` under the day's cap of ${usd(costs.cap_usd)}`);
   add(` Sail ${usd(costs.sail_usd)}, Claude ${usd(costs.claude_usd)} (verdicts ${usd(costs.verdicts_usd)})`);

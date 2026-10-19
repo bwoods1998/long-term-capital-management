@@ -134,8 +134,9 @@ minutes after it goes) nor, for `evl_verdicts`, while the House's `PAUSE` stands
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
 meters, at `/v1/health`) into `<state>/metered.json`, and `cap_breach` stands while today's MEASURED metered spend so far,
-or yesterday's whole day, is over that day's cap (the lowest budget.json gave; its no-profit $5 when none could be read).
-INFO: the budget holds every line it can, and a fixed cost it cannot.
+or yesterday's whole day, is over that day's cap (the lowest budget.json gave; its no-profit $5 when none could be read),
+and while Sail's or Claude's meter has gone 6 hours unread (the cap cannot be judged: it fails closed). INFO: the budget
+holds every line it can, and a fixed cost it cannot.
 
 THE DAILY ONE-SCREEN REPORT (release 1019c, the goal's item 5; league/ops/daily_report.py): once a New York day, at the
 first run after the lane's own nightly report job (from 23:45 ET when that has not run), its own `POST /v1/notify` kind
