@@ -81,9 +81,11 @@ until release 1019b (below) brings it onto the House.
 - **Tests:** league/tests/test_evl_health.py (the four causes, STOP and PAUSE, the close decision's tally end to end),
   test_ops_metered.py, test_daily_report.py (through the stall job with a fake gateway), the CostRule, LaneAllowance and
   Job tests of test_ops_budget.py, test_events_house.py `TheBudgetsLine`, test_events_run.py and test_events_wave2.py's
-  tallies; gateway/test/report-notice.test.mjs and stall-notice.test.mjs. Docs: docs/operations.md (**Release 1019c,
-  alarms and costs**, the stall table, the budget rule), docs/events.md (**Alarms and the daily report**),
-  docs/design.md, README.md.
+  tallies; gateway/test/report-notice.test.mjs and stall-notice.test.mjs. Release E2's health replays and the E4 panel
+  lane's end-to-end test were written on the old floor ($4 + $1 of research with no budget.json): they keep it as their
+  House's setting (league/tests/elane_e2_fakes.py `pre_1019c_floor`), the rule's own floor held by test_ops_budget.
+  Docs: docs/operations.md (**Release 1019c, alarms and costs**, the stall table, the budget rule), docs/events.md
+  (**Alarms and the daily report**), docs/design.md, README.md.
 
 ### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (unreleased; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
