@@ -453,6 +453,17 @@ class PublisherTest(Case):
         self.assertNotIn(LANE_KEY, body)
         self.assertIsNone(body["compute"]["claude_usd"], "never understated")
 
+    def test_a_view_the_allowlist_cannot_build_costs_only_itself(self):
+        from unittest import mock
+
+        fixture_world(self.dir).close()
+        site = Site()
+        with mock.patch.object(publish, "site_lane", side_effect=ValueError("a broken view")):
+            self.publisher(site).publish(self.house())
+        body = site.checkpoints()[-1]
+        self.assertNotIn(LANE_KEY, body)
+        self.assertEqual(body["compute"]["claude_usd"], "44.07", "the rest of the checkpoint as ever")
+
     def test_a_house_with_no_lane_publishes_what_it_did(self):
         site = Site()
         house = self.house()

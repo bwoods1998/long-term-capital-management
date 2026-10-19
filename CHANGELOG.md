@@ -50,7 +50,7 @@ until release 1019b (below) brings it onto the House.
   Other). `compute.claude_usd` now holds the lane's verdicts (null while the lane's store cannot be read). Every older
   block is byte for byte what it was; a site that refuses the key gets the checkpoint without it and is offered it
   again half an hour later. Contract: `league/tests/fixtures/site_contract.md`; fixture `site_checkpoint_lane.json`;
-  tests `league/tests/test_site_lane.py` (16, both Pythons); `site_schema.js` refreshed from the site's branch.
+  tests `league/tests/test_site_lane.py` (17, both Pythons); `site_schema.js` refreshed from the site's branch.
 - **What the page draws** (the site's PR): the Agents board as Shadow, Learning, Probe and Sized with the gold "Real
   money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
   `...&window=1&lane=1`; every older read unchanged.

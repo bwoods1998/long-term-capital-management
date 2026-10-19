@@ -1157,7 +1157,10 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
         rationale = site_rationale(given.rationale, shown, body.get("positions"), published_at)
         if levels is not None and rationale is not None:
             body["levels"], body["rationale"] = levels, rationale
-    lane = site_lane(given.lane, published_at) if given.lane is not None else None
+    try:  # the newest block: whatever its input, it costs only itself, never the checkpoint
+        lane = site_lane(given.lane, published_at) if given.lane is not None else None
+    except Exception:  # noqa: BLE001
+        lane = None
     if lane is not None:
         body[LANE_KEY] = lane
     return fit(body, pinned)
