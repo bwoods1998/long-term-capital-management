@@ -231,302 +231,6 @@ programs trades real money at learning size.
   Docs: docs/operations.md (**Release 1019c, alarms and costs**, the stall table, the budget rule), docs/events.md
   (**Alarms and the daily report**), docs/design.md, README.md.
 
-### 21:00Z Oct 19, 2026: release 1019b (#574: `base/r1`, `feat/evl-v2`, `r1/lane` #570, `r2/gateway` #569, `r2/house` #573, its three fix rounds, the proof's tightening and round 4), House `20261019T205943Z-90834d01c78d`, main `3230a884`; gateway `29ed37e1`
-
-- The gateway first: version `29ed37e1` deployed 20:13:42Z from `rel/1019b` `3230a884` (its gateway tree is the CI-green
-  `8458ab42`'s; suite 489/489), `STOCK_EVENT_BUYS` "on", `STOCK_SINGLE_EQUITY_SHARE` "0.1", `STOCK_MAX_EQUITY_MULTIPLE`
-  "1" (rollback `7456e73d`).
-- The House: promoted 21:00:28Z (previous `20261019T034531Z-6583edd72b34`), main `1a2eb20f` -> `3230a884`, CI green on
-  the exact head, no order in flight. Verified 21:10:43Z: real money true, no failures, the options execution
-  fingerprint `b60410ad`, the constitution `fd38e4e1`, the money digest `285fa7af`, the gate contract `397b22b7`; no
-  real-money block, no stop tripped; the old lanes exits only (`equity.enabled` false), `equity.events.enabled` true
-  (learning 0.02, Probe 0.05, Sized 0.10).
-- The lane migrated 21:11:45Z (`scripts/evl_migrate.py`, the desktop's timers stopped at 21:11:23Z, none running): its
-  filings, news, verdicts, intents, receipts and the desktop's live-refusal markers (A67) on the House; the first House
-  record pass 21:12Z `ok`, `lane.json` ready with the verdict line at $3.00 and no warning. The desktop's store is the
-  backup; its timers stay stopped (one writer).
-- The first real buys: Tue Oct 20 at 09:17-09:27 ET (the open-entry programs, once the auction paper proof's BUY stage
-  holds, A68 bis) and at the 15:46 ET close decision (the close-entry programs).
-- Rollback: `STOCK_EVENT_BUYS` "off" at the gateway, or `equity_money.event.enabled` False (money `25f5eb21`,
-  constitution `8a6a2160`); with no event lot open, `scripts/floor_box.py rollback` to main `c1c6fae7` (release 1019a)
-  and the gateway by `wrangler rollback 7456e73d-af22-4e98-8643-798fd3a85c64`.
-
-### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (DEPLOYED 21:00Z Oct 19 in #574, the gateway first at 20:13Z; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
-
-- **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable
-  program trades REAL money at learning size from its first event (whole shares, about 2% of equity a position, never
-  above 5%), with the full-size shadow beside it; the House becomes the lane's system of record.
-- **What it carries** (main `1a2eb20f` and five merges, in this order, each `--no-ff`): `base/r1` `de6b192f` (release
-  1019a and the lane with PREREG-EVL-2's wave); `feat/evl-v2` `f9fbfec1` (PREREG-EVL-3's version 2 rows, looks counted
-  in events, `league/events/bands.py`, the `bands`, `band_history` and `real_fills` tables); `r1/lane` `e3db9050`
-  (#570: the lane on the House's tick, `scripts/evl_migrate.py`); `r2/gateway` `1d825d4d` (#569: gateway G2, the
-  event lane's whole-share `opg` / `cls` buys); `r2/house` `077b80cb` (#573: the equity book's event kind, the money rows
-  `equity_money.event`, the auction paper proof). R1's alarms and cost rule (`r1/alarms`, #572) are NOT in it. The rule
-  the code implements joins the tree: `docs/prereg/PREREG-EVL-3.md`, byte for byte from the tag `prereg-evl-3` (commit
-  `6d3fa8d1`, SHA-256 `40228862`), behind the wall with the other two (`docs/prereg/`).
-- **The lane interface, reconciled.** The House's event book (league/events/book.py) uses the lane's own modules, with
-  no stand-in left in it or its tests: `programs.SEATING`, `BY_KEY` and `Program.can_seat` (version 1 never trades);
-  `bands.bands(store)` (no row = learning; a band table that cannot be read plans no buy); `bands.record_fill` for the
-  fill write-back (one row a (program, version, event, side); a write again changes ONLY the fee, the broker's posted
-  one, which demotion's net reads). The House lane's nightly screen task runs `bands.review` after the looks (demotion
-  to learning, Sized; a failed review is a warning). `league/events/bands.py` joins the wall (`league.ci`
-  `PENDING_GATEWAY`). The verdicts asked ahead of a decision (`ask_only`) count version 1 and version 2 of one program
-  apart (`run._key`), so the House never stops asking while one version waits. league/tests/test_events_book.py
-  `TheRealLane` runs the lane's own record and decision (an invented 8-K, its verdict at 07:31 ET, the 09:15 ET
-  decision writing version 2 and version 1 intents) into a real store and the book on it, through the fills back to
-  `bands.real_events`; test_events_house.py proves the screen task's demotion from 50 losing real fills.
-- **Switched on.** `gateway/wrangler.jsonc` `STOCK_EVENT_BUYS` "on", with `STOCK_SINGLE_EQUITY_SHARE` "0.1" (the goal's
-  10% a name) and `STOCK_MAX_EQUITY_MULTIPLE` "1" (no margin); `league/config.json` `events.enabled` true. Every real
-  event buy still waits on the House's own `equity_money.event.enabled`, the auction paper proof's BUY stage (one KO
-  share, limit-on-open, on the practice account), the program's band, and every wall: the book-wide 10% a name, the
-  100% book, the loss budget ($400 net in any 20 sessions, $800 net in total, realized plus open risk, an event lot at
-  value x max(0.10, 1.65 x sigma60 x sqrt(h))), the kill switch, the daily and drawdown stops, long only, Alpaca only.
-- **SEC reads retry EDGAR's 429/5xx** (league/events/gw.py `sec_getter`: after 1, 2 and 4 s, then raise as before;
-  test_events_gw_retry.py): on Oct 19 one browse-edgar 503 in the operating-company test failed the desktop lane's
-  first live open decision twice (amendment A67).
-- **The auction paper proof passes on the venue's acceptance** (captain's amendment A68): Alpaca's practice venue
-  simulates no auction (on-open and on-close orders are plain orders at the bid or ask there; a practice limit-on-open
-  buy of one F share at 1.25 x its previous close expired unfilled on Oct 19), so a stage whose order the venue took
-  and ended at its auction unfilled passes on its shape (`mode` "accepted"; a buy so passed holds no share and its SELL
-  stage is "n/a"); the BUY stage passes as soon as the venue holds the limit-on-open order exactly as sent (every field
-  echoed), so the same opg window's real buys may go (A68 bis); a rejected or lost order still fails
-  (league/events/proof.py; test_events_book.py TheAuctionProof).
-- **The three reviews' fixes** (money, House, judges; each held by a test that fails on the integrated head
-  `a2c0c794`, league/tests/test_events_review_1019b.py). THE MONEY PATH: two programs' lots of one name due at one
-  auction are both sold in its cross (`_symbol_busy(auction_sale=...)`: the book's own working sales of the symbol at
-  that same auction no longer stop the second; any other working order still does); the equity day's order count keeps
-  ONE order for an event lot's exit and none once its sale is sent (`_exit_reserve`; an old lane's lot keeps two), so
-  the open's lots sold at the close no longer starve that close's entries; a gateway 403 `stock_eligible` clears the
-  book's note of the eligible list so it is published again. THE HOUSE: the event step's decision and the auctions'
-  ends are each guarded and the decision plans its EXITS before it reads the lane, so a lane store that cannot be read
-  never stops a market-on-close sale; the close decision reads every name's T29 minute ONCE, all the day's names in
-  batched requests of 200 (`EquityBook._event_minute_closes`, `book.reaction_reader(minutes_many=)`), never one read an
-  article, and a program with no room reads nothing; `book.decided` counts a lane decision CUT by its bound as not made;
-  the record pass fetches a filing whose fetch FAILED again at its next passes (`FETCH_TRIES` 6 in all), before its live
-  decision; a lane decision that raised is closed `failed` and tried again a minute later while live
-  (`DECIDE_RETRY`); the screen task runs the band review whatever the looks did (receipt `partial` on a failure);
-  `scripts/evl_migrate.py` reads a systemctl that cannot answer as a timer running (it failed open). THE JUDGES: a look
-  waits until its as-of close is FINAL for its program (`screen.final_until`: the re-decision window of three sessions
-  has passed it, every decision of the program's entry kind through it is made and not pending on its own verdicts,
-  and the daily-index backfill of the weekdays through it that the House still backfills has run), version 1 and
-  version 2 alike; version 2's schedule resumes strictly after the last look on record at the k after every k written
-  or merged (the merged ks are now in the look's detail), so late events never make a second look at one close; the
-  band move a version 2 look makes (Probe, retired) is written in the look's own transaction (`write_look(apply=)`,
-  `bands.on_look(db=)`), so a look on record has always moved its band; one program's failure in the screen is its own
-  (`errors`). `league/ci.py` `PENDING_GATEWAY` gains the lane's rule inputs: `league/events/universe.py`,
-  `calendar.py`, `edgar.py`, `news.py`, `run.py` and `store.py` (the updater never ships a change to them; `house.py`,
-  `gw.py` and `report.py` stay outside). No identity moves with them.
-- **The re-reviews' fixes** (fix round 2 on `18824bca`; each held by a test in league/tests/test_events_review_1019b.py,
-  "the second review", that fails on `18824bca`). THE MONEY PATH: the auction's slots are given IN ROOM'S ORDER
-  (league/events/book.py `allocate`): Sized, Probe, learning, then the tables' order, each program taking its own ranked
-  picks whose name no earlier program was given, until its room is full, and only a name given is taken (EVL-ERN-REACT-ON
-  takes the 4 of 12 C1 events C1 has no room for, EVL-ERN-GUIDE-O1 the 4 READ-O1 has none for); SIZE BEFORE SLOTS
-  (`EquityBook._event_gate`): a pick no whole share of fits by price, on E at the previous close as the send sizes it
-  (one share at the limit above the book-wide 10% a name; at learning, a 2% target of no whole share with one share
-  above 5% of E), and a pick whose name an event lot sells at the same auction are skipped before they take a slot (the
-  shadow keeps the event; the decision's summary counts them); AN EXIT NEVER WAITS ON AN ENTRY: a buy waits while a sale
-  of its name at its auction is unfinished (a sale refused for a reading, 424 or 409, goes again the next minute); the
-  close decision's batched T29 read sends a failed request again once, and when the retry fails too the decision is
-  written `failed` with why (its summary and the minute's `errors`) and made again the next minute of its window. THE
-  JUDGES: ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (league/events/run.py `eligibility`,
-  universe.py `results` / `record_result` / `combined` / `seen_live`, the store's new `eligibility` table): every result
-  is kept, eligible or not, with its rule; a live decision reads the live rule's result and checks under the live rule a
-  CIK with none; a backfill decision (the hourly re-decision) reads whatever result there is (eligible only when none
-  refuses) and checks under the backfill rule only a CIK no decision judged; real money's picks and the gateway's
-  eligible list read only the live rule's eligible rows (`book.LIVE_ROWS`). A store from before the table (the
-  desktop's) is migrated at its first open: each universe row labelled with its session's first decision run's rule
-  (live within 10 minutes of its time, else backfill), meta `evl:eligibility:from` the first session after the last one
-  decided; for those sessions a re-decision reads a CIK its live run saw as ineligible. The House's re-decision reach is
-  the judge's, defined once in `screen.py` (`FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`) and imported
-  by `house.py` and the CLI, and `screen._reach` waits out the House's if it is ever larger; demotion's two windows
-  count the current Probe stay (`bands.probe_since`; Sized counts every Probe+ event), so "back to Probe at its next
-  passed look" holds. THE HOUSE: a record pass whose feed failed counts its retried rows beside the error (no KeyError);
-  a decision cut once and then failing waits as a failed one (`_due_decision` reads the receipt's status before the cut;
-  `_decide` forgets the cut when a run raises); a failed fetch is tried again 2, 4, 8, 16 and 32 minutes after its first
-  failure (`FETCH_BACKOFF`, six tries in all); `events.verdict_usd_day` $3.00 (`league/config.json`, and the House's
-  default): the goal's cost rule (metered compute at most $5 a day plus half the trailing week's realized net profit),
-  the House box's about $1.29 a day beside it, until budget rule 3 ships. LEFT AS READINGS THAT TRADE LESS (the
-  captain's amendments): the equity day's order count of 60 (entries stop at about 30 open-entry lots sold the same
-  day; it moves in a later release), a program's room counting its lots sold in the same cross, a session pending only
-  on another program's verdicts final for this one, and the one-position-per-issuer rule as programs.py reads it. No
-  identity moves.
-- **The third review's fixes** (fix round 3 on `30558c43`; each held by a test in
-  league/tests/test_events_review_1019b.py, "the third review", that fails on `30558c43`). THE HOUSE: THE SALES GO
-  BEFORE THE DECISION (league/equity/live.py `_event_step`: for each auction inside its window, the exits due are
-  planned, its sales sent, then its decision made, then its buys sent), and the close decision's T29 reads are BOUNDED
-  BY THE WINDOW (`_event_minute_closes`, `EVENT_MINUTE_STOP_S` 60 s: a failed request is sent again once, never after a
-  timeout and never in the window's last minute, and no request starts in that minute): with 450 live names and
-  Alpaca's 1Min bars hanging to the client's timeout, the lot due out at the close is sold at 15:47 and NEWS-READ-ON's
-  buy goes at 15:48, where before the sale missed the 15:49 cut-off; A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS'
-  PICKS (a REACT row of a name whose T29 minute was not read is not taken; every other pick goes, NEWS-READ-ON's
-  included, and the decision is made with what was read; only an E that cannot be read leaves it `failed`); an EMPTY
-  Alpaca asset list is never kept (league/events/house.py `EventLane.assets`), so one empty answer no longer turns a
-  live open decision into a backfill; the record pass's verdict step catches any failure (a warning; the pass ends ok
-  and EDGAR and the news keep their 2-minute polling); the live-or-backfill rule of a run is the judge's
-  (league/events/run.py `LIVE_WITHIN`, `live_run`, behind the wall; house.py and the CLI's catchup call it). THE
-  JUDGES: THE DESKTOP'S LIVE REFUSALS SURVIVE THE MIGRATION (league/events/store.py `_migrate`: each meta
-  `elig-no:<day>:<cik>` = "live", amendment A67's markers, becomes that CIK's live result "ineligible" for its session
-  before the universe rows are labelled, so no re-decision of either kind admits it; `universe.seen_live` reads nothing
-  more for a day with markers, and for a legacy day without them takes the first finished live decision of either kind
-  and counts only events FETCHED before it, `run._first_fetched`); SIZED COUNTS THE CURRENT PROBE STAY
-  (league/events/bands.py `review`, as demotion does: the reading that trades less). The readings that trade less are
-  listed in full in docs/operations.md (**Release 1019b**) and docs/events.md (A67, A70), and both pages now say exactly
-  what `events/STOP` does: it idles the lane; buys from events and verdicts already stored can still go. Not changed:
-  league/events/proof.py (fixed by the captain in `30558c43`), the day order count of 60 (release 1019c), programs.py,
-  any judged constant, frozen file or money row. No identity moves.
-- **Tests.** The full league suite on 3.14: 12,393 OK (33 skipped). The events, equity, live, ci, constitution,
-  publish, stall and budget modules on 3.11: 2,138 OK (1 skipped). Gateway 489/489 (`STOCK_EVENT_BUYS` pinned "on" as deployed; the event-buy cases
-  run on a baseline with it "off", so the switch's refusals stay tested). After the reviews' fixes: the full league
-  suite on 3.14, 12,417 tests (33 skipped), green but for the one wall-list test the new `PENDING_GATEWAY` entries
-  moved (test_e3_identities' stages, then updated: green); the same 3.11 modules, 2,162 OK (1 skipped); gateway
-  489/489; `python -m league.ci --base origin/main --branch rel/1019b --no-tests` passed. After the re-reviews' fixes:
-  the full league suite on 3.14, 12,442 OK (33 skipped); the same 3.11 modules, 2,195 OK (1 skipped); gateway 489/489;
-  `league.ci` passed; the identities, computed with the tree's own functions on both Pythons, unchanged (options
-  execution `b60410ad`, equity `78022ca6`, money `285fa7af`, constitution `fd38e4e1`, gate `397b22b7`, xs `2f0083bc`).
-  After the third review's fixes: the full league suite on 3.14, 12,466 OK (33 skipped; 455 modules, one process
-  each); the same 3.11 modules, 2,215 OK (1 skipped); gateway 489/489; `python -m league.ci --base origin/main
-  --branch rel/1019b --no-tests` passed; the identities unchanged on both Pythons.
-- **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019b**): 1. the gateway from this head; 2. the House
-  from this head (verify the grant on `285fa7af` and `release.live.equity.events.enabled` true); 3. on blake-desktop
-  stop the `ltcm-evl-*` timers, then `scripts/evl_migrate.py --dry-run` and `scripts/evl_migrate.py`; 4. the paper
-  proof's practice buy at the next 09:16 ET window gates the first real learning buy (the close-entry programs from
-  that session's close decision, the open-entry ones from the next open).
-- **Rollback.** `STOCK_EVENT_BUYS` "off" at the gateway (the instant stop of event buys; sales go on), or
-  `equity_money.event.enabled` False (a constitution-only owner deploy: money `25f5eb21`, constitution `8a6a2160`).
-  `touch <state>/events/STOP` (no deploy) or `events.enabled` false idles the LANE only: the House's event book still
-  decides on the store as it stands, so buys from events and verdicts already stored can still go. With no event lot open, the
-  previous House release (`20261019T034531Z-6583edd72b34`, main `c1c6fae7`) and gateway (`7456e73d`) restore 1019a
-  exactly; never roll the House back past this release while an event lot is open.
-
-### The event lane's version 2 (PREREG-EVL-3): learning bands from birth, looks counted in events, on `feat/evl-v2` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, the House release that carries the event lane's real-money path)
-
-- **Why.** The owner's goal of 05:15Z Oct 19, 2026 (no waiting periods; every seatable program trades real money at
-  learning size from its first event) and the frozen PREREG-EVL-3 (registered 05:23:06Z).
-- **What.** `league/events/programs.py` version 2 rows of the nine seatable programs (`SEATING`; version 1 never seats;
-  lookups by (id, version)); `league/events/screen.py` version 2 looks by settled events with the 40-issuer and
-  8-block minimums, merged looks, alpha 0.018, the retirement test; `league/events/bands.py` (new: the bands, their
-  history, the House's real fills, promotion, demotion, Sized, retirement); the store's `bands`, `band_history` and
-  `real_fills` tables (additive); the report shows each version's band and next look; the CLI's `bands`.
-- **Tests.** league/tests/test_events_v2.py (7) and the lane suite (105 on 3.14 and 3.11).
-
-### The event lane on the House (release R1, WP1), on `r1/lane` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, which switched it on; the lane migrated 21:11Z; part of release R1, an owner deploy: `league/config.json` gains a key and `league/ci.py` changes; cut from `base/r1` `de6b192f`; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract are the base's; ships switched off)
-
-- **Why.** EVL-DESIGN's phase 2 and R1-SPEC WP1: the House is the lane's system of record before the first possible
-  screen look (about Oct 30), so the desktop's timers move into the House's process.
-- **What.** `league/events/house.py`: the lane's scheduler (`EventLane`), one bounded task a turn, never raising into
-  the tick (a failure is a warning at most once an hour per task, so the House's repeat rule never makes it an error):
-  the decisions first (09:15 ET open, close - 14 minutes; live within 10 minutes of their time, a backfill after; then
-  pending ones, then the hourly re-decision of the last three sessions after the record pass), verdicts for a decision
-  within 30 minutes or pending, the record pass every 2 minutes (at most 90 s, resumable: a new filing is stored
-  `listed` at once and fetched in order), the equity after the close, the score at 20:30 ET with the screen and the
-  report after it, the ticker snapshot at 07:00 ET, verdicts from 07:30 ET (`decide_open` / `decide_close` with the new
-  `ask_only`: the decision's own code, no intent, no receipt), and the daily-index backfill. Verdicts wait while the
-  House is paused (`PAUSE`) and above the lane's own line, `events.verdict_usd_day` ($5 a New York day). Each task
-  writes a receipt (`record`, `decide-open:<day>`, `decide-close:<day>`, `verdicts` with its call counts, `universe`,
-  `equity`, `score`, `screen`, `report`, `tickers`, `backfill`), and `<state>/events/lane.json` holds its health.
-- **The hook.** Not `House.feeds` (a non-None `feeds` wakes the House's legacy feed paths, and research_capabilities
-  answers differently for any non-None one: shown by a test): `league/service.py` wraps `house.publisher` when
-  `config.json` `events.enabled` is true, in the House's own loop on its box (never a canary), and each publish (60 s)
-  runs the original publisher as before and then starts the lane's turn on the feeds lane (`feeds:evl`).
-- **Off until it has a store.** The lane never makes `<state>/events/`: `scripts/evl_migrate.py` copies the desktop's
-  store there once (chunks with their SHA-256 read back, every file and table checked on the box, one rename; refused
-  while the desktop's timers run or when the target is not empty), and the lane starts within a minute.
-- **Judges behind the wall.** `league/ci.py` FORBIDDEN gains `league/events/programs.py`, `verdicts.py`, `score.py`,
-  `screen.py` and `docs/prereg/` (in `PENDING_GATEWAY` until the gateway's merge list follows): no role changes them and
-  the in-box updater never ships one.
-- **Tests.** league/tests/test_events_house.py (34: the hook and the House's tick, the order and bounds of tasks,
-  verdicts before the decision, the resumable record pass, nightly, backfill, PAUSE and the line, failures as
-  warnings, `house.feeds` None), league/tests/test_evl_migrate.py (9), test_ci and test_e3_identities (the wall).
-- **Deploy.** Ships with `events.enabled` false (the owner flips it in `config.json`, an owner deploy; release 1019b ships it true); with it true the
-  lane waits, recording nothing, until the migration lands. Order: deploy, stop the desktop timers, migrate, watch
-  `lane.json` and the receipts. Rollback: the previous release (the store stays on disk, unread); or, with no deploy,
-  `touch <state>/events/STOP` and the lane idles after the turn in hand.
-
-### Release R2: the event lane's real money on the House, on `r2/house` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b; stacked on `r2/gateway`; an owner deploy after gateway G2, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; VERSION 2 OF THE NINE SEATABLE PROGRAMS TRADES REAL MONEY AT LEARNING SIZE FROM ITS FIRST EVENT (PREREG-EVL-3) once the gateway's `STOCK_EVENT_BUYS` is on and the auction paper proof's BUY stage has passed; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
-
-- **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 section 2 (with
-  PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2): every seatable program trades real money at learning size from
-  its first event, in whole shares, in the listing exchange's auctions, inside the goal's walls.
-- **What.** THE EQUITY BOOK'S EVENT KIND (league/equity/live.py `_event_step` and after; the rules in the new adapter
-  league/events/book.py, `BOOKS["event"]`): version 2 of the nine seatable programs (version 1 never trades), at the
-  band the LANE's store gives each (`bands`: learning from birth, Probe, Sized, retired; read at each session's first
-  decision; an unreadable band table plans no buy); the open decision at 09:15 ET and the close decision at close - 14
-  minutes on the lane's store read-only, only events stored and verdicts answered before them (the lane's own intents
-  of the same decision never a holding); whole-share limit-on-open / limit-on-close buys at 1.25 x the previous SIP
-  close (`opg` sends 09:16-09:27, `cls` close - 13 to - 11), sized by `size_entry` (learning 2% of E, Probe 5%, Sized
-  10%, E the equity at the previous close; the book-wide 10% a name, the 100% book, the cash, the loss budget at the
-  lot's own weight; one share when the target rounds to none and it fits, at learning only when one share is at most
-  5% of E), at most 8 open a learning program (Probe 6, Sized 8), ROOM in the order Sized, Probe, learning, then the
-  tables' order; market-on-close sales at the last session and MARKET-ON-OPEN sales at the next session's open for
-  EVL-ERN-REACT-ON, EVL-NEWS-READ-ON and EVL-NEWS-REACT-ON; PREREG-EVL-1 section 5's fallback ladder (5 closing crosses,
-  then a day sale each session, at 0 for the budget after 20 sessions); THE REAL FILLS WRITTEN BACK to the lane's
-  `real_fills`, one row a (program, version, event, side), idempotent (the lane computes Sized and demotion from them);
-  the House's eligible list sent to the gateway when a buy is planned. The money rows `equity_money.event` (its own
-  switch `enabled`, on; `equity_money.enabled` STAYS False: the old lanes are exits only, proven beside an event buy)
-  and `position_share.stock` 0.20 -> 0.10 with the gateway's `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" (also the old
-  lanes' name cap of a program's own sleeve: a panel basket's fifths would be cut to a tenth of its sleeve were that
-  lane reopened; test_e4_e2e says so). Open risk of an event lot value x max(0.10, 1.65 x sigma60 x sqrt(h)) (0.40 when
-  sigma is unknown or the lot is past its exit; ETF, stock and options weights unchanged), and every closed event lot
-  in the budget whatever its band. THE AUCTION PAPER PROOF (league/events/proof.py: one KO share, a limit-on-open buy
-  and a market-on-close sale on the practice account; its BUY stage gates every real event buy, a failed SELL stage
-  stops them). THE EVENT TWINS (league/ops/twins.py `event_twin`: each real fill beside the shadow's own auction print,
-  `entry_gap_bp` / `exit_gap_bp`). The forward register, the forward twins, FW7, FW9 and the old Done meter leave event
-  programs out. An error alert, once a session, when the gateway refuses an event buy for `STOCK_EVENT_BUYS` off (the
-  owner's step). league/events/book.py and proof.py are behind the owner's wall (`league.ci` `PENDING_GATEWAY`).
-- **Needs from the lane (release R1's, `feat/evl-v2`)**: the version 2 rows in league/events/programs.py, and in its
-  store the `bands` table (with `bands(store)`) and the `real_fills` table; the book reads and writes them by these
-  names (league/tests/test_events_book.py adds the same rows and tables when the tree does not carry them yet).
-  Release 1019b reconciles it: the book uses the lane's own `programs.SEATING` / `BY_KEY`, `bands.bands` and
-  `bands.record_fill`, and the tests' stand-ins are gone.
-- **Not here.** The site's positions panel admits no stock row yet: the site's schema (`capital/schema.js`) and the
-  House's rows of event lots (league/trading_profit.py, league/publish.py) ship together with the site's PR; the agents
-  roster's EVL programs are release R1's (WP4).
-- **Tests.** league/tests/test_events_book.py (new, 37, through the real book and the real `size_entry`); the
-  changed pins in test_constitution, test_ci, test_e3_identities, test_e4_e2e, test_equity_money,
-  test_equity_opens_off, test_equity_design, test_equity_seats and test_equity_book_panel; the golden ETF week
-  (test_equity_etf_orders) unchanged order for order. Gateway suite 489/489.
-- **Deploy and rollback.** Gateway G2 first (`r2/gateway`), then this House release (with the lane's version 2 rows
-  and tables), then the gateway again from its head (`STOCK_SINGLE_EQUITY_SHARE` "0.1", `STOCK_EVENT_BUYS` `on`: the
-  owner's step for the first real event buy). [docs/operations.md](docs/operations.md), **The event lane's real money on
-  the House (release R2)**. Rollback: `equity_money.event.enabled` False (money `25f5eb21`, constitution `8a6a2160`) or
-  `STOCK_EVENT_BUYS` off; with no event lot open, the previous House release and gateway version.
-
-### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; DEPLOYED 20:13Z Oct 19 in #574, gateway `29ed37e1`, with release 1019b's `STOCK_EVENT_BUYS` "on"; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
-
-- **Why.** The owner's goal of Oct 19, 2026 (item 4) and PREREG-EVL-1 section 8: an event program that passes its
-  screen trades real money at Probe, its entries whole-share limit-on-open / limit-on-close orders at 1.25 x the
-  previous SIP close, at most 10% of equity a name, no margin.
-- **What.** A second real stock buy branch (`gateway/lib/caps.mjs` "event-lane stock buys", `router.mjs`
-  `realEventBuy`, `gate.mjs`): a buy with `time_in_force` `opg` or `cls`, behind `STOCK_EVENT_BUYS` (and
-  `STOCK_BUYS_REAL`); only a name on the House's eligible list of the New York day (the new `POST|GET
-  /v1/stock/eligible`, checked again in the Gate's reserving step); the venue's asset record (us_equity, active,
-  tradable, a listed exchange) and SIP daily bars (previous close >= $3, 20-session ADV >= $1M) read by the gateway
-  itself, cached per symbol per day; the limit at most 1.25 x the previous SIP close; metered at qty x limit; every
-  stock cap, the name held BOOK-WIDE to the single-stock share and never above 10% of equity (a code ceiling);
-  `STOCK_MAX_EQUITY_MULTIPLE` "2" -> "1" (no margin as a gateway wall); the kill switch stops it. Sales of held event
-  shares at `opg` / `cls` (market or limit) are closes as before, pinned by a test. `/v1/health` shows
-  `stock_buys.event_buys` (the switches, the share, the list's day, count and sha).
-- **Not here.** `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" moves together with the constitution's
-  `equity_money.position_share.stock` (league.ci holds the House's row within the gateway's var), so it ships in the
-  House release R2 (`r2/house`); event buys are held to 10% a name by the code ceiling either way.
-- **Tests.** gateway/test/event-buys.test.mjs (new, 23: the switch, the shape, the list and its route, the asset and
-  bars checks and their cache, the limit, the 10% book-wide cap, no margin, the kill switch, sales at opg/cls, the
-  list's own buys unchanged); stock-buys.test.mjs pins the deployed vars. Gateway suite 489/489.
-- **Deploy and rollback.** `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` from the
-  release's head, never 12:55-20:05Z on a trading day (12:55-21:05Z from Nov 2), with no order in flight; rollback
-  `wrangler rollback <the previous version>`.
-
-### The event lane (EVL), shadow, on `feat/evl-shadow` (on the House since release 1019b, DEPLOYED 21:00Z Oct 19 in #574, its store migrated 21:11Z; it ran on the captain's workstation until then)
-
-- **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.
-- **Rules.** [PREREG-EVL-1](docs/prereg/PREREG-EVL-1.md) (registered 01:08:38Z Oct 19) and
-  [PREREG-EVL-2](docs/prereg/PREREG-EVL-2.md) (registered 03:04:07Z Oct 19): nine seatable programs, five records,
-  four controls; expected false passes 0.9. Each program counts only events knowable after its own registration time.
-- **What.** `league/events/` (recorders, verdicts, programs, decisions, scoring, the screen, the report) and
-  [docs/events.md](docs/events.md). PREREG-EVL-2's rows add exits at the next open, the day-news window (09:00-15:29
-  ET), the insider-buy trigger and the limit at entry. Shadow only: no order path.
-- **Tests.** league/tests/test_events_*.py (98 on 3.14 and 3.11).
-
 ### Gateway G1: Claude Haiku 4.5 priced and Alpaca news readable, for the event lane (the goal of Oct 19, 2026; PREREG-EVL-1), on `feat/g1-haiku-news` (DEPLOYED 03:56Z Oct 19 in #568, gateway `7456e73d`; a gateway deploy only, no House code, no money rule, no order path)
 
 - `CLAUDE_MODELS` gains `claude-haiku-4-5-20251001` at the list prices ($1 input, $1.25 five-minute write, $0.10 hit,
@@ -889,6 +593,302 @@ money digest `cfcc94b1` and the constitution digest `60796aed` are main's; no se
   missing close, the field frozen, the same blocked list at K=30 and K=40, no Infinity, a reader that never raises,
   and every other Done key unchanged. It also runs the script's own checks, copied, and the pinned script itself
   where `LTCM_SCALING_SCRIPT` names it.
+
+### 21:00Z Oct 19, 2026: release 1019b (#574: `base/r1`, `feat/evl-v2`, `r1/lane` #570, `r2/gateway` #569, `r2/house` #573, its three fix rounds, the proof's tightening and round 4), House `20261019T205943Z-90834d01c78d`, main `3230a884`; gateway `29ed37e1`
+
+- The gateway first: version `29ed37e1` deployed 20:13:42Z from `rel/1019b` `3230a884` (its gateway tree is the CI-green
+  `8458ab42`'s; suite 489/489), `STOCK_EVENT_BUYS` "on", `STOCK_SINGLE_EQUITY_SHARE` "0.1", `STOCK_MAX_EQUITY_MULTIPLE`
+  "1" (rollback `7456e73d`).
+- The House: promoted 21:00:28Z (previous `20261019T034531Z-6583edd72b34`), main `1a2eb20f` -> `3230a884`, CI green on
+  the exact head, no order in flight. Verified 21:10:43Z: real money true, no failures, the options execution
+  fingerprint `b60410ad`, the constitution `fd38e4e1`, the money digest `285fa7af`, the gate contract `397b22b7`; no
+  real-money block, no stop tripped; the old lanes exits only (`equity.enabled` false), `equity.events.enabled` true
+  (learning 0.02, Probe 0.05, Sized 0.10).
+- The lane migrated 21:11:45Z (`scripts/evl_migrate.py`, the desktop's timers stopped at 21:11:23Z, none running): its
+  filings, news, verdicts, intents, receipts and the desktop's live-refusal markers (A67) on the House; the first House
+  record pass 21:12Z `ok`, `lane.json` ready with the verdict line at $3.00 and no warning. The desktop's store is the
+  backup; its timers stay stopped (one writer).
+- The first real buys: Tue Oct 20 at 09:17-09:27 ET (the open-entry programs, once the auction paper proof's BUY stage
+  holds, A68 bis) and at the 15:46 ET close decision (the close-entry programs).
+- Rollback: `STOCK_EVENT_BUYS` "off" at the gateway, or `equity_money.event.enabled` False (money `25f5eb21`,
+  constitution `8a6a2160`); with no event lot open, `scripts/floor_box.py rollback` to main `c1c6fae7` (release 1019a)
+  and the gateway by `wrangler rollback 7456e73d-af22-4e98-8643-798fd3a85c64`.
+
+### Release 1019b: real money for the event lane (learning band), the lane on the House, on `rel/1019b` (DEPLOYED 21:00Z Oct 19 in #574, the gateway first at 20:13Z; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, then `scripts/evl_migrate.py` with the desktop's timers stopped; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1` (release R2's rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+
+- **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3: every seatable
+  program trades REAL money at learning size from its first event (whole shares, about 2% of equity a position, never
+  above 5%), with the full-size shadow beside it; the House becomes the lane's system of record.
+- **What it carries** (main `1a2eb20f` and five merges, in this order, each `--no-ff`): `base/r1` `de6b192f` (release
+  1019a and the lane with PREREG-EVL-2's wave); `feat/evl-v2` `f9fbfec1` (PREREG-EVL-3's version 2 rows, looks counted
+  in events, `league/events/bands.py`, the `bands`, `band_history` and `real_fills` tables); `r1/lane` `e3db9050`
+  (#570: the lane on the House's tick, `scripts/evl_migrate.py`); `r2/gateway` `1d825d4d` (#569: gateway G2, the
+  event lane's whole-share `opg` / `cls` buys); `r2/house` `077b80cb` (#573: the equity book's event kind, the money rows
+  `equity_money.event`, the auction paper proof). R1's alarms and cost rule (`r1/alarms`, #572) are NOT in it. The rule
+  the code implements joins the tree: `docs/prereg/PREREG-EVL-3.md`, byte for byte from the tag `prereg-evl-3` (commit
+  `6d3fa8d1`, SHA-256 `40228862`), behind the wall with the other two (`docs/prereg/`).
+- **The lane interface, reconciled.** The House's event book (league/events/book.py) uses the lane's own modules, with
+  no stand-in left in it or its tests: `programs.SEATING`, `BY_KEY` and `Program.can_seat` (version 1 never trades);
+  `bands.bands(store)` (no row = learning; a band table that cannot be read plans no buy); `bands.record_fill` for the
+  fill write-back (one row a (program, version, event, side); a write again changes ONLY the fee, the broker's posted
+  one, which demotion's net reads). The House lane's nightly screen task runs `bands.review` after the looks (demotion
+  to learning, Sized; a failed review is a warning). `league/events/bands.py` joins the wall (`league.ci`
+  `PENDING_GATEWAY`). The verdicts asked ahead of a decision (`ask_only`) count version 1 and version 2 of one program
+  apart (`run._key`), so the House never stops asking while one version waits. league/tests/test_events_book.py
+  `TheRealLane` runs the lane's own record and decision (an invented 8-K, its verdict at 07:31 ET, the 09:15 ET
+  decision writing version 2 and version 1 intents) into a real store and the book on it, through the fills back to
+  `bands.real_events`; test_events_house.py proves the screen task's demotion from 50 losing real fills.
+- **Switched on.** `gateway/wrangler.jsonc` `STOCK_EVENT_BUYS` "on", with `STOCK_SINGLE_EQUITY_SHARE` "0.1" (the goal's
+  10% a name) and `STOCK_MAX_EQUITY_MULTIPLE` "1" (no margin); `league/config.json` `events.enabled` true. Every real
+  event buy still waits on the House's own `equity_money.event.enabled`, the auction paper proof's BUY stage (one KO
+  share, limit-on-open, on the practice account), the program's band, and every wall: the book-wide 10% a name, the
+  100% book, the loss budget ($400 net in any 20 sessions, $800 net in total, realized plus open risk, an event lot at
+  value x max(0.10, 1.65 x sigma60 x sqrt(h))), the kill switch, the daily and drawdown stops, long only, Alpaca only.
+- **SEC reads retry EDGAR's 429/5xx** (league/events/gw.py `sec_getter`: after 1, 2 and 4 s, then raise as before;
+  test_events_gw_retry.py): on Oct 19 one browse-edgar 503 in the operating-company test failed the desktop lane's
+  first live open decision twice (amendment A67).
+- **The auction paper proof passes on the venue's acceptance** (captain's amendment A68): Alpaca's practice venue
+  simulates no auction (on-open and on-close orders are plain orders at the bid or ask there; a practice limit-on-open
+  buy of one F share at 1.25 x its previous close expired unfilled on Oct 19), so a stage whose order the venue took
+  and ended at its auction unfilled passes on its shape (`mode` "accepted"; a buy so passed holds no share and its SELL
+  stage is "n/a"); the BUY stage passes as soon as the venue holds the limit-on-open order exactly as sent (every field
+  echoed), so the same opg window's real buys may go (A68 bis); a rejected or lost order still fails
+  (league/events/proof.py; test_events_book.py TheAuctionProof).
+- **The three reviews' fixes** (money, House, judges; each held by a test that fails on the integrated head
+  `a2c0c794`, league/tests/test_events_review_1019b.py). THE MONEY PATH: two programs' lots of one name due at one
+  auction are both sold in its cross (`_symbol_busy(auction_sale=...)`: the book's own working sales of the symbol at
+  that same auction no longer stop the second; any other working order still does); the equity day's order count keeps
+  ONE order for an event lot's exit and none once its sale is sent (`_exit_reserve`; an old lane's lot keeps two), so
+  the open's lots sold at the close no longer starve that close's entries; a gateway 403 `stock_eligible` clears the
+  book's note of the eligible list so it is published again. THE HOUSE: the event step's decision and the auctions'
+  ends are each guarded and the decision plans its EXITS before it reads the lane, so a lane store that cannot be read
+  never stops a market-on-close sale; the close decision reads every name's T29 minute ONCE, all the day's names in
+  batched requests of 200 (`EquityBook._event_minute_closes`, `book.reaction_reader(minutes_many=)`), never one read an
+  article, and a program with no room reads nothing; `book.decided` counts a lane decision CUT by its bound as not made;
+  the record pass fetches a filing whose fetch FAILED again at its next passes (`FETCH_TRIES` 6 in all), before its live
+  decision; a lane decision that raised is closed `failed` and tried again a minute later while live
+  (`DECIDE_RETRY`); the screen task runs the band review whatever the looks did (receipt `partial` on a failure);
+  `scripts/evl_migrate.py` reads a systemctl that cannot answer as a timer running (it failed open). THE JUDGES: a look
+  waits until its as-of close is FINAL for its program (`screen.final_until`: the re-decision window of three sessions
+  has passed it, every decision of the program's entry kind through it is made and not pending on its own verdicts,
+  and the daily-index backfill of the weekdays through it that the House still backfills has run), version 1 and
+  version 2 alike; version 2's schedule resumes strictly after the last look on record at the k after every k written
+  or merged (the merged ks are now in the look's detail), so late events never make a second look at one close; the
+  band move a version 2 look makes (Probe, retired) is written in the look's own transaction (`write_look(apply=)`,
+  `bands.on_look(db=)`), so a look on record has always moved its band; one program's failure in the screen is its own
+  (`errors`). `league/ci.py` `PENDING_GATEWAY` gains the lane's rule inputs: `league/events/universe.py`,
+  `calendar.py`, `edgar.py`, `news.py`, `run.py` and `store.py` (the updater never ships a change to them; `house.py`,
+  `gw.py` and `report.py` stay outside). No identity moves with them.
+- **The re-reviews' fixes** (fix round 2 on `18824bca`; each held by a test in league/tests/test_events_review_1019b.py,
+  "the second review", that fails on `18824bca`). THE MONEY PATH: the auction's slots are given IN ROOM'S ORDER
+  (league/events/book.py `allocate`): Sized, Probe, learning, then the tables' order, each program taking its own ranked
+  picks whose name no earlier program was given, until its room is full, and only a name given is taken (EVL-ERN-REACT-ON
+  takes the 4 of 12 C1 events C1 has no room for, EVL-ERN-GUIDE-O1 the 4 READ-O1 has none for); SIZE BEFORE SLOTS
+  (`EquityBook._event_gate`): a pick no whole share of fits by price, on E at the previous close as the send sizes it
+  (one share at the limit above the book-wide 10% a name; at learning, a 2% target of no whole share with one share
+  above 5% of E), and a pick whose name an event lot sells at the same auction are skipped before they take a slot (the
+  shadow keeps the event; the decision's summary counts them); AN EXIT NEVER WAITS ON AN ENTRY: a buy waits while a sale
+  of its name at its auction is unfinished (a sale refused for a reading, 424 or 409, goes again the next minute); the
+  close decision's batched T29 read sends a failed request again once, and when the retry fails too the decision is
+  written `failed` with why (its summary and the minute's `errors`) and made again the next minute of its window. THE
+  JUDGES: ELIGIBILITY ONCE PER (ENTRY SESSION, CIK), BY THE RULE THAT MADE IT (league/events/run.py `eligibility`,
+  universe.py `results` / `record_result` / `combined` / `seen_live`, the store's new `eligibility` table): every result
+  is kept, eligible or not, with its rule; a live decision reads the live rule's result and checks under the live rule a
+  CIK with none; a backfill decision (the hourly re-decision) reads whatever result there is (eligible only when none
+  refuses) and checks under the backfill rule only a CIK no decision judged; real money's picks and the gateway's
+  eligible list read only the live rule's eligible rows (`book.LIVE_ROWS`). A store from before the table (the
+  desktop's) is migrated at its first open: each universe row labelled with its session's first decision run's rule
+  (live within 10 minutes of its time, else backfill), meta `evl:eligibility:from` the first session after the last one
+  decided; for those sessions a re-decision reads a CIK its live run saw as ineligible. The House's re-decision reach is
+  the judge's, defined once in `screen.py` (`FINAL_SESSIONS`, `FINAL_LOOKBACK`, `FINAL_BACKFILL_WEEKDAYS`) and imported
+  by `house.py` and the CLI, and `screen._reach` waits out the House's if it is ever larger; demotion's two windows
+  count the current Probe stay (`bands.probe_since`; Sized counts every Probe+ event), so "back to Probe at its next
+  passed look" holds. THE HOUSE: a record pass whose feed failed counts its retried rows beside the error (no KeyError);
+  a decision cut once and then failing waits as a failed one (`_due_decision` reads the receipt's status before the cut;
+  `_decide` forgets the cut when a run raises); a failed fetch is tried again 2, 4, 8, 16 and 32 minutes after its first
+  failure (`FETCH_BACKOFF`, six tries in all); `events.verdict_usd_day` $3.00 (`league/config.json`, and the House's
+  default): the goal's cost rule (metered compute at most $5 a day plus half the trailing week's realized net profit),
+  the House box's about $1.29 a day beside it, until budget rule 3 ships. LEFT AS READINGS THAT TRADE LESS (the
+  captain's amendments): the equity day's order count of 60 (entries stop at about 30 open-entry lots sold the same
+  day; it moves in a later release), a program's room counting its lots sold in the same cross, a session pending only
+  on another program's verdicts final for this one, and the one-position-per-issuer rule as programs.py reads it. No
+  identity moves.
+- **The third review's fixes** (fix round 3 on `30558c43`; each held by a test in
+  league/tests/test_events_review_1019b.py, "the third review", that fails on `30558c43`). THE HOUSE: THE SALES GO
+  BEFORE THE DECISION (league/equity/live.py `_event_step`: for each auction inside its window, the exits due are
+  planned, its sales sent, then its decision made, then its buys sent), and the close decision's T29 reads are BOUNDED
+  BY THE WINDOW (`_event_minute_closes`, `EVENT_MINUTE_STOP_S` 60 s: a failed request is sent again once, never after a
+  timeout and never in the window's last minute, and no request starts in that minute): with 450 live names and
+  Alpaca's 1Min bars hanging to the client's timeout, the lot due out at the close is sold at 15:47 and NEWS-READ-ON's
+  buy goes at 15:48, where before the sale missed the 15:49 cut-off; A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS'
+  PICKS (a REACT row of a name whose T29 minute was not read is not taken; every other pick goes, NEWS-READ-ON's
+  included, and the decision is made with what was read; only an E that cannot be read leaves it `failed`); an EMPTY
+  Alpaca asset list is never kept (league/events/house.py `EventLane.assets`), so one empty answer no longer turns a
+  live open decision into a backfill; the record pass's verdict step catches any failure (a warning; the pass ends ok
+  and EDGAR and the news keep their 2-minute polling); the live-or-backfill rule of a run is the judge's
+  (league/events/run.py `LIVE_WITHIN`, `live_run`, behind the wall; house.py and the CLI's catchup call it). THE
+  JUDGES: THE DESKTOP'S LIVE REFUSALS SURVIVE THE MIGRATION (league/events/store.py `_migrate`: each meta
+  `elig-no:<day>:<cik>` = "live", amendment A67's markers, becomes that CIK's live result "ineligible" for its session
+  before the universe rows are labelled, so no re-decision of either kind admits it; `universe.seen_live` reads nothing
+  more for a day with markers, and for a legacy day without them takes the first finished live decision of either kind
+  and counts only events FETCHED before it, `run._first_fetched`); SIZED COUNTS THE CURRENT PROBE STAY
+  (league/events/bands.py `review`, as demotion does: the reading that trades less). The readings that trade less are
+  listed in full in docs/operations.md (**Release 1019b**) and docs/events.md (A67, A70), and both pages now say exactly
+  what `events/STOP` does: it idles the lane; buys from events and verdicts already stored can still go. Not changed:
+  league/events/proof.py (fixed by the captain in `30558c43`), the day order count of 60 (release 1019c), programs.py,
+  any judged constant, frozen file or money row. No identity moves.
+- **Tests.** The full league suite on 3.14: 12,393 OK (33 skipped). The events, equity, live, ci, constitution,
+  publish, stall and budget modules on 3.11: 2,138 OK (1 skipped). Gateway 489/489 (`STOCK_EVENT_BUYS` pinned "on" as deployed; the event-buy cases
+  run on a baseline with it "off", so the switch's refusals stay tested). After the reviews' fixes: the full league
+  suite on 3.14, 12,417 tests (33 skipped), green but for the one wall-list test the new `PENDING_GATEWAY` entries
+  moved (test_e3_identities' stages, then updated: green); the same 3.11 modules, 2,162 OK (1 skipped); gateway
+  489/489; `python -m league.ci --base origin/main --branch rel/1019b --no-tests` passed. After the re-reviews' fixes:
+  the full league suite on 3.14, 12,442 OK (33 skipped); the same 3.11 modules, 2,195 OK (1 skipped); gateway 489/489;
+  `league.ci` passed; the identities, computed with the tree's own functions on both Pythons, unchanged (options
+  execution `b60410ad`, equity `78022ca6`, money `285fa7af`, constitution `fd38e4e1`, gate `397b22b7`, xs `2f0083bc`).
+  After the third review's fixes: the full league suite on 3.14, 12,466 OK (33 skipped; 455 modules, one process
+  each); the same 3.11 modules, 2,215 OK (1 skipped); gateway 489/489; `python -m league.ci --base origin/main
+  --branch rel/1019b --no-tests` passed; the identities unchanged on both Pythons.
+- **Deploy** ([docs/operations.md](docs/operations.md), **Release 1019b**): 1. the gateway from this head; 2. the House
+  from this head (verify the grant on `285fa7af` and `release.live.equity.events.enabled` true); 3. on blake-desktop
+  stop the `ltcm-evl-*` timers, then `scripts/evl_migrate.py --dry-run` and `scripts/evl_migrate.py`; 4. the paper
+  proof's practice buy at the next 09:16 ET window gates the first real learning buy (the close-entry programs from
+  that session's close decision, the open-entry ones from the next open).
+- **Rollback.** `STOCK_EVENT_BUYS` "off" at the gateway (the instant stop of event buys; sales go on), or
+  `equity_money.event.enabled` False (a constitution-only owner deploy: money `25f5eb21`, constitution `8a6a2160`).
+  `touch <state>/events/STOP` (no deploy) or `events.enabled` false idles the LANE only: the House's event book still
+  decides on the store as it stands, so buys from events and verdicts already stored can still go. With no event lot open, the
+  previous House release (`20261019T034531Z-6583edd72b34`, main `c1c6fae7`) and gateway (`7456e73d`) restore 1019a
+  exactly; never roll the House back past this release while an event lot is open.
+
+### The event lane's version 2 (PREREG-EVL-3): learning bands from birth, looks counted in events, on `feat/evl-v2` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, the House release that carries the event lane's real-money path)
+
+- **Why.** The owner's goal of 05:15Z Oct 19, 2026 (no waiting periods; every seatable program trades real money at
+  learning size from its first event) and the frozen PREREG-EVL-3 (registered 05:23:06Z).
+- **What.** `league/events/programs.py` version 2 rows of the nine seatable programs (`SEATING`; version 1 never seats;
+  lookups by (id, version)); `league/events/screen.py` version 2 looks by settled events with the 40-issuer and
+  8-block minimums, merged looks, alpha 0.018, the retirement test; `league/events/bands.py` (new: the bands, their
+  history, the House's real fills, promotion, demotion, Sized, retirement); the store's `bands`, `band_history` and
+  `real_fills` tables (additive); the report shows each version's band and next look; the CLI's `bands`.
+- **Tests.** league/tests/test_events_v2.py (7) and the lane suite (105 on 3.14 and 3.11).
+
+### The event lane on the House (release R1, WP1), on `r1/lane` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b, which switched it on; the lane migrated 21:11Z; part of release R1, an owner deploy: `league/config.json` gains a key and `league/ci.py` changes; cut from `base/r1` `de6b192f`; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `f4fc39ff`, the constitution digest `34bbe7a5` and the gate contract are the base's; ships switched off)
+
+- **Why.** EVL-DESIGN's phase 2 and R1-SPEC WP1: the House is the lane's system of record before the first possible
+  screen look (about Oct 30), so the desktop's timers move into the House's process.
+- **What.** `league/events/house.py`: the lane's scheduler (`EventLane`), one bounded task a turn, never raising into
+  the tick (a failure is a warning at most once an hour per task, so the House's repeat rule never makes it an error):
+  the decisions first (09:15 ET open, close - 14 minutes; live within 10 minutes of their time, a backfill after; then
+  pending ones, then the hourly re-decision of the last three sessions after the record pass), verdicts for a decision
+  within 30 minutes or pending, the record pass every 2 minutes (at most 90 s, resumable: a new filing is stored
+  `listed` at once and fetched in order), the equity after the close, the score at 20:30 ET with the screen and the
+  report after it, the ticker snapshot at 07:00 ET, verdicts from 07:30 ET (`decide_open` / `decide_close` with the new
+  `ask_only`: the decision's own code, no intent, no receipt), and the daily-index backfill. Verdicts wait while the
+  House is paused (`PAUSE`) and above the lane's own line, `events.verdict_usd_day` ($5 a New York day). Each task
+  writes a receipt (`record`, `decide-open:<day>`, `decide-close:<day>`, `verdicts` with its call counts, `universe`,
+  `equity`, `score`, `screen`, `report`, `tickers`, `backfill`), and `<state>/events/lane.json` holds its health.
+- **The hook.** Not `House.feeds` (a non-None `feeds` wakes the House's legacy feed paths, and research_capabilities
+  answers differently for any non-None one: shown by a test): `league/service.py` wraps `house.publisher` when
+  `config.json` `events.enabled` is true, in the House's own loop on its box (never a canary), and each publish (60 s)
+  runs the original publisher as before and then starts the lane's turn on the feeds lane (`feeds:evl`).
+- **Off until it has a store.** The lane never makes `<state>/events/`: `scripts/evl_migrate.py` copies the desktop's
+  store there once (chunks with their SHA-256 read back, every file and table checked on the box, one rename; refused
+  while the desktop's timers run or when the target is not empty), and the lane starts within a minute.
+- **Judges behind the wall.** `league/ci.py` FORBIDDEN gains `league/events/programs.py`, `verdicts.py`, `score.py`,
+  `screen.py` and `docs/prereg/` (in `PENDING_GATEWAY` until the gateway's merge list follows): no role changes them and
+  the in-box updater never ships one.
+- **Tests.** league/tests/test_events_house.py (34: the hook and the House's tick, the order and bounds of tasks,
+  verdicts before the decision, the resumable record pass, nightly, backfill, PAUSE and the line, failures as
+  warnings, `house.feeds` None), league/tests/test_evl_migrate.py (9), test_ci and test_e3_identities (the wall).
+- **Deploy.** Ships with `events.enabled` false (the owner flips it in `config.json`, an owner deploy; release 1019b ships it true); with it true the
+  lane waits, recording nothing, until the migration lands. Order: deploy, stop the desktop timers, migrate, watch
+  `lane.json` and the receipts. Rollback: the previous release (the store stays on disk, unread); or, with no deploy,
+  `touch <state>/events/STOP` and the lane idles after the turn in hand.
+
+### Release R2: the event lane's real money on the House, on `r2/house` (DEPLOYED 21:00Z Oct 19 in #574, release 1019b; stacked on `r2/gateway`; an owner deploy after gateway G2, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; VERSION 2 OF THE NINE SEATABLE PROGRAMS TRADES REAL MONEY AT LEARNING SIZE FROM ITS FIRST EVENT (PREREG-EVL-3) once the gateway's `STOCK_EVENT_BUYS` is on and the auction paper proof's BUY stage has passed; THE MONEY DIGEST MOVES `f4fc39ff` -> `285fa7af` and the constitution `34bbe7a5` -> `fd38e4e1`, the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+
+- **Why.** The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 section 2 (with
+  PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2): every seatable program trades real money at learning size from
+  its first event, in whole shares, in the listing exchange's auctions, inside the goal's walls.
+- **What.** THE EQUITY BOOK'S EVENT KIND (league/equity/live.py `_event_step` and after; the rules in the new adapter
+  league/events/book.py, `BOOKS["event"]`): version 2 of the nine seatable programs (version 1 never trades), at the
+  band the LANE's store gives each (`bands`: learning from birth, Probe, Sized, retired; read at each session's first
+  decision; an unreadable band table plans no buy); the open decision at 09:15 ET and the close decision at close - 14
+  minutes on the lane's store read-only, only events stored and verdicts answered before them (the lane's own intents
+  of the same decision never a holding); whole-share limit-on-open / limit-on-close buys at 1.25 x the previous SIP
+  close (`opg` sends 09:16-09:27, `cls` close - 13 to - 11), sized by `size_entry` (learning 2% of E, Probe 5%, Sized
+  10%, E the equity at the previous close; the book-wide 10% a name, the 100% book, the cash, the loss budget at the
+  lot's own weight; one share when the target rounds to none and it fits, at learning only when one share is at most
+  5% of E), at most 8 open a learning program (Probe 6, Sized 8), ROOM in the order Sized, Probe, learning, then the
+  tables' order; market-on-close sales at the last session and MARKET-ON-OPEN sales at the next session's open for
+  EVL-ERN-REACT-ON, EVL-NEWS-READ-ON and EVL-NEWS-REACT-ON; PREREG-EVL-1 section 5's fallback ladder (5 closing crosses,
+  then a day sale each session, at 0 for the budget after 20 sessions); THE REAL FILLS WRITTEN BACK to the lane's
+  `real_fills`, one row a (program, version, event, side), idempotent (the lane computes Sized and demotion from them);
+  the House's eligible list sent to the gateway when a buy is planned. The money rows `equity_money.event` (its own
+  switch `enabled`, on; `equity_money.enabled` STAYS False: the old lanes are exits only, proven beside an event buy)
+  and `position_share.stock` 0.20 -> 0.10 with the gateway's `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" (also the old
+  lanes' name cap of a program's own sleeve: a panel basket's fifths would be cut to a tenth of its sleeve were that
+  lane reopened; test_e4_e2e says so). Open risk of an event lot value x max(0.10, 1.65 x sigma60 x sqrt(h)) (0.40 when
+  sigma is unknown or the lot is past its exit; ETF, stock and options weights unchanged), and every closed event lot
+  in the budget whatever its band. THE AUCTION PAPER PROOF (league/events/proof.py: one KO share, a limit-on-open buy
+  and a market-on-close sale on the practice account; its BUY stage gates every real event buy, a failed SELL stage
+  stops them). THE EVENT TWINS (league/ops/twins.py `event_twin`: each real fill beside the shadow's own auction print,
+  `entry_gap_bp` / `exit_gap_bp`). The forward register, the forward twins, FW7, FW9 and the old Done meter leave event
+  programs out. An error alert, once a session, when the gateway refuses an event buy for `STOCK_EVENT_BUYS` off (the
+  owner's step). league/events/book.py and proof.py are behind the owner's wall (`league.ci` `PENDING_GATEWAY`).
+- **Needs from the lane (release R1's, `feat/evl-v2`)**: the version 2 rows in league/events/programs.py, and in its
+  store the `bands` table (with `bands(store)`) and the `real_fills` table; the book reads and writes them by these
+  names (league/tests/test_events_book.py adds the same rows and tables when the tree does not carry them yet).
+  Release 1019b reconciles it: the book uses the lane's own `programs.SEATING` / `BY_KEY`, `bands.bands` and
+  `bands.record_fill`, and the tests' stand-ins are gone.
+- **Not here.** The site's positions panel admits no stock row yet: the site's schema (`capital/schema.js`) and the
+  House's rows of event lots (league/trading_profit.py, league/publish.py) ship together with the site's PR; the agents
+  roster's EVL programs are release R1's (WP4).
+- **Tests.** league/tests/test_events_book.py (new, 37, through the real book and the real `size_entry`); the
+  changed pins in test_constitution, test_ci, test_e3_identities, test_e4_e2e, test_equity_money,
+  test_equity_opens_off, test_equity_design, test_equity_seats and test_equity_book_panel; the golden ETF week
+  (test_equity_etf_orders) unchanged order for order. Gateway suite 489/489.
+- **Deploy and rollback.** Gateway G2 first (`r2/gateway`), then this House release (with the lane's version 2 rows
+  and tables), then the gateway again from its head (`STOCK_SINGLE_EQUITY_SHARE` "0.1", `STOCK_EVENT_BUYS` `on`: the
+  owner's step for the first real event buy). [docs/operations.md](docs/operations.md), **The event lane's real money on
+  the House (release R2)**. Rollback: `equity_money.event.enabled` False (money `25f5eb21`, constitution `8a6a2160`) or
+  `STOCK_EVENT_BUYS` off; with no event lot open, the previous House release and gateway version.
+
+### Gateway G2: the event lane's real buys, on `r2/gateway` (release R2; DEPLOYED 20:13Z Oct 19 in #574, gateway `29ed37e1`, with release 1019b's `STOCK_EVENT_BUYS` "on"; a gateway deploy, before the House release R2; `STOCK_EVENT_BUYS` ships `off`, so it changes nothing the floor does)
+
+- **Why.** The owner's goal of Oct 19, 2026 (item 4) and PREREG-EVL-1 section 8: an event program that passes its
+  screen trades real money at Probe, its entries whole-share limit-on-open / limit-on-close orders at 1.25 x the
+  previous SIP close, at most 10% of equity a name, no margin.
+- **What.** A second real stock buy branch (`gateway/lib/caps.mjs` "event-lane stock buys", `router.mjs`
+  `realEventBuy`, `gate.mjs`): a buy with `time_in_force` `opg` or `cls`, behind `STOCK_EVENT_BUYS` (and
+  `STOCK_BUYS_REAL`); only a name on the House's eligible list of the New York day (the new `POST|GET
+  /v1/stock/eligible`, checked again in the Gate's reserving step); the venue's asset record (us_equity, active,
+  tradable, a listed exchange) and SIP daily bars (previous close >= $3, 20-session ADV >= $1M) read by the gateway
+  itself, cached per symbol per day; the limit at most 1.25 x the previous SIP close; metered at qty x limit; every
+  stock cap, the name held BOOK-WIDE to the single-stock share and never above 10% of equity (a code ceiling);
+  `STOCK_MAX_EQUITY_MULTIPLE` "2" -> "1" (no margin as a gateway wall); the kill switch stops it. Sales of held event
+  shares at `opg` / `cls` (market or limit) are closes as before, pinned by a test. `/v1/health` shows
+  `stock_buys.event_buys` (the switches, the share, the list's day, count and sha).
+- **Not here.** `STOCK_SINGLE_EQUITY_SHARE` "0.2" -> "0.1" moves together with the constitution's
+  `equity_money.position_share.stock` (league.ci holds the House's row within the gateway's var), so it ships in the
+  House release R2 (`r2/house`); event buys are held to 10% a name by the code ceiling either way.
+- **Tests.** gateway/test/event-buys.test.mjs (new, 23: the switch, the shape, the list and its route, the asset and
+  bars checks and their cache, the limit, the 10% book-wide cap, no margin, the kill switch, sales at opg/cls, the
+  list's own buys unchanged); stock-buys.test.mjs pins the deployed vars. Gateway suite 489/489.
+- **Deploy and rollback.** `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy` from the
+  release's head, never 12:55-20:05Z on a trading day (12:55-21:05Z from Nov 2), with no order in flight; rollback
+  `wrangler rollback <the previous version>`.
+
+### The event lane (EVL), shadow, on `feat/evl-shadow` (on the House since release 1019b, DEPLOYED 21:00Z Oct 19 in #574, its store migrated 21:11Z; it ran on the captain's workstation until then)
+
+- **Why.** The owner's goal of Oct 19, 2026: one event-driven single-stock lane, judged by pre-registered screens.
+- **Rules.** [PREREG-EVL-1](docs/prereg/PREREG-EVL-1.md) (registered 01:08:38Z Oct 19) and
+  [PREREG-EVL-2](docs/prereg/PREREG-EVL-2.md) (registered 03:04:07Z Oct 19): nine seatable programs, five records,
+  four controls; expected false passes 0.9. Each program counts only events knowable after its own registration time.
+- **What.** `league/events/` (recorders, verdicts, programs, decisions, scoring, the screen, the report) and
+  [docs/events.md](docs/events.md). PREREG-EVL-2's rows add exits at the next open, the day-news window (09:00-15:29
+  ET), the insider-buy trigger and the limit at entry. Shadow only: no order path.
+- **Tests.** league/tests/test_events_*.py (98 on 3.14 and 3.11).
 
 ### 03:46Z Oct 19, 2026: release 1019a (#568: R0 #567, the old lanes exits only, the cancelled subscriptions' end dates, gateway G1 #566), House `20261019T034531Z-6583edd72b34`, main `c1c6fae7`; gateway `7456e73d`
 
