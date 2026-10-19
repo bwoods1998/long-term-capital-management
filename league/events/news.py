@@ -1,7 +1,7 @@
 """Alpaca (Benzinga) news for the event lane: `GET v1beta1/news` through the gateway (gateway G1 signs that path).
 
 A row is stored once per article id with the time the lane first stored it. KNOWABLE = created_at + 2 minutes
-(PREREG-EVL-1 section 3). `live` is 1 when the recorder stored the article within 30 minutes of its creation, else 0
+(PREREG-EVL-1 section 3). `live` is 1 when the recorder stored the article within 10 minutes of its creation, else 0
 (backfilled); a backfilled article edited more than 10 minutes after publication is excluded at selection
 (league.events.programs.news_in). Headlines are licensed: they stay in the private store and never reach the site.
 """
@@ -16,7 +16,7 @@ from . import store as S
 
 PATH = "/v1/alpaca/v1beta1/news"
 KNOWABLE_LAG = dt.timedelta(minutes=2)
-LIVE_WITHIN = dt.timedelta(minutes=30)
+LIVE_WITHIN = dt.timedelta(minutes=10)
 PAGE = 50
 MAX_PAGES = 400
 

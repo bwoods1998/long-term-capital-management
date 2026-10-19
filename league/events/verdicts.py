@@ -3,7 +3,7 @@
 Model `claude-haiku-4-5-20251001` through the gateway's `/v1/claude/messages`, temperature 0, max_tokens 300, no
 thinking, no tools. Each verdict is stored once (event, prompt SHA-256, model) with the request id, the answer, the
 times and the gateway's settled cost; replay reads the stored verdict and never asks again. An answer that is not valid
-JSON with an integer `score` in -3..3 is `unparsed` and trades nothing. A failed call is retried at most 3 times.
+JSON with an integer `score` in -3..3 is `unparsed` and trades nothing. A call with no answer stores nothing.
 
 The two prompts below are PREREG-EVL-1's text exactly (a test reads the prereg file and compares). Their SHA-256
 (`PROMPTS[...].sha`) names the prompt version in every stored verdict.
@@ -113,45 +113,47 @@ def stored(store: S.Store, event: str, prompt: Prompt) -> Mapping[str, Any] | No
 
 
 def ask(store: S.Store, gw: Any, event: str, prompt: Prompt, user_text: str, *,
-        now: Any = None) -> Mapping[str, Any]:
-    """The stored verdict for (event, prompt, model), asking the gateway once if there is none. `now()` -> UTC."""
+        now: Any = None) -> Mapping[str, Any] | None:
+    """The stored verdict for (event, prompt, model), asking the gateway when there is none. `now()` -> UTC.
+
+    Only an ANSWER is ever stored (`ok`, `unparsed`, `refused`), and the first stored answer is final (PREREG draft 2
+    section 4). A call that gets no answer -- a transport failure, a 5xx or 429, or a refusal by the gateway itself
+    (for instance before it admits temperature 0, or an unpriced model) -- stores nothing and returns None: the event
+    waits for a later pass. At most `ATTEMPTS` calls a pass."""
     have = stored(store, event, prompt)
-    if have is not None and have["status"] in ("ok", "unparsed", "refused"):
+    if have is not None:
         return have
     clock = now or S.utc_now
     request_id = f"evl:{event}:{prompt.sha[:12]}"[:160]
     body = {"model": MODEL, "max_tokens": MAX_TOKENS, "temperature": TEMPERATURE, "system": prompt.system,
             "messages": [{"role": "user", "content": user_text}]}
     asked_at = clock()
-    status, score, guidance, answer, usd = "failed", None, None, None, None
     for _ in range(ATTEMPTS):
-        code, payload = gw.post_json(PATH, body, headers={REQUEST_HEADER: request_id})
         try:
-            usd = float(gw.last_headers.get(COST_HEADER)) if gw.last_headers.get(COST_HEADER) else usd
+            code, payload = gw.post_json(PATH, body, headers={REQUEST_HEADER: request_id})
+        except OSError:
+            continue
+        if not (200 <= code < 300 and isinstance(payload, dict)):
+            if 400 <= code < 500 and code != 429:
+                return None  # the gateway refused the call itself: no answer, nothing stored, a later pass asks again
+            continue
+        try:
+            usd = float(gw.last_headers.get(COST_HEADER)) if gw.last_headers.get(COST_HEADER) else None
         except ValueError:
-            pass
-        if 200 <= code < 300 and isinstance(payload, dict):
-            text = "".join(b.get("text") or "" for b in payload.get("content") or []
-                           if isinstance(b, dict) and b.get("type") == "text")
-            answer = text
-            if payload.get("stop_reason") == "refusal":
-                status = "refused"
-            else:
-                status, score, guidance = parse_answer(text, kind=prompt.name)
-            break
-        answer = json.dumps(payload)[:2000] if payload is not None else None
-        if code in (400, 401, 403, 404):  # not a transient failure: retrying asks the same refusal again
-            status = f"error:{code}"
-            break
-    with store.tx() as db:
-        db.execute("INSERT INTO verdicts(event, prompt_sha, model, request_id, asked_at, answered_at, status, score, "
-                   "guidance, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(event, prompt_sha, model) "
-                   "DO UPDATE SET request_id=excluded.request_id, asked_at=excluded.asked_at, answered_at=excluded."
-                   "answered_at, status=excluded.status, score=excluded.score, guidance=excluded.guidance, answer="
-                   "excluded.answer, usd=COALESCE(verdicts.usd, 0) + COALESCE(excluded.usd, 0)",
-                   (event, prompt.sha, MODEL, request_id, S.iso(asked_at), S.iso(clock()), status, score, guidance, answer,
-                    usd))
-    return stored(store, event, prompt)
+            usd = None
+        text = "".join(b.get("text") or "" for b in payload.get("content") or []
+                       if isinstance(b, dict) and b.get("type") == "text")
+        if payload.get("stop_reason") == "refusal":
+            status, score, guidance = "refused", None, None
+        else:
+            status, score, guidance = parse_answer(text, kind=prompt.name)
+        with store.tx() as db:
+            db.execute("INSERT OR IGNORE INTO verdicts(event, prompt_sha, model, request_id, asked_at, answered_at, status, "
+                       "score, guidance, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (event, prompt.sha, MODEL, request_id, S.iso(asked_at), S.iso(clock()), status, score, guidance,
+                        text, usd))
+        return stored(store, event, prompt)
+    return None
 
 
 __all__ = ["MODEL", "PROMPTS", "Prompt", "render_doc", "render_news", "parse_answer", "ask", "stored", "SYSTEM_DOC",

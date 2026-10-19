@@ -222,17 +222,51 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False) -> di
                 news_verdict(ctx, row) if "id" in row and "accession" not in row else doc_verdict(ctx, row, uni))
         return scores[key]
 
-    out: dict[str, Any] = {}
+    def needs_verdict(prog: P.Program, row: Mapping[str, Any]) -> bool:
+        """An eligible event of `prog`'s family that a verdict could exist for (an 8-K with TEXT >= 200 characters, or a
+        news article whose symbol is the eligible one)."""
+        uni = elig.get(row.get("cik"))
+        if uni is None:
+            return False
+        if prog.family == "news":
+            return uni["symbol"] == row.get("symbol")
+        items = P.items_of(row)
+        if prog.family == "ern" and not items & P.ERN_ITEMS:
+            return False
+        if prog.family == "8k" and (not items & P.OTHER_ITEMS or items & P.ERN_ITEMS):
+            return False
+        return bool(row.get("text_sha")) and (row.get("text_len") or 0) >= 200
+
+    def pending(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
+        """How many of `prog`'s eligible events still have no stored verdict (PREREG section 4: READ events wait)."""
+        if not (prog.reads or prog.family == "news"):
+            return 0
+        prompt = V.PROMPTS["news" if prog.family == "news" else "doc"]
+        missing = 0
+        for row in rows:
+            if not needs_verdict(prog, row):
+                continue
+            verdict(row)
+            event = f"news:{row['id']}" if prog.family == "news" else f"8k:{row['accession']}"
+            if V.stored(st, event, prompt) is None:
+                missing += 1
+        return missing
+
+    out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
     for prog in P.PROGRAMS:
         if prog.entry_at != "open":
             continue
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "news": articles}.get(prog.family, [])
+        waiting = pending(prog, rows)
+        if waiting:
+            out["pending"][prog.id] = waiting   # decided by a later pass, once every verdict is stored
+            continue
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict)
         out[prog.id] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
-    st.finish_receipt(rid, "ok", out, now=ctx.now())
+    st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
 

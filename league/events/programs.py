@@ -24,7 +24,7 @@ from . import calendar as C
 from . import store as S
 
 #: The registration time (UTC): the prereg's commit time on `prereg/evl-1`. None refuses every decision.
-REGISTERED_AT: str | None = None
+REGISTERED_AT: str | None = "2026-10-19T01:08:38Z"  # A61: tag prereg-evl-1, commit 3d6194dd
 
 ERN_ITEMS = frozenset({"2.02"})
 OTHER_ITEMS = frozenset({"1.01", "2.01", "7.01", "8.01"})

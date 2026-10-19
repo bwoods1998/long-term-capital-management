@@ -120,5 +120,22 @@ class RunTest(unittest.TestCase):
         self.assertEqual(len(self.gw.claude_calls), 3)               # replay reads the stored verdicts
 
 
+    def test_read_programs_wait_for_verdicts(self):
+        from league.events import edgar as E
+        E.record_filing(self.st, sec_pages, self.entry("0000000001-26-000001", "0000000001"), source="current", now=self.now)
+        refusing = FakeGateway({"AAA": 3})
+        refusing.post_json = lambda path, body, headers=None: (400, {"error": "temperature may only be 0"})
+        ctx = R.Context(self.st, refusing, sec_pages, now=lambda: self.now)
+        out = R.decide_open(ctx, dt.date(2026, 10, 19))
+        self.assertEqual(out["pending"], {"EVL-ERN-READ-O1": 1, "EVL-ERN-READ-O3": 1})
+        self.assertEqual(out["EVL-CTRL-ERN-ALL-O1"]["planned"], 1)       # controls need no verdict
+        status = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19'").fetchone()[0]
+        self.assertEqual(status, "pending")
+        self.assertIsNone(self.st.db.execute("SELECT 1 FROM intents WHERE program='EVL-ERN-READ-O1'").fetchone())
+        later = R.decide_open(self.ctx, dt.date(2026, 10, 19))          # the gateway admits it now
+        self.assertEqual(later["pending"], {})
+        self.assertEqual(later["EVL-ERN-READ-O1"]["planned"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
