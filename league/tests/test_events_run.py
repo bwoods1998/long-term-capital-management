@@ -137,5 +137,32 @@ class RunTest(unittest.TestCase):
         self.assertEqual(later["EVL-ERN-READ-O1"]["planned"], 1)
 
 
+    def test_c1_close_decision_reads_the_1529_bar_against_the_last_close_before_acceptance(self):
+        from league.events import edgar as E
+        for acc, cik in (("0000000001-26-000001", "0000000001"), ("0000000002-26-000002", "0000000002")):
+            E.record_filing(self.st, sec_pages, self.entry(acc, cik), source="current", now=self.now)
+        minute = {"AAA": 20.9, "BBB": 20.5}   # the prior close is 20 (FakeGateway's daily bars): 1.045 and 1.025
+
+        def get_json(path, params=None, base=self.gw.get_json):
+            if path.endswith("/v2/stocks/bars") and params.get("timeframe") == "1Min":
+                sym = params["symbols"]
+                end = S.parse_iso(params["end"])
+                bars = [{"t": S.iso(end - dt.timedelta(minutes=k)), "o": 20, "h": 21, "l": 19, "c": minute[sym], "v": 100}
+                        for k in (3, 2, 1)]  # bars starting 15:27, 15:28, 15:29 (the last ends at 15:30)
+                return {"bars": {sym: bars}, "next_page_token": None}
+            return base(path, params)
+        self.gw.get_json = get_json
+        late = dt.datetime(2026, 10, 19, 19, 46, 30, tzinfo=UTC)          # 15:46:30 EDT
+        ctx = R.Context(self.st, self.gw, sec_pages, now=lambda: late)
+        out = R.decide_close(ctx, dt.date(2026, 10, 19))
+        self.assertEqual(out["EVL-ERN-REACT-C1"]["planned"], 1)
+        row = self.st.db.execute("SELECT * FROM intents WHERE program='EVL-ERN-REACT-C1'").fetchone()
+        self.assertEqual((row["symbol"], row["entry_at"], row["exit_day"]), ("AAA", "close", "2026-10-20"))
+        self.assertAlmostEqual(row["rank_key"], 20.9 / 20)
+        self.assertEqual(row["decided_at"], "2026-10-19T19:46:00Z")
+        mark = self.st.db.execute("SELECT * FROM marks WHERE symbol='AAA'").fetchone()
+        self.assertEqual((mark["label"], mark["px"]), ("1530", 20.9))
+
+
 if __name__ == "__main__":
     unittest.main()
