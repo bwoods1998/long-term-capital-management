@@ -1,17 +1,20 @@
 """RELEASE R2: the equity book's EVENT KIND (league/equity/live.py `_event_step`, league/events/book.py, the auction
 proof of league/events/proof.py), through the REAL book, the REAL `size_entry` and the real money table in force,
 against an in-memory venue whose auction orders fill at an invented auction print, and a lane store of invented events
-(PREREG-EVL-1 sections 3, 5 and 8; PREREG-EVL-2's overnight rows). No figure here is a market's.
+(PREREG-EVL-3 section 2 with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2's overnight rows). No figure here is a
+market's.
 
-Held here: every event program ships at shadow and a passed look seats it from the next decision; the real-money
+Held here: VERSION 2 of every seatable program trades real money from its first event at the band the LANE's store
+gives it (learning from birth; Probe; Sized; retired trades nothing), and version 1 never trades; the real-money
 decision reads only events stored and verdicts answered before its decision time; the auction orders' shapes (a whole-
 share limit-on-open or limit-on-close buy at 1.25 x the previous SIP close, a market-on-close or market-on-open sale);
-the size (5% of E in whole shares, one share when that rounds to none and fits the walls, the book-wide 10% a name,
-the loss budget at the lot's own weight); the exits at the scheduled auction and the fallback ladder; the open risk
-of an event lot (max(0.10, 1.65 x sigma x sqrt(h)), 0.40 when sigma is unknown or the lot is past its exit); the kill
-switch, the kind's switch and the auction proof's BUY stage stopping buys and never sales; one name an auction across
-programs; and THE OLD LANES STAY EXITS ONLY (`equity_money.enabled` False): no ETF or panel program buys while an
-event program does."""
+the size (learning 2% of E, Probe 5%, Sized 10%, in whole shares; one share when that rounds to none and fits the walls
+and, at learning, one share is at most 5% of E; the book-wide 10% a name; the loss budget at the lot's own weight);
+ROOM (Sized, then Probe, then learning; then the tables' order); the exits at the scheduled auction and the fallback
+ladder; the open risk of an event lot (max(0.10, 1.65 x sigma x sqrt(h)), 0.40 when sigma is unknown or the lot is past
+its exit); the kill switch, the kind's switch and the auction proof's BUY stage stopping buys and never sales; the real
+fills written back to the lane's store; and THE OLD LANES STAY EXITS ONLY (`equity_money.enabled` False): no ETF or panel
+program buys while an event program does."""
 
 from __future__ import annotations
 
@@ -47,6 +50,34 @@ UTC = dt.timezone.utc
 PRIOR, DAY, NEXT = dt.date(2026, 11, 3), dt.date(2026, 11, 4), dt.date(2026, 11, 5)
 CIK, CIK2, CIK3 = "0000000001", "0000000002", "0000000003"
 
+#: PREREG-EVL-3's version 2 rows of the nine seatable programs. The lane's league/events/programs.py carries them (its
+#: branch feat/evl-v2); on a tree that does not yet, this module adds the same rows for its own tests: each seatable row
+#: of version 1 at version 2, PREREG-EVL-3's.
+_PATCHES: list = []
+
+
+def setUpModule():
+    if not any(p.seatable and p.version == 2 for p in P.PROGRAMS):
+        extra = tuple(dataclasses.replace(p, version=2, prereg=3) for p in P.PROGRAMS if p.seatable and p.version == 1)
+        _PATCHES.append(mock.patch.object(P, "PROGRAMS", P.PROGRAMS + extra))
+        _PATCHES[-1].start()
+
+
+def tearDownModule():
+    while _PATCHES:
+        _PATCHES.pop().stop()
+
+
+def V2(program: str) -> P.Program:
+    """Version 2 of a seatable program (the one real money trades)."""
+    found = EB.program_of(program, 2)
+    assert found is not None, program
+    return found
+
+
+def key(program: str) -> str:
+    return L.instance_key(program, 2)
+
 
 def at(day: dt.date, hh: int, mm: int, ss: int = 3) -> float:
     return dt.datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=NY).timestamp()
@@ -56,12 +87,21 @@ def iso(day: dt.date, hh: int, mm: int) -> str:
     return LS.iso(dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=NY))
 
 
+#: The lane's band table and the House's fills table as PREREG-EVL-3's lane writes them (league/events/store.py on
+#: feat/evl-v2; created here when the tree's store does not).
+BANDS_DDL = ("CREATE TABLE IF NOT EXISTS bands(program TEXT NOT NULL, version INTEGER NOT NULL, band TEXT NOT NULL, "
+             "since TEXT, why TEXT, PRIMARY KEY(program, version))")
+FILLS_DDL = ("CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL, "
+             "side TEXT NOT NULL, qty REAL, price REAL, fee REAL, filled_at TEXT, band TEXT, "
+             "PRIMARY KEY(program, version, event, side))")
+
+
 # ----------------------------------------------------------------------------------------------------- the lane store
 class Lane:
-    """An invented lane store (`<root>/events/events.sqlite`): the book's NYSE sessions, 8-K filings, verdicts,
-    universe rows, looks and the lane's decision receipts."""
+    """An invented lane store (`<root>/events/events.sqlite`): the book's NYSE sessions, 8-K and Form 4 filings, news,
+    verdicts, universe rows, the lane's bands, intents and decision receipts, and the real fills table."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, fills: bool = True):
         self.st = LS.Store(root / "events")
         d = dt.date(2026, 9, 1)
         with self.st.tx() as db:
@@ -72,6 +112,9 @@ class Lane:
                                (d.isoformat(), LS.iso(dt.datetime.fromtimestamp(m.open_at, UTC)),
                                 LS.iso(dt.datetime.fromtimestamp(m.close_at, UTC)), int(m.early)))
                 d += dt.timedelta(days=1)
+            db.execute(BANDS_DDL)
+            if fills:
+                db.execute(FILLS_DDL)
 
     def filing(self, accession: str, cik: str, *, accepted: str, received: str | None = None, items=("2.02",),
                form: str = "8-K") -> None:
@@ -106,30 +149,33 @@ class Lane:
                            "sigma60) VALUES(?, ?, ?, 'Invented Co', 'NASDAQ', ?, ?, 'IWM', NULL)",
                            (day.isoformat(), symbol, cik, prev_close, adv20))
 
-    def look(self, program: str, *, passed: bool = True, held: bool = True, k: int = 1) -> None:
-        self.st.db.execute("INSERT OR REPLACE INTO looks(program, version, k, at, sessions, n, issuers, blocks, mean_a, "
-                           "mean_r, mean_a_tradable, p, alpha, fp_check, held, passed, why) VALUES(?, 1, ?, ?, 10, 80, 50, "
-                           "10, 0.01, 0.01, 0.01, 0.001, 0.024, 0.0, ?, ?, 'invented')",
-                           (program, k, iso(PRIOR, 16, 0), int(held), int(passed)))
+    def band(self, program: str, band: str, *, version: int = 2, why: str = "invented") -> None:
+        """The lane's band of a program (PREREG-EVL-3 section 2), as its own rules would write it."""
+        self.st.db.execute("INSERT OR REPLACE INTO bands(program, version, band, since, why) VALUES(?, ?, ?, ?, ?)",
+                           (program, version, band, iso(PRIOR, 20, 0), why))
 
     def decided(self, day: dt.date, at_: str = "open") -> None:
         rid = self.st.start_receipt(f"decide-{at_}:{day.isoformat()}")
         self.st.finish_receipt(rid, "ok", {})
 
-    def intent(self, program: str, event: str, symbol: str, cik: str, entry: dt.date, exit_: dt.date, *,
+    def intent(self, program: P.Program, event: str, symbol: str, cik: str, entry: dt.date, exit_: dt.date, *,
                status: str = "planned") -> None:
         """A shadow intent as the lane's own decision writes it (league/events/programs.py `write_intents`)."""
-        p = P.BY_ID[program]
+        p = program
         self.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
                            "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, ?, ?, ?, ?, 'x', ?, ?, ?, ?, 3, "
                            "'shadow', ?, NULL)", (p.id, p.version, event, symbol, cik, entry.isoformat(), p.entry_at,
                                                   exit_.isoformat(), p.exit_at, status))
 
+    def fills(self) -> list[dict]:
+        return [dict(r) for r in self.st.db.execute("SELECT * FROM real_fills ORDER BY event, side")]
 
-def earnings(lane: Lane, accession: str = "a-1", cik: str = CIK, symbol: str = "ACME", *, prev_close: float = 40.0,
-             score: int = 3, received: str | None = None, answered: str | None = None) -> None:
-    """An earnings 8-K accepted after the PRIOR session's close, its verdict, and its issuer's universe row for DAY."""
-    lane.filing(accession, cik, accepted=iso(PRIOR, 16, 30), received=received or iso(PRIOR, 16, 31))
+
+def earnings(lane: Lane, accession: str = "a-1", cik: str = CIK, symbol: str = "ACME", *, prev_close: float = 16.0,
+             score: int = 3, received: str | None = None, answered: str | None = None, items=("2.02",)) -> None:
+    """An 8-K (earnings by default) accepted after the PRIOR session's close, its verdict, and its issuer's universe row
+    for DAY. The default previous close, $16.00, puts the limit at $20.00: two whole shares at learning's 2% of $2,000."""
+    lane.filing(accession, cik, accepted=iso(PRIOR, 16, 30), received=received or iso(PRIOR, 16, 31), items=items)
     lane.verdict(accession, score, answered=answered or iso(PRIOR, 16, 35))
     lane.universe(DAY, symbol, cik, prev_close)
 
@@ -309,11 +355,10 @@ class EventTest(unittest.TestCase):
         self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
         return h
 
-    def seated(self, h: Harness, *programs: str) -> None:
-        for program in programs or ("EVL-ERN-READ-O1",):
-            h.lane.look(program)
-        h.lane.decided(DAY, "open")
-        h.lane.decided(DAY, "close")
+    def ready(self, h: Harness, day: dt.date = DAY) -> None:
+        """The lane's own decisions of `day` done (their receipts), as the book waits for them."""
+        h.lane.decided(day, "open")
+        h.lane.decided(day, "close")
 
 
 # ------------------------------------------------------------------------------------------------------- the rows
@@ -322,17 +367,20 @@ class TheRows(unittest.TestCase):
         s = EB.settings()
         self.assertIs(CONSTITUTION["equity_money"]["enabled"], False, "the old lanes stay exits only")
         self.assertIs(s.enabled, True)
-        self.assertEqual((s.seats, s.probe_share, s.sized_share, s.probe_open, s.sized_open, s.per_name, s.limit_ratio),
-                         (9, D("0.05"), D("0.10"), 6, 8, D("0.10"), D("1.25")))
+        self.assertEqual({band: s.share(band) for band in EB.LIVE_BANDS},
+                         {"learning": D("0.02"), "probe": D("0.05"), "sized": D("0.10")})
+        self.assertEqual({band: s.max_open(band) for band in EB.LIVE_BANDS}, {"learning": 8, "probe": 6, "sized": 8})
+        self.assertEqual((s.one_share_cap("learning"), s.one_share_cap("probe"), s.per_name, s.limit_ratio),
+                         (D("0.05"), None, D("0.10"), D("1.25")))
         self.assertEqual((s.risk_floor, s.risk_z, s.sigma_sessions), (D("0.10"), D("1.65"), 60))
-        self.assertEqual((s.sized_min_events, s.sized_confidence), (150, D("0.80")))
-        self.assertEqual((s.loss_usd, s.loss_sessions, s.shadow_sessions, s.retire_events), (D("-150"), 20, 20, 100))
         self.assertEqual(dict(s.offsets), ES.EVENT_DEFAULTS)
-        self.assertEqual(len(EB.SEATABLE), 9, "PREREG-EVL-1's four and PREREG-EVL-2's five")
-        self.assertEqual([p.id for p in EB.SEATABLE][:4],
-                         ["EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1"])
-        self.assertEqual(L.EVENT_LANE, EB.LANE)
-        self.assertEqual(L.EVENT_STRICT_WEIGHT, EB.STRICT_WEIGHT)
+        self.assertEqual([p.id for p in EB.seatable()],
+                         ["EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1", "EVL-ERN-REACT-ON",
+                          "EVL-ERN-GUIDE-O1", "EVL-INS-BUY-O1", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON"],
+                         "version 2 of PREREG-EVL-1's four and PREREG-EVL-2's five, in the tables' order")
+        self.assertEqual({p.version for p in EB.seatable()}, {2}, "version 1 never trades")
+        self.assertIsNone(EB.program_of("EVL-ERN-READ-O1", 1))
+        self.assertEqual((L.EVENT_LANE, L.EVENT_STRICT_WEIGHT, L.EVENT_LIVE_BANDS), (EB.LANE, EB.STRICT_WEIGHT, EB.LIVE_BANDS))
 
     def test_the_moments_are_the_preregistered_ones_and_move_with_a_half_day(self):
         m = ES.event_moments(DAY)
@@ -355,24 +403,23 @@ class TheRows(unittest.TestCase):
         for path, value, why in ((("per_name_share",), "0.11", "per_name_share = '0.11' is outside (0, 0.10]"),
                                  (("limit_ratio",), "1.30", "limit_ratio = '1.30' is outside (1.00, 1.25]"),
                                  (("open_risk", "floor"), "0.05", "open_risk.floor = '0.05' is outside [0.10, 1.00]"),
-                                 (("position_share", "probe"), "0.20", "position_share.probe = '0.20' is outside"),
-                                 (("seats",), 10, "seats = 10 is outside [0, 9]"),
+                                 (("position_share", "learning"), "0.03", "position_share.learning = '0.03' is outside"),
+                                 (("one_share_max", "learning"), "0.06", "one_share_max.learning = '0.06' is outside"),
+                                 (("max_open", "learning"), 9, "max_open.learning = 9 is outside [0, 8]"),
                                  (("order_path", "open_decide_before_open_s"), 600, "is outside [900, 900]"),
                                  (("enabled",), 1, "event.enabled = 1 is not exactly one of [False, True]")):
             bad = json.loads(json.dumps(CONSTITUTION))
             node = bad["equity_money"]["event"]
-            for key in path[:-1]:
-                node = node[key]
+            for k in path[:-1]:
+                node = node[k]
             node[path[-1]] = value
             got = " ".join(equity_money_problems(bad))
             self.assertIn(why, got, path)
             self.assertEqual(EB.settings(bad), EB.FALLBACK, path)
         swapped = json.loads(json.dumps(CONSTITUTION))
-        swapped["equity_money"]["event"]["order_path"]["open_until_before_open_s"] = 599
-        swapped["equity_money"]["event"]["order_path"]["open_send_before_open_s"] = 600
-        self.assertEqual(equity_money_problems(swapped), [])
-        swapped["equity_money"]["event"]["max_open"] = {"probe": 6, "sized": 5}
-        self.assertIn("a Probe program never holds more than a Sized one", " ".join(equity_money_problems(swapped)))
+        swapped["equity_money"]["event"]["position_share"]["learning"] = "0.02"
+        swapped["equity_money"]["event"]["position_share"]["probe"] = "0.01"
+        self.assertIn("a learning position is never larger than a Probe one", " ".join(equity_money_problems(swapped)))
 
     def test_the_ladder_and_the_lane_names_are_the_shadows(self):
         from league.events import score as SC
@@ -393,87 +440,60 @@ class TheRows(unittest.TestCase):
         walk = [100 * (1.01 if i % 2 else 0.99) ** i for i in range(61)]
         self.assertIsNotNone(EB.sigma(walk))
         self.assertIsNone(EB.sigma(walk[:60]), "60 returns need 61 closes")
-        self.assertEqual(EB.exit_plan(P.BY_ID["EVL-ERN-READ-O1"], DAY), (DAY.isoformat(), "close"))
-        self.assertEqual(EB.exit_plan(P.BY_ID["EVL-ERN-REACT-C1"], DAY), (NEXT.isoformat(), "close"))
-        self.assertEqual(EB.exit_plan(P.BY_ID["EVL-ERN-REACT-ON"], DAY), (NEXT.isoformat(), "open"))
-        self.assertEqual(EB.exit_plan(P.BY_ID["EVL-NEWS-READ-ON"], dt.date(2026, 11, 25)), ("2026-11-27", "open"),
+        self.assertEqual(EB.exit_plan(V2("EVL-ERN-READ-O1"), DAY), (DAY.isoformat(), "close"))
+        self.assertEqual(EB.exit_plan(V2("EVL-ERN-REACT-C1"), DAY), (NEXT.isoformat(), "close"))
+        self.assertEqual(EB.exit_plan(V2("EVL-ERN-REACT-ON"), DAY), (NEXT.isoformat(), "open"))
+        self.assertEqual(EB.exit_plan(V2("EVL-NEWS-READ-ON"), dt.date(2026, 11, 25)), ("2026-11-27", "open"),
                          "over Thanksgiving: the next SESSION's open")
 
 
 # ------------------------------------------------------------------------------------------------------- the bands
-class TheBands(unittest.TestCase):
-    def close(self, cash: str, day: str = "2026-11-02", notional: str = "100") -> EB.Close:
-        return EB.Close(day, D(cash), D(notional), day, CIK)
+class TheBands(EventTest):
+    def test_learning_from_birth_and_the_lanes_word_after(self):
+        h = self.harness()
+        lane = EB.open_lane(self.root)
+        self.addCleanup(lane.close)
+        got = EB.bands(lane)
+        self.assertEqual([(b.program, b.version, b.band) for b in got], [(p.id, 2, "learning") for p in EB.seatable()],
+                         "no row in the lane's band table: learning from birth")
+        h.lane.band("EVL-8K-READ-O1", "probe")
+        h.lane.band("EVL-NEWS-READ-O1", "sized")
+        h.lane.band("EVL-INS-BUY-O1", "retired")
+        h.lane.band("EVL-ERN-GUIDE-O1", "shadow")                       # no band of PREREG-EVL-3
+        h.lane.band("EVL-ERN-READ-O1", "probe", version=1)              # version 1 never trades, whatever its row
+        got = {b.program: b for b in EB.bands(lane)}
+        self.assertEqual({p: b.band for p, b in got.items()},
+                         {"EVL-ERN-READ-O1": "learning", "EVL-ERN-REACT-C1": "learning", "EVL-8K-READ-O1": "probe",
+                          "EVL-NEWS-READ-O1": "sized", "EVL-ERN-REACT-ON": "learning", "EVL-ERN-GUIDE-O1": "retired",
+                          "EVL-INS-BUY-O1": "retired", "EVL-NEWS-READ-ON": "learning", "EVL-NEWS-REACT-ON": "learning"})
+        self.assertIn("no band of PREREG-EVL-3", got["EVL-ERN-GUIDE-O1"].why)
+        self.assertEqual({b.version for b in got.values()}, {2})
+        self.assertEqual(EB.bands(None) and [b.band for b in EB.bands(None)], ["learning"] * 9, "no lane: no band table")
 
-    def test_every_program_ships_at_shadow_and_a_passed_look_seats_it(self):
-        s = EB.settings()
-        out = EB.bands(None, {}, {}, DAY, s)
-        self.assertEqual({b.band for b in out}, {"shadow"})
-        self.assertTrue(all("no held look" in b.why for b in out))
-        program = P.BY_ID["EVL-ERN-READ-O1"]
-        b = EB.band_of(program, None, {"k": 1, "passed": 1}, [], DAY, s)
-        self.assertEqual((b.band, b.since_day), ("probe", DAY.isoformat()))
-        self.assertEqual(EB.band_of(program, None, {"k": 2, "passed": 0}, [], DAY, s).band, "shadow")
+    def test_a_band_table_that_cannot_be_read_trades_nothing(self):
+        h = self.harness()
+        h.lane.st.db.execute("DROP TABLE bands")
+        h.lane.st.db.execute("CREATE TABLE bands(program TEXT, version INTEGER, level TEXT)")   # no `band` column
+        h.lane.st.db.execute("INSERT INTO bands VALUES('EVL-ERN-READ-O1', 2, 'probe')")
+        lane = EB.open_lane(self.root)
+        self.addCleanup(lane.close)
+        self.assertIsNone(EB.bands(lane))
+        earnings(h.lane, "a-1", CIK, "ACME")
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        out = h.tick(9, 15)
+        self.assertEqual(h.event_intents("buy"), [])
+        self.assertIn("band table cannot be read", out.get("event_bands", ""))
 
-    def test_the_150_dollar_line_demotes_for_20_sessions_and_100_negative_events_retire_for_good(self):
-        s = EB.settings()
-        program = P.BY_ID["EVL-ERN-READ-O1"]
-        live = {"band": "probe", "since_day": "2026-10-30"}
-        losses = [self.close("-80"), self.close("-71")]
-        b = EB.band_of(program, live, {"k": 1, "passed": 1}, losses, DAY, s)
-        self.assertEqual(b.band, "demoted")
-        last = DAY
-        for _ in range(19):
-            last = ES.next_session(last)
-        self.assertEqual(b.until_day, last.isoformat(), "20 sessions in shadow, today the first")
-        held = {"band": "demoted", "until_day": b.until_day, "why": b.why}
-        self.assertEqual(EB.band_of(program, held, {"k": 1, "passed": 1}, losses, last, s).band, "demoted")
-        after = ES.next_session(last)
-        self.assertEqual(EB.band_of(program, held, {"k": 1, "passed": 1}, losses, after, s).band, "probe",
-                         "back, its last held look passed")
-        self.assertEqual(EB.band_of(program, held, {"k": 2, "passed": 0}, losses, after, s).band, "shadow")
-        self.assertEqual(EB.band_of(program, live, {"k": 1, "passed": 1}, [self.close("-149")], DAY, s).band, "probe",
-                         "-$149 is above the line")
-        bad = [self.close("-1") for _ in range(100)]
-        r = EB.band_of(program, {"band": "probe"}, {"k": 1, "passed": 1}, bad, DAY, s)
-        self.assertEqual(r.band, "retired")
-        self.assertEqual(EB.band_of(program, {"band": "retired", "why": r.why}, {"k": 3, "passed": 1}, [], DAY, s).band,
-                         "retired", "for good: a new version must be registered")
-
-    def test_sized_after_150_events_with_the_80_percent_bound_above_zero(self):
-        s = EB.settings()
-        program = P.BY_ID["EVL-ERN-READ-O1"]
-        days = []
-        d = dt.date(2026, 6, 1)
-        while len(days) < 160:
-            if ES.is_session(d):
-                days.append(d.isoformat())
-            d += dt.timedelta(days=1)
-        good = [EB.Close(day, D("2.00") if i % 3 else D("-1.00"), D("100"), day, f"{i:010d}") for i, day in enumerate(days)]
-        self.assertEqual(EB.band_of(program, {"band": "probe"}, {"k": 1, "passed": 1}, good[:149], DAY, s).band, "probe")
-        self.assertEqual(EB.band_of(program, {"band": "probe"}, {"k": 1, "passed": 1}, good, DAY, s).band, "sized")
-        self.assertEqual(s.share("sized"), D("0.10"))
-        self.assertEqual(s.max_open("sized"), 8)
-
-    def test_seats_go_in_the_tables_order_and_nobody_trading_loses_one(self):
-        s = dataclasses.replace(EB.settings(), seats=2)
-
-        class OneLane:
-            def __init__(self):
-                self.db = None
-
-        looks = {p.id: {"k": 1, "passed": 1} for p in EB.SEATABLE}
-        with mock.patch.object(EB, "last_held_look", lambda lane, program, version: looks.get(program)):
-            out = {b.program: b for b in EB.bands(OneLane(), {}, {}, DAY, s)}
-            self.assertEqual(sorted(p for p, b in out.items() if b.live), ["EVL-ERN-REACT-C1", "EVL-ERN-READ-O1"])
-            self.assertIn("no free seat", out["EVL-8K-READ-O1"].why)
-            held = {("EVL-NEWS-REACT-ON", 1): {"band": "probe", "since_day": "2026-11-02"}}
-            out = {b.program: b for b in EB.bands(OneLane(), held, {}, DAY, s)}
-            self.assertEqual(sorted(p for p, b in out.items() if b.live), ["EVL-ERN-READ-O1", "EVL-NEWS-REACT-ON"],
-                             "the program trading keeps its seat; one free seat, by the tables' order")
-            off = dataclasses.replace(s, enabled=False)
-            out = {b.program: b for b in EB.bands(OneLane(), held, {}, DAY, off)}
-            self.assertEqual([p for p, b in out.items() if b.live], ["EVL-NEWS-REACT-ON"], "off: nobody new")
+    def test_room_goes_sized_then_probe_then_learning_then_the_tables_order(self):
+        self.assertLess(EB.room_key("EVL-NEWS-REACT-ON", "sized"), EB.room_key("EVL-ERN-READ-O1", "probe"))
+        self.assertLess(EB.room_key("EVL-NEWS-REACT-ON", "probe"), EB.room_key("EVL-ERN-READ-O1", "learning"))
+        self.assertLess(EB.room_key("EVL-ERN-READ-O1", "learning"), EB.room_key("EVL-8K-READ-O1", "learning"))
+        pick = EB.Pick("x", 2, "8k:x", "ACME", CIK, 3.0, 1e6, D("16"), "t")
+        out = EB.one_name_an_auction({"EVL-ERN-READ-O1": [pick], "EVL-8K-READ-O1": [pick]},
+                                     {"EVL-ERN-READ-O1": "learning", "EVL-8K-READ-O1": "probe"})
+        self.assertEqual(({k: len(v) for k, v in out.items()}), {"EVL-8K-READ-O1": 1, "EVL-ERN-READ-O1": 0},
+                         "one name at one auction: the Probe program before the earlier row at learning")
 
 
 # ------------------------------------------------------------------------------------------------------- the picks
@@ -482,19 +502,18 @@ class ThePicks(EventTest):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")
         earnings(h.lane, "a-2", CIK2, "BETA", received=iso(DAY, 9, 16))           # stored after 09:15
-        earnings(h.lane, "a-3", CIK3, "GAMA", answered=iso(DAY, 9, 15) + "")       # answered after 09:15 (below)
+        earnings(h.lane, "a-3", CIK3, "GAMA")
         h.lane.st.db.execute("UPDATE verdicts SET answered_at=? WHERE event='8k:a-3'",
-                             (LS.iso(dt.datetime(2026, 11, 4, 9, 15, 1, tzinfo=NY)),))
+                             (LS.iso(dt.datetime(2026, 11, 4, 9, 15, 1, tzinfo=NY)),))   # answered after 09:15
         lane = EB.open_lane(self.root)
         self.addCleanup(lane.close)
         moment = dt.datetime.fromtimestamp(ES.event_moments(DAY).open_decide, UTC)
-        picks = EB.picks(lane, P.BY_ID["EVL-ERN-READ-O1"], DAY, decided_at=moment)
+        picks = EB.picks(lane, V2("EVL-ERN-READ-O1"), DAY, decided_at=moment)
         self.assertEqual([p.symbol for p in picks], ["ACME"])
-        self.assertEqual(picks[0].prev_close, D("40.0"))
-        # The shadow rule decides all three (the store as it stands later): real money only what it could know.
+        self.assertEqual(picks[0].prev_close, D("16.0"))
         later = moment + dt.timedelta(hours=1)
-        self.assertEqual(sorted(p.symbol for p in EB.picks(lane, P.BY_ID["EVL-ERN-READ-O1"], DAY, decided_at=later)),
-                         ["ACME", "BETA", "GAMA"])
+        self.assertEqual(sorted(p.symbol for p in EB.picks(lane, V2("EVL-ERN-READ-O1"), DAY, decided_at=later)),
+                         ["ACME", "BETA", "GAMA"], "the shadow's rule (the store as it stands later) decides all three")
 
     def test_the_lanes_own_intents_of_today_are_this_decision_and_an_earlier_one_holds_the_issuer(self):
         """The book waits for the lane's own decision of the auction, which has written TODAY'S intents by then: they are
@@ -503,10 +522,10 @@ class ThePicks(EventTest):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")
         earnings(h.lane, "a-2", CIK2, "BETA")
-        program = P.BY_ID["EVL-ERN-READ-O1"]
-        h.lane.intent(program.id, "8k:a-1", "ACME", CIK, DAY, DAY)          # the lane's decision of today
-        h.lane.intent(program.id, "8k:a-2", "BETA", CIK2, DAY, DAY)
-        h.lane.intent(program.id, "8k:old", "BETA", CIK2, PRIOR, PRIOR)     # an earlier decision's BETA position
+        program = V2("EVL-ERN-READ-O1")
+        h.lane.intent(program, "8k:a-1", "ACME", CIK, DAY, DAY)          # the lane's decision of today
+        h.lane.intent(program, "8k:a-2", "BETA", CIK2, DAY, DAY)
+        h.lane.intent(program, "8k:old", "BETA", CIK2, PRIOR, PRIOR)     # an earlier decision's BETA position
         lane = EB.open_lane(self.root)
         self.addCleanup(lane.close)
         moment = dt.datetime.fromtimestamp(ES.event_moments(DAY).open_decide, UTC)
@@ -514,12 +533,13 @@ class ThePicks(EventTest):
         self.assertTrue(P._held_recently(lane, program, CIK, DAY), "the shadow's own rule reads today's intent as held")
         self.assertFalse(EB.held_recently(lane, program, CIK, DAY))
         self.assertTrue(EB.held_recently(lane, program, CIK2, DAY))
+        self.assertFalse(EB.held_recently(lane, P.BY_ID["EVL-ERN-READ-O1"], CIK2, DAY), "version 1's are its own")
         h.lane.st.db.execute("UPDATE intents SET status='skipped:x' WHERE event='8k:old'")
         self.assertFalse(EB.held_recently(lane, program, CIK2, DAY), "a skipped intent held nothing")
         self.assertEqual([p.symbol for p in EB.picks(lane, program, DAY, decided_at=moment)], ["ACME", "BETA"])
 
     def test_every_seatable_program_reads_its_own_window_and_rule(self):
-        """Each of the nine seatable rows through `picks` on the store's own rows (invented): its window, its event, its
+        """Each of the nine version 2 rows through `picks` on the store's own rows (invented): its window, its event, its
         verdict or reaction or purchase, its universe row."""
         h = self.harness()
         cik = {name: f"{i:010d}" for i, name in enumerate(("ERN", "EKA", "OTH", "NWS", "GUI", "INS", "DAY", "RCT"), 11)}
@@ -546,20 +566,19 @@ class ThePicks(EventTest):
         moves = {"EKA": 1.05, "RCT": 1.06, "DAY": 0.99}
         react = lambda row, uni: moves.get(uni["symbol"])  # noqa: E731
         got = {p.id: [x.symbol for x in EB.picks(lane, p, DAY, decided_at=open_at if p.entry_at == "open" else close_at,
-                                                  reaction=react)] for p in EB.SEATABLE}
+                                                  reaction=react)] for p in EB.seatable()}
         self.assertEqual(got, {"EVL-ERN-READ-O1": ["ERN"], "EVL-ERN-REACT-C1": ["EKA"], "EVL-8K-READ-O1": ["OTH"],
                                "EVL-NEWS-READ-O1": ["NWS"], "EVL-ERN-REACT-ON": ["EKA"], "EVL-ERN-GUIDE-O1": ["GUI"],
                                "EVL-INS-BUY-O1": ["INS"], "EVL-NEWS-READ-ON": ["DAY"], "EVL-NEWS-REACT-ON": ["RCT"]})
-        [buy] = EB.picks(lane, P.BY_ID["EVL-INS-BUY-O1"], DAY, decided_at=open_at)
+        [buy] = EB.picks(lane, V2("EVL-INS-BUY-O1"), DAY, decided_at=open_at)
         self.assertEqual(buy.rank, 60_000.0, "ranked by its purchase value")
-        both = EB.one_name_an_auction({p: [x for x in EB.picks(lane, P.BY_ID[p], DAY, decided_at=close_at,
-                                                                 reaction=react)]
+        both = EB.one_name_an_auction({p: EB.picks(lane, V2(p), DAY, decided_at=close_at, reaction=react)
                                        for p in ("EVL-ERN-REACT-ON", "EVL-ERN-REACT-C1")})
         self.assertEqual(({k: [x.symbol for x in v] for k, v in both.items()}),
                          {"EVL-ERN-REACT-C1": ["EKA"], "EVL-ERN-REACT-ON": []},
-                         "one name at one auction: PREREG-EVL-1's C1 before PREREG-EVL-2's REACT-ON")
+                         "one name at one auction, both at learning: PREREG-EVL-1's C1 before PREREG-EVL-2's REACT-ON")
 
-    def test_the_rule_ranking_the_issuer_rule_and_one_name_an_auction(self):
+    def test_the_rule_ranking_and_the_issuer_rule(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME", score=2)
         earnings(h.lane, "a-2", CIK2, "BETA", score=3)
@@ -567,46 +586,49 @@ class ThePicks(EventTest):
         lane = EB.open_lane(self.root)
         self.addCleanup(lane.close)
         moment = dt.datetime.fromtimestamp(ES.event_moments(DAY).open_decide, UTC)
-        picks = EB.picks(lane, P.BY_ID["EVL-ERN-READ-O1"], DAY, decided_at=moment)
+        picks = EB.picks(lane, V2("EVL-ERN-READ-O1"), DAY, decided_at=moment)
         self.assertEqual([p.symbol for p in picks], ["BETA", "ACME"], "score 3 first, then 2; score 1 not taken")
-        held = EB.picks(lane, P.BY_ID["EVL-ERN-READ-O1"], DAY, decided_at=moment, held=lambda cik: cik == CIK2)
+        held = EB.picks(lane, V2("EVL-ERN-READ-O1"), DAY, decided_at=moment, held=lambda cik: cik == CIK2)
         self.assertEqual([p.symbol for p in held], ["ACME"], "an issuer held by real money is skipped")
-        both = EB.one_name_an_auction({"EVL-ERN-GUIDE-O1": picks, "EVL-ERN-READ-O1": picks})
-        self.assertEqual([p.symbol for p in both["EVL-ERN-READ-O1"]], ["BETA", "ACME"], "PREREG-EVL-1's row first")
-        self.assertEqual(both["EVL-ERN-GUIDE-O1"], [], "the later row's picks of the same names are skipped")
 
 
 # ------------------------------------------------------------------------------------------------------- the day
 class TheDay(EventTest):
-    def test_a_passing_program_buys_at_the_open_and_sells_at_the_close_in_whole_shares(self):
+    def test_a_program_at_learning_buys_at_the_open_and_sells_at_the_close_in_whole_shares(self):
         h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME", prev_close=40.0)
-        h.lane.intent("EVL-ERN-READ-O1", "8k:a-1", "ACME", CIK, DAY, DAY)       # the lane's own decision came first
-        self.seated(h)
-        h.symbol("ACME", last=41.0, sd=0.02)
-        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")
-        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("43.00")
+        earnings(h.lane, "a-1", CIK, "ACME")                                   # limit $20.00
+        h.lane.intent(V2("EVL-ERN-READ-O1"), "8k:a-1", "ACME", CIK, DAY, DAY)  # the lane's own decision came first
+        self.ready(h)
+        h.symbol("ACME", last=17.0, sd=0.02)
+        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")
+        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("17.50")
         h.tick(9, 15)
         [buy] = h.event_intents("buy")
-        self.assertEqual((buy["status"], buy["tif"], buy["otype"], buy["limit_px"], buy["exit_day"], buy["exit_at"]),
-                         ("planned", "opg", "limit", "50.00", DAY.isoformat(), "close"))
+        self.assertEqual((buy["status"], buy["band"], buy["tif"], buy["otype"], buy["limit_px"], buy["exit_day"],
+                          buy["exit_at"], buy["version"]),
+                         ("planned", "learning", "opg", "limit", "20.00", DAY.isoformat(), "close", 2))
         self.assertEqual(D(buy["weight"]), D("0.10"), "max(0.10, 1.65 x 2%)")
         self.assertEqual(h.venue.client.lists, [{"day": DAY.isoformat(), "symbols": ["ACME"]}], "the eligible list")
-        inst = h.book._instance("EVL-ERN-READ-O1@1:r")
-        self.assertEqual((inst.kind, inst.lane, inst.band), ("event", "event", "probe"))
+        inst = h.book._instance(key("EVL-ERN-READ-O1"))
+        self.assertEqual((inst.kind, inst.lane, inst.band, inst.live), ("event", "event", "learning", True))
+        self.assertIsNone(h.book._instance(L.instance_key("EVL-ERN-READ-O1", 1)), "version 1 never trades")
+        self.assertEqual(len([i for i in h.book._instances() if i.kind == "event"]), 9, "all nine at learning")
         h.tick(9, 16)
         [body] = h.bodies()
-        self.assertEqual(body, {"symbol": "ACME", "qty": "2", "side": "buy", "type": "limit", "limit_price": "50.00",
+        self.assertEqual(body, {"symbol": "ACME", "qty": "2", "side": "buy", "type": "limit", "limit_price": "20.00",
                                 "time_in_force": "opg", "client_order_id": body["client_order_id"]},
-                         "5% of E=$2,000 at the $50.00 limit: two whole shares, limit-on-open")
+                         "2% of E=$2,000 at the $20.00 limit: two whole shares, limit-on-open")
         h.tick(9, 31)
         [lot] = h.lots()
-        self.assertEqual((lot.qty, lot.entry_px, lot.lane, lot.info["evl_exit"]),
-                         (D(2), D("42.000000"), "event", {"day": DAY.isoformat(), "at": "close", "rung": 0}))
+        self.assertEqual((lot.qty, lot.entry_px, lot.lane, lot.version, lot.info["evl_exit"], lot.info["evl"]["band"]),
+                         (D(2), D("17.000000"), "event", 2, {"day": DAY.isoformat(), "at": "close", "rung": 0},
+                          "learning"))
         figures = L.probe_figures(h.state.rows, weights={"etf": D("0.20"), "stock": D("0.40")})
-        self.assertEqual(figures.open_risk, D("0.10") * D(2) * D("42.000000"), "the event lot's own weight, not 0.40")
+        self.assertEqual(figures.open_risk, D("0.10") * D(2) * D("17.000000"), "the event lot's own weight, not 0.40")
         h.tick(9, 33)
         self.assertEqual(h.event_intents("buy")[0]["status"], "done")
+        self.assertEqual([(f["side"], f["qty"], f["price"], f["band"], f["version"]) for f in h.lane.fills()],
+                         [("buy", 2.0, 17.0, "learning", 2)], "the buy handed back to the lane")
         h.tick(15, 46)
         [sale] = h.event_intents("sell")
         self.assertEqual((sale["tif"], sale["otype"], sale["lid"], sale["rung"]), ("cls", "market", lot.lid, 0))
@@ -617,28 +639,65 @@ class TheDay(EventTest):
         h.tick(16, 1)
         h.tick(16, 3)
         [lot] = h.lots()
-        self.assertEqual((lot.status, lot.exit_px, lot.exit_at, lot.exit_day), ("closed", D("43.000000"), "close",
+        self.assertEqual((lot.status, lot.exit_px, lot.exit_at, lot.exit_day), ("closed", D("17.500000"), "close",
                                                                                DAY.isoformat()))
         self.assertEqual(h.event_intents("sell")[0]["status"], "done")
+        fills = h.lane.fills()
+        self.assertEqual([(f["event"], f["side"], f["qty"], f["price"]) for f in fills],
+                         [("8k:a-1", "buy", 2.0, 17.0), ("8k:a-1", "sell", 2.0, 17.5)])
+        self.assertEqual(fills[1]["fee"], float(lot.fees))
+        h.tick(16, 5)
+        self.assertEqual(len(h.lane.fills()), 2, "written once a side (idempotent)")
         self.assertEqual([k for k, _ in h.events if k == "equity.event_decide"], ["equity.event_decide"] * 2)
 
-    def test_the_one_share_rule_and_the_ten_percent_wall(self):
+    def test_probe_and_sized_bands_size_up_and_take_room_first(self):
         h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME", prev_close=150.0)        # limit 187.50 over a $100 target: one share
-        earnings(h.lane, "a-2", CIK2, "BETA", prev_close=170.0)       # limit 212.50: over 10% of $2,000
-        self.seated(h)
-        for symbol in ("ACME", "BETA"):
-            h.symbol(symbol, last=150.0)
+        earnings(h.lane, "a-1", CIK, "ACME")                                   # READ-O1, learning: 2 shares at $20
+        earnings(h.lane, "o-1", CIK2, "OTHR", items=("8.01",))                 # 8K-READ-O1 at Probe: 5 shares at $20
+        earnings(h.lane, "s-1", CIK3, "SIZD", items=("7.01",))                 # 8K-READ-O1 too: its next pick
+        h.lane.band("EVL-8K-READ-O1", "probe")
+        self.ready(h)
+        for symbol in ("ACME", "OTHR", "SIZD"):
+            h.symbol(symbol, last=17.0)
         h.tick(9, 15)
         h.tick(9, 16)
-        sent = {b["symbol"]: b for b in h.bodies()}
-        self.assertEqual((sent["ACME"]["qty"], sent["ACME"]["limit_price"]), ("1", "187.50"))
-        self.assertNotIn("BETA", sent)
-        beta = next(r for r in h.event_intents("buy") if r["symbol"] == "BETA")
-        self.assertEqual(beta["status"], "refused")
-        self.assertIn("no whole share fits", beta["why"])
+        sent = [(b["symbol"], b["qty"]) for b in h.bodies()]
+        self.assertIn(sent[0][0], ("OTHR", "SIZD"))
+        self.assertEqual(sent[-1], ("ACME", "2"),
+                         "ROOM: the Probe program's buys go before the learning program's, though its row is later")
+        self.assertEqual(dict(sent), {"OTHR": "5", "SIZD": "5", "ACME": "2"}, "Probe 5% of E, learning 2%")
 
-    def test_the_kill_switch_the_kinds_switch_and_the_auction_proof_stop_buys_never_sales(self):
+    def test_the_one_share_rule_and_its_caps(self):
+        h = self.harness()
+        earnings(h.lane, "a-1", CIK, "ACME", prev_close=60.0)            # learning: $40 target, limit $75: one share
+        earnings(h.lane, "a-2", CIK2, "BETA", prev_close=100.0)          # learning: limit $125 > 5% of $2,000
+        earnings(h.lane, "o-1", CIK3, "GAMA", prev_close=150.0, items=("8.01",))   # Probe: limit $187.50 under 10%
+        earnings(h.lane, "o-2", "0000000004", "DELT", prev_close=170.0, items=("8.01",))   # Probe: $212.50 over 10%
+        h.lane.band("EVL-8K-READ-O1", "probe")
+        self.ready(h)
+        for symbol in ("ACME", "BETA", "GAMA", "DELT"):
+            h.symbol(symbol, last=50.0)
+        h.tick(9, 15)
+        h.tick(9, 16)
+        sent = {b["symbol"]: (b["qty"], b["limit_price"]) for b in h.bodies()}
+        self.assertEqual(sent, {"ACME": ("1", "75.00"), "GAMA": ("1", "187.50")})
+        refused = {r["symbol"]: r for r in h.event_intents("buy") if r["status"] == "refused"}
+        self.assertEqual(sorted(refused), ["BETA", "DELT"])
+        self.assertIn("above 0.05 x E", refused["BETA"]["why"], "learning's one share at most 5% of E")
+        self.assertIn("no whole share fits", refused["DELT"]["why"], "the book-wide 10% a name")
+
+    def test_learning_is_held_to_eight_open_a_program(self):
+        h = self.harness()
+        for i in range(10):
+            earnings(h.lane, f"a-{i}", f"{i + 100:010d}", f"N{i:03d}", prev_close=1.0 + i / 100)
+        self.ready(h)
+        for i in range(10):
+            h.symbol(f"N{i:03d}", last=1.0)
+        h.tick(9, 15)
+        buys = [r for r in h.event_intents("buy") if r["program"] == "EVL-ERN-READ-O1"]
+        self.assertEqual(len(buys), 8, "at most 8 open learning positions per program")
+
+    def test_the_kill_switch_the_kinds_switch_the_proof_and_the_gateway_stop_buys_never_sales(self):
         for stop in ("kill", "switch", "proof", "gateway"):
             with self.subTest(stop=stop):
                 self.tmp = tempfile.TemporaryDirectory()
@@ -646,8 +705,8 @@ class TheDay(EventTest):
                 self.root = Path(self.tmp.name)
                 h = self.harness()
                 earnings(h.lane, "a-1", CIK, "ACME")
-                self.seated(h)
-                h.symbol("ACME", last=41.0)
+                self.ready(h)
+                h.symbol("ACME", last=17.0)
                 block = {"kill": "kill switch", "switch": "equity_money.event.enabled is false",
                          "proof": "auction paper proof's BUY stage", "gateway": "the refused buy"}[stop]
                 patch = mock.patch.dict(CONSTITUTION["equity_money"]["event"], {"enabled": False}) \
@@ -677,14 +736,15 @@ class TheDay(EventTest):
     def test_an_exit_is_never_held_by_the_kinds_switch_or_the_proof_only_by_the_kill_switch(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0)
-        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")
-        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("43.00")
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")
+        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("17.50")
         for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33)):
             h.tick(hh, mm)
         self.assertEqual(len(h.lots(open_only=True)), 1)
         h.auction.ok, h.auction.failed = False, "the SELL stage failed"
+        h.lane.band("EVL-ERN-READ-O1", "retired")       # (read at the next session's sync: no sale waits on a band)
         with mock.patch.dict(CONSTITUTION["equity_money"]["event"], {"enabled": False}):
             h.kill = True
             h.tick(15, 46)
@@ -699,9 +759,9 @@ class TheDay(EventTest):
     def test_the_fallback_ladder_closes_then_a_day_sale(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0)
-        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")       # no close print: a halt
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")       # no close print: a halt
         h.day(DAY)
         lot = h.lots()[0]
         self.assertIn(lot.status, ("open", "closing"), "unsold: still held (closing marks the sale it sent)")
@@ -711,8 +771,7 @@ class TheDay(EventTest):
         self.assertTrue(any("rung 1 of the ladder" in text for _, text in h.alerts))
         day = NEXT
         for rung in range(2, EB.LADDER_CLOSES + 2):
-            h.lane.decided(day, "open")
-            h.lane.decided(day, "close")
+            self.ready(h, day)
             h.day(day)
             lot = h.book._lot(lot.lid)
             self.assertEqual(lot.info["evl_exit"]["rung"], rung)
@@ -726,133 +785,18 @@ class TheDay(EventTest):
         self.assertEqual({b["time_in_force"] for b in sells}, {"cls"})
         self.assertEqual(len(sells), 1 + EB.LADDER_CLOSES)
 
-    def test_an_overnight_program_buys_at_the_close_and_sells_at_the_next_open(self):
-        h = self.harness()
-        # EVL-ERN-REACT-ON: an earnings 8-K accepted on DAY during the session, its 15:29 ET minute at +5% over the
-        # PRIOR session's close.
-        h.lane.filing("r-1", CIK, accepted=iso(DAY, 11, 0), received=iso(DAY, 11, 1))
-        h.lane.universe(DAY, "ACME", CIK, 40.0)
-        h.lane.st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('ACME', ?, 'raw', 40, "
-                             "40, 40, 40.0, 1e6, 'x')", (PRIOR.isoformat(),))
-        h.lane.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('ACME', ?, '1530', "
-                             "42.0, 'x', 'sip-1min', 'x')", (DAY.isoformat(),))
-        self.seated(h, "EVL-ERN-REACT-ON")
-        h.symbol("ACME", last=42.0)
-        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("42.50")
-        h.venue.prints[("ACME", NEXT.isoformat(), "open")] = D("43.10")
-        for hh, mm in ((9, 15), (15, 46), (15, 47), (16, 1), (16, 3)):
-            h.tick(hh, mm)
-        [buy] = h.event_intents("buy")
-        self.assertEqual((buy["tif"], buy["exit_day"], buy["exit_at"]), ("cls", NEXT.isoformat(), "open"))
-        self.assertEqual(h.bodies()[0]["time_in_force"], "cls")
-        [lot] = h.lots()
-        self.assertEqual(lot.info["evl_exit"], {"day": NEXT.isoformat(), "at": "open", "rung": 0})
-        h.lane.decided(NEXT, "open")
-        for hh, mm in ((9, 15), (9, 16), (9, 31)):
-            h.tick(hh, mm, day=NEXT)
-        sale = h.bodies()[-1]
-        self.assertEqual((sale["side"], sale["type"], sale["time_in_force"]), ("sell", "market", "opg"),
-                         "a market-on-open sale in the 09:16-09:27 window")
-        self.assertEqual((h.lots()[0].status, h.lots()[0].exit_px), ("closed", D("43.100000")))
-
-    def test_the_old_lanes_stay_exits_only_while_an_event_program_buys(self):
-        """PREREG-EVL-1 section 8 closed the index ETF and options programs to new entries: `equity_money.enabled` stays
-        False and the event kind has its own switch. A seated ETF program's planned buy is refused ("exits only")
-        beside an event program's buy that goes."""
-        h = self.harness(enabled=False)
-        earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0)
-        etf = h.instance()
-        h.intent(etf, "buy", symbol="SPY", share="0.5", exec_day=DAY, decided=PRIOR)
-        h.tick(9, 15)
-        h.tick(9, 16)
-        h.tick(9, 31)
-        h.tick(9, 46)
-        self.assertEqual([b["symbol"] for b in h.bodies()], ["ACME"], "the event buy alone")
-        spy = [i for i in h.intents(kind="buy") if i.symbol == "SPY"][0]
-        self.assertEqual(spy.status, "missed")
-        self.assertIn("equity_money.enabled is false: exits only", spy.why)
-        self.assertEqual(h.book._open_block(lambda opening=True: None, etf, lambda: False),
-                         "equity_money.enabled is false: exits only")
-        inst = h.book._instance("EVL-ERN-READ-O1@1:r")
-        self.assertIsNone(h.book._open_block(lambda opening=True: None, inst, lambda: False),
-                          "the event program's own gates pass with the old lanes' switch off")
-
-    def test_the_eligible_list_goes_only_for_a_buy_and_a_list_the_gateway_lacks_holds_it(self):
-        h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME")
-        h.symbol("ACME", last=41.0)
-        h.lane.decided(DAY, "open")
-        h.lane.decided(DAY, "close")
-        h.day(DAY)
-        self.assertEqual((h.venue.client.lists, h.bodies()), ([], []), "every program in shadow: nothing asked, sent")
-        h.lane.look("EVL-ERN-READ-O1")
-        earnings(h.lane, "a-2", CIK2, "BETA")
-        h.lane.st.db.execute("UPDATE filings SET accepted_at=?, knowable_at=?, received_at=? WHERE accession='a-2'",
-                             (iso(DAY, 16, 30), iso(DAY, 16, 40), iso(DAY, 16, 31)))
-        h.lane.universe(NEXT, "BETA", CIK2, 40.0)
-        h.lane.decided(NEXT, "open")
-        h.venue.client.fail = True
-        h.tick(9, 15, day=NEXT)
-        h.tick(9, 16, day=NEXT)
-        [buy] = h.event_intents("buy")
-        self.assertEqual((buy["symbol"], buy["why"]), ("BETA", "the day's eligible list is not at the gateway yet"))
-        self.assertEqual(h.bodies(), [])
-        h.venue.client.fail = False
-        h.tick(9, 17, day=NEXT)
-        self.assertEqual([b["symbol"] for b in h.bodies()], ["BETA"])
-        self.assertEqual([d["day"] for d in h.venue.client.lists], [NEXT.isoformat()] * 3, "tried each minute")
-        self.assertEqual(h.state.get("eq_event_list")["count"], 1)
-
-    def test_end_stale_leaves_an_auction_order_of_its_own_session_alone(self):
-        h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0)
-        h.tick(9, 15)
-        h.tick(9, 16)
-        h.tick(9, 25)
-        self.assertEqual(h.venue.cancels, [], "queued for the open: never cancelled")
-        [order] = h.orders()
-        self.assertEqual((order.tif, order.otype, order.status), ("opg", "limit", "working"))
-
-    def test_a_working_event_buy_counts_its_own_weight_in_the_budget(self):
-        h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0, sd=None)              # no sigma: the stricter 0.40
-        h.tick(9, 15)
-        h.tick(9, 16)
-        figures = L.probe_figures(h.state.rows, weights={"etf": D("0.20"), "stock": D("0.40")})
-        self.assertEqual(figures.open_risk, D("0.40") * D(2) * D("50.00"))
-        self.assertEqual(figures.programs, 1)
-
-    def test_no_lane_on_the_house_plans_nothing_and_says_nothing(self):
-        h = self.harness()
-        import shutil
-
-        h.lane.st.close()
-        shutil.rmtree(self.root / "events")
-        h.day(DAY)
-        self.assertEqual(h.bodies(), [])
-        self.assertEqual([k for k, _ in h.events if k.startswith("equity.event")], [])
-        self.assertEqual(h.book.health()["events"]["programs"][0]["band"], "shadow")
-
-
     def test_unsold_twenty_sessions_after_its_exit_it_is_at_zero_for_the_budget(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
-        h.symbol("ACME", last=41.0)
-        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")       # and never a close print again: a halt
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")       # and never a close print again: a halt
         h.venue.fill = "none"                                                # nor a day trade
         h.day(DAY)
         lid = h.lots()[0].lid
         day, seen = NEXT, []
         for _ in range(EB.ZERO_AFTER + 2):
-            h.lane.decided(day, "open")
-            h.lane.decided(day, "close")
+            self.ready(h, day)
             h.day(day)
             plan = h.book._lot(lid).info["evl_exit"]
             seen.append((day, plan.get("zero")))
@@ -871,9 +815,129 @@ class TheDay(EventTest):
         self.assertTrue(any("is still held 20 sessions after its planned exit" in text for level, text in h.alerts
                             if level == "error"))
 
-    def test_an_event_close_counts_in_the_loss_budget_at_probe_or_sized(self):
+    def test_an_overnight_program_buys_at_the_close_and_sells_at_the_next_open(self):
         h = self.harness()
-        inst = L.Instance("EVL-ERN-READ-O1@1:r", "EVL-ERN-READ-O1", 1, L.EVENT_LANE, "", "", {}, "sized", False, 1,
+        # EVL-ERN-REACT-ON: an earnings 8-K accepted on DAY during the session, its 15:29 ET minute at +5% over the
+        # PRIOR session's close. (EVL-ERN-REACT-C1 wants the same name at the same close: its row is the earlier, so
+        # REACT-ON is set at Probe here to take it: ROOM.)
+        h.lane.filing("r-1", CIK, accepted=iso(DAY, 11, 0), received=iso(DAY, 11, 1))
+        h.lane.universe(DAY, "ACME", CIK, 16.0)
+        h.lane.st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('ACME', ?, 'raw', 16, "
+                             "16, 16, 16.0, 1e6, 'x')", (PRIOR.isoformat(),))
+        h.lane.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('ACME', ?, '1530', "
+                             "16.8, 'x', 'sip-1min', 'x')", (DAY.isoformat(),))
+        h.lane.band("EVL-ERN-REACT-ON", "probe")
+        self.ready(h)
+        h.symbol("ACME", last=16.8)
+        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("17.00")
+        h.venue.prints[("ACME", NEXT.isoformat(), "open")] = D("17.20")
+        for hh, mm in ((9, 15), (15, 46), (15, 47), (16, 1), (16, 3)):
+            h.tick(hh, mm)
+        [buy] = [r for r in h.event_intents("buy") if r["status"] != "refused"]
+        self.assertEqual((buy["program"], buy["tif"], buy["exit_day"], buy["exit_at"]),
+                         ("EVL-ERN-REACT-ON", "cls", NEXT.isoformat(), "open"))
+        self.assertEqual((h.bodies()[0]["time_in_force"], h.bodies()[0]["qty"]), ("cls", "5"))
+        [lot] = h.lots()
+        self.assertEqual(lot.info["evl_exit"], {"day": NEXT.isoformat(), "at": "open", "rung": 0})
+        self.ready(h, NEXT)
+        for hh, mm in ((9, 15), (9, 16), (9, 31)):
+            h.tick(hh, mm, day=NEXT)
+        sale = h.bodies()[-1]
+        self.assertEqual((sale["side"], sale["type"], sale["time_in_force"], sale["qty"]), ("sell", "market", "opg", "5"),
+                         "a market-on-open sale in the 09:16-09:27 window")
+        self.assertEqual((h.lots()[0].status, h.lots()[0].exit_px), ("closed", D("17.200000")))
+
+    def test_the_old_lanes_stay_exits_only_while_an_event_program_buys(self):
+        """PREREG-EVL-1 section 8 closed the index ETF and options programs to new entries: `equity_money.enabled` stays
+        False and the event kind has its own switch. A seated ETF program's planned buy is refused ("exits only")
+        beside an event program's buy that goes; a version 1 event program has no instance at all."""
+        h = self.harness(enabled=False)
+        earnings(h.lane, "a-1", CIK, "ACME")
+        h.lane.band("EVL-ERN-READ-O1", "sized", version=1)
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        etf = h.instance()
+        h.intent(etf, "buy", symbol="SPY", share="0.5", exec_day=DAY, decided=PRIOR)
+        h.tick(9, 15)
+        h.tick(9, 16)
+        h.tick(9, 31)
+        h.tick(9, 46)
+        self.assertEqual([b["symbol"] for b in h.bodies()], ["ACME"], "the event buy alone")
+        spy = [i for i in h.intents(kind="buy") if i.symbol == "SPY"][0]
+        self.assertEqual(spy.status, "missed")
+        self.assertIn("equity_money.enabled is false: exits only", spy.why)
+        self.assertEqual(h.book._open_block(lambda opening=True: None, etf, lambda: False),
+                         "equity_money.enabled is false: exits only")
+        inst = h.book._instance(key("EVL-ERN-READ-O1"))
+        self.assertIsNone(h.book._open_block(lambda opening=True: None, inst, lambda: False),
+                          "the event program's own gates pass with the old lanes' switch off")
+        self.assertEqual({i.version for i in h.book._instances() if i.kind == "event"}, {2})
+
+    def test_the_eligible_list_goes_only_for_a_buy_and_a_list_the_gateway_lacks_holds_it(self):
+        h = self.harness()
+        for program in EB.seatable():
+            h.lane.band(program.id, "retired")
+        earnings(h.lane, "a-1", CIK, "ACME")
+        h.symbol("ACME", last=17.0)
+        self.ready(h)
+        h.day(DAY)
+        self.assertEqual((h.venue.client.lists, h.bodies()), ([], []), "every program retired: nothing asked, sent")
+        h.lane.st.db.execute("DELETE FROM bands WHERE program='EVL-ERN-READ-O1'")     # back to learning
+        earnings(h.lane, "a-2", CIK2, "BETA")
+        h.lane.st.db.execute("UPDATE filings SET accepted_at=?, knowable_at=?, received_at=? WHERE accession='a-2'",
+                             (iso(DAY, 16, 30), iso(DAY, 16, 40), iso(DAY, 16, 31)))
+        h.lane.universe(NEXT, "BETA", CIK2, 16.0)
+        self.ready(h, NEXT)
+        h.venue.client.fail = True
+        h.tick(9, 15, day=NEXT)
+        h.tick(9, 16, day=NEXT)
+        [buy] = h.event_intents("buy")
+        self.assertEqual((buy["symbol"], buy["why"]), ("BETA", "the day's eligible list is not at the gateway yet"))
+        self.assertEqual(h.bodies(), [])
+        h.venue.client.fail = False
+        h.tick(9, 17, day=NEXT)
+        self.assertEqual([b["symbol"] for b in h.bodies()], ["BETA"])
+        self.assertEqual([d["day"] for d in h.venue.client.lists], [NEXT.isoformat()] * 3, "tried each minute")
+        self.assertEqual(h.state.get("eq_event_list")["count"], 1)
+
+    def test_end_stale_leaves_an_auction_order_of_its_own_session_alone(self):
+        h = self.harness()
+        earnings(h.lane, "a-1", CIK, "ACME")
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        h.tick(9, 15)
+        h.tick(9, 16)
+        h.tick(9, 25)
+        self.assertEqual(h.venue.cancels, [], "queued for the open: never cancelled")
+        [order] = h.orders()
+        self.assertEqual((order.tif, order.otype, order.status), ("opg", "limit", "working"))
+
+    def test_a_working_event_buy_counts_its_own_weight_in_the_budget(self):
+        h = self.harness()
+        earnings(h.lane, "a-1", CIK, "ACME")
+        self.ready(h)
+        h.symbol("ACME", last=17.0, sd=None)              # no sigma: the stricter 0.40
+        h.tick(9, 15)
+        h.tick(9, 16)
+        figures = L.probe_figures(h.state.rows, weights={"etf": D("0.20"), "stock": D("0.40")})
+        self.assertEqual(figures.open_risk, D("0.40") * D(2) * D("20.00"))
+        self.assertEqual(figures.programs, 1)
+
+    def test_no_lane_on_the_house_plans_nothing_and_says_nothing(self):
+        h = self.harness()
+        import shutil
+
+        h.lane.st.close()
+        shutil.rmtree(self.root / "events")
+        h.day(DAY)
+        self.assertEqual(h.bodies(), [])
+        self.assertEqual([k for k, _ in h.events if k.startswith("equity.event")], [])
+        self.assertEqual(h.book.health()["events"]["programs"], [])
+        self.assertEqual([i for i in h.book._instances() if i.kind == "event"], [])
+
+    def test_an_event_close_counts_in_the_loss_budget_at_any_band(self):
+        h = self.harness()
+        inst = L.Instance(key("EVL-ERN-READ-O1"), "EVL-ERN-READ-O1", 2, L.EVENT_LANE, "", "", {}, "sized", False, 1,
                           created_at=h.clock(), kind=L.EVENT_KIND)
         h.book._save_instance(inst)
         etf = h.instance()
@@ -886,6 +950,37 @@ class TheDay(EventTest):
         figures = L.probe_figures(h.state.rows, weights={"etf": D("0.20"), "stock": D("0.40")})
         self.assertEqual(figures.closes, ((PRIOR.isoformat(), D("-7.50")),),
                          "the Sized event lot's loss is the budget's; a Sized ETF lot's stays outside it, as before")
+
+
+# ------------------------------------------------------------------------------------------------------- the fills
+class TheFills(EventTest):
+    def test_fills_wait_for_the_lanes_table_and_a_posted_fee_is_written_again(self):
+        self.tmp2 = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp2.cleanup)
+        h = self.harness()
+        h.lane.st.db.execute("DROP TABLE real_fills")
+        earnings(h.lane, "a-1", CIK, "ACME")
+        self.ready(h)
+        h.symbol("ACME", last=17.0)
+        h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("17.00")
+        h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("17.50")
+        out = {}
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33), (9, 35)):
+            out = h.tick(hh, mm)
+        self.assertIn("no real_fills table yet", out.get("event_fills", ""))
+        h.lane.st.db.execute(FILLS_DDL)
+        h.tick(9, 36)
+        self.assertEqual([f["side"] for f in h.lane.fills()], ["buy"])
+        for hh, mm in ((15, 46), (15, 47), (16, 1), (16, 3)):
+            h.tick(hh, mm)
+        [lot] = h.lots()
+        sell = [f for f in h.lane.fills() if f["side"] == "sell"][0]
+        self.assertEqual(sell["fee"], float(lot.fees))
+        lot.fees += D("0.02")                                   # the broker's posted fees, later
+        h.book._save_lot(lot)
+        h.tick(16, 10)
+        sell = [f for f in h.lane.fills() if f["side"] == "sell"][0]
+        self.assertEqual((sell["fee"], len(h.lane.fills())), (float(lot.fees), 2))
 
 
 # ------------------------------------------------------------------------------------------------------- the twins
@@ -902,7 +997,7 @@ class FakeStore:
 
 class TheTwins(EventTest):
     def lot(self, **over) -> dict:
-        row = {"lid": 7, "instance": "EVL-ERN-READ-O1@1:r", "family": "EVL-ERN-READ-O1", "version": 1, "lane": "event",
+        row = {"lid": 7, "instance": "EVL-ERN-READ-O1@2:r", "family": "EVL-ERN-READ-O1", "version": 1, "lane": "event",
                "symbol": "ACME", "class": "stock", "qty": "0", "opened_qty": "2", "entry_px": "42.00",
                "entry_notional": "84.00", "entry_at": "open", "fees": "0.02", "div": "0", "status": "closed",
                "exit_px": "43.00", "exit_at": "close", "exit_day": DAY.isoformat(), "opened_day": DAY.isoformat(),
@@ -947,8 +1042,8 @@ class TheTwins(EventTest):
 
     def test_the_round_reads_the_lanes_marks_and_keeps_the_record_beside_e1s(self):
         h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
+        earnings(h.lane, "a-1", CIK, "ACME", prev_close=40.0)
+        self.ready(h)
         h.symbol("ACME", last=41.0)
         h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")
         h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("43.00")
@@ -977,8 +1072,8 @@ class TheReaders(EventTest):
 
     def book(self) -> Harness:
         h = self.harness()
-        earnings(h.lane, "a-1", CIK, "ACME")
-        self.seated(h)
+        earnings(h.lane, "a-1", CIK, "ACME", prev_close=40.0)
+        self.ready(h)
         h.symbol("ACME", last=41.0)
         h.venue.prints[("ACME", DAY.isoformat(), "open")] = D("42.00")
         h.venue.prints[("ACME", DAY.isoformat(), "close")] = D("43.00")
@@ -998,8 +1093,8 @@ class TheReaders(EventTest):
         book = FT.read_book(path)
         self.assertEqual([r["lane"] for r in book["instances"]], ["beta"])
         self.assertEqual(list(book["lots"]), [etf.id])
-        self.assertTrue(h.state.rows("SELECT 1 AS x FROM eq_intents WHERE instance='EVL-ERN-READ-O1@1:r'"))
-        self.assertNotIn("EVL-ERN-READ-O1@1:r", set(book["intents"]) | set(book["exits"]))
+        self.assertTrue(h.state.rows("SELECT 1 AS x FROM eq_intents WHERE instance='EVL-ERN-READ-O1@2:r'"))
+        self.assertNotIn("EVL-ERN-READ-O1@2:r", set(book["intents"]) | set(book["exits"]))
 
     def test_fw7_fw9_and_the_old_done_meter_never_count_an_event_program(self):
         from league.ops import dlane_report as DR

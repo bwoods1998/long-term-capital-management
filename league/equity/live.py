@@ -1170,7 +1170,8 @@ class EquityBook:
                 "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "events": self._event_health()}
 
     def _event_health(self) -> dict[str, Any] | None:
-        """THE EVENT KIND'S LINE (release R2): its switch and seats, each seatable program's band (`eq_event_programs`),
+        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares, each version 2 program's band as
+        the book last read it from the lane (`eq_event_programs`),
         the auction paper proof's stages, the eligible list at the gateway, the last decisions (counts only). None when
         the event adapter cannot be imported."""
         adapter = self._event_adapter()
@@ -1180,7 +1181,8 @@ class EquityBook:
             s = adapter.settings()
             proof = self._auction_proof()
             stages = proof.status().get("stages") if proof is not None else None
-            return {"enabled": bool(s.enabled), "seats": int(s.seats),
+            return {"enabled": bool(s.enabled),
+                    "shares": {band: text(s.share(band)) for band in EVENT_LIVE_BANDS},
                     "programs": [{k: r[k] for k in ("program", "version", "band", "since", "why")}
                                  for r in self.state.rows("SELECT * FROM eq_event_programs ORDER BY program")],
                     "proof": {name: (stage or {}).get("status") for name, stage in (stages or {}).items()} or None,
@@ -4896,19 +4898,19 @@ class EquityBook:
                 proof.step(now, em)     # (its row is kv `paper_proof_auction` and the health page's `events.proof`)
         except Exception as exc:  # noqa: BLE001 - never the event step's end
             self._error("auction proof", exc, out)
+        if em is not None:
+            self._event_finish(now, em, adapter, out)
+            for at, decide, until in (("open", em.open_decide, em.open_until),
+                                      ("close", em.close_decide, em.close_until)):
+                if decide <= now < until:
+                    self._event_decide(now, em, at, s, adapter, out)
+            for at, send, until in (("open", em.open_send, em.open_until), ("close", em.close_send, em.close_until)):
+                if send <= now < until:
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out)
         try:
-            self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3)
+            self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3; any day)
         except Exception as exc:  # noqa: BLE001 - written again next minute
             self._error("event fills", exc, out)
-        if em is None:
-            return
-        self._event_finish(now, em, adapter, out)
-        for at, decide, until in (("open", em.open_decide, em.open_until), ("close", em.close_decide, em.close_until)):
-            if decide <= now < until:
-                self._event_decide(now, em, at, s, adapter, out)
-        for at, send, until in (("open", em.open_send, em.open_until), ("close", em.close_send, em.close_until)):
-            if send <= now < until:
-                self._event_send(now, em, at, s, adapter, real_block, killed, out)
 
     # ---------------------------------------------------------------- the band sync
     def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
