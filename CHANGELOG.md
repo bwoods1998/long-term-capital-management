@@ -66,6 +66,9 @@ until release 1019b (below) brings it onto the House.
   share, limit-on-open, on the practice account), the program's band, and every wall: the book-wide 10% a name, the
   100% book, the loss budget ($400 net in any 20 sessions, $800 net in total, realized plus open risk, an event lot at
   value x max(0.10, 1.65 x sigma60 x sqrt(h))), the kill switch, the daily and drawdown stops, long only, Alpaca only.
+- **SEC reads retry EDGAR's 429/5xx** (league/events/gw.py `sec_getter`: after 1, 2 and 4 s, then raise as before;
+  test_events_gw_retry.py): on Oct 19 one browse-edgar 503 in the operating-company test failed the desktop lane's
+  first live open decision twice (amendment A67).
 - **The auction paper proof passes on the venue's acceptance** (captain's amendment A68): Alpaca's practice venue
   simulates no auction (on-open and on-close orders are plain orders at the bid or ask there; a practice limit-on-open
   buy of one F share at 1.25 x its previous close expired unfilled on Oct 19), so a stage whose order the venue took

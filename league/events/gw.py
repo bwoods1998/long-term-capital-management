@@ -91,23 +91,34 @@ class Gateway:
         return self._request("POST", path, body=body, headers=headers)
 
 
-def sec_getter(transport: Any = None) -> Callable[[str], bytes]:
+#: EDGAR's answers that are tried again (rate limit, server busy), and the waits between the tries: one 503 from
+#: browse-edgar failed Monday Oct 19's first live open decision. A read still failing after them raises as before.
+SEC_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+SEC_RETRY_WAITS = (1.0, 2.0, 4.0)
+
+
+def sec_getter(transport: Any = None, *, sleep: Callable[[float], Any] | None = None) -> Callable[[str], bytes]:
     """`get(url) -> bytes` for www.sec.gov with the House's contact User-Agent and the SEC's rate (ltcm.data)."""
     from ltcm.data import CONTACT_USER_AGENT, HttpTransport
     from ltcm.data.edgar import MIN_INTERVAL
 
     # 30 MB, not the transport's 4 MB default: an 8-K's exhibit can be a large HTML file, and dropping those would make
     # the event set depend on document size (PREREG TEXT reads only the first 16,000 characters of it).
+    pause = sleep or time.sleep
     transport = transport or HttpTransport(user_agent=CONTACT_USER_AGENT, min_interval=MIN_INTERVAL,
                                            max_bytes=30 * 1024 * 1024)
 
     def get(url: str) -> bytes:
         if not url.startswith("https://www.sec.gov/"):
             raise ValueError(f"not an SEC URL: {url[:80]}")
-        status, _, body = transport.get(url, {"Accept": "*/*"}, 45.0)
-        if status != 200:
-            raise GatewayError(status, f"SEC {url[:120]}")
-        return body
+        for wait in SEC_RETRY_WAITS + (None,):
+            status, _, body = transport.get(url, {"Accept": "*/*"}, 45.0)
+            if status == 200:
+                return body
+            if status not in SEC_RETRY_STATUS or wait is None:
+                break
+            pause(wait)
+        raise GatewayError(status, f"SEC {url[:120]}")
     return get
 
 
