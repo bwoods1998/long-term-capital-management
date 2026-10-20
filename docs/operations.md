@@ -36,7 +36,7 @@ receipts carry both the lane's `kept` and the alarms' verdict tally (a kept prog
   control did not, and real money's one position per issuer stopped seeing the shadow's holding. A74 (6) is withdrawn:
   every program a written look does not freeze is decided whole (A74 (5)'s group freeze alone keeps A66's purpose,
   outside the window as inside it), and `screen.outside_window`, which only it read, is gone. The captain records the
-  withdrawal before the first version 2 event settles (20:30 ET Tue Oct 20).
+  withdrawal before this head deploys; A74 (6) never ran on the House, so no record changes.
 
 **Identities** (the tree's own functions, on both Pythons): money `285fa7af` -> `055e5313`, constitution `fd38e4e1` ->
 `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150; the alarms move none); the standing grant

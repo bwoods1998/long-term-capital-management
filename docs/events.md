@@ -107,8 +107,8 @@ finished receipt was pending on: after an outage of three sessions or more (or a
 the very events the backfill a look waits for brings, against PREREG-EVL-1 section 3 ("an outage removes nothing";
 backfilled events "are read afterwards and count"), gave a late event to a READ program that was pending and not to its
 control, and hid the shadow's holding from real money's one position per issuer; the group freeze alone keeps every
-written look's record as the look read it (a reading for the captain to record before the first version 2 event
-settles).
+written look's record as the look read it (for the captain to record before release 1019c deploys: A74 (6) never ran
+on the House, so no record changes).
 THE LATE SHARE IS RECORDED (PREREG-EVL-1 section 3: an outage removes nothing, the late share is reported): the
 summary's `kept` names each program a decision left as it was, with why (and the look that froze it), the `events` its
 rule takes on the verdicts and prices already stored that its record does not hold, and the `unjudged` ones it would

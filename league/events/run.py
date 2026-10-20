@@ -285,7 +285,7 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
     decision pending on verdicts, the daily-index backfill's (league/events/house.py `_backfill`, which A66's third
     rule makes a look wait for, whatever the session's age) and the CLI's catchup. A74 (6), which wrote again OUTSIDE
     the re-decision window only the programs the last finished receipt was pending on, is WITHDRAWN (release 1019c's
-    judges review, its major; a reading for the captain to record before the first version 2 event settles): it threw
+    judges review, its major; for the captain to record before the release deploys, and never live): it threw
     away the events a backfill brings after an outage of three sessions or more (PREREG-EVL-1 section 3: "an outage
     removes nothing"; backfilled events "are read afterwards and count"), split a READ program that was pending from
     its control, and hid the shadow's holding from real money's one position per issuer (A70 (14)); the group freeze

@@ -63,31 +63,37 @@ programs trades real money at learning size.
   00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the higher). The
   cap moves only with realized profit; at no realized profit it is a constant $5, so it cannot bite before the lane's
   first profitable week.
-- **Fix round** (the release's three reviews of `21996df0`: two majors, no blocker; each held by tests that fail
-  without the fix). (1) THE HOUSE AT RISK IS NO RESEARCH (the House review; league/ops/stall.py `_house_brake`): deploy
-  step 3's research switch marked `braked` "Not judged" whatever braked the Sail guard, silencing "free disk on the
-  House box" and "top up Sail", which the research causes carried at once before the switch (release 1019b). Under the
-  switch only a brake by the budget's own daily stop (`research_budget`, `account_budget`: `stall.BUDGET_BRAKES`, held
-  equal to the guard's `BUDGET_CAUSES`) is not judged; any other cause is judged as `braked` always was (12 of the last
-  24 h), and the line or the disk that the guard holds now is the owner's step at once, read from the guard's record as
-  well as its brake events (a cause that joins a standing brake writes no event, so the window alone missed a disk
-  filling under the budget's stop). (2) AN OUTAGE REMOVES NOTHING (the judges review; league/events/run.py `_scope`):
-  A74 (6) wrote again, outside the re-decision window, only the programs the session's last receipt was pending on,
-  while the House's daily-index backfill decides again the sessions of the filings it fetches whatever their age (and
-  A66's third rule makes a look wait for it): after an outage of three sessions or more, or an index two days late, the
-  backfilled events went into no record (PREREG-EVL-1 section 3: "an outage removes nothing"), a READ program that was
-  pending took a late event its control did not, and real money's one position per issuer stopped seeing the shadow's
-  holding. A74 (6) is withdrawn: every program a written look does not freeze is decided whole (A74 (5)'s group freeze
-  alone keeps A66's purpose, outside the window as inside it), and `screen.outside_window`, which only it read, is
-  gone (a judge file's change that only removes what this release added). The withdrawal goes to the captain for an
-  amendment before the first version 2 event settles (20:30 ET Tue Oct 20). Tests: league/tests/test_ops_stall.py
-  `TheHouseAtRiskUnderTheResearchSwitch` (8: the disk and the line stand with research off, the budget's stop alone
-  does not, a disk filling under the budget's stop and a brake of ten minutes stand at once and clear with it, an
-  unreadable balance is judged by the window, a pause holds it as before, the budget's brakes are the guard's);
-  league/tests/test_events_1019c.py (outside the window every program is decided whole and the control stays even
-  with its READ programs; a look freezes its group outside the window too; `AnOutageRemovesNothing`: the backfill after
-  a three-session outage lands in every record and Monday is final with it, and real money's one position per issuer
-  sees it; `TheHouseAfterAnOutage`: the House's own scheduler backfills and decides Monday whole).
+- **Fix round** (the release's three reviews of `21996df0`: two majors, no blocker; each held by tests that fail without
+  the fix). (1) THE HOUSE AT RISK IS NO RESEARCH (the House review; league/ops/stall.py `_house_brake`): deploy step 3's
+  research switch marked `braked` "Not judged" whatever braked the Sail guard, silencing "free disk on the House box"
+  and "top up Sail", which the research causes carried at once before the switch (release 1019b). Under the switch only
+  a brake by the budget's own daily stop (`research_budget`, `account_budget`: `stall.BUDGET_BRAKES`, held equal to the
+  guard's `BUDGET_CAUSES`) is not judged; any other cause is judged as `braked` always was (12 of the last 24 h), and
+  the line or the disk that the guard holds now is the owner's step at once, read from the guard's record as well as its
+  brake events (a cause that joins a standing brake writes no event, so the window alone missed a disk filling under the
+  budget's stop). (2) AN OUTAGE REMOVES NOTHING (the judges review; league/events/run.py `_scope`): A74 (6) wrote again,
+  outside the re-decision window, only the programs the session's last receipt was pending on, while the House's
+  daily-index backfill decides again the sessions of the filings it fetches whatever their age (and A66's third rule
+  makes a look wait for it): after an outage of three sessions or more, or an index two days late, the backfilled events
+  went into no record (PREREG-EVL-1 section 3: "an outage removes nothing"), a READ program that was pending took a late
+  event its control did not, and real money's one position per issuer stopped seeing the shadow's holding. A74 (6) is
+  withdrawn: every program a written look does not freeze is decided whole (A74 (5)'s group freeze alone keeps A66's
+  purpose, outside the window as inside it), and `screen.outside_window`, which only it read, is gone (a judge file's
+  change that only removes what this release added). The withdrawal goes to the captain for an amendment before this
+  head deploys (A74 (6) never ran on the House: no record changes). Tests: league/tests/test_ops_stall.py
+  `TheHouseAtRiskUnderTheResearchSwitch` (8: the disk and the line stand with research off, the budget's stop alone does
+  not, a disk filling under the budget's stop and a brake of ten minutes stand at once and clear with it, an unreadable
+  balance is judged by the window, a pause holds it as before, the budget's brakes are the guard's);
+  league/tests/test_events_1019c.py (outside the window every program is decided whole and the control stays even with
+  its READ programs; a look freezes its group outside the window too; `AnOutageRemovesNothing`: the backfill after a
+  three-session outage lands in every record and Monday is final with it, and real money's one position per issuer sees
+  it; `TheHouseAfterAnOutage`: the House's own scheduler backfills and decides Monday whole). On `833f510b`, the fix
+  round's code: the full league suite on 3.14 by `python -m unittest discover -s league/tests -t .`, 12,609 OK (33
+  skipped, 1,447 s), and one process a module, 462 modules, 12,609 OK (33 skipped); on 3.11 the integration's 101
+  modules and test_swarm_guard, 102 modules, 2,701 OK (1 skipped); the gateway 495/495 (no gateway file changes);
+  `python -m league.ci --base origin/main --branch rel/1019c --no-tests` passed; the identities unchanged, on both
+  Pythons (options execution `b60410ad`, equity `78022ca6`, money `055e5313`, constitution `a8d4cbd9`, gate `397b22b7`,
+  xs `2f0083bc`; with `equity_money.event.enabled` False `1b7a5c22` / `50e951c9`).
 - **Tests.** league/tests/test_events_1019c_merge.py (1), the merge's own: while Claude refuses, EVL-8K-READ-O1 waits
   on an invented 8.01 8-K's verdict (tally 1 needed, 0 answered); a look of version 2 over that session freezes the
   group, and the re-decision keeps both versions and the control, asks nothing, finishes `ok` and writes the tally 0/0,
