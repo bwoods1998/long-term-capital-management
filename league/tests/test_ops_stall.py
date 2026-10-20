@@ -681,6 +681,120 @@ class OwnerSteps(Base):
         self.assertIsNone(ST.kill_facts(None))
 
 
+class TheHouseAtRiskUnderTheResearchSwitch(Base):
+    """Release 1019c's House review, its major: THE RESEARCH SWITCH (`ops.json` `stall.research` false, the release's
+    deploy step 3) marked `braked` not judged whatever braked the Sail guard, so the House's own alarms went quiet:
+    "free disk on the House box" (the state disk under the guard's line: the House's ledger needs room, and the event
+    lane's store grows every day) and "top up Sail" (the balance under the House's line: Sail out of credit pauses every
+    box, the House included). Before the switch (release 1019b) the research causes, standing while research is off,
+    carried those steps at once (`research_step`). Under the switch only the budget's own daily stop goes unjudged:
+    every other brake is judged, and a cause the owner alone can lift that the guard holds now is the owner's step at
+    once."""
+
+    def ctx(self, *, now=NOW, ceiling=20, binds=(), research=False):
+        ctx = Context("stall", root=self.root, base=self.base, due_at=now, config={}, clock=lambda: now,
+                      settings_value={} if research else {"stall": {"research": False}})
+        ctx.notify = self.notify
+        ctx.population_ceiling = ceiling
+        ctx.binds = list(binds)
+        return ctx
+
+    def brake(self, hours, causes, *, now_causes=None):
+        """A floor where nothing stalls, then a brake `hours` ago naming `causes`; the guard's record names `now_causes`
+        (the brake's own by default: the guard writes an event only when it brakes or releases)."""
+        self.healthy()
+        self.ago(hours)
+        self.store.event("swarm.guard", None, {"action": "brake", "causes": list(causes)})
+        self.store.put("guard", {"braked": True, "causes": list(causes if now_causes is None else now_causes)})
+
+    def test_a_low_state_disk_is_the_owners_step_with_research_switched_off(self):
+        self.brake(20, ["disk"])
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["braked"])
+        check = out["checks"]["braked"]
+        self.assertEqual(check["owner_step"], ST.GUARD_STEPS["disk"])
+        self.assertIn("free disk on the House box", check["owner_step"])
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:braked", "mailed at once, as an owner step")
+        self.assertEqual(self.notify.entry("braked")["owner_step"], ST.GUARD_STEPS["disk"])
+        self.assertEqual((check["numbers"]["braked_hours_disk"], check["numbers"]["house_causes"]), (20.0, "disk"))
+        for cause in ("births", "gym_runs", "validations", "birth_yield"):
+            self.assertTrue(out["checks"][cause]["what"].startswith("Not judged: research is switched off"), cause)
+        on, _ = self.run_at(research=True, now=NOW + 60)
+        self.assertEqual((on["checks"]["braked"]["stalled"], on["checks"]["braked"]["owner_step"]),
+                         (True, ST.GUARD_STEPS["disk"]), "with research on, as ever")
+
+    def test_sail_under_the_houses_line_is_the_owners_step_with_research_switched_off(self):
+        self.brake(20, ["under_line"])
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["braked"])
+        self.assertIn("top up Sail", out["checks"]["braked"]["owner_step"])
+
+    def test_the_budgets_own_stop_alone_is_not_judged(self):
+        """What the switch is for: research off, the budget's day may stand braked all day; no mail comes of it."""
+        self.brake(20, ["research_budget"], now_causes=["research_budget", "account_budget"])
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], [])
+        self.assertEqual(self.notify.calls, [])
+        check = out["checks"]["braked"]
+        self.assertTrue(check["what"].startswith("Not judged: research is switched off (ops.json stall.research is "
+                                                 "false)"))
+        self.assertEqual((check["stalled"], check["owner_step"], check["numbers"]["judged"]), (False, None, False))
+        on = self.check("braked", research=True, now=NOW + 60)
+        self.assertEqual((on["stalled"], on["owner_step"]), (True, None), "with research on: INFO, as ever")
+
+    def test_a_disk_that_fills_under_the_budgets_stop_is_the_owners_step_at_once(self):
+        """A cause that joins a standing brake writes no brake event (the guard writes one when it brakes or releases):
+        the window names the budget's stop alone and the guard's record names the disk. Its step is mailed at once."""
+        self.brake(20, ["research_budget"], now_causes=["research_budget", "disk"])
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["braked"])
+        check = out["checks"]["braked"]
+        self.assertEqual(check["owner_step"], ST.GUARD_STEPS["disk"])
+        self.assertEqual(check["numbers"]["braked_hours_research_budget"], 20.0)
+        self.assertNotIn("braked_hours_disk", check["numbers"])
+        self.assertEqual((check["numbers"]["causes_now"], check["numbers"]["house_causes"]),
+                         ("research_budget,disk", "disk"))
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:braked")
+
+    def test_a_fresh_brake_for_the_disk_is_the_owners_step_at_once_and_clears_with_it(self):
+        self.brake(10 / 60, ["disk"])
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["braked"], "ten minutes: the owner's step at once, not after 12 hours")
+        self.assertEqual(out["checks"]["braked"]["numbers"]["braked_hours_24h"], 0.17)
+        self.ago(-0.25)                                  # released 15 minutes after NOW
+        self.store.event("swarm.guard", None, {"action": "release", "causes": []})
+        self.store.put("guard", {"braked": False, "causes": []})
+        later, _ = self.run_at(now=NOW + 0.5 * HOUR)
+        self.assertEqual(later["stalled"], [])
+        self.assertEqual(later["cleared"], ["braked"])
+        self.assertIn("the House at risk is judged", later["checks"]["braked"]["what"], "judged, and under 12 h")
+
+    def test_a_brake_no_owner_step_lifts_is_judged_by_the_window(self):
+        """An unreadable balance (the guard cannot see the House's runway) is judged as with research on: 12 of 24 h,
+        INFO."""
+        self.brake(13, ["balance_unreadable"])
+        check = self.check("braked")
+        self.assertEqual((check["stalled"], check["owner_step"]), (True, None))
+        self.assertIn("balance_unreadable is no budget stop", check["what"])
+
+    def test_a_pause_holds_it_as_it_holds_every_brake(self):
+        self.brake(20, ["disk"])
+        pause = self.root / "PAUSE"
+        pause.write_text("maintenance")
+        os.utime(pause, (NOW - HOUR, NOW - HOUR))
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], [], "a pause stops research and the brake by design, as before the switch")
+        self.assertFalse(out["checks"]["braked"]["stalled"])
+        self.assertIn("the House at risk is judged", out["checks"]["braked"]["what"])
+
+    def test_the_budgets_own_brakes_are_the_guards(self):
+        from league.swarm import guard as SG
+
+        self.assertEqual(ST.BUDGET_BRAKES, SG.BUDGET_CAUSES)
+        self.assertLessEqual(set(ST.GUARD_STEPS), set(SG.CAUSES) - set(SG.BUDGET_CAUSES))
+        self.assertIn("braked", ST.RESEARCH_CAUSES)
+
+
 class OwnerDeployGrace(Base):
     """The readiness audit's M12 (Oct 10, 2026): the 16:20Z Oct 9 "owner deploy waiting" mail fired inside the operator's
     own 16:17-16:28Z deploy. A refusal counts once it has stood 45 minutes, and never while a deploy is in flight."""

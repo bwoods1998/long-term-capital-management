@@ -19,6 +19,25 @@ UTC day; the lower of `events.verdict_usd_day` and budget rule 3's allowance) at
 receipts carry both the lane's `kept` and the alarms' verdict tally (a kept program is asked nothing, so the tally and
 `evl_verdicts` never wait on it).
 
+**The fix round** (the release's three reviews: two majors, each held by tests that fail without the fix):
+- **THE HOUSE AT RISK IS NO RESEARCH** (the House review; league/ops/stall.py `_house_brake`). Deploy step 3's research
+  switch marked `braked` "Not judged" whatever braked the Sail guard, so the House's own alarms went quiet: "free disk
+  on the House box" (the state disk under the guard's line; the lane's store grows every day) and "top up Sail" (the
+  balance under the House's line). Before the switch (release 1019b) the research causes, standing while research is
+  off, carried those owner steps at once. Under the switch only a brake by the budget's own daily stop
+  (`research_budget`, `account_budget`) is not judged; a brake with any other cause is judged as `braked` always was
+  (12 of the last 24 h), and the disk or the line that the guard holds NOW is the owner's step at once, read from the
+  guard's record as well as its brake events (a cause that joins a standing brake writes no event).
+- **AN OUTAGE REMOVES NOTHING** (the judges review; league/events/run.py `_scope`). A74 (6) wrote again, outside the
+  re-decision window, only the programs the session's last receipt was pending on. The House's daily-index backfill
+  decides again the sessions of the filings it fetches, whatever their age, and A66's third rule makes a look wait for
+  it; so after an outage of three sessions or more (or an index two days late) the backfilled events went into no
+  record (PREREG-EVL-1 section 3: "an outage removes nothing"), a READ program that was pending took a late event its
+  control did not, and real money's one position per issuer stopped seeing the shadow's holding. A74 (6) is withdrawn:
+  every program a written look does not freeze is decided whole (A74 (5)'s group freeze alone keeps A66's purpose,
+  outside the window as inside it), and `screen.outside_window`, which only it read, is gone. The captain records the
+  withdrawal before the first version 2 event settles (20:30 ET Tue Oct 20).
+
 **Identities** (the tree's own functions, on both Pythons): money `285fa7af` -> `055e5313`, constitution `fd38e4e1` ->
 `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150; the alarms move none); the standing grant
 re-ratifies at the House's start. The options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs
@@ -41,7 +60,8 @@ with an order in flight; CI green on the exact head; only a head that contains r
    09:17-09:27 ET window and no "the event kind's day order count" or "the House's day order count" refusal on an event
    buy; then each section's own verify list.
 3. ON THE BOX, the research switch (`ops.json` `stall.research` false), as **Release 1019c, alarms and costs** says (its
-   step 3).
+   step 3). From this head it silences only the budget's own brakes, never the Sail guard's House-at-risk ones (the fix
+   round): the next `stall` receipt reads `braked` "Not judged" unless the guard braked for another cause.
 
 **Rollback**: `STOCK_EVENT_BUYS` "off" at the gateway (the instant stop of event buys; sales go on), or
 `equity_money.event.enabled` False (a constitution-only owner deploy: money `1b7a5c22`, constitution `50e951c9`). The
@@ -73,16 +93,16 @@ Deploy only a head that contains release 1019b's DEPLOYED head (`git merge-base 
   program's entry kind through X is made; otherwise A66's three sessions. The screen's waiting line says where the fast
   path stopped and why ("the fast path (A69) stops at <day>: ..."). The record receipts the House writes already prove
   the first condition: no new record.
-- **A66'S OWED RULE** (league/events/run.py `_scope`): a re-decision of a session outside the re-decision window (a
-  decision pending on verdicts inside the 45-day look-back, or the CLI's catchup) writes intents only for the programs
-  its last finished receipt was pending on; and no decision writes an intent under a look already written: A LOOK
+- **A66'S OWED RULE** (league/events/run.py `_scope`): no decision writes an intent under a look already written: A LOOK
   FREEZES ITS WHOLE GROUP over the sessions it covers (every version of the program's id, its control, and every
-  version of every READ program of that control; `_group`), inside the window too, pending or not (the judges
-  review: freezing only the look's own version and its control left version 1 and GUIDE-O1 taking late events their
-  version 2 and control did not). The decision's receipt names each program it left as it was (`kept`: why, the
-  freezing look, and the event ids left out of its record, `events` and `unjudged`; `_left_out` asks no verdict and
-  fetches no price), and the daily report counts them per program ("kept out n (+m unjudged)"); a look's detail
-  records when it was written (`written_at`).
+  version of every READ program of that control; `_group`), inside the re-decision window and outside it, pending or
+  not (the judges review: freezing only the look's own version and its control left version 1 and GUIDE-O1 taking
+  late events their version 2 and control did not). Every other program is decided whole, however old the session (the
+  release's fix round withdrew A74 (6), which wrote again outside the window only the programs the last receipt was
+  pending on and so dropped a backfill's events after an outage: **Release 1019c**, above). The decision's receipt
+  names each program it left as it was (`kept`: why, the freezing look, and the event ids left out of its record,
+  `events` and `unjudged`; `_left_out` asks no verdict and fetches no price), and the daily report counts them per
+  program ("kept out n (+m unjudged)"); a look's detail records when it was written (`written_at`).
 - **THE EVENT KIND'S OWN DAY ORDER COUNT**: `equity_money.event.max_orders_day` 150 (a new money row, bounds 0-300;
   `equity_money_problems` holds it under the gateway's day line, 300, and with the old lanes' 60 under the House-wide
   line, 250). league/equity/live.py `_count_refusal` counts the event kind's orders (`event_orders_today`: the orders of
@@ -217,7 +237,9 @@ green on the exact head):
 `lane_usd_day` 3.00) and `meters.claude.lane_usd_day`; `/workspace/state/events/lane.json` `verdict_line_usd` 3.0 and
 its `verdict_line_source`; `/workspace/state/metered.json` after two stall runs (schema 2: each meter's readings,
 `began`, the UTC days' caps) and no `/workspace/state/cap-hold.json` while the day is under its cap; the next
-`stall` receipt: `births`, `gym_runs`, `validations`, `braked` and `birth_yield` "Not judged: research is switched off",
+`stall` receipt: `births`, `gym_runs`, `validations` and `birth_yield` "Not judged: research is switched off" (`braked`
+too while the Sail guard is braked for the budget's own stop alone, judged for any other cause: release 1019c's fix
+round),
 `underspend` "Not judged: budget rule 3: a cheap day is never a failed day", `cap_breach` judged with the day's
 measured spend, the four `evl_` causes judged; the first stall run after the lane's nightly report job (or from 23:45 ET)
 mails "LTCM daily <day>: ..." and `stall.json` `report.day` is that day.
@@ -6335,7 +6357,7 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `births` | no `swarm.born` in the last 12 h while the living population is under `population.ceiling` (as the swarm loads its settings, the budget's tightening included) | none, unless the Sail guard is braked under its line or for disk, or the kill switch is on |
 | `gym_runs` | fewer than 10 Gym runs in the last 6 h (a run is a `runs` row the Gym evaluated: a row with a trial, neither `refused` nor `error`; those, and the rows with no trial an F1 verdict copies from an identical program, are counted apart) | as `births` |
 | `validations` | no Validation verdict in the last 24 h (no validation the Gym evaluated, no verdict read from an identical program, nothing a tournament round judged) while a living family is owed one: its candidate (the submitted best, else the Train best the researcher picked by score, `state.best_train_version`, as `Tournament.candidate_version` reads it) is not its validated version, and the last round within the 24 h did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart) | as `births` |
-| `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
+| `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance). Under THE RESEARCH SWITCH (release 1019c) not judged while every cause is the budget's own stop; any other cause is judged as here, and `under_line` or `disk` held now stands at once | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
 | `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
 | `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys. Since the weekend fixes (the readiness audit's M12) a refusal counts only once it has stood 45 minutes, and never while a deploy is in flight (a `deploys.jsonl` `start` row with no verdict yet, at most 2 h old, or the operator's own `data/nightly.stop`, the deploy's step 2, at most 2 h old) | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
 | `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
@@ -6415,7 +6437,12 @@ marks the old lanes' research causes (`stall.RESEARCH_CAUSES`: `births`, `birth_
 no Validation try or look, A3 Validation or gate waits, A6 the birth yield, A7 the unit: `stall.RESEARCH_ALARMS`) from
 `dlane`, so no mail and no owner step comes of research being off (A60). No pause file: `PAUSE` holds new entries and
 becomes an owner step after 6 h. Absent, the switch is true; the money alarms (A4, A5, PL1, PT1, K5, DC1, the forward
-record's) stand either way.
+record's) stand either way. THE HOUSE AT RISK IS NO RESEARCH (release 1019c's fix round, the House review): `braked` is
+not judged only while every cause of the brake is the budget's own daily stop (`stall.BUDGET_BRAKES`, the guard's
+`BUDGET_CAUSES`: `research_budget`, `account_budget`); a brake with any other cause (the balance under the House's line,
+the state disk, an unreadable balance or budget rule, no reading) is judged as with research on, and the line or the
+disk that the guard holds now is the owner's step at once ("top up Sail", "free disk on the House box"), as the
+research causes carried it before the switch (`stall._house_brake`).
 
 **The equity lanes' own causes** (release E2.4; the four `elane_` rows; `league/ops/elane_health.py`, which the
 stall job calls once): judged only while the lanes are on and not paused, on evidence since the running release first

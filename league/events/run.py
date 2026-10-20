@@ -7,11 +7,11 @@ their SCHEDULED time (09:15 ET open, close - 14 min) whether
 they ran live or as a backfill (`why` says which): a backfilled decision uses only data that was knowable at the
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
-A decision made again (release 1019c, `_scope`): outside the House's re-decision window it writes intents only for the
-programs its last receipt was pending on (A66, owed), and, inside the window too, never for a program of a GROUP over
-whose session a look of the group is written (the group: every version of a program's id, its control, and every
-version of every READ program of that control); the summary's `kept` names each program it left as it was, why, and
-the events it left out of that program's record (`_left_out`), which the daily report counts.
+A decision made again (release 1019c, `_scope`), inside the House's re-decision window or outside it (a backfill after
+an outage, a decision pending on verdicts, the CLI's catchup), writes intents for every program but those of a GROUP
+over whose session a look of the group is written (the group: every version of a program's id, its control, and every
+version of every READ program of that control; A66's owed purpose, A74 (5)); the summary's `kept` names each program it
+left as it was, why, and the events it left out of that program's record (`_left_out`), which the daily report counts.
 """
 
 from __future__ import annotations
@@ -271,40 +271,30 @@ def _group(program: str) -> frozenset[str]:
 
 def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[P.Program], dict[str, Any] | None]:
     """WHAT A DECISION OF SESSION `day` MAY WRITE AGAIN (release 1019c): `kept(prog)` is why it writes (and asks)
-    nothing for `prog` ({"why", and "look" when a look keeps it}), None when it decides it as before.
+    nothing for `prog` ({"why", "look"}), None when it decides it as before. A66's owed purpose, "a late-stored event
+    can never land under a look already written", is kept by ONE rule:
 
-    - A66, OWED (the captain's amendment of 13:00Z Oct 19, 2026): a re-decision of a session OUTSIDE the re-decision
-      window (league/events/screen.py `outside_window`: the House decides it again no more; what reaches it is a
-      decision pending on verdicts, inside the House's look-back, or the CLI's catchup) writes intents only for the
-      programs its last finished receipt (`ok` or `pending`) was pending on: that session is final for every other
-      program (A66's second rule), so a look may stand over it, and a late-stored event must never land under a look
-      already written. A last receipt `ok` was pending on none; an unreadable one is read as pending on none (the
-      reading that writes nothing). A session with no finished receipt is decided whole.
-    - A WRITTEN LOOK FREEZES ITS GROUP (A66's "a late-stored event can never land under a look already written", which
-      A69's fast path reaches inside the window: it can make a close final while the House still decides it again
-      every hour; a reading for the captain to record with release 1019c's other readings of A69): once a look of any
-      version of a program of the group (`_group`) is written as of the exit of this session's intents of that program
-      or later, every program of the group is decided again for nothing, inside the window and out, pending or not (a
-      kept run writes no `pending` for it, so its session is made, A66's second rule). The as-of date, the record a
-      look read and the look stay the same; v1 and v2 keep the same events, and every READ program's control the same
-      blocks.
+    - A WRITTEN LOOK FREEZES ITS GROUP (A74 (5); A66's purpose, which A69's fast path reaches inside the window: it can
+      make a close final while the House still decides it again every hour): once a look of any version of a program of
+      the group (`_group`) is written as of the exit of this session's intents of that program or later, every program
+      of the group is decided again for nothing, inside the window and out, pending or not (a kept run writes no
+      `pending` for it, so its session is made, A66's second rule). The as-of date, the record a look read and the look
+      stay the same; v1 and v2 keep the same events, and every READ program's control the same blocks.
+
+    Every other program is decided whole, whichever session and whoever asks: the House's hourly re-decision, a
+    decision pending on verdicts, the daily-index backfill's (league/events/house.py `_backfill`, which A66's third
+    rule makes a look wait for, whatever the session's age) and the CLI's catchup. A74 (6), which wrote again OUTSIDE
+    the re-decision window only the programs the last finished receipt was pending on, is WITHDRAWN (release 1019c's
+    judges review, its major; a reading for the captain to record before the first version 2 event settles): it threw
+    away the events a backfill brings after an outage of three sessions or more (PREREG-EVL-1 section 3: "an outage
+    removes nothing"; backfilled events "are read afterwards and count"), split a READ program that was pending from
+    its control, and hid the shadow's holding from real money's one position per issuer (A70 (14)); the group freeze
+    alone keeps every written look's record as the look read it. (`now` is not read: the callers' signature stays.)
     Every program a decision keeps is in its summary's `kept`, with why and the events left out of its record
     (`_left_out`, written by the decision: PREREG-EVL-1 section 3's late share, which league/events/report.py counts);
     the shadow's earlier intents stand."""
-    from . import screen as SN
     from .programs import BY_KEY
 
-    last = st.db.execute("SELECT started_at, status, summary FROM receipts WHERE job=? AND status IN ('ok', 'pending') "
-                         "ORDER BY id DESC LIMIT 1", (f"decide-{kind}:{day.isoformat()}",)).fetchone()
-    pending: set[str] | None = None     # None: every program may be decided
-    if last is not None and SN.outside_window(st, day, now):
-        pending = set()
-        if str(last["status"]) == "pending":
-            try:
-                body = json.loads(last["summary"] or "{}")
-                pending = {str(k) for k in (body.get("pending") or {})} if isinstance(body, dict) else set()
-            except (TypeError, ValueError, AttributeError):
-                pending = set()
     exits: dict[int, dt.date] = {}
     frozen: dict[str, str] = {}     # program id -> the written look that freezes its group over `day`
     for row in st.db.execute("SELECT program, version, k, at FROM looks ORDER BY program, version, k"):
@@ -329,9 +319,6 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
             frozen.setdefault(member, name)
 
     def kept(prog: P.Program) -> dict[str, Any] | None:
-        if pending is not None and _key(prog) not in pending:
-            return {"why": f"outside the re-decision window: decided by its run of {last['started_at']}, which was not "
-                           "pending on it"}
         look = frozen.get(prog.id)
         if look is not None:
             return {"why": f"a look of its group is written over this session ({look})", "look": look}

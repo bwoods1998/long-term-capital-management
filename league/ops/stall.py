@@ -154,6 +154,10 @@ carry the day, never a figure.
 THE RESEARCH SWITCH (release R1): `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and
 drops the direction lane's research alarms (`RESEARCH_ALARMS`) from `dlane`, so no mail and no owner step comes of the
 old lanes' research being off (A60, by settings); no pause file (`PAUSE` holds entries and is an owner step after 6 h).
+THE HOUSE AT RISK IS NO RESEARCH (release 1019c's House review): under the switch `braked` is still judged for a brake
+that is not the budget's own daily stop alone (`BUDGET_BRAKES`; `_house_brake`), and a brake the owner alone can lift
+(the Sail balance under the House's line, the state disk) that the guard holds now is the owner's step at once, as the
+research causes carried it before the switch.
 A CHEAP DAY IS NEVER A FAILED DAY (budget rule 3, `CHEAP_DAY_RULE`): `underspend` is never judged under it.
 
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
@@ -350,7 +354,7 @@ OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf'
 #: `EQUITY_STRUCTURES` (league/tests/test_e4_integration.py holds the two equal).
 EQUITY_STRUCTURES = ("etf", "stock", "panel")
 #: The causes a pause stops by design: not raised while the floor is paused, nor while research is switched off
-#: (`RESEARCH_SWITCH`).
+#: (`RESEARCH_SWITCH`; `braked` then only for the budget's own stop: `_house_brake`).
 RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
 #: THE RESEARCH SWITCH (release R1, the goal of Oct 19, 2026; A60 turned the old lanes' research off by settings):
 #: `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and drops the direction lane's research
@@ -358,8 +362,17 @@ RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked",
 #: birth yield, the unit) from the `dlane` cause, so no mail and no owner step comes of research being off. No pause file:
 #: `PAUSE` holds new entries and becomes an owner step after 6 h. Absent, it is true (the release ships it so); the
 #: House sets it false while the old lanes' research is off. The money alarms (A4, A5, PL1, PT1, K5, DC1) stand either way.
+#: THE HOUSE AT RISK IS NO RESEARCH (release 1019c's House review, its major): the switch silences only a brake by the
+#: budget's own daily stop (`BUDGET_BRAKES`), which research switched off makes stand by design. A brake with any other
+#: cause (the Sail balance under the House's line, the state disk, an unreadable balance or budget rule, no reading) is
+#: still judged as `braked` (`_house_brake`), and one the owner alone can lift (`GUARD_STEPS`) standing now is the
+#: owner's step at once, as the research causes carried it before the switch (`research_step`, release 1019b).
 RESEARCH_SWITCH = "research"
 RESEARCH_ALARMS = ("A1", "A2", "A3", "A6", "A7")
+#: The Sail guard's brakes that are THE BUDGET's own daily stop (league/swarm/guard.py `BUDGET_CAUSES`, which a test
+#: holds equal: this job imports nothing of the swarm). Every other cause of a brake is the House at risk or a guard
+#: that cannot see.
+BUDGET_BRAKES = ("research_budget", "account_budget")
 #: A CHEAP DAY IS NEVER A FAILED DAY (budget rule 3, the goal of Oct 19, 2026, item 5): from this rule version on,
 #: `underspend` is never judged (the cap is what may be spent, never what must be).
 CHEAP_DAY_RULE = 3
@@ -1333,9 +1346,10 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
            alert_states: Mapping[str, Mapping[str, Any]] | None = None, research_on: bool = True,
            cheap_day: bool | None = None) -> dict[str, dict[str, Any]]:
     """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure. `research_on` False
-    (THE RESEARCH SWITCH, ops.json `stall.research`) marks `RESEARCH_CAUSES` not judged and drops `RESEARCH_ALARMS`
-    from `dlane`; `cheap_day` (None: the running budget rule's, `B.RULE_VERSION` >= `CHEAP_DAY_RULE`) never judges
-    `underspend`. The event lane's and the equity lanes' own causes are `run`'s (league/ops/evl_health.py,
+    (THE RESEARCH SWITCH, ops.json `stall.research`) marks `RESEARCH_CAUSES` not judged, but for a brake of the Sail
+    guard that is not the budget's own daily stop alone (`_house_brake`: the House at risk is no research), and drops
+    `RESEARCH_ALARMS` from `dlane`; `cheap_day` (None: the running budget rule's, `B.RULE_VERSION` >= `CHEAP_DAY_RULE`)
+    never judges `underspend`. The event lane's and the equity lanes' own causes are `run`'s (league/ops/evl_health.py,
     league/ops/elane_health.py)."""
     out: dict[str, dict[str, Any]] = {}
     guard_now = swarm.get("guard") or {}
@@ -1556,7 +1570,45 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
         for cause in RESEARCH_CAUSES:
             if out[cause].get("judged") is not False:
                 out[cause] = _not_judged(f"research is switched off (ops.json stall.{RESEARCH_SWITCH} is false)", out[cause])
+        # ... but the House at risk is no research: a brake that is not the budget's own daily stop alone stands
+        # (release 1019c's House review), under the pause's rule like every brake.
+        house = _house_brake(brake, guard_now)
+        if house is not None:
+            out["braked"] = house if since is None else {**house, "stalled": False, "paused": True}
     return out
+
+
+def _house_brake(brake: Mapping[str, Any], guard_now: Mapping[str, Any]) -> dict[str, Any] | None:
+    """`braked` UNDER THE RESEARCH SWITCH (release 1019c's House review, its major: the switch silenced the House's own
+    low-disk alarm and the Sail-under-the-line one). None when every cause of the brake, those the window's brake
+    events named (`brake`: `funnel.guard_hours`) and those the guard's record names now (`guard_now`), is the budget's
+    own daily stop (`BUDGET_BRAKES`), which research switched off makes stand by design: the cause stays not judged.
+    Otherwise the brake is judged as with research on (`BRAKED_HOURS` of the last `BRAKE_WINDOW_HOURS`, whatever the
+    cause), and a cause the owner alone can lift (`GUARD_STEPS`: under the House's line, the state disk) that the guard
+    holds NOW stands at once with its owner step: before the switch the research causes, which research off left
+    standing, carried that step at once (`research_step`). The guard's record is read as well as the window's events
+    because a cause that joins a standing brake (the disk filling under the budget's stop) writes no brake event."""
+    by_cause = {str(c): h for c, h in (brake.get("by_cause") or {}).items()}
+    now_causes = [str(c) for c in guard_now.get("causes") or []] if guard_now.get("braked") else []
+    house = sorted((set(by_cause) | set(now_causes)) - set(BUDGET_BRAKES))
+    if not house:
+        return None
+    hours = float(brake.get("hours") or 0.0)
+    step_now = _guard_step(now_causes)
+    doing = [GUARD_DOING.get(c, f"{c}: the guard releases when it clears")
+             for c in dict.fromkeys([*now_causes, *by_cause])]
+    return {
+        "stalled": step_now is not None or (bool(brake.get("known")) and hours >= BRAKED_HOURS),
+        "what": f"The Sail guard was braked {hours:.1f} of the last {BRAKE_WINDOW_HOURS} h "
+                f"({', '.join(f'{c} {h:.1f} h' for c, h in by_cause.items()) or 'no cause named'})"
+                + (f" and is braked now ({', '.join(now_causes)})" if now_causes else "")
+                + f". Research is switched off, but {', '.join(house)} is no budget stop: the House at risk is judged.",
+        "numbers": {f"braked_hours_{BRAKE_WINDOW_HOURS}h": hours, "braked_now": bool(brake.get("braked_now")),
+                    "braked_since": brake.get("braked_since"),
+                    **{f"braked_hours_{c}"[:40]: h for c, h in by_cause.items()},
+                    "causes_now": ",".join(now_causes)[:80] or "none", "house_causes": ",".join(house)[:80]},
+        "doing": _first_up("; ".join(doing) or "the guard releases when its cause clears") + ".",
+        "owner_step": step_now or _guard_step(by_cause), "onset": S.epoch(brake.get("braked_since"))}
 
 
 def _not_judged(why: str, check: Mapping[str, Any] | None = None) -> dict[str, Any]:

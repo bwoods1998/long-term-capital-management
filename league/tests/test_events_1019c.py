@@ -21,6 +21,7 @@ from league.events import run as R
 from league.events import screen as SC
 from league.events import store as S
 from league.tests import equity_design as X
+from league.tests import test_events_house as TH
 from league.tests.test_events_book import DAY, PRIOR, EventTest, iso
 from league.tests.test_events_review_1019b import LooksOnAFinalRecord, c1_event
 from league.tests.test_events_run import FakeGateway, sec_pages
@@ -211,13 +212,23 @@ class TheFastPath(unittest.TestCase):
                          "pending only on another program's verdicts: made for this one")
 
 
+def opens_after(st: S.Store, day: dt.date, now: dt.datetime) -> int:
+    """How many sessions after `day` have had their open decision at `now`: from SC.FINAL_SESSIONS (three) on, the
+    House's hourly re-decision reaches `day` no more (A66's first rule)."""
+    after = C.sessions(st, day + dt.timedelta(days=1), now.astimezone(NY).date())
+    return len([s for s in after if s.open_decide <= now])
+
+
 # ================================================================================ A66 owed: what a re-decision writes
 class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
-    """A66 (owed): a re-decision of a session OUTSIDE the re-decision window writes intents only for the programs its
-    own receipt was pending on; and never for a program of a GROUP (every version of an id, its control, and every
-    READ program of that control) a look of which stands over the session, so a late-stored event can never land
-    under a look already written, and the group's records stay even (release 1019c's judges review). Each kept
-    program's entry lists the events left out of its record, and the daily report counts them."""
+    """A66 (owed), as release 1019c's fix round keeps it: a re-decision never writes an intent for a program of a GROUP
+    (every version of an id, its control, and every READ program of that control) a look of which stands over the
+    session, so a late-stored event can never land under a look already written, and the group's records stay even
+    (release 1019c's judges review; A74 (5)). Every other program is decided whole, inside the re-decision window and
+    outside it: A74 (6), which wrote again outside the window only the programs the last receipt was pending on, is
+    withdrawn (the judges review of release 1019c, its major: it dropped a backfilled event from every record, and
+    split a READ program from its control). Each kept program's entry lists the events left out of its record, and the
+    daily report counts them."""
 
     MONDAY = dt.date(2026, 10, 19)
     AAA = ("0000000001-26-000001", "0000000001")       # accepted 07:05 ET Monday (sec_pages); verdict score 3
@@ -264,44 +275,54 @@ class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
         self.store(self.BBB)                 # stored late: after Monday's decision ran
         return first
 
-    def test_outside_the_window_only_the_programs_it_was_pending_on_are_decided(self):
+    def test_outside_the_window_every_program_is_decided_whole(self):
+        """Release 1019c's judges review, its major (A74 (6) withdrawn): the late BBB lands for every program its rule
+        takes, the control too, so each READ program's comparison with its control stays even (under A74 (6) GUIDE-O1,
+        which was pending, took BBB and its control did not)."""
         first = self.pending_monday()
         friday = dt.datetime(2026, 10, 23, 14, 0, tzinfo=UTC)     # Tue, Wed, Thu and Fri have had their opens
-        self.assertTrue(SC.outside_window(self.st, self.MONDAY, friday))
+        self.assertGreaterEqual(opens_after(self.st, self.MONDAY, friday), SC.FINAL_SESSIONS)
         out = self.decide(friday)
         self.assertEqual(out["pending"], {})
-        self.assertEqual(self.symbols("EVL-ERN-READ-O1"), ["AAA"], "a program it was pending on is decided")
+        self.assertNotIn("kept", out, "no look stands over Monday: nothing is kept")
+        self.assertEqual(self.symbols("EVL-ERN-READ-O1"), ["AAA"], "BBB's score 1 is under READ-O1's 2")
         self.assertEqual(self.symbols("EVL-ERN-READ-O1", 2), ["AAA"])
-        self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), ["AAA", "BBB"], "the late event too, for that program")
-        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"],
-                         "the control was not pending: its session is final, the late event never lands in it")
-        self.assertIn("outside the re-decision window", out["kept"]["EVL-CTRL-ERN-ALL-O1"]["why"])
-        self.assertEqual(out["kept"]["EVL-CTRL-ERN-ALL-O1"]["events"], [f"8k:{self.BBB[0]}"],
-                         "the late event the control's record leaves out is named in its receipt")
-        self.assertEqual(out["kept"]["EVL-CTRL-ERN-ALL-O1"]["unjudged"], [])
-        self.assertEqual(set(out["kept"]) & set(first["pending"]), set())
+        self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), ["AAA", "BBB"])
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA", "BBB"],
+                         "the control takes the late event as its READ programs do: the comparison stays even")
+        self.assertNotIn("EVL-CTRL-ERN-ALL-O1", first["pending"], "it was not pending: A74 (6) kept it")
         receipt = self.st.db.execute("SELECT status FROM receipts WHERE job='decide-open:2026-10-19' ORDER BY id DESC "
                                      "LIMIT 1").fetchone()[0]
         self.assertEqual(receipt, "ok")
         again = self.decide(friday + dt.timedelta(hours=1))
-        self.assertIn("EVL-ERN-READ-O1", again["kept"], "an ok receipt was pending on none: nothing is decided again")
-        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"])
+        self.assertNotIn("kept", again)
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA", "BBB"], "decided again: the same record")
+        self.assertEqual(self.symbols("EVL-ERN-GUIDE-O1", 2), ["AAA", "BBB"])
 
     def test_inside_the_window_every_program_is_decided_again(self):
         self.pending_monday()
         tuesday = dt.datetime(2026, 10, 20, 14, 0, tzinfo=UTC)
-        self.assertFalse(SC.outside_window(self.st, self.MONDAY, tuesday))
+        self.assertLess(opens_after(self.st, self.MONDAY, tuesday), SC.FINAL_SESSIONS)
         out = self.decide(tuesday)
         self.assertNotIn("kept", out)
         self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA", "BBB"], "inside the window the late event lands")
 
-    def test_a_failed_run_after_a_pending_one_keeps_the_pending_ones_scope(self):
-        self.pending_monday()
-        rid = self.st.start_receipt("decide-open:2026-10-19")
-        self.st.finish_receipt(rid, "failed", {"why": "GatewayError: invented"})
-        out = self.decide(dt.datetime(2026, 10, 23, 14, 0, tzinfo=UTC))
-        self.assertIn("EVL-CTRL-ERN-ALL-O1", out["kept"])
-        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"])
+    def test_a_look_freezes_its_group_outside_the_window_too(self):
+        """The one rule that keeps A66's purpose holds outside the window as inside it: a look of READ-O1 version 2 over
+        Monday keeps its whole group, and a record outside the group takes the late AAA (under A74 (6) Monday's `ok`
+        receipt kept every program, that record too)."""
+        self.store(self.BBB)
+        self.assertEqual(self.decide(self.now)["pending"], {})
+        self.store(self.AAA)                 # stored late
+        self.look("EVL-ERN-READ-O1", 2)
+        friday = dt.datetime(2026, 10, 23, 14, 0, tzinfo=UTC)
+        self.assertGreaterEqual(opens_after(self.st, self.MONDAY, friday), SC.FINAL_SESSIONS)
+        out = self.decide(friday)
+        self.assertEqual(sorted(out["kept"]), sorted(p if v == 1 else f"{p}@v{v}" for p, v in self.GROUP))
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["BBB"], "nothing lands under the group's look")
+        self.assertEqual(out["kept"]["EVL-CTRL-ERN-ALL-O1"]["events"], [f"8k:{self.AAA[0]}"], "named and counted")
+        self.assertEqual(self.symbols("EVL-ERN-READ-O3"), ["AAA"], "a record outside the group: decided whole")
+        self.assertNotIn("EVL-ERN-READ-O3", out["kept"])
 
     GROUP = (("EVL-ERN-READ-O1", 1), ("EVL-ERN-READ-O1", 2), ("EVL-ERN-GUIDE-O1", 1), ("EVL-ERN-GUIDE-O1", 2),
              ("EVL-CTRL-ERN-ALL-O1", 1))
@@ -444,6 +465,135 @@ class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
             ("EVL-ERN-REACT-C1", 1)])["why"], "version 1 of the id too")
         self.assertIsNone(R._scope(self.st, "close", friday, tuesday)(EB.program_of("EVL-ERN-REACT-ON", 2)),
                           "another id with no control is its own group")
+
+
+# ============================================================== an outage removes nothing (A74 (6) withdrawn)
+class BackfillGateway(FakeGateway):
+    """FakeGateway with a NASDAQ closing print, which the backfill rule reads for the listing exchange (invented)."""
+
+    def get_json(self, path, params=None):
+        if path.endswith("/trades"):
+            return {"trades": [{"t": params["start"], "x": "Q", "p": 20.0, "s": 100, "c": ["@", "6"]}]}
+        return super().get_json(path, params)
+
+
+class AnOutageRemovesNothing(unittest.TestCase):
+    """Release 1019c's judges review, its major: PREREG-EVL-1 section 3, "an outage removes nothing", and its BACKFILL,
+    events "are read afterwards and count". The House is down from Monday 10:00 ET to Thursday 10:00 ET. Back, its
+    daily-index backfill of Monday (still in its three weekdays' reach; a look of Monday waits for it, A66's third rule)
+    stores BBB, an 8-K of Monday's open window the current feed missed, and decides Monday's open again
+    (league/events/house.py `_backfill`). Monday is outside the re-decision window by then: under A74 (6), now
+    withdrawn, Monday's `ok` receipt kept every program, BBB was in no record, and real money's one position per issuer
+    no longer saw the shadow's holding."""
+
+    MONDAY = dt.date(2026, 10, 19)
+    AAA = ("0000000001-26-000001", "0000000001")       # accepted 07:05 ET Monday (sec_pages): stored live, score 3
+    BBB = ("0000000002-26-000002", "0000000002")       # accepted 07:10 ET Monday: missed live, the backfill's, score 3
+    BACK = dt.datetime(2026, 10, 22, 14, 0, tzinfo=UTC)     # Thursday 10:00 ET: the House is back
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = S.Store(self.tmp.name)
+        self.gw = BackfillGateway({"AAA": 3, "BBB": 3})
+        C.refresh(self.st, self.gw, dt.date(2026, 8, 1), dt.date(2026, 12, 31))
+        self.st.set_meta("tickers@2026-10-19T01:05:00Z", self.st.put_document(sec_pages("x/company_tickers.json"), "t"))
+        self._pinned = P.REGISTERED_AT
+        P.REGISTERED_AT = "2026-10-19T01:00:00Z"
+
+    def tearDown(self):
+        P.REGISTERED_AT = self._pinned
+        self.st.close()
+        self.tmp.cleanup()
+
+    def store(self, filing, *, source: str, now: dt.datetime) -> None:
+        acc, cik = filing
+        entry = {"form": "8-K", "cik": cik, "accession": acc, "company": "Co", "items": ["2.02"], "accepted_at": None,
+                 "index_url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{acc}-index.htm"}
+        self.assertEqual(E.record_filing(self.st, sec_pages, entry, source=source, now=now), "fetched")
+
+    def symbols(self, program: str, version: int = 1) -> list[str]:
+        return [r[0] for r in self.st.db.execute("SELECT symbol FROM intents WHERE program=? AND version=? AND "
+                                                 "status='planned' ORDER BY symbol", (program, version))]
+
+    def outage(self) -> dict:
+        """Monday's live open decision (AAA), the outage, and the backfill's re-decision of Monday on Thursday."""
+        live = dt.datetime(2026, 10, 19, 13, 15, tzinfo=UTC)              # 09:15 ET Monday
+        self.store(self.AAA, source="current", now=live)
+        first = R.decide_open(R.Context(self.st, self.gw, sec_pages, now=lambda: live), self.MONDAY)
+        self.assertEqual(first["pending"], {})
+        self.assertEqual(self.symbols("EVL-CTRL-ERN-ALL-O1"), ["AAA"])
+        self.assertGreaterEqual(opens_after(self.st, self.MONDAY, self.BACK), SC.FINAL_SESSIONS, "outside the window")
+        horizon, why = SC.final_until(self.st, "EVL-ERN-READ-O1", 2, self.BACK.astimezone(NY).date(), self.BACK)
+        self.assertIsNone(horizon)
+        self.assertIn("the daily-index backfill of 2026-10-19 has not run", why, "A66's third rule: Monday waits")
+        self.store(self.BBB, source="daily-index", now=self.BACK)
+        self.st.set_meta("evl:backfill:2026-10-19", "done")
+        at = self.BACK + dt.timedelta(minutes=5)
+        return R.decide_open(R.Context(self.st, self.gw, sec_pages, now=lambda: at), self.MONDAY, backfill_run=True)
+
+    def test_a_backfill_after_an_outage_of_three_sessions_lands_in_every_record(self):
+        again = self.outage()
+        self.assertNotIn("kept", again, "no look stands over Monday: nothing is kept")
+        self.assertEqual(again["pending"], {})
+        for program, version in (("EVL-ERN-READ-O1", 1), ("EVL-ERN-READ-O1", 2), ("EVL-ERN-GUIDE-O1", 1),
+                                 ("EVL-ERN-GUIDE-O1", 2), ("EVL-CTRL-ERN-ALL-O1", 1)):
+            self.assertEqual(self.symbols(program, version), ["AAA", "BBB"], f"{program} v{version}: the event counts")
+        horizon, _ = SC.final_until(self.st, "EVL-ERN-READ-O1", 2, self.BACK.astimezone(NY).date(),
+                                    self.BACK + dt.timedelta(minutes=10))
+        self.assertEqual(horizon, self.MONDAY, "Monday is final once its backfill ran, with BBB in its record")
+
+    def test_real_moneys_one_position_per_issuer_sees_the_backfilled_event(self):
+        """PREREG-EVL-1 section 5 and A70 (14): READ-O1 version 2 held BBB's issuer from Monday's backfilled event, so
+        real money's decision of Friday Oct 23 (within 5 sessions) skips the issuer for that program."""
+        self.outage()
+        self.assertTrue(EB.held_recently(self.st, EB.program_of("EVL-ERN-READ-O1", 2), self.BBB[1],
+                                         dt.date(2026, 10, 23)))
+
+
+class TheHouseAfterAnOutage(TH.LaneCase):
+    """The House's own scheduler (league/events/house.py), down Monday 10:00 ET to Thursday 11:00 ET: Monday's decisions
+    were made before it went down (LaneCase.setUp), the missed decisions of Tuesday to Thursday on its return. Monday's
+    daily index (still in the backfill's reach on Thursday) holds an earnings 8-K accepted 07:10 ET Monday that the live
+    pass missed: the backfill fetches it and the House decides Monday's open again, for every program."""
+
+    start = "2026-10-22T15:00:00Z"   # Thu Oct 22, 11:00 ET
+
+    def test_the_backfilled_event_reaches_every_record(self):
+        acc = "0000000002-26-000777"
+        self.gw.scores["BBB"] = 3                       # its verdict: READ-O1's rule takes it too
+        self.sec.add(acc, "0000000002", "2026-10-19 07:10:00", current=False)
+        self.sec.daily["20261019"] = [acc]
+        self.mark_recorded()
+        with self.store() as st:
+            for day, kinds in (("2026-10-20", ("open", "close")), ("2026-10-21", ("open", "close")),
+                               ("2026-10-22", ("open",))):
+                for kind in kinds:
+                    rid = st.start_receipt(f"decide-{kind}:{day}", now=TH.et("2026-10-22", "10:30"))
+                    st.finish_receipt(rid, "ok", {}, now=TH.et("2026-10-22", "10:31"))
+            for day in ("2026-10-20", "2026-10-21"):
+                st.set_meta(f"evl:backfill:{day}", "done")
+            st.set_meta("tickers@2026-10-22T11:00:05Z", st.put_document(json.dumps(TH.TICKERS).encode(), "t"))
+        for kind in ("open", "close"):
+            self.lane._looks[(kind, dt.date(2026, 10, 22))] = TH.H.VerdictLook(self.clock_dt(), 0, False)
+        self.lane._events_at = TH.et("2026-10-22", "00:00")
+        tasks = []
+        for _ in range(12):
+            last = self.turn()
+            tasks.append((last.get("task"), last.get("status")))
+            if last.get("task") == "decide-open":
+                break
+            self.clock.advance(30)
+        self.assertIn(("backfill", "ok"), tasks, tasks)
+        self.assertEqual(tasks[-1][0], "decide-open", tasks)
+        with self.store() as st:
+            got = {(r[0], r[1]) for r in st.db.execute("SELECT program, version FROM intents WHERE event=?",
+                                                        (f"8k:{acc}",))}
+            summary = json.loads(st.db.execute("SELECT summary FROM receipts WHERE job='decide-open:2026-10-19' "
+                                               "ORDER BY id DESC LIMIT 1").fetchone()[0])
+        self.assertNotIn("kept", summary)
+        for key in (("EVL-CTRL-ERN-ALL-O1", 1), ("EVL-ERN-READ-O1", 1), ("EVL-ERN-READ-O1", 2),
+                    ("EVL-ERN-GUIDE-O1", 2)):
+            self.assertIn(key, got, f"the backfilled 8-K is in {key}'s record")
 
 
 # ======================================================================== the event kind's own day order count

@@ -782,15 +782,6 @@ def _reach() -> tuple[int, dt.timedelta, int]:
     return sessions, lookback, weekdays
 
 
-def outside_window(store: S.Store, day: dt.date, now: dt.datetime) -> bool:
-    """Whether the House decides session `day` again no more at `now`: the reach's sessions after it (`_reach`) have had
-    their open decision (`final_until`'s first rule, at the same reach). league/events/run.py restricts a re-decision
-    of such a session to the programs its last receipt was pending on (A66, owed; release 1019c)."""
-    reach = _reach()[0]
-    later = [s for s in C.sessions(store, day + dt.timedelta(days=1), now.astimezone(C.NY).date()) if s.open_decide <= now]
-    return len(later) >= reach
-
-
 def _waits_on(status: str, summary: Any, key: str) -> bool:
     """Whether a decision receipt (`status`, `summary`) leaves the decision unmade for the program keyed `key` (A66's
     second rule): anything but `ok`, or `pending` on this program's own verdicts (an unreadable summary waits)."""
@@ -1217,7 +1208,7 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
-           "final_until", "outside_window", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
+           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "B", "TIE", "LOOKS", "SEATABLE", "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",

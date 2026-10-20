@@ -96,8 +96,9 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   today is over it the cap breach hold holds every line at 0 until 00:00 UTC), and mails the lane's DAILY ONE-SCREEN REPORT once a New York day after the lane's report job
   (`league/ops/daily_report.py`: account-shown profit first, Net after costs beside it, by program and band; costs
   measured against the cap; events, intents, fills, settled n, evidence; figures only). `ops.json` `stall.research`
-  false stops the old lanes' research causes and research alarms from being judged while their research is off, and
-  `underspend` is never judged under budget rule 3 (a cheap day is never a failed day).
+  false stops the old lanes' research causes and research alarms from being judged while their research is off (a
+  Sail guard brake is still judged unless it is the budget's own daily stop alone: the House at risk is no research),
+  and `underspend` is never judged under budget rule 3 (a cheap day is never a failed day).
 - **The budget rule (D4; rule version 3 from release 1019c, the goal of Oct 19, 2026, item 4).** Every metered compute
   dollar of a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to min($25, $5 + 0.5 x the
   trailing week's realized net profit / 7): the trailing week is the last 5 sessions' realized net of every real book

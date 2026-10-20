@@ -6,9 +6,9 @@ entering that day and to date; its settled outcomes to date (n, issuers, session
 TRADABLE events, the market direction); for a seatable program its next look and its last look's result; the gap
 between the auction prints and the daily bars of the day's settled events; the expected false passes (0.10 x every
 seatable version registered); the events its decisions KEPT OUT of each program's record (release 1019c: a session a
-look of its group stands over, or outside the re-decision window, is decided again for nothing, and its decision
-receipt lists what it left out; PREREG-EVL-1 section 3's late share); and the receipts of the day's jobs, the missed
-and failed ones listed. `build` returns the report as JSON-ready data, `render` as a few lines of plain text.
+look of its group stands over is decided again for nothing, and its decision receipt lists what it left out;
+PREREG-EVL-1 section 3's late share); and the receipts of the day's jobs, the missed and failed ones listed. `build`
+returns the report as JSON-ready data, `render` as a few lines of plain text.
 
 Licensing: Alpaca's data and Benzinga's headlines are not redistributed. Neither form carries a price, a headline, a
 symbol or a document's text: only counts and summary statistics (means of returns, gaps in basis points).

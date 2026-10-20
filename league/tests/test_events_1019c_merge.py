@@ -1,9 +1,8 @@
 """RELEASE 1019c, the merge of `r3/lane-1019c` (#578) and `r2/alarms` (#575): a decision's receipt carries both the
-lane's `kept` (league/events/run.py `_scope`: the programs a written look of their group, or a session outside the
-re-decision window, leaves as they were) and the alarms' verdict tally `verdicts: {needed, answered}` (the stall job's
-`evl_verdicts`, league/ops/evl_health.py `tally`). A kept program is asked no verdict, so its events never enter the
-tally: `evl_verdicts` never waits on a frozen group. Synthetic data only: every filing, verdict and receipt here is
-invented."""
+lane's `kept` (league/events/run.py `_scope`: the programs a written look of their group leaves as they were) and the
+alarms' verdict tally `verdicts: {needed, answered}` (the stall job's `evl_verdicts`, league/ops/evl_health.py
+`tally`). A kept program is asked no verdict, so its events never enter the tally: `evl_verdicts` never waits on a
+frozen group. Synthetic data only: every filing, verdict and receipt here is invented."""
 
 from __future__ import annotations
 
