@@ -715,8 +715,8 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
     pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever the room:
     `EquityBook._event_gate`). Inside a band the programs go in the tables' order; inside Sized and inside Probe
     (`PROBE_UP`) ROUND-ROBIN (the captain's A85): one pick GIVEN a program a pass, the tables' order inside a pass, pass
-    after pass until every one of them is full or out of picks, so no Probe row takes a name a later Probe row wanted
-    before that row was given its first; learning as before, each program in turn to its room. Only a name GIVEN to a
+    after pass until every one of them is full or out of picks, so no Probe row is given a second name before every
+    later Probe row has had its first; learning as before, each program in turn to its room. Only a name GIVEN to a
     program is taken: a name a program wanted but had no room for (or skipped) goes on to the next program that wants
     it, which then moves on to its next picks. Returns ({program: the picks given, in its order}, {program: {why passed
     over: how many}}), both in ROOM's order."""

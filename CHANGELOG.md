@@ -67,7 +67,7 @@ programs trades real money at learning size.
   Probe buy is never held, the median of five decisions with an unread one passed over, the room cap and the buys'
   weights, the cash this auction's sales give back, the loss budget held by R x the weight, and round-robin at the
   decision and at the send (two Probe programs with cash for two buys: one each). Docs: docs/events.md,
-  docs/operations.md ("The event lane's real money", the day's sends, ROOM, the reservation, the size),
+  docs/operations.md ("The event lane's real money on the House": the day's sends, the slots, ROOM, the reservation, the size),
   league/equity/INTERFACES.md section 20.
 
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
