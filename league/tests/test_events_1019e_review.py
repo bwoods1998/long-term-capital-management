@@ -7,10 +7,10 @@ league/tests/test_events_house.py `LaneCase`):
   `verdict_usd`): its stored cost counts in the lane's day line, in the budget rule's measure of the lane (window, peak
   and today) and in the site's bill; the next verdict is refused once births and verdicts reach the line; the call
   itself is made only when its worst case fits under what is left of the line;
-- EVERY FAMILY A SEATABLE BIRTH CAN HAVE TRADES WHAT ITS SHADOW DECIDES (league/events/book.py `rows_for`: the `ins`
-  family's Form 4 cluster triggers were missing): for a seatable birth of each of the eight families, the House's
-  real-money picks at each auction are exactly its shadow's planned intents; a family the book reads no rows for is
-  an error, never silence;
+- EVERY FAMILY A SEATABLE BIRTH CAN HAVE TRADES WHAT ITS SHADOW DECIDES: for a seatable birth of each of the seven
+  families real money can read, the House's real-money picks at each auction are exactly its shadow's planned intents;
+  an `ins` (Form 4 cluster) birth is a record only (A89) and a family the book reads no rows for is an error, never
+  silence;
 - A DECISION MADE WITHOUT A BIRTH IS NOT MADE FOR IT (league/events/screen.py `final_until`, `births_made_without`;
   league/events/run.py `births_only`; the House's lane and the CLI's catchup): a week decided by a release without
   births (release 1019d's receipts) leaves the birth's looks waiting, not final over an incomplete record; the births'

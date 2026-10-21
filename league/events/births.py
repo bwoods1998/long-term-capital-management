@@ -31,7 +31,8 @@ code). A spec is a JSON object of exactly `FIELDS`:
   PREREG program's; a longer hold is a record, as PREREG-EVL-1's ERN-READ-O3);
 - `rank`: the ranking key when room is short: "score", "reaction", "value" or "none" (the family's own, `RANKS`);
 - `seatable`: true (real money at learning size from its first event, judged by PREREG-EVL-3's screen) or false (a
-  record: free, never seated, never screened).
+  record: free, never seated, never screened); an `ins` (Form 4 cluster) birth is false only (A89: real money cannot
+  read a cluster as stored before its decision).
 A READ birth (a verdict threshold, a guidance filter or a score ranking) carries its CONTROL, derived from its spec
 and registered with it (`control_spec`: the same rule with every verdict condition removed, a record with the id
 "<id>-CTRL"): PREREG-EVL-1 section 7's "for a READ program, its mean block value exceeds its control's" holds for a
@@ -919,7 +920,7 @@ USER = """THE GRAMMAR. A spec is a JSON object with exactly these fields:
 - "hold": h, 1..5 sessions; 1 when seatable.
 - "rank": "score", "reaction" (react families), "value" (Form 4) or "none".
 - "seatable": true (trades real money at learning size from its first event and is judged by the screen) or false (a
-  record, free).
+  record, free). An ins (Form 4 cluster) spec must be seatable false: a record only.
 THE VALIDATOR refuses a spec that selects fewer than <<MIN_RATE>> events a session over the last <<SESSIONS>>
 sessions, or whose selected events overlap any existing program's with a Jaccard of <<JACCARD>> or more. Each seatable
 spec costs 0.10 of the false-pass budget: <<BUDGET>>. Propose at most <<K>> specs, at most <<SEATABLE>> of them

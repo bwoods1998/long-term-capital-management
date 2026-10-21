@@ -25,9 +25,10 @@ gate contract `397b22b7`; the standing grant pins the money digest, which does n
 **The review round** (the adversarial reviews of `4ab66a39`; league/tests/test_events_1019e_review.py, each test failing
 without its fix): THE BIRTHS CALL IS INSIDE THE LANE'S LINE (house.py `_spend_today` counts `birth_calls` by their
 answer time, and the call is made only when its worst case fits under `line_left`; budget.py `lane_spend` and
-site_lane.py `verdict_usd` count it too); THE BOOK READS THE `ins` FAMILY (book.py `rows_for`: a seatable birth of Form 4
-cluster triggers was decided and screened and never traded; a family it reads no rows for is now an error, and every
-family's real-money picks equal its shadow's intents in a test); A DECISION MADE WITHOUT A BIRTH IS NOT MADE FOR IT
+site_lane.py `verdict_usd` count it too); AN `ins` BIRTH IS A RECORD ONLY (A89: a Form 4 cluster
+reads filings that may be stored after a decision, so births.parse refuses a seatable one and book.rows_for reads no
+`ins` rows; a family it reads no rows for is an error, and every other family's real-money picks equal its shadow's
+intents in a test); A DECISION MADE WITHOUT A BIRTH IS NOT MADE FOR IT
 (screen.py `final_until` reads a birth's group like PREREG-EVL-4's named receipts, with the births' own decision,
 `decide-open-births` / `decide-close-births`, run by the lane and the CLI's catchup as a backfill for every older such
 decision: `births_made_without`); A BIRTH'S LOOK WAITS ON ITS CONTROL'S FAILED OR PENDING PART; THE LIMIT AT ENTRY FOR

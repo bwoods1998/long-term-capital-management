@@ -547,9 +547,10 @@ birth's looks waiting until the births' own decision (`decide-open-births:<day>`
 names it; the House's lane runs it once for every such decision older than its hourly re-decision's reach, and the
 CLI's `catchup` too (`screen.births_made_without`). A read error of the births table keeps the births last read from
 that store (never unloading them mid-run), and the score applies the limit at entry to any program the process does not
-know (only a birth can be one). The House's book reads every family a seatable birth can have, the `ins` family's Form
-4 cluster triggers included (a test trades a seatable birth of each of the eight families and finds its real-money
-picks equal to its shadow's intents at every auction).
+know (only a birth can be one). The House's book reads every family a seatable birth can have
+(a test trades a seatable birth of each of the seven and finds its real-money picks equal to its shadow's intents at
+every auction); an `ins` (Form 4 cluster) birth is a record only (A89: its cluster reads Form 4s that may be stored
+after a decision), so the book reads no `ins` rows and the grammar refuses a seatable one.
 
 **On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
