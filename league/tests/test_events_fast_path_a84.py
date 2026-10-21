@@ -374,6 +374,25 @@ class FinalRecordAlarm(unittest.TestCase):
         before = min(p.registered_at for p in P.SEATING) - dt.timedelta(minutes=1)
         self.assertFalse(self.check(before)["judged"], "no program registered yet: not judged")
 
+    def test_a_registered_seatable_birth_is_judged_too_and_the_table_is_left_as_it_was(self):
+        """Release 1019f's integration with release 1019e's births: the stall job's process holds no birth until
+        `final_lags` loads them from the same read-only store; a seatable birth is a seating program like any other."""
+        from league.events import births as BI
+        from league.tests.test_events_births import spec
+
+        sp = spec("EVL-B-8K-502", "8k", {"items": ["5.02"]})
+        self.st.db.execute("INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, "
+                           "received_at, path, commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, 1, ?, ?, ?, "
+                           "'docs/births/2026-10-20.jsonl', ?, 0, '{}', 'x', 'captain', '2026-10-20')",
+                           (sp["id"], BI.sha(sp), BI.canonical(sp), "2026-10-21T01:00:00Z", "2026-10-21T01:00:00Z",
+                            "2026-10-21T01:00:00Z", "c" * 40))
+        self.assertEqual(P.BIRTHS, (), "no birth loaded in this process")
+        lags = EV.final_lags(self.root, self.now.timestamp())
+        self.assertIn(("EVL-B-8K-502", 1), {(r["program"], r["version"]) for r in lags})
+        self.assertEqual(len(lags), len(P.PREREG_SEATING) + 1)
+        self.assertEqual((P.BIRTHS, len(P.SEATING)), ((), len(P.PREREG_SEATING)), "the table left as it was")
+        self.assertEqual(self.check()["numbers"]["programs"], len(P.PREREG_SEATING) + 1)
+
     def test_its_own_failure_blinds_no_other_cause(self):
         with mock.patch.object(EV, "final_lags", side_effect=RuntimeError("invented")):
             out = EV.checks({"config": {"events": {"enabled": True}}, "settings": {}}, self.root,

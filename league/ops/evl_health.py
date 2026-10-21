@@ -27,7 +27,10 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
 - `evl_score`: intents due by the latest session whose 23:00 ET has passed (`SCORE_BY`) still `planned` or `entered`:
   the night's score passes left them open. An intent whose exit print the tape showed absent (a `marks` row with no
   price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) is waiting by design and is
-  counted apart. A night with nothing due is no stall.
+  counted apart, and so is one a decision WROTE AFTER the night's last score pass started (release 1019f; a catch-up
+  decision of an older session, as PREREG-EVL-4's rows decided by themselves: `written_after`, from the decision
+  receipts' own counts), which the next pass settles; with no pass after the close nothing is excused. A night with
+  nothing due is no stall.
 - `evl_fills` (the goal's "fill gaps"): the lane's real fills set beside the shadow's own auction prices (the House's
   EVENT TWINS, league/ops/twins.py `event_twin`, in the swarm store's kv `equity_twins`: `entry_gap_bp` and
   `exit_gap_bp`, signed, positive when the real fill was worse): over the last `FILL_LOOK` (20) priced twins with a
@@ -402,8 +405,8 @@ def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]
             db, "SELECT key, value FROM meta WHERE key LIKE 'evl:backfill:%'")}
         out["four"] = four_waiting(db, today)
         if score_day is not None:
-            out["open_due"] = guard.rows(db, "SELECT i.program, i.version, i.event, i.symbol, i.entry_day, i.exit_day, "
-                                             "i.exit_at, (SELECT u.bench FROM universe u WHERE u.day=i.entry_day AND "
+            out["open_due"] = guard.rows(db, "SELECT i.program, i.version, i.event, i.symbol, i.entry_day, i.entry_at, "
+                                             "i.exit_day, i.exit_at, (SELECT u.bench FROM universe u WHERE u.day=i.entry_day AND "
                                              "u.symbol=i.symbol) AS bench FROM intents i WHERE i.status IN ('planned', "
                                              "'entered') AND i.exit_day<=?", (score_day,))
             symbols = sorted({str(r["symbol"]) for r in out["open_due"]} | {str(r["bench"]) for r in out["open_due"]
@@ -515,7 +518,11 @@ def final_lags(root: str | Path, now: float) -> list[dict[str, Any]]:
     `written_v2`), its final record (`screen.final_until` at `now`) beside what A69 allows: [{program, version, horizon,
     allowed, lag, why, onset}], `lag` the sessions after `horizon` (from the program's registration day when none is
     final) through `allowed`, `onset` when that lag first exceeded `FINAL_LAG_SESSIONS` (the open decision of the session
-    two after the last allowed within it). A program with no session A69 can make final yet is left out. Read-only."""
+    two after the last allowed within it). A program with no session A69 can make final yet is left out. Read-only.
+    WITH R3'S BIRTHS (release 1019e; release 1019f's integration): the stall job runs in its own process, where no lane
+    has loaded the registered births, so the births are loaded here from the same read-only store
+    (league/events/programs.py `load_births`) and a seatable birth is judged like any seating program; the table is
+    left as this process had it (unloaded again when it held none)."""
     from ..events import bands as BA
     from ..events import calendar as C
     from ..events import programs as P
@@ -527,7 +534,10 @@ def final_lags(root: str | Path, now: float) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     with guard.readonly():
         store = ReadOnlyStore(Path(root) / STORE.parent)
+        had = tuple(P.BIRTHS)
         try:
+            if not had:
+                P.load_births(store)
             band = BA.bands(store)
             for prog in P.SEATING:
                 if prog.registered_at > at or band.get((prog.id, prog.version)) == "retired":
@@ -548,6 +558,8 @@ def final_lags(root: str | Path, now: float) -> list[dict[str, Any]]:
                 out.append({"program": prog.id, "version": int(prog.version), "horizon": horizon, "allowed": allowed,
                             "lag": lag, "why": str(why), "onset": onset})
         finally:
+            if not had:
+                P.load_births(None)
             store.close()
     return out
 
@@ -869,7 +881,36 @@ def _waiting_on_tape(row: Mapping[str, Any], marks: set) -> bool:
     return False
 
 
+#: A decision receipt's job: its entry kind and day (`decide-<kind>:<day>`, and the later rows' own receipts of it,
+#: `decide-close-evl4:<day>`, `decide-open-births:<day>`, `decide-close-births:<day>`).
+DECIDE_JOB = re.compile(r"^decide-(open|close)(?:-[a-z0-9]+)?:(\d{4}-\d{2}-\d{2})$")
+
+
+def written_after(f: Mapping[str, Any], since: float) -> set[tuple[str, str, str]]:
+    """RELEASE 1019f's INTEGRATION (`evl_score`'s false alarm of Oct 21, 2026: a catch-up decision, PREREG-EVL-4's rows
+    decided by themselves for an older close once release 1019d was live, wrote intents due by the night's session
+    after that night's score pass had run): {(program key, entry kind, entry day)} that a decision receipt STARTED after
+    `since` wrote new intents for (its summary's counts under the program's key, league/events/run.py `_key`, with
+    `planned` > 0). Those intents wait for the next score pass by design."""
+    out: set[tuple[str, str, str]] = set()
+    for job, rows in (f.get("decide") or {}).items():
+        match = DECIDE_JOB.match(str(job))
+        if match is None:
+            continue
+        for r in rows:
+            started = S.epoch(r.get("started_at"))
+            if started is None or started <= since:
+                continue
+            summary = _loads(r.get("summary"))
+            for key, counts in (summary.items() if isinstance(summary, Mapping) else ()):
+                if isinstance(counts, Mapping) and (_num(counts.get("planned")) or 0) > 0:
+                    out.add((str(key), match.group(1), match.group(2)))
+    return out
+
+
 def _score(now: float, f: Mapping[str, Any], latest: Mapping[str, Any]) -> dict[str, Any]:
+    from ..events.screen import program_key
+
     day = latest["day"].isoformat()
     open_due = list(f["open_due"])
     waiting = [r for r in open_due if _waiting_on_tape(r, f["none_marks"])]
@@ -877,6 +918,12 @@ def _score(now: float, f: Mapping[str, Any], latest: Mapping[str, Any]) -> dict[
     after = latest["close_at"] + 16 * 60
     passes = [r for r in f["score"] if (S.epoch(r["started_at"]) or 0.0) >= after]
     last = passes[-1] if passes else (f["score"][-1] if f["score"] else None)
+    # (Release 1019f's integration: an intent a decision wrote after the night's last score pass started is the next
+    # pass's to settle, never a stall of this one; with no pass after the close, nothing is excused.)
+    fresh = written_after(f, S.epoch(passes[-1]["started_at"]) or 0.0) if passes else set()
+    new = [r for r in stuck if (program_key(str(r["program"]), int(r["version"])), str(r.get("entry_at") or ""),
+                                str(r["entry_day"])) in fresh]
+    stuck = [r for r in stuck if r not in new]
     summary = _loads(last.get("summary")) if last else None
     summary = summary if isinstance(summary, Mapping) else {}
     errors = int(_num(summary.get("errors")) or 0) if not isinstance(summary.get("errors"), list) else len(summary["errors"])
@@ -885,12 +932,16 @@ def _score(now: float, f: Mapping[str, Any], latest: Mapping[str, Any]) -> dict[
         what = (f"{len(stuck)} intents due by the session of {day} are still open after the night's score "
                 + (f"passes (the last at {_hhmm(S.epoch(last['started_at']))} ET, {str(last.get('status') or 'running')}, "
                    f"{errors} errors)." if passes else "passes: no score pass ran after its close."))
-    elif open_due:
-        what = f"Every intent due by the session of {day} is settled but {len(waiting)} the tape keeps waiting (no print)."
+    elif new or waiting:
+        what = (f"Every intent due by the session of {day} is settled but "
+                + " and ".join(x for x in ((f"{len(waiting)} the tape keeps waiting (no print)" if waiting else ""),
+                                           (f"{len(new)} a decision wrote after the night's last score pass (the next "
+                                            "pass settles them)" if new else "")) if x) + ".")
     else:
         what = f"Every intent due by the session of {day} is settled."
     return {"stalled": stalled, "judged": True, "what": what,
-            "numbers": {"day": day, "open_due": len(stuck), "waiting_on_tape": len(waiting), "passes": len(passes),
+            "numbers": {"day": day, "open_due": len(stuck), "waiting_on_tape": len(waiting), "after_last_pass": len(new),
+                        "passes": len(passes),
                         "last_pass_at": None if last is None else last["started_at"],
                         "last_pass_status": None if last is None else str(last.get("status") or "running")[:20],
                         "last_pass_errors": errors},
@@ -1461,5 +1512,6 @@ __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "swi
            "backfill_reach", "backfill_due", "handback_facts", "four_waiting", "four_kept", "four_decisions",
            "empty_facts", "LIVE_DB", "ENTRY_HOURS", "ENTRY_FILL_SHARE", "AUCTION_SETTLE_MINUTES", "VENUE_CANCEL_S",
            "BOUND", "UNSENT", "BACKFILL_DUE", "BACKFILL_STREAK_HOURS", "FOUR_REFILL_HOURS", "HANDBACK_HOURS", "KEPT_FOUR",
+           "written_after", "DECIDE_JOB",
            "RECORD_MINUTES", "DECIDE_GRACE_MINUTES", "DECIDE_LOOKBACK_HOURS", "VERDICT_GRACE_MINUTES", "RESUME_MINUTES",
            "SCORE_BY", "FEEDS"]
