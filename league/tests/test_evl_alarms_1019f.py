@@ -218,6 +218,26 @@ class Backfill(Lane):
         self.assertIn("is done, but 2 filings failed to fetch in its passes", check["what"])
         self.assertIsNone(check["onset"])
 
+    def test_release_1019fs_backfill_retries_count_the_days_last_figure_not_each_pass(self):
+        """Release 1019f's backfill (fix/backfill-robust) tries a failed fetch again and its receipts carry `retrying`:
+        their `failed` is the DAY's count so far. A filing that failed once and fetched on its retry leaves the done day
+        clear (summed, the old way, it would stand for a filing that is in the store); one past its last try stands,
+        named by the last receipt (`done-failed`, its `unfetched`)."""
+        backfill_done(self.st, [MON, TUE])
+        self.backfill(TUE, et(WED, "05:01"), "partial", fetched=3, failed=1, retrying=1, retried=0)
+        self.backfill(TUE, et(WED, "05:04"), "ok", fetched=1, failed=0, retrying=0, retried=1)
+        clear = self.check("evl_backfill", et(WED, "07:00"))
+        self.assertFalse(clear["stalled"], clear["what"])
+        self.backfill(MON, et(TUE, "05:01"), "partial", fetched=2, failed=1, retrying=1, retried=0)
+        self.backfill(MON, et(TUE, "06:05"), "done-failed", failed=1, retrying=0, retried=1,
+                      unfetched=[{"accession": "0000000003-26-000702", "form": "8-K", "tries": 6, "error": "x"}])
+        check = self.check("evl_backfill", et(WED, "07:00"))
+        self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["first_day"], check["numbers"]["state"], check["numbers"]["failed"]),
+                         ("2026-10-19", "failed", 1))
+        self.assertIn("is done, but 1 filings failed to fetch after their last try (named in its last receipt's "
+                      "`unfetched`)", check["what"])
+
 
 class FourKind(Lane):
     """(c) PREREG-EVL-4's rows of a close a release without them decided: `evl_decide` and `evl_verdicts`."""

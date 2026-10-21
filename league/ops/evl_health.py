@@ -61,7 +61,9 @@ RELEASE 1019f (the audit of the live House, lens "stalls": alarms that did not e
   reach): a weekday of the daily-index backfill's reach (league/events/house.py `BACKFILL_WEEKDAYS`, from the lane's
   registration) not `done` by `BACKFILL_DUE` (12:00 ET) of the next weekday; or a `waiting` or `partial` streak of a
   day's `backfill` receipts (any status but `ok`) lasting more than `BACKFILL_STREAK_HOURS` (6); or a done day whose
-  passes failed to fetch any filing (`failed` > 0 summed over its receipts: the backfill does not try a filing it has
+  passes failed to fetch any filing (with release 1019f's backfill, which tries a failed fetch again `FETCH_TRIES`
+  times and marks its receipts `retrying`, the day's own count in its last receipt: the filings past their last try;
+  with an earlier release's receipts, `failed` > 0 summed over them: that backfill did not try a filing it had
   seen again). The text names the day and the counts.
 - `evl_decide` ALSO stands for PREREG-EVL-4's rows still to decide by themselves: a close in the judge's own
   `made_without` (league/events/screen.py, read only) for more than `FOUR_REFILL_HOURS` (2: two of the House's hourly
@@ -1198,12 +1200,20 @@ def _backfill(now: float, f: Mapping[str, Any], reach: list[dt.date]) -> dict[st
         summaries = [s for s in (_loads(r.get("summary")) for r in rows) if isinstance(s, Mapping)]
         counts = {k: sum(int(_num(s.get(k)) or 0) for s in summaries) for k in ("failed", "fetched", "known", "unlisted")}
         counts["filings"] = max([int(_num(s.get("filings")) or 0) for s in summaries], default=0)
+        # RELEASE 1019f's BACKFILL (fix/backfill-robust: a failed fetch is tried again, FETCH_TRIES in all, and its
+        # receipts carry `retrying`): a receipt's `failed` is then the DAY's count of filings failed so far, not that
+        # pass's, so the latest receipt's is the figure (a done day's: the filings past their last try, named in its
+        # `unfetched`); an earlier release's receipts (no `retrying`) count each pass's own failures, which it never
+        # tried again: summed, as before.
+        retried = any("retrying" in s for s in summaries)
+        if retried:
+            counts["failed"] = next((int(_num(s.get("failed")) or 0) for s in reversed(summaries) if "failed" in s), 0)
         last = rows[-1] if rows else None
         base = {"day": key, "passes": len(rows), "last_status": None if last is None else str(last.get("status") or ""),
                 "last_at": None if last is None else S.epoch(last.get("finished_at") or last.get("started_at")), **counts}
         if meta.get(key) == "done":
             if counts["failed"] > 0:
-                found.append({**base, "state": "failed", "since": None, "hours": None})
+                found.append({**base, "state": "failed", "since": None, "hours": None, "retried": retried})
             continue
         run = []
         for r in reversed(rows):
@@ -1235,7 +1245,8 @@ def _backfill(now: float, f: Mapping[str, Any], reach: list[dt.date]) -> dict[st
                     f"{_hours_of(first['hours'] * 3600)} h: {last}{counted}.")
         else:
             what = (f"The daily-index backfill of {first['day']} is done, but {first['failed']} filings failed to fetch "
-                    f"in its passes (the backfill does not try a filing it has seen again): {counted}.")
+                    + ("after their last try (named in its last receipt's `unfetched`)" if first.get("retried") else
+                       "in its passes (the backfill does not try a filing it has seen again)") + f": {counted}.")
         if len(found) > 1:
             what += f" {len(found)} days of the reach stand in all."
     return {"stalled": bool(found), "judged": True, "what": what,

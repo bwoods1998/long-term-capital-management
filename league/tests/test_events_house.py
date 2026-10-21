@@ -118,6 +118,8 @@ class FakeSEC:
         self.mono = mono
         self.slow = 0.0
         self.fail = None
+        self.broken = {}       # accession -> how many more of its index-page reads fail (HTTP 503)
+        self.daily_status = {}  # YYYYMMDD -> the status its daily index answers instead (e.g. 503)
 
     def add(self, acc, cik, accepted_et, *, form="8-K", items=("2.02",), company="Co", current=True):
         self.filings[acc] = {"form": form, "cik": cik, "company": company, "accepted": accepted_et, "items": list(items)}
@@ -140,9 +142,10 @@ class FakeSEC:
             return self._atom(form).encode()
         if "/daily-index/" in url:
             key = url.rsplit("form.", 1)[1].split(".")[0]
-            if key not in self.daily:
+            if key in self.daily_status or key not in self.daily:
                 from league.events.gw import GatewayError
-                raise GatewayError(404, "SEC")
+                # (SEC answers a daily index that does not exist with 403, or 503: never 404)
+                raise GatewayError(self.daily_status.get(key, 403), "SEC")
             lines = []
             for entry in self.daily[key]:
                 # An accession, or (accession, filer cik, filer name): the index lists a filing once per filer.
@@ -155,6 +158,10 @@ class FakeSEC:
         if url.endswith("-index.htm"):
             self._tick()
             acc = url.rsplit("/", 1)[1].replace("-index.htm", "")
+            if self.broken.get(acc):
+                from league.events.gw import GatewayError
+                self.broken[acc] -= 1
+                raise GatewayError(503, "SEC")
             f = self.filings[acc]
             items = "".join(f"Item {i}: x " for i in f["items"])
             return (f'<div class="infoHead">Accepted</div><div class="info">{f["accepted"]}</div>'
@@ -959,6 +966,135 @@ class TheBackfill(LaneCase):
             self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
             self.assertEqual(st.db.execute("SELECT count(*) FROM filings WHERE status='fetched' AND accession LIKE "
                                            "'0000000002-26-00050%'").fetchone()[0], 3)
+
+    def backfill_pass(self, day):
+        """One backfill pass of `day` on its own store connection, with a 90 s bound."""
+        with self.store() as st:
+            ctx = H.LaneContext(self.lane, st, H.LaneGateway(self.gw, self.lane, None, cut=False), self.sec, self.lane.now)
+            return self.lane._backfill(ctx, day, self.mono() + 90)
+
+    def due_day(self):
+        with self.store() as st:
+            now = self.clock_dt()
+            return self.lane._backfill_due(st, now, now.astimezone(NY).date(), [])
+
+    def test_a_failed_fetch_holds_its_day_and_is_tried_again_after_its_backoff(self):
+        # Release 1019f: a filing whose fetch failed no longer counts as seen; its day is not done, it is tried again
+        # FETCH_BACKOFF after its first failure, and a later day is backfilled meanwhile.
+        good, flaky = "0000000002-26-000601", "0000000003-26-000602"
+        self.sec.add(good, "0000000002", "2026-10-19 16:30:00", current=False)
+        self.sec.add(flaky, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [good, flaky]
+        self.sec.broken[flaky] = 1
+        t0 = et("2026-10-21", "06:00")
+        self.at(t0)
+        first = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertFalse(first["complete"], first)
+        self.assertEqual((first["fetched"], first["failed"], first["retrying"], first["retried"]), (1, 1, 1, 0))
+        self.assertEqual(first["next_try"], S.iso(t0 + H.FETCH_BACKOFF[0]))
+        self.assertNotIn("unfetched", first)
+        with self.store() as st:
+            self.assertIsNone(st.meta("evl:backfill:2026-10-19"))
+            self.assertTrue(st.db.execute("SELECT status FROM filings WHERE accession=?", (flaky,)).fetchone()[0]
+                            .startswith("failed:"))
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "partial")
+        self.assertEqual(self.due_day(), dt.date(2026, 10, 20))    # the waiting day holds no later day
+        with self.store() as st:
+            st.set_meta("evl:backfill:2026-10-20", "done")
+        self.at(t0 + H.FETCH_BACKOFF[0] - dt.timedelta(seconds=1))
+        self.assertIsNone(self.due_day())                            # its retry is not due yet
+        self.at(t0 + H.FETCH_BACKOFF[0])
+        self.assertEqual(self.due_day(), dt.date(2026, 10, 19))
+        second = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertTrue(second["complete"], second)
+        self.assertEqual((second["fetched"], second["failed"], second["retrying"], second["retried"]), (1, 0, 0, 1))
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+        with self.store() as st:
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+        self.assertIsNone(self.due_day())
+
+    def test_a_dead_document_is_tried_fetch_tries_times_then_named_and_its_day_done(self):
+        # Release 1019f: a filing that never fetches (a dead document) is tried FETCH_TRIES times in all, at the
+        # FETCH_BACKOFF steps after its first failure, as the record pass tries a live one; then the receipt names it
+        # (accession, form, error) and the day is done, so no look waits on it for good.
+        good, dead = "0000000002-26-000701", "0000000003-26-000702"
+        self.sec.add(good, "0000000002", "2026-10-19 16:30:00", current=False)
+        self.sec.add(dead, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [good, dead]
+        self.sec.broken[dead] = 10 ** 6
+        t0 = et("2026-10-20", "11:00")
+        self.at(t0)
+        reads = lambda: sum(1 for url in self.sec.calls if url.endswith(f"{dead}-index.htm"))   # noqa: E731
+        outs = [self.backfill_pass(dt.date(2026, 10, 19))]
+        for k in range(H.FETCH_TRIES - 1):
+            self.assertFalse(outs[-1]["complete"], outs[-1])
+            with self.store() as st:
+                self.assertIsNone(st.meta("evl:backfill:2026-10-19"))
+            self.at(t0 + H.FETCH_BACKOFF[k] - dt.timedelta(seconds=30))   # before its next try: nothing is tried
+            before = reads()
+            early = self.backfill_pass(dt.date(2026, 10, 19))
+            self.assertEqual((reads(), early["retried"], early["complete"]), (before, 0, False))
+            self.at(t0 + H.FETCH_BACKOFF[k])
+            outs.append(self.backfill_pass(dt.date(2026, 10, 19)))
+            self.assertEqual(outs[-1]["retried"], 1)
+        last = outs[-1]
+        self.assertEqual(reads(), H.FETCH_TRIES)
+        self.assertTrue(last["complete"], last)
+        self.assertEqual((last["failed"], last["retrying"]), (1, 0))
+        self.assertEqual([(u["accession"], u["form"], u["tries"]) for u in last["unfetched"]],
+                         [(dead, "8-K", H.FETCH_TRIES)])
+        self.assertTrue(last["unfetched"][0]["error"].startswith("failed:GatewayError:HTTP 503"), last["unfetched"])
+        receipt = self.receipts("backfill")[-1]
+        self.assertEqual(receipt["status"], "done-failed")
+        self.assertEqual(json.loads(receipt["summary"])["unfetched"][0]["accession"], dead)
+        with self.store() as st:
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+        self.assertIsNone(self.due_day())
+        self.assertNotIn(dt.date(2026, 10, 19), self.lane._backfill_failed)   # (the day's retry state is dropped)
+
+    def test_an_sec_holiday_without_an_index_is_done_and_any_other_missing_index_waits(self):
+        # Release 1019f: EDGAR is closed on a federal holiday and publishes no daily index for it (Wed Nov 11, 2026,
+        # Veterans Day: NYSE trades, EDGAR is closed). SEC answers a daily index that does not exist with 403 or 503,
+        # never 404 (fix/backfill-robust's independent check): a weekday IN THE TABLE whose index read fails, whatever
+        # the status, is done, "no index: SEC holiday"; a failed read on any other weekday, 403 or 503, waits as before.
+        for holiday, status, name in ((dt.date(2026, 11, 11), 403, "Veterans Day"),
+                                      (dt.date(2026, 11, 26), 503, "Thanksgiving Day")):
+            with self.subTest(holiday=holiday, status=status):
+                self.sec.daily_status[holiday.strftime("%Y%m%d")] = status
+                self.at(et((holiday + dt.timedelta(days=1)).isoformat(), "06:00"))
+                out = self.backfill_pass(holiday)
+                self.assertEqual((out["complete"], out["why"], out["holiday"], out["status"]),
+                                 (True, "no index: SEC holiday", name, status))
+                self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+                with self.store() as st:
+                    self.assertEqual(st.meta(f"evl:backfill:{holiday.isoformat()}"), "done")
+        for day, status in ((dt.date(2026, 11, 10), 403), (dt.date(2026, 11, 13), 503)):   # no holiday: it waits
+            with self.subTest(day=day, status=status):
+                self.sec.daily_status[day.strftime("%Y%m%d")] = status
+                self.at(et((day + dt.timedelta(days=1)).isoformat(), "06:00"))
+                self.lane._attempts.pop(f"backfill:{day.isoformat()}", None)
+                other = self.backfill_pass(day)
+                self.assertEqual(other["_status"], "waiting")
+                self.assertIn(f"HTTP {status}", other["waiting"])
+                with self.store() as st:
+                    self.assertIsNone(st.meta(f"evl:backfill:{day.isoformat()}"))
+        self.at(et("2026-12-28", "06:00"))
+        self.assertEqual(self.backfill_pass(dt.date(2026, 12, 24))["_status"], "waiting")   # no holiday by the table
+        acc = "0000000002-26-000801"                                        # a holiday with an index: read as any day
+        self.sec.add(acc, "0000000002", "2026-12-25 16:30:00", current=False)
+        self.sec.daily["20261225"] = [acc]
+        read = self.backfill_pass(dt.date(2026, 12, 25))
+        self.assertEqual((read["complete"], read["fetched"]), (True, 1))
+        self.assertNotIn("why", read)
+
+    def test_the_sec_holiday_table_is_opms_for_2026_and_2027(self):
+        days = H.SEC_HOLIDAYS
+        self.assertTrue(all(d.weekday() < 5 and d.year in (2026, 2027) for d in days), days)
+        self.assertEqual(len(days), 23)                                       # OPM's 11 a year, and Dec 31, 2027
+        self.assertEqual(days[dt.date(2026, 11, 11)], "Veterans Day")
+        self.assertEqual(days[dt.date(2026, 7, 3)], "Independence Day")       # July 4, 2026 is a Saturday
+        self.assertEqual(days[dt.date(2027, 12, 31)], "New Year's Day")       # Jan 1, 2028 is a Saturday
+        self.assertNotIn(dt.date(2026, 4, 3), days)                           # Good Friday: NYSE shut, EDGAR open
 
     def test_an_unpublished_index_waits_an_hour(self):
         self.at(et("2026-10-20", "11:00"))

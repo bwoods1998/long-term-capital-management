@@ -38,6 +38,36 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The daily-index backfill's failed fetches and SEC holidays, on `fix/backfill-robust` (unreleased; `league/events/house.py`, behind the wall; cut from `rel/1019d` `5a17bd25`, joins release 1019f on top of release 1019e; the captain records its amendment; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no judge, setting, money row or gateway file changes)
+
+- **The defects** (a read-only audit of the live House, after A82). (a) `EventLane._backfill` marked a filing seen
+  BEFORE fetching it, so a failed fetch counted as seen and its day was done at once with `failed` > 0. One transient
+  SEC error lost the filing for good: the record pass leaves a filing past its six tries to the backfill, and nothing
+  fetched it after that. (b) EDGAR is closed on a federal holiday and publishes no daily index for it, so the index URL
+  of such a weekday never exists (SEC answers 403 or 503 for it, never 404) and the backfill waited an hour at a time while the day was in reach. Wed
+  Nov 11, 2026 (Veterans Day) is a trading day, so every look across it would have waited on `evl:backfill:2026-11-11`
+  (A66's reach, A69's condition (iii)); Thanksgiving and Christmas would have done the same.
+- **The fix.** (a) A failed daily-index filing is not seen. It is tried again at the first pass 2, 4, 8, 16 and 32
+  minutes after its first failure, `FETCH_TRIES` (6) tries in all: the module's `FETCH_BACKOFF`, the record pass's
+  rule, with the backfill's own count (`_backfill_failed`, kept by the process). The day is complete only when every
+  filing is fetched, known or unlisted, or past its last try. While only retries are left, the day waits for the next
+  one (`_backfill_wait`) and a later day is backfilled meanwhile. The receipt is `partial` with `failed`, `retrying` and
+  `next_try`. After the last try the day is done: the receipt `done-failed` names each filing (`unfetched`: accession,
+  form, tries, error), and a filing the record pass fetched in the meantime is not named. (b) `SEC_HOLIDAYS`: OPM's
+  federal holidays of 2026 and 2027 (opm.gov's federal-holidays page, read Oct 21, 2026) and Fri Dec 31, 2027 (New
+  Year's Day 2028 observed, 5 U.S.C. 6103(b)). A weekday in the table whose index read FAILS, WHATEVER THE STATUS (SEC
+  answers a daily index that does not exist with 403 or 503, never 404: the branch's independent check, fixed at
+  release 1019f's integration), is done, `no index: SEC holiday` (receipt `ok`, with `why`, `holiday` and the
+  `status`; EDGAR accepts no filing that day, so done is right even when the read failed for another reason). A failed
+  read on any other weekday, whatever its status, waits as before, and a holiday's index that exists is read as any day's. The screen reads the same meta, so no judge
+  moves. A dead document past its last try stays `failed:` in the store, and A69's condition (ii) still waits on it
+  for the closes whose windows hold it (the judge's rule); A66's reach no longer does.
+- **Tests.** `test_events_house.TheBackfill`, four new ones: a failed fetch holds its day, a later day goes first, and
+  the retry at 2 minutes completes it `ok`; a dead document is read exactly six times, never before its step, then
+  named and its day done `done-failed`; an SEC holiday whose index answers 403 and one whose index answers 503 are
+  done, while a non-holiday answering 403 or 503 waits and a holiday with an index is read as any day; the table is OPM's (weekdays, 23 days, Good Friday not in
+  it). A82's tests pass unchanged. The lane's 407 tests pass on 3.14 and 3.11.
+
 ### Alarms that did not exist: each auction's real buys, the daily-index backfill, PREREG-EVL-4's own decisions, the notice pace, the hand-back, on `fix/evl-alarms-entries-backfill` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: three new causes, an INFO notice's `waiting_owner`, the report's real buys and break-even edge), THEN THE HOUSE (`league/ops/` is protected); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no judge, no constitution row, no setting)
 
 - **Why.** A read-only audit of the live House (lens "stalls", Oct 21, 2026) found five things no alarm watched. (a) The
