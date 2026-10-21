@@ -38,6 +38,96 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Alarms that did not exist: each auction's real buys, the daily-index backfill, PREREG-EVL-4's own decisions, the notice pace, the hand-back, on `fix/evl-alarms-entries-backfill` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: three new causes, an INFO notice's `waiting_owner`, the report's real buys and break-even edge), THEN THE HOUSE (`league/ops/` is protected); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no judge, no constitution row, no setting)
+
+- **Why.** A read-only audit of the live House (lens "stalls", Oct 21, 2026) found five things no alarm watched. (a) The
+  captain found by hand that the venue cancelled about a quarter of the lane's auction buys (A80): nothing said that a
+  planned real buy never became a fill, or never went at all. (b) The daily-index backfill answered `partial` for two
+  days without completing one (A82): nothing said so, while every look waits on it. (c) PREREG-EVL-4's rows of a close a
+  release without them decided wait for their own decision (`decide-close-evl4`): nothing watched it, and
+  `evl_verdicts` never read its tallies. (d) `stall.due_notice` returned at its owner branch: once an owner cause was
+  told, every new INFO cause (an event-lane decision missed, a feed down, a fill gap) waited up to 12 hours for the next
+  owner notice; and the direction lane's A4 would stand for good under the research switch. (e) Nothing set the book's
+  real fills beside the lane's `real_fills`, from which the lane computes Sized, demotion and retirement.
+- **(a) `evl_entries`** (league/ops/evl_health.py, INFO): each auction of the last 24 h, judged 15 minutes after its
+  cross, from the book's own rows in `live.sqlite` read-only (`eq_event_intents` buys joined with `eq_intents` and their
+  `eq_orders`, and the auction's `eq_event_decisions` summary); it stands when under 90% of the planned buys filled or one
+  was never sent. Its numbers: planned, filled, the venue's cancels at once (`venue_cancel_ms`: an auction buy ended
+  `canceled` within 60 s of its own `submitted_at`, nothing filled, no cancel of the House's own sent, the rule release
+  1019e's re-send reads), the re-sends after one and how many filled (A80's one re-send from release 1019e: an order of
+  the buy after its venue cancel that reached the venue), the never-sent by reason (`unsent_reason`, from the gateway's
+  cap on a refused order or the book's own words: the day order count, cash, the loss budget, the 10% a name, the
+  invested cap, the program's room, one share too dear, the gateway, a sale of the name at the same cross, ...), the sent
+  and not filled, and the constraint that bound the auction most (`bound`: cash, budget, room with the decision's picks
+  cut for room, order line, name wall with the decision's name-wall skips, invested, or none). No symbol, price or
+  order id leaves the House. Not judged with no `live.sqlite` or no event table in it; one that cannot be read leaves
+  only this cause and `evl_handback` unjudged.
+- **The daily report** (league/ops/daily_report.py; the captain's A80 (2)): `entries`, the day's real buys (the same
+  totals, the never-sent by reason, the room cut; per auction its filled of planned and its `bound`), and
+  `break_even`, THE BREAK-EVEN EDGE OF DONE'S COMPUTE CLAUSE once a Probe or Sized buy exists: the measured metered
+  compute per session since the first such buy over the dollars bought at Probe or Sized size per session, in basis
+  points of those dollars ("n/a until a Probe buy" before). The gateway prints three lines and, from the first Probe
+  buy, a fourth: "Real buys 7/9 filled; venue cancels 2 (re-sent 1, filled 1)", " never sent 1 (cash 1); not filled 0;
+  room cut 2", " By auction: open 4/6 bound cash; close 3/3 bound room", "Break-even edge +583.3 bp ($3.50 / $60.00
+  Probe, a session)" (the fixture's invented figures); the fixture's one screen grows from 44 lines to 47.
+- **(b) `evl_backfill`** (INFO): a weekday of the backfill's reach (league/events/house.py `BACKFILL_WEEKDAYS`, none
+  before the lane's registration) not `done` by 12:00 ET of the next weekday; a run of the day's `backfill` receipts with
+  no `ok` (`waiting`, `partial`) over 6 h; or a done day whose passes failed to fetch a filing (`failed` summed over its
+  receipts: the backfill does not try a filing it has seen again). The text names the day and its counts.
+- **(c) `evl_decide` and `evl_verdicts`**: `evl_decide` also stands for a close in the judge's own
+  `screen.made_without` (read only, no program run) for 2 h since the stall job first saw it there (kept in
+  `stall.json` `evl_kept`) and since its latest `decide-close` finished, whose latest `decide-close-evl4` is not `ok`
+  (never run, failed, cut, unfinished, pending) or is older than that close's latest decision (`stale`); not while the
+  House's PAUSE stands, and counted from a PAUSE's or STOP's end. `evl_verdicts` reads the `decide-close-evl4`
+  receipts' tallies too (each a backfill: read while its latest one started inside the last 24 h).
+- **(d) The notice** (league/ops/stall.py): after the owner branch, `due_notice` answers "info" when a standing cause
+  that needs nothing was told by no notice in the last 24 h (`told_lately`), so a new cause is mailed at once while a
+  told owner cause stands. `notice_causes` sends that notice with the causes needing nothing alone, so the gateway keys
+  it `stall:info:<those causes>` (the owner key it already sent inside 12 h would answer `duplicate` and mail nothing);
+  its facts name the owner causes still waiting (`waiting_owner`, ids only, never part of the key), and the mail opens
+  "Nothing new here needs you ... Still waiting on you, as mailed within the last 12 hours: <their words>". `mail.told`
+  records the causes a notice listed (no longer every cause standing), and a Done checkpoint is told only by a notice
+  that lists `done`. THE CLOSED LANE'S ROOM: the direction lane's A4 is not judged under the research switch
+  (`CLOSED_LANE_ALARMS`, named in `dlane`'s `not_judged` beside the research alarms): the House's report of Oct 21
+  carried it beside A1 and A2, and under the switch it would stand for good, an INFO notice due every day for nothing
+  new; with research on it stands as before, and K5, PL1, PT1, A5 and DC1 stand either way.
+- **(e) `evl_handback`** (INFO): every `eq_orders` row of a real event lot (`eq_lots.lane` "event", instance `:r`) with
+  `filled_qty` > 0, keyed (program, version, event, side) by its lot's `info.evl`, owed as the book hands it back
+  (league/equity/live.py `_event_fills`: a buy once its intent has ended or its lot is no longer open, a sale once its
+  lot is closed) and set beside the lane's `real_fills`: it stands on any fill owed over 1 h and not there.
+- **The gateway** (`gateway/lib/email.mjs`): `STALL_CAUSES` words `evl_entries`, `evl_backfill` and `evl_handback`;
+  the stall notice reads `waiting_owner`; `composeReport` prints the real buys and the break-even edge (`ENTRY_WORDS`:
+  only the House's own reason and constraint names are worded, anything else is left out or reads unknown).
+- **Docs.** The module docstrings of league/ops/evl_health.py, stall.py and daily_report.py; docs/events.md (the
+  alarms table and the notice's pace); docs/operations.md (the stall table's three rows, `evl_decide`'s and `dlane`'s,
+  the notice's pace and the report's real buys); league/equity/INTERFACES.md section 20 (the read-only readers of the
+  book's rows).
+- **Tests.** league/tests/test_evl_alarms_1019f.py (19): the venue's cancel at once read off its own stamps (5 ms; 60 s
+  inside, 60.001 s outside; a sale, a day order, a fill, the House's own cancel, a replaced order, a stamp missing or
+  zoneless are none); the never-sent reasons from the book's own words and the gateway's caps; an auction 7 of 10 filled
+  with two venue cancels, one re-sent and filled, one stopped by the day order count and one sized out on cash, bound by
+  room; 9 of 10 filled is quiet but one never sent stands; no book, no event table and an unreadable book (only the two
+  causes unjudged); a weekday late at noon of the next weekday, a waiting streak over 6 h, a done day with failed
+  fetches, the Friday-to-Monday due; PREREG-EVL-4's close kept from first sight, standing after 2 h as never run,
+  failed, pending (with its tally read by `evl_verdicts`), clearing once decided, stale after a decision without the
+  rows, held by the PAUSE and counted from its end; the hand-back owed after an hour, quiet once written, nothing owed by
+  a buy at its auction or a part sold of an open lot, a sale owed once its lot closes; the notice pace pure and through
+  the job (an owner notice, then the new `evl_record` mailed 40 minutes later as `stall:info:evl_record` naming
+  `kill_on` as waiting, nothing more until the owner's 12 hours; an INFO notice sent while a told `done` stands leaves
+  its checkpoint untold); A4 under the switch and with research on; the three
+  causes through the job and worded by the gateway. league/tests/test_daily_report.py: the day's real buys per auction
+  and the break-even edge (and its synthetic lane gains the book, the backfill done and PREREG-EVL-4's own decisions,
+  so the causes stay quiet); the fixture `daily_report.json` gains `entries` and `break_even`. Changed:
+  test_evl_health (the eight causes; the harness's backfill done), test_elane_health (the morning replay's barren
+  passes, standing as INFO from 10:20, are now mailed then as `stall:info:elane_births`, before their owner notice at
+  13:20). The gateway: stall-notice (`waiting_owner`, the three causes) and report-notice (the real buys and the
+  break-even edge, their figures only; one screen up to 47 lines); 497 pass.
+- **Deploy.** The gateway first (an older one answers 400 to a notice naming a new cause, and nothing is mailed), then
+  the House; no money digest move, so the grant needs no new ratification. Verify on the first stall run: the receipt's
+  `checks` carry `evl_entries`, `evl_backfill` and `evl_handback`, and `stall.json` carries `evl_kept`.
+- **Rollback.** The previous House release (it ignores `evl_kept`); `ops.json` `stall.evl` false switches the eight
+  `evl_` causes off. Roll the gateway back only after the House: a House of this release mails the new causes.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head

@@ -37,13 +37,45 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
   evidence the screen judges, are mis-measured), with at least `FILL_MIN` (5) of them; the text says which way. Not
   judged before the first real fill is priced.
 
-IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the four are not judged,
+RELEASE 1019f (the audit of the live House, lens "stalls": alarms that did not exist; the captain's A80 (2)):
+- `evl_entries` (the goal's "fill gaps" BEFORE the price: the real buys that never became fills): each auction of the
+  last `ENTRY_HOURS` (24) whose cross is `AUCTION_SETTLE_MINUTES` (15) behind, from the book's own rows in
+  `<state>/live.sqlite` (`eq_event_intents` buys joined with `eq_intents` and their `eq_orders`, read-only), stands when
+  under `ENTRY_FILL_SHARE` (90%) of its planned buys filled, or when any planned buy was NEVER SENT to the venue. Its
+  numbers: planned, filled, the VENUE CANCELS (A80: an auction buy the venue ended `canceled` within `VENUE_CANCEL_S`
+  (60) seconds of its own `submitted_at`, nothing filled and no cancel of the House's own sent: `venue_cancel_ms`, the
+  rule release 1019e's re-send reads), the re-sends that went after one (A80's one re-send, release 1019e: an order
+  of the buy after its venue cancel that reached the venue) and how many filled, the never-sent by reason
+  (`unsent_reason`: the day order count, cash, the loss budget, the name wall, the invested cap, the program's room, the
+  price of one share, the gateway, ...), and the constraint that BOUND the auction most (`BOUND`: cash, budget, room,
+  order line, name wall, invested; the decision's room cut and name-wall skips counted with the buys cut or stopped).
+  Not judged with no live.sqlite or no event table in it. league/ops/daily_report.py prints the same per auction.
+- `evl_backfill` (A82's backfill as an alarm: the screen waits on `evl:backfill:<day>` for every weekday in its
+  reach): a weekday of the daily-index backfill's reach (league/events/house.py `BACKFILL_WEEKDAYS`, from the lane's
+  registration) not `done` by `BACKFILL_DUE` (12:00 ET) of the next weekday; or a `waiting` or `partial` streak of a
+  day's `backfill` receipts (any status but `ok`) lasting more than `BACKFILL_STREAK_HOURS` (6); or a done day whose
+  passes failed to fetch any filing (`failed` > 0 summed over its receipts: the backfill does not try a filing it has
+  seen again). The text names the day and the counts.
+- `evl_decide` ALSO stands for PREREG-EVL-4's rows still to decide by themselves: a close in the judge's own
+  `made_without` (league/events/screen.py, read only) for more than `FOUR_REFILL_HOURS` (2: two of the House's hourly
+  refills) since the stall job first saw it there and since its latest `decide-close` receipt finished, whose latest
+  `decide-close-evl4` receipt is not `ok` (none, failed, cut, running, pending), or is `ok` but older than that close's
+  latest decision (decided again by a release without the rows). The first sight is kept in stall.json (`evl_kept`).
+  `evl_verdicts` reads the `decide-close-evl4` receipts' tallies too (each such receipt is a backfill: read while its
+  latest one started inside the last 24 h).
+- `evl_handback`: every real event fill the book has made (`eq_orders` of an event lot with `filled_qty` > 0) set
+  beside the lane's `real_fills` (the rows the book hands back, league/equity/live.py `_event_fills`: a buy once its
+  intent has ended, a sale once its lot is closed): it stands on any fill due to the lane more than `HANDBACK_HOURS` (1)
+  and not in it. The lane computes Sized, demotion and retirement from those rows (PREREG-EVL-3), so a gap is evidence
+  the judge never sees.
+
+IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the causes are not judged,
 nor for `RESUME_MINUTES` after it goes (the lane's first passes); a decision whose window fell inside it is excused for
 good. While the House's maintenance `<state>/PAUSE` stands (no paid call: no verdict) `evl_verdicts` is not judged, and a
 run of unanswered receipts is counted from the pause's end. The stall job keeps the windows it saw (`idle_windows`,
 stall.json `evl_idle`). WHEN THEY ARE JUDGED AT ALL: only while the lane runs on the House (league/config.json
 `events.enabled` true) and `<state>/ops.json` `stall.evl` is not false. A store that cannot be read is "Not judged" and an
-entry of the job's `errors`; a lane switched on with no store yet has recorded nothing (`evl_record` stands). All four are
+entry of the job's `errors`; a lane switched on with no store yet has recorded nothing (`evl_record` stands). All are
 INFO with no owner step: each is the House's to fix (a release or the captain).
 """
 from __future__ import annotations
@@ -51,6 +83,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
@@ -58,7 +91,8 @@ from zoneinfo import ZoneInfo
 from . import guard
 from . import schedule as S
 
-CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills")
+CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_entries", "evl_backfill",
+          "evl_handback")
 #: The stall job's key in `<state>/ops.json` that switches these four off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
@@ -86,6 +120,46 @@ FEEDS = (("8-K", "8k"), ("4", "form4"), ("news", "news"))
 #: The idle windows the stall job keeps (`idle_windows`): this many of each kind, none older than this.
 IDLE_KEEP = 8
 IDLE_DAYS = 3
+#: THE ENTRIES (`evl_entries`, release 1019f): the book's state (league/equity/live.py, read-only), the auctions read, how
+#: long after its cross an auction is judged (the book ends its intents 2 minutes after it: `EVENT_SETTLE_S`), the share
+#: of its planned buys that must fill.
+LIVE_DB = "live.sqlite"
+ENTRY_HOURS = 24.0
+AUCTION_SETTLE_MINUTES = 15
+ENTRY_FILL_SHARE = 0.90
+#: THE CAPTAIN'S A80: a venue cancel is an auction buy the venue ended `canceled` within this many seconds of its own
+#: submission, nothing filled, no cancel of the House's own sent (league/equity/live.py `venue_cancel_ms` from release
+#: 1019e reads the same rule); the venue stamps `canceled_at` to the millisecond, so a cancel inside the order's own
+#: millisecond can read this much before it.
+VENUE_CANCEL_S = 60.0
+VENUE_STAMP_SLACK_S = 0.001
+#: Orders that never reached the venue: refused by the House's own rate or the gateway, or lost (the venue never showed
+#: its client id).
+UNSENT_ORDERS = ("refused", "lost")
+#: The constraints `bound` names, in the order a tie is named.
+BOUND = ("cash", "budget", "room", "order_line", "name_wall", "invested")
+#: The size rule's bindings (league/equity/sizing.py `Sized.binding`) and the gateway's caps (gateway/lib/*.mjs), as the
+#: constraint each is.
+SIZING_BINDS = {"cash": "cash", "sleeve_cash": "cash", "cash_negative": "cash", "budget": "budget",
+                "instrument": "name_wall", "sleeve_cap": "name_wall", "invested": "invested", "min_order": "min_order"}
+GATEWAY_CAPS = {"buying_power": "cash", "stock_position": "name_wall", "stock_total": "invested",
+                "day_orders": "order_line", "day_open_orders": "order_line"}
+#: Every reason `unsent_reason` names, in the order the numbers list them.
+UNSENT = ("order_line", "cash", "budget", "name_wall", "invested", "room", "price", "min_order", "gateway", "sale",
+          "busy", "blocked", "unreadable", "other")
+#: THE BACKFILL (`evl_backfill`, release 1019f): a weekday's daily index is due `done` by this New York time of the next
+#: weekday; a run of receipts that are not `ok` this long stands.
+BACKFILL_DUE = dt.time(12, 0)
+BACKFILL_STREAK_HOURS = 6.0
+#: PREREG-EVL-4's rows still to decide by themselves stand on `evl_decide` once this long (two of the House's hourly
+#: refills, league/events/house.py `REDECIDE_EVERY`) after the stall job first saw the close so and its decision
+#: finished.
+FOUR_REFILL_HOURS = 2.0
+#: THE HAND-BACK (`evl_handback`, release 1019f): a real fill due to the lane's `real_fills` this long and not there
+#: stands.
+HANDBACK_HOURS = 1.0
+#: What the stall job keeps for these causes in stall.json (`evl_kept`): {"four": {close day: first seen}}.
+KEPT_FOUR = "four"
 DOING = {
     "not_judged": "Nothing: the cause is not judged while it reads so.",
     "evl_record": ("The House's tick runs a record pass every 2 minutes (EDGAR's current 8-K and Form 4 feeds, Alpaca's "
@@ -96,7 +170,9 @@ DOING = {
     "evl_decide": ("The House's tick runs a due decision before any other task of the lane, again a minute after one that "
                    "failed while it is live, and decides a missed one later from what was knowable at its time (the "
                    "shadow rule). A decision not made in its window missed its auction: real money took none of its "
-                   "events."),
+                   "events. PREREG-EVL-4's rows of a close a release without them decided are decided by themselves "
+                   "(decide-close-evl4, once, as a backfill) from the House's hourly refill; until then that close is not "
+                   "final for them."),
     "evl_verdicts": ("The lane asks each verdict as soon as its event is recorded and eligible, and again before each "
                      "decision, at most 3 calls a pass; a call with no answer stores nothing and is asked again "
                      "(PREREG-EVL-1 section 4). Reading programs wait (pending) until every verdict they need is stored, "
@@ -111,6 +187,19 @@ DOING = {
                   "cost allowance against the signed mean gap per side (raised, never lowered, when the fills are worse); "
                   "the goal's Done asks fills within 15 bp of replay either way, so a gap either way is the House's to "
                   "explain: the fills or the shadow's auction prices are mis-measured."),
+    "evl_entries": ("Each planned event buy goes at its auction's window through every gate of a real open, the day's "
+                    "order count, the program's room and the size rule (cash, the loss budget, the 10% a name, the "
+                    "invested cap); a buy the venue cancels at once goes again once from release 1019e (A80); a buy never "
+                    "sent or not filled is missed, and its full-size shadow keeps the event: real settled events come "
+                    "slower by that share. The House moves no wall to fill more."),
+    "evl_backfill": ("The lane reads each weekday's EDGAR daily index from 05:00 ET the next day, hourly until it is "
+                     "complete, filing by filing (A82), and decides again the sessions the filings it fetches enter; the "
+                     "screen's looks wait for every weekday of its reach to be done (A66, A69 (iii)), so a day not done "
+                     "holds every look that covers it."),
+    "evl_handback": ("The book writes each real event fill back into the lane's store every minute until the store takes "
+                     "it (league/equity/live.py `_event_fills`: a buy once its intent has ended, a sale once its lot is "
+                     "closed); the lane computes Sized, demotion and retirement from those rows, so a fill missing there "
+                     "is evidence the judge never sees."),
 }
 
 
@@ -121,7 +210,7 @@ def _get(ctx: Any, name: str, default: Any = None) -> Any:
 
 
 def switched_off(ctx: Any) -> bool:
-    """THE OWNER'S SWITCH (`<state>/ops.json` `stall.evl` false): the four are not judged; absent, they are."""
+    """THE OWNER'S SWITCH (`<state>/ops.json` `stall.evl` false): the causes are not judged; absent, they are."""
     settings = _get(ctx, "settings")
     block = settings.get("stall") if isinstance(settings, Mapping) else None
     return isinstance(block, Mapping) and block.get(SWITCH) is False
@@ -252,23 +341,45 @@ def entry_kinds() -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------------------------- the reads
+class _Db:
+    """A read-only connection as the judge's readers read a store (`db`): league/events/screen.py `made_without`."""
+
+    def __init__(self, db: Any):
+        self.db = db
+
+
+def empty_facts() -> dict[str, Any]:
+    """`facts` of a lane with no store yet."""
+    return {"record": [], "decide": {}, "score": [], "open_due": [], "none_marks": set(), "backfill": [],
+            "backfill_meta": {}, "four": {}}
+
+
 def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]:
-    """Every receipt the four causes read, and the intents due by `score_day` still open, in one read-only transaction:
-    {record: [...], decide: {job: [...]}, score: [...], open_due: [...], none_marks: {(symbol, day)}}."""
+    """Every receipt the causes read, and the intents due by `score_day` still open, in one read-only transaction:
+    {record: [...], decide: {job: [...]}, score: [...], open_due: [...], none_marks: {(symbol, day)}, backfill: [...],
+    backfill_meta: {day: value}, four: {close day: {stale, closed_at, status}}} (`four`: league/events/screen.py
+    `made_without` over the store, the judge's own reading of the closes PREREG-EVL-4's rows still wait on)."""
     since = S.iso(now - 5 * 86400)
+    today = dt.datetime.fromtimestamp(now, NY).date()
 
     def read(db: Any) -> dict[str, Any]:
         rows = guard.rows(db, "SELECT id, job, started_at, finished_at, status, summary FROM receipts WHERE started_at>=? "
-                              "AND (job='record' OR job LIKE 'decide-%' OR job='score') ORDER BY id", (since,))
-        out: dict[str, Any] = {"record": [], "decide": {}, "score": [], "open_due": [], "none_marks": set()}
+                              "AND (job='record' OR job LIKE 'decide-%' OR job='score' OR job='backfill') ORDER BY id",
+                          (since,))
+        out: dict[str, Any] = empty_facts()
         for r in rows:
             job = str(r["job"])
             if job == "record":
                 out["record"].append(r)
             elif job == "score":
                 out["score"].append(r)
+            elif job == "backfill":
+                out["backfill"].append(r)
             else:
                 out["decide"].setdefault(job, []).append(r)
+        out["backfill_meta"] = {str(r["key"])[len("evl:backfill:"):]: str(r["value"]) for r in guard.rows(
+            db, "SELECT key, value FROM meta WHERE key LIKE 'evl:backfill:%'")}
+        out["four"] = four_waiting(db, today)
         if score_day is not None:
             out["open_due"] = guard.rows(db, "SELECT i.program, i.version, i.event, i.symbol, i.entry_day, i.exit_day, "
                                              "i.exit_at, (SELECT u.bench FROM universe u WHERE u.day=i.entry_day AND "
@@ -283,6 +394,30 @@ def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]
                 out["none_marks"] = {(str(m["symbol"]), str(m["day"])) for m in marks}
         return out
     return guard.read(Path(root) / STORE, read)
+
+
+def four_waiting(db: Any, today: dt.date) -> dict[str, dict[str, Any]] | None:
+    """THE CLOSES PREREG-EVL-4'S ROWS STILL WAIT ON: league/events/screen.py `made_without` over the store (the judge's own
+    reading, read only: no program is run), {close day: {stale, closed_at (the finish of the close's latest
+    `decide-close` receipt, epoch), status (its latest `decide-close-evl4` receipt's, None when there is none)}}; None
+    when the judge's reading cannot be made (the cause says so)."""
+    try:
+        from ..events import screen as SC
+
+        waiting = SC.made_without(_Db(db), today)
+        kind = SC.FOUR_KIND
+    except Exception:  # noqa: BLE001 - not read: said, never a stall by itself
+        return None
+    out: dict[str, dict[str, Any]] = {}
+    for day, stale in sorted(waiting.items()):
+        key = day.isoformat()
+        close = db.execute("SELECT finished_at FROM receipts WHERE job=? ORDER BY id DESC LIMIT 1",
+                           (f"decide-close:{key}",)).fetchone()
+        four = db.execute("SELECT status FROM receipts WHERE job=? ORDER BY id DESC LIMIT 1",
+                          (f"decide-{kind}:{key}",)).fetchone()
+        out[key] = {"stale": bool(stale), "closed_at": None if close is None else S.epoch(close[0]),
+                    "status": None if four is None else str(four[0] or "")}
+    return out
 
 
 def event_twins(root: str | Path) -> list[dict[str, Any]]:
@@ -415,7 +550,50 @@ def made(rows: list[Mapping[str, Any]], ends: float) -> bool:
                and (S.epoch(r["finished_at"]) or float("inf")) <= ends for r in rows)
 
 
-def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: list) -> dict[str, Any]:
+FOUR_WORDS = {"never": "was never run", "failed": "failed", "cut": "was cut by the lane's time bound",
+              "unfinished": "never finished", "pending": "waits on its verdicts",
+              "stale": "is older than the close's latest decision (decided again by a release without the rows)"}
+
+
+def four_kept(kept: Any, four: Mapping[str, Any] | None, now: float) -> dict[str, str]:
+    """The stall job's FIRST SIGHT of each close PREREG-EVL-4's rows still wait on (`four_waiting`), {day: ISO time}, kept
+    in stall.json (`evl_kept` `four`): a close seen now keeps its first sight (or takes now), one that no longer waits is
+    dropped; with nothing read (None) what was kept stays."""
+    seen = kept if isinstance(kept, Mapping) else {}
+    if four is None:
+        return {str(k): str(v) for k, v in seen.items() if S.epoch(v) is not None}
+    return {day: str(seen[day]) if S.epoch(seen.get(day)) is not None else S.iso(now) for day in four}
+
+
+def _four_state(row: Mapping[str, Any]) -> str:
+    status = row.get("status")
+    if status is None:
+        return "never"
+    if status == "ok":
+        return "stale"
+    return status if status in ("failed", "cut", "pending") else "unfinished"
+
+
+def _four(now: float, four: Mapping[str, Any] | None, seen: Mapping[str, Any], idle: Mapping[str, list]) -> list:
+    """PREREG-EVL-4's rows still to decide by themselves (the module docstring): each close of `four` waiting
+    `FOUR_REFILL_HOURS` since the later of the stall job's first sight (`seen`), the finish of its latest `decide-close`
+    receipt and the end of the last STOP or PAUSE, oldest first. None while the House's PAUSE stands (no verdict is asked:
+    a decision waiting on them waits by design)."""
+    if not four or _open(list(idle.get("pause") or [])):
+        return []
+    quiet = max([float(end) for start, end in (idle.get("stop") or []) + (idle.get("pause") or []) if end is not None],
+                default=None)
+    out = []
+    for day, row in sorted(four.items()):
+        first = S.epoch(seen.get(day))
+        start = max([t for t in (now if first is None else first, _num(row.get("closed_at")), quiet) if t is not None])
+        if now - start >= FOUR_REFILL_HOURS * 3600:
+            out.append({"day": day, "state": _four_state(row), "since": start})
+    return out
+
+
+def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: list, *,
+            idle: Mapping[str, list] | None = None, seen: Mapping[str, Any] | None = None) -> dict[str, Any]:
     due = decisions(now, kinds)
     missed, excused = [], 0
     for d in due:
@@ -434,6 +612,8 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                      else status if status in ("failed", "cut") else "failed")
         later = any(str(r.get("status") or "") in ("ok", "pending") and r.get("finished_at") for r in rows)
         missed.append({**d, "state": state, "later": later})
+    four = f.get("four")
+    waits = _four(now, four, seen or {}, idle if isinstance(idle, Mapping) else {"stop": stops})
     first = missed[0] if missed else None
     if first is None:
         what = (f"Every scheduled decision of the last {DECIDE_LOOKBACK_HOURS:g} h was made in its window ({len(due)})."
@@ -446,13 +626,29 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                 + ("; it was decided later, for the shadow record only" if first["later"] else "")
                 + (f". {len(missed)} decisions of the last {DECIDE_LOOKBACK_HOURS:g} h were missed in all." if len(missed) > 1
                    else "."))
-    return {"stalled": bool(missed), "judged": True, "what": what,
+    if waits:
+        w = waits[0]
+        text = (f"PREREG-EVL-4's rows of the close of {w['day']} are still to decide by themselves "
+                f"{_hours_of(now - w['since'])} h after a release decided it without them: its decide-close-evl4 "
+                f"{FOUR_WORDS[w['state']]}" + (f" ({len(waits)} closes in all)" if len(waits) > 1 else "") + ".")
+        what = text if first is None else f"{what} {text}"
+    elif four is None:
+        what += " PREREG-EVL-4's closes could not be read (league/events/screen.py made_without)."
+    return {"stalled": bool(missed) or bool(waits), "judged": True, "what": what,
             "numbers": {"decisions_due": len(due), "missed": len(missed), "excused_stop": excused,
                         "first_missed": None if first is None else f"{first['kind']}:{first['day']}",
                         "first_missed_at": None if first is None else S.iso(first["at"]),
                         "first_state": None if first is None else first["state"],
-                        "decided_later": sum(1 for m in missed if m["later"])},
-            "doing": DOING["evl_decide"], "owner_step": None, "onset": None if first is None else first["ends"]}
+                        "decided_later": sum(1 for m in missed if m["later"]),
+                        "four_waiting": len(waits), "four_first": waits[0]["day"] if waits else None,
+                        "four_state": waits[0]["state"] if waits else None,
+                        "four_hours": round((now - waits[0]["since"]) / 3600.0, 1) if waits else None},
+            "doing": DOING["evl_decide"], "owner_step": None,
+            "onset": first["ends"] if first is not None else (waits[0]["since"] if waits else None)}
+
+
+def _hours_of(seconds: float) -> str:
+    return f"{max(0.0, seconds) / 3600.0:.1f}"
 
 
 def tally(row: Mapping[str, Any]) -> tuple[int | None, int] | None:
@@ -473,9 +669,38 @@ def tally(row: Mapping[str, Any]) -> tuple[int | None, int] | None:
     return None
 
 
+def four_decisions(now: float, f: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """PREREG-EVL-4's own decisions (`decide-close-evl4:<day>`, each a backfill of its close: league/events/run.py
+    `decide_close` with `evl4_only`) whose latest receipt started inside the last `DECIDE_LOOKBACK_HOURS`, as
+    `decisions` gives the scheduled ones: [{kind, day, at, ends}], `at` the close's decision time."""
+    try:
+        from ..events.screen import FOUR_KIND
+    except Exception:  # noqa: BLE001 - the judge's name for it, as release 1019d ships it
+        FOUR_KIND = "close-evl4"
+    head = f"decide-{FOUR_KIND}:"
+    out = []
+    for job, rows in (f.get("decide") or {}).items():
+        if not str(job).startswith(head) or not rows:
+            continue
+        started = S.epoch(rows[-1].get("started_at"))
+        if started is None or started < now - DECIDE_LOOKBACK_HOURS * 3600:
+            continue
+        try:
+            day = dt.date.fromisoformat(str(job)[len(head):])
+        except ValueError:
+            continue
+        found = sessions(day, day)
+        if not found or found[0]["close_at"] is None:
+            continue
+        at = found[0]["close_at"] - CLOSE_DECIDE_BEFORE.total_seconds()
+        if at <= now:
+            out.append({"kind": FOUR_KIND, "day": day.isoformat(), "at": at, "ends": at + DECIDE_GRACE_MINUTES * 60})
+    return sorted(out, key=lambda d: d["at"])
+
+
 def _verdicts(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], idle: Mapping[str, list],
               line: Mapping[str, Any] | None) -> dict[str, Any]:
-    due = decisions(now, kinds)
+    due = decisions(now, kinds) + four_decisions(now, f)
     held, needed_all, unanswered_all, read = [], 0, 0, 0
     quiet_until = max([float(end) for start, end in (idle.get("stop") or []) + (idle.get("pause") or [])
                        if end is not None], default=None)
@@ -511,7 +736,9 @@ def _verdicts(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], idle: Ma
         what = (f"No verdict a decision of the last {DECIDE_LOOKBACK_HOURS:g} h needed is unanswered past it." if read
                 else f"No decision of the last {DECIDE_LOOKBACK_HOURS:g} h carries a verdict tally.")
     else:
-        what = (f"{first['missing']} verdicts the event lane's {first['kind']} decision of {first['day']} needs have no "
+        kind = "close decision of PREREG-EVL-4's rows" if first["kind"] != "open" and first["kind"] != "close" \
+            else f"{first['kind']} decision"
+        what = (f"{first['missing']} verdicts the event lane's {kind} of {first['day']} needs have no "
                 f"answer {round((now - first['since']) / 60)} minutes past it"
                 + (f" ({len(held)} decisions in all)" if len(held) > 1 else "")
                 + ("; the lane's verdict line for the day is reached" if at_line else "") + ".")
@@ -575,12 +802,461 @@ def _score(now: float, f: Mapping[str, Any], latest: Mapping[str, Any]) -> dict[
             "onset": _ny(latest["day"], SCORE_BY) if stalled else None}
 
 
+# ---------------------------------------------------------------------------------------------- the entries (1019f)
+#: The book's words for a buy held from its send (league/equity/live.py `_event_work_entry`, `_count_refusal`,
+#: `_open_block`, `_symbol_busy`, `_size_event`), lower case, and the reason each is; the first that matches names it.
+UNSENT_WORDS = (("order count", "order_line"), ("has on order more than its", "room"), ("eligible list", "gateway"),
+                ("the refused buy", "gateway"), ("a sale of", "sale"), ("one order a symbol", "busy"),
+                ("could not be read", "unreadable"), ("cannot be read", "unreadable"), ("no sizing equity", "unreadable"),
+                ("kill switch", "blocked"), ("paper proof", "blocked"), ("exits only", "blocked"),
+                ("reconciliation", "blocked"), ("not at probe or sized", "blocked"), ("real-money block", "blocked"))
+UNSENT_SAID = {"order_line": "the day order count", "cash": "cash", "budget": "the loss budget",
+               "name_wall": "the 10% a name", "invested": "the invested cap", "room": "the program's room",
+               "price": "one share too dear", "min_order": "under the minimum order", "gateway": "the gateway",
+               "sale": "a sale of the name at the same cross", "busy": "a working order of the name",
+               "blocked": "a gate of real opens", "unreadable": "a figure unread", "other": "another reason"}
+
+
+def venue_cancel_ms(order: Mapping[str, Any]) -> int | None:
+    """THE CAPTAIN'S A80: the milliseconds THE VENUE took to cancel this order (an `eq_orders` row) after its own
+    submission, read off the venue's own stamps the book keeps (`answer.submitted_at`, `answer.canceled_at`, RFC 3339,
+    league/live/venue.py `parse_time`), when it is an AUCTION BUY the venue ended `canceled` within `VENUE_CANCEL_S` of its
+    submission with nothing filled and no cancel of the House's own sent (`answer.cancel_sent`); None otherwise (a sale,
+    a day order, a fill, an order the House cancelled or the venue replaced, a stamp missing or unreadable, a cancel
+    later than that: the auction's own end of an unfilled order). The rule release 1019e's re-send reads
+    (league/equity/live.py `venue_cancel_ms`)."""
+    from ..live.venue import parse_time
+
+    answer = order.get("answer")
+    answer = answer if isinstance(answer, Mapping) else _loads(answer)
+    answer = answer if isinstance(answer, Mapping) else {}
+    if (str(order.get("side") or "") != "buy" or str(order.get("tif") or "") not in ("opg", "cls")
+            or str(order.get("status") or "") != "canceled" or answer.get("final") != "canceled"):
+        return None
+    if (_num(order.get("filled_qty")) or 0.0) > 0 or "cancel_sent" in answer:
+        return None
+    submitted, canceled = parse_time(answer.get("submitted_at")), parse_time(answer.get("canceled_at"))
+    if submitted is None or canceled is None:
+        return None
+    took = canceled - submitted
+    if not -VENUE_STAMP_SLACK_S <= took <= VENUE_CANCEL_S:
+        return None
+    return max(0, int(round(took * 1000)))
+
+
+def unsent_reason(why: Any, refused: Mapping[str, Any] | None = None) -> str:
+    """Why an event buy never reached the venue, one of `UNSENT`: the gateway's cap on the order it refused
+    (`GATEWAY_CAPS`, else "gateway"), else the size rule's binding when no whole share fit (`SIZING_BINDS`; "price" when
+    one share at the limit was above the band's one-share cap), else the book's own words on the intent (`UNSENT_WORDS`:
+    the last reason a gate held it by, `_event_finish`'s "never sent: ..."); "other" for anything else."""
+    cap = str((refused or {}).get("cap") or "")
+    if cap:
+        return GATEWAY_CAPS.get(cap, "gateway")
+    text = str(why or "")
+    bound = re.search(r"no whole share fits \(([a-z_]+)\)", text)
+    if bound:
+        return SIZING_BINDS.get(bound.group(1), "other")
+    if "no whole share fits" in text:
+        return "price"
+    low = text.lower()
+    return next((reason for needle, reason in UNSENT_WORDS if needle in low), "other")
+
+
+def sent_binding(why: Any) -> str | None:
+    """The constraint that cut a SENT event buy below its band's target (its order's `why`: "event entry at the open (N
+    shares at learning (cash): ..."), one of `BOUND`; None when the target was bought whole or the words say no cut."""
+    found = re.search(r"\d+ shares at [a-z]+ \(([a-z_]+)\)", str(why or ""))
+    name = SIZING_BINDS.get(found.group(1)) if found else None
+    return name if name in BOUND else None
+
+
+def auctions(now: float, hours: float = ENTRY_HOURS) -> list[dict[str, Any]]:
+    """The auctions (the opening and closing crosses of the House's NYSE sessions) inside the last `hours` whose cross is
+    `AUCTION_SETTLE_MINUTES` behind: [{day, at, t}] (`t` the cross, epoch), oldest first."""
+    today = dt.datetime.fromtimestamp(now, NY).date()
+    out = []
+    for s in sessions(today - dt.timedelta(days=4), today):
+        for at, t in (("open", s["open_at"]), ("close", s["close_at"])):
+            if t is not None and now - hours * 3600 <= t and t + AUCTION_SETTLE_MINUTES * 60 <= now:
+                out.append({"day": s["day"].isoformat(), "at": at, "t": float(t)})
+    return sorted(out, key=lambda a: a["t"])
+
+
+def auctions_of(day: str) -> list[dict[str, Any]]:
+    """The two auctions of New York day `day` ([] with no session that day)."""
+    on = dt.date.fromisoformat(day)
+    return [{"day": day, "at": at, "t": float(t)} for s in sessions(on, on)
+            for at, t in (("open", s["open_at"]), ("close", s["close_at"])) if t is not None]
+
+
+def decision_room(decision: Mapping[str, Any] | None) -> dict[str, Any]:
+    """What the book's decision of an auction (`eq_event_decisions` summary: each program's picks, room, planned and
+    skipped) left out before any buy was planned: the picks beyond the programs' room (`room_cut`), the programs that
+    read nothing for having no room (`programs_full`), and the picks the real-money rules skipped whatever the room
+    (league/events/book.py `allocate`: the 10% a name, one share too dear, a sale of the name at the same cross)."""
+    summary = _loads(decision.get("summary")) if isinstance(decision, Mapping) else None
+    programs = summary.get("programs") if isinstance(summary, Mapping) else None
+    picks = room_cut = full = 0
+    skipped: dict[str, int] = {}
+    for p in (programs.values() if isinstance(programs, Mapping) else ()):
+        if not isinstance(p, Mapping):
+            continue
+        skip = p.get("skipped") if isinstance(p.get("skipped"), Mapping) else {}
+        passed = 0
+        for name, n in skip.items():
+            skipped[str(name)] = skipped.get(str(name), 0) + int(_num(n) or 0)
+            passed += int(_num(n) or 0)
+        wanted = _num(p.get("picks"))
+        if wanted is None:
+            full += int(_num(p.get("room")) == 0)
+            continue
+        picks += int(wanted)
+        room_cut += max(0, int(wanted) - int(_num(p.get("planned")) or 0) - passed)
+    return {"decided": isinstance(decision, Mapping) and str(decision.get("status") or "") == "done", "picks": picks,
+            "room_cut": room_cut, "programs_full": full, "skipped_name_wall": skipped.get("name_wall", 0),
+            "skipped_price": skipped.get("one_share", 0), "skipped_sale": skipped.get("sale", 0)}
+
+
+def auction_entries(rows: list[Mapping[str, Any]], orders: Mapping[int, list[Mapping[str, Any]]],
+                    decision: Mapping[str, Any] | None) -> dict[str, Any]:
+    """One auction's real event buys (`rows`: its `eq_event_intents` buys with their `eq_intents` status and why;
+    `orders`: each buy's `eq_orders` in send order) and its decision (`decision_room`): planned, filled, the venue's
+    cancels at once (A80) and the re-sends after one (and how many of those filled), the buys never sent by reason
+    (`unsent_reason`), sent and not filled (`unfilled`), still to finish (`unfinished`), cut below target by a
+    constraint (`cut`), and the constraint that bound the auction most (`bound`, of `BOUND`, "none": the buys stopped
+    or cut by each, the decision's room cut and its name-wall skips with them)."""
+    never: dict[str, int] = {}
+    cut: dict[str, int] = {}
+    filled = venue = resent = resent_filled = unfilled = unfinished = 0
+    for r in rows:
+        mine = list(orders.get(int(r["iid"]), []))
+        reached = [o for o in mine if str(o.get("status") or "") not in UNSENT_ORDERS]
+        got = math.fsum(_num(o.get("filled_qty")) or 0.0 for o in mine) > 0
+        cancels = [o for o in mine if venue_cancel_ms(o) is not None]
+        if cancels:
+            venue += 1
+            if any(int(o["eid"]) > int(cancels[0]["eid"]) for o in reached):
+                resent += 1
+                resent_filled += int(got)
+        live = str(r.get("status") or "") in ("planned", "sent")
+        if got:
+            filled += 1
+        elif not reached:
+            last = mine[-1] if mine else None
+            answer = _loads(last.get("answer")) if last is not None else None
+            refused = answer if isinstance(answer, Mapping) and str(last.get("status") or "") == "refused" else None
+            reason = unsent_reason(r.get("why"), refused)
+            never[reason] = never.get(reason, 0) + 1
+        elif live:
+            unfinished += 1
+        elif not cancels:
+            unfilled += 1
+        binding = sent_binding(reached[0].get("why")) if reached else None
+        if binding is not None:
+            cut[binding] = cut.get(binding, 0) + 1
+    room = decision_room(decision)
+    tally = {"cash": never.get("cash", 0) + cut.get("cash", 0), "budget": never.get("budget", 0) + cut.get("budget", 0),
+             "room": room["room_cut"] + never.get("room", 0), "order_line": never.get("order_line", 0),
+             "name_wall": never.get("name_wall", 0) + cut.get("name_wall", 0) + room["skipped_name_wall"],
+             "invested": never.get("invested", 0) + cut.get("invested", 0)}
+    top = max(tally.values())
+    return {"planned": len(rows), "filled": filled, "venue_cancels": venue, "resent": resent,
+            "resent_filled": resent_filled, "never_sent": sum(never.values()),
+            "never": {k: never.get(k, 0) for k in UNSENT}, "unfilled": unfilled, "unfinished": unfinished,
+            "cut": {k: cut.get(k, 0) for k in BOUND}, **room,
+            "bound": next(k for k in BOUND if tally[k] == top) if top > 0 else "none"}
+
+
+def entry_facts(root: str | Path, wanted: list[Mapping[str, Any]]) -> list[dict[str, Any]] | None:
+    """Each auction of `wanted` ([{day, at, t}], `auctions` or `auctions_of`) as the book's own rows in
+    `<state>/live.sqlite` tell it (read-only, one transaction): [{day, at, t, **`auction_entries`}], in `wanted`'s order;
+    None with no live.sqlite or no event table in it (the book has planned no event buy on this House)."""
+    path = Path(root) / LIVE_DB
+    if not path.exists():
+        return None
+    days = sorted({str(w["day"]) for w in wanted})
+
+    def read(db: Any) -> dict[str, Any] | None:
+        names = {str(r[0]) for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if not {"eq_event_intents", "eq_intents", "eq_orders"} <= names:
+            return None
+        if not days:
+            return {"intents": [], "orders": [], "decisions": []}
+        intents = guard.batched(db, "SELECT e.iid, e.program, e.version, e.day, e.at, e.band, i.status, i.why FROM "
+                                    "eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE e.side='buy' AND e.day IN "
+                                    "({marks}) ORDER BY e.iid", days)
+        iids = [int(r["iid"]) for r in intents]
+        orders = guard.batched(db, "SELECT * FROM eq_orders WHERE iid IN ({marks}) ORDER BY eid", iids) if iids else []
+        made = guard.batched(db, "SELECT day, at, status, summary FROM eq_event_decisions WHERE day IN ({marks})",
+                             days) if "eq_event_decisions" in names else []
+        return {"intents": intents, "orders": orders, "decisions": made}
+    got = guard.read(path, read)
+    if got is None:
+        return None
+    by_iid: dict[int, list[Mapping[str, Any]]] = {}
+    for o in got["orders"]:
+        by_iid.setdefault(int(o["iid"]), []).append(o)
+    made = {(str(d["day"]), str(d["at"])): d for d in got["decisions"]}
+    return [{**w, **auction_entries([r for r in got["intents"] if str(r["day"]) == w["day"] and str(r["at"]) == w["at"]],
+                                    by_iid, made.get((str(w["day"]), str(w["at"]))))} for w in wanted]
+
+
+def entry_totals(found: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """The auctions' counts added up (the `never` reasons and `cut` constraints too)."""
+    keys = ("planned", "filled", "venue_cancels", "resent", "resent_filled", "never_sent", "unfilled", "unfinished",
+            "room_cut", "skipped_name_wall", "skipped_price")
+    out: dict[str, Any] = {k: sum(int(a.get(k) or 0) for a in found) for k in keys}
+    for group, order in (("never", UNSENT), ("cut", BOUND)):
+        out[group] = {k: sum(int((a.get(group) or {}).get(k) or 0) for a in found) for k in order}
+    out["auctions"] = len(found)
+    return out
+
+
+def short_of(a: Mapping[str, Any]) -> bool:
+    """An auction whose real buys fell short: under `ENTRY_FILL_SHARE` of its planned buys filled, or one never sent."""
+    planned = int(a.get("planned") or 0)
+    return planned > 0 and (int(a.get("filled") or 0) < ENTRY_FILL_SHARE * planned - 1e-9 or int(a.get("never_sent") or 0) > 0)
+
+
+def _pct(part: int, whole: int) -> int | None:
+    return None if not whole else int(round(100.0 * part / whole))
+
+
+def _entries(now: float, found: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """`evl_entries` (the module docstring)."""
+    if found is None:
+        return _not_judged("no event table in live.sqlite (the book has planned no real event buy on this House)")
+    total = entry_totals(found)
+    short = [a for a in found if short_of(a)]
+    pct = _pct(total["filled"], total["planned"])
+    reasons = ", ".join(f"{UNSENT_SAID[k]} {n}" for k, n in total["never"].items() if n)
+    if not total["planned"]:
+        what = (f"No real event buy was planned at the {len(found)} auctions of the last {ENTRY_HOURS:g} h."
+                if found else f"No auction's cross of the last {ENTRY_HOURS:g} h is {AUCTION_SETTLE_MINUTES} minutes behind.")
+    else:
+        first = short[0] if short else None
+        what = ((f"Real event buys fell short at {len(short)} of {len(found)} auctions of the last {ENTRY_HOURS:g} h: "
+                 if short else f"Real event buys at the {len(found)} auctions of the last {ENTRY_HOURS:g} h: ")
+                + f"{total['filled']} of {total['planned']} planned filled ({pct}%, the bar {ENTRY_FILL_SHARE:.0%})"
+                + (f"; the venue cancelled {total['venue_cancels']} at once (A80)" if total["venue_cancels"] else "")
+                + (f", {total['resent']} went again once ({total['resent_filled']} filled)" if total["resent"] else "")
+                + (f"; {total['never_sent']} never sent ({reasons})" if total["never_sent"] else "; none never sent")
+                + (f"; {total['unfilled']} sent and not filled at the cross" if total["unfilled"] else "")
+                + (f"; {total['unfinished']} not finished yet" if total["unfinished"] else "")
+                + (f". The {first['at']} of {first['day']} bound most on {UNSENT_SAID.get(first['bound'], first['bound'])}"
+                   if first is not None and first["bound"] != "none" else "") + ".")
+    first = short[0] if short else None
+    numbers: dict[str, Any] = {"auctions": len(found), "planned": total["planned"], "filled": total["filled"],
+                               "fill_pct": pct, "venue_cancels": total["venue_cancels"], "resent": total["resent"],
+                               "resent_filled": total["resent_filled"], "never_sent": total["never_sent"],
+                               "unfilled": total["unfilled"],
+                               "short_first": None if first is None else f"{first['at']}:{first['day']}",
+                               "bound": (first or (found[-1] if found else {})).get("bound") or "none"}
+    numbers.update({f"never_{k}": n for k, n in total["never"].items() if n})
+    return {"stalled": bool(short), "judged": True, "what": what, "numbers": numbers, "doing": DOING["evl_entries"],
+            "owner_step": None, "onset": None if first is None else first["t"] + AUCTION_SETTLE_MINUTES * 60}
+
+
+# ---------------------------------------------------------------------------------------------- the backfill (1019f)
+def backfill_reach(now: float) -> list[dt.date]:
+    """The weekdays the House's daily-index backfill reads (league/events/house.py `_backfill_due`: the last
+    `BACKFILL_WEEKDAYS` weekdays before today, none before the lane's registration), oldest first."""
+    try:
+        from ..events import house as H
+
+        weekdays = int(H.BACKFILL_WEEKDAYS)
+    except Exception:  # noqa: BLE001 - the judge's own reach, as release 1019d ships it
+        weekdays = 3
+    try:
+        from ..events import programs as P
+
+        start: dt.date | None = P.registered().astimezone(NY).date()
+    except Exception:  # noqa: BLE001 - no registration read: every weekday of the reach
+        start = None
+    day, out = dt.datetime.fromtimestamp(now, NY).date(), []
+    while len(out) < weekdays:
+        day -= dt.timedelta(days=1)
+        if day.weekday() < 5:
+            out.append(day)
+    return sorted(d for d in out if start is None or d >= start)
+
+
+def backfill_due(day: dt.date) -> float:
+    """When the backfill of weekday `day` is due done: `BACKFILL_DUE` (12:00 ET) of the next weekday."""
+    nxt = day + dt.timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += dt.timedelta(days=1)
+    return _ny(nxt, BACKFILL_DUE)
+
+
+def _backfill(now: float, f: Mapping[str, Any], reach: list[dt.date]) -> dict[str, Any]:
+    """`evl_backfill` (the module docstring), from the lane's `backfill` receipts and its `evl:backfill:<day>` meta."""
+    meta = f.get("backfill_meta") or {}
+    by_day: dict[str, list[Mapping[str, Any]]] = {}
+    for r in f.get("backfill") or []:
+        said = _loads(r.get("summary"))
+        if isinstance(said, Mapping) and said.get("day"):
+            by_day.setdefault(str(said["day"]), []).append(r)
+    found = []
+    for day in reach:
+        key = day.isoformat()
+        rows = by_day.get(key, [])
+        summaries = [s for s in (_loads(r.get("summary")) for r in rows) if isinstance(s, Mapping)]
+        counts = {k: sum(int(_num(s.get(k)) or 0) for s in summaries) for k in ("failed", "fetched", "known", "unlisted")}
+        counts["filings"] = max([int(_num(s.get("filings")) or 0) for s in summaries], default=0)
+        last = rows[-1] if rows else None
+        base = {"day": key, "passes": len(rows), "last_status": None if last is None else str(last.get("status") or ""),
+                "last_at": None if last is None else S.epoch(last.get("finished_at") or last.get("started_at")), **counts}
+        if meta.get(key) == "done":
+            if counts["failed"] > 0:
+                found.append({**base, "state": "failed", "since": None, "hours": None})
+            continue
+        run = []
+        for r in reversed(rows):
+            if str(r.get("status") or "") == "ok":
+                break
+            run.append(r)
+        start = S.epoch(run[-1].get("started_at")) if run else None
+        streak = None if start is None else (now - start) / 3600.0
+        due = backfill_due(day)
+        if now >= due:
+            found.append({**base, "state": "late", "since": due, "hours": (now - due) / 3600.0, "streak": streak})
+        elif streak is not None and streak > BACKFILL_STREAK_HOURS:
+            found.append({**base, "state": "streak", "since": start, "hours": streak, "streak": streak})
+    done = sum(1 for d in reach if meta.get(d.isoformat()) == "done")
+    first = found[0] if found else None
+    if first is None:
+        what = (f"The daily-index backfill's reach ({', '.join(d.isoformat() for d in reach)}): {done} done, the rest not "
+                "yet due." if reach else "No weekday is in the daily-index backfill's reach yet.")
+    else:
+        counted = (f"{first['passes']} passes; {first['filings']} filings, {first['known']} known, {first['fetched']} "
+                   f"fetched, {first['failed']} failed, {first['unlisted']} unlisted")
+        last = ("" if first["last_at"] is None else
+                f"its last pass read '{first['last_status']}' at {_hhmm(first['last_at'])} ET; ")
+        if first["state"] == "late":
+            what = (f"The daily-index backfill of {first['day']} is not done {_hours_of(now - first['since'])} h after it "
+                    f"was due (12:00 ET of the next weekday): {last or 'no pass on record; '}{counted}.")
+        elif first["state"] == "streak":
+            what = (f"The daily-index backfill of {first['day']} has read waiting or partial for "
+                    f"{_hours_of(first['hours'] * 3600)} h: {last}{counted}.")
+        else:
+            what = (f"The daily-index backfill of {first['day']} is done, but {first['failed']} filings failed to fetch "
+                    f"in its passes (the backfill does not try a filing it has seen again): {counted}.")
+        if len(found) > 1:
+            what += f" {len(found)} days of the reach stand in all."
+    return {"stalled": bool(found), "judged": True, "what": what,
+            "numbers": {"reach": len(reach), "done": done, "standing": len(found),
+                        "first_day": None if first is None else first["day"],
+                        "state": None if first is None else first["state"],
+                        "hours": None if first is None or first["hours"] is None else round(first["hours"], 1),
+                        "passes": None if first is None else first["passes"],
+                        "last_status": None if first is None else (first["last_status"] or None),
+                        **({k: first[k] for k in ("filings", "known", "fetched", "failed", "unlisted")} if first else {})},
+            "doing": DOING["evl_backfill"], "owner_step": None,
+            "onset": None if first is None else first["since"]}
+
+
+# ---------------------------------------------------------------------------------------------- the hand-back (1019f)
+def handback_facts(root: str | Path) -> dict[str, Any] | None:
+    """The real event fills the book owes the lane (`<state>/live.sqlite`, read-only: every `eq_orders` row of a real event
+    lot with `filled_qty` > 0, its lot and its buy's intent) set beside the lane's `real_fills` (read-only):
+    {due: {(program, version, event, side): since}, handed: {...}, table: bool}; None with no live.sqlite or no event
+    lot. Due as the book hands them back (league/equity/live.py `_event_fills`): a buy once its intent has ended or its
+    lot is no longer open, from the later of its last fill and that end; a sale once its lot is closed, from the close."""
+    live = Path(root) / LIVE_DB
+    if not live.exists():
+        return None
+
+    def read(db: Any) -> list[dict[str, Any]] | None:
+        names = {str(r[0]) for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if not {"eq_orders", "eq_lots", "eq_intents"} <= names:
+            return None
+        fill = "(SELECT MAX(f.at) FROM eq_fills f WHERE f.eid=o.eid)" if "eq_fills" in names else "NULL"
+        return guard.rows(db, f"SELECT o.side, o.updated_at, {fill} AS fill_at, l.family, l.version, l.status AS lot, "
+                              "l.opened_at, l.closed_at, l.info, (SELECT i.status FROM eq_intents i WHERE i.iid=l.iid) "
+                              "AS buy_status, (SELECT i.updated_at FROM eq_intents i WHERE i.iid=l.iid) AS buy_at FROM "
+                              "eq_orders o JOIN eq_lots l ON l.lid=o.lid WHERE l.lane='event' AND substr(l.instance, -2)="
+                              "':r' AND CAST(o.filled_qty AS REAL) > 0 ORDER BY o.eid")
+    rows = guard.read(live, read)
+    if rows is None:
+        return None
+    due: dict[tuple[str, int, str, str], float] = {}
+    for r in rows:
+        info = _loads(r.get("info"))
+        evl = info.get("evl") if isinstance(info, Mapping) else None
+        if not isinstance(evl, Mapping) or not evl.get("event"):
+            continue
+        side = str(r.get("side") or "")
+        key = (str(r["family"]), int(r["version"]), str(evl["event"]), side)
+        if side == "buy":
+            ended = str(r.get("buy_status") or "") not in ("planned", "sent")
+            if str(r.get("lot") or "") == "open" and not ended:
+                continue    # its auction is not over: the book hands the buy back once it is
+            times = [_num(r.get("fill_at")), _num(r.get("buy_at")) if ended else None, _num(r.get("opened_at"))]
+        elif side == "sell":
+            if str(r.get("lot") or "") != "closed":
+                continue    # a sale of a lot not closed: handed back once it is (the ladder may still sell the rest)
+            times = [_num(r.get("closed_at")), _num(r.get("fill_at"))]
+        else:
+            continue
+        since = max([t for t in times if t is not None], default=_num(r.get("updated_at")) or 0.0)
+        due[key] = max(due.get(key, since), since)
+    if not due:
+        return {"due": {}, "handed": set(), "table": True}
+    path = Path(root) / STORE
+    if not path.exists():
+        return {"due": due, "handed": set(), "table": False}
+
+    def lane(db: Any) -> set | None:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone() is None:
+            return None
+        return {(str(r["program"]), int(r["version"]), str(r["event"]), str(r["side"]))
+                for r in guard.rows(db, "SELECT program, version, event, side FROM real_fills")}
+    handed = guard.read(path, lane)
+    return {"due": due, "handed": handed or set(), "table": handed is not None}
+
+
+def _handback(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`evl_handback` (the module docstring)."""
+    if found is None:
+        return _not_judged("no real event lot in live.sqlite (the book has filled no real event buy on this House)")
+    due = found["due"]
+    if not due:
+        return {"stalled": False, "judged": True, "what": "No real event fill is on record in live.sqlite yet.",
+                "numbers": {"fills_due": 0, "handed": 0, "missing": 0}, "doing": DOING["evl_handback"],
+                "owner_step": None, "onset": None}
+    missing = sorted(((since, key) for key, since in due.items() if key not in found["handed"]), key=lambda x: x[0])
+    late = [(since, key) for since, key in missing if now - since > HANDBACK_HOURS * 3600]
+    first = late[0] if late else None
+    buys = sum(1 for _, k in late if k[3] == "buy")
+    if first is None:
+        what = (f"Every real event fill due to the lane is in its real_fills ({len(due) - len(missing)} of {len(due)}"
+                + (f"; {len(missing)} under {HANDBACK_HOURS:g} h old" if missing else "") + ").")
+    else:
+        since, key = first
+        what = (f"{len(late)} real event fills are not in the lane's real_fills more than {HANDBACK_HOURS:g} h after the "
+                f"book owed them ({buys} buys, {len(late) - buys} sales)"
+                + ("" if found["table"] else ": the lane's store holds no real_fills table")
+                + f"; the oldest, a {'buy' if key[3] == 'buy' else 'sale'} of {key[0]} version {key[1]}, owed since "
+                f"{_hhmm(since)} ET {dt.datetime.fromtimestamp(since, NY).date().isoformat()}, {_hours_of(now - since)} h ago.")
+    return {"stalled": bool(late), "judged": True, "what": what,
+            "numbers": {"fills_due": len(due), "handed": len(due) - len(missing), "missing": len(missing),
+                        "missing_late": len(late), "missing_buys": buys, "missing_sales": len(late) - buys,
+                        "table": bool(found["table"]),
+                        "oldest_hours": None if first is None else round((now - first[0]) / 3600.0, 1),
+                        "oldest_program": None if first is None else first[1][0].lower(),
+                        "oldest_side": None if first is None else first[1][3]},
+            "doing": DOING["evl_handback"], "owner_step": None, "onset": None if first is None else first[0]}
+
+
 def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None = None, idle: Any = None,
-           line: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """THE STALL JOB'S CALL (league/ops/stall.py `run`): the four causes' checks (the module docstring). `idle` is
+           line: Mapping[str, Any] | None = None, kept: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """THE STALL JOB'S CALL (league/ops/stall.py `run`): the causes' checks (the module docstring). `idle` is
     `idle_windows`' answer (None: read now, with nothing kept); `line` the lane's verdict line and the day's spend
-    ({line_usd, spent_usd}, `verdict_line`). Never raises: a store that cannot be read is "Not judged" and an entry of
-    `errors`."""
+    ({line_usd, spent_usd}, `verdict_line`); `kept` what the stall job keeps for them in stall.json (`evl_kept`), updated
+    in place when the store is read (`KEPT_FOUR`: `four_kept`). Never raises: a store that cannot be read is "Not
+    judged" and an entry of `errors`; live.sqlite that cannot be read leaves `evl_entries` and `evl_handback` "Not
+    judged" (an entry of `errors`) and the rest judged."""
     try:
         if switched_off(ctx):
             return {c: _not_judged(f"switched off (ops.json stall.{SWITCH} is false)") for c in CAUSES}
@@ -597,12 +1273,17 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
                                    "minutes ago") for c in CAUSES}
         latest = score_session(now)
         if not (Path(root) / STORE).exists():
-            f: dict[str, Any] = {"record": [], "decide": {}, "score": [], "open_due": [], "none_marks": set()}
+            f: dict[str, Any] = empty_facts()
         else:
             with guard.readonly():
                 f = facts(root, now, None if latest is None else latest["day"].isoformat())
         kinds = entry_kinds()
-        out = {"evl_record": _record(now, f), "evl_decide": _decide(now, f, kinds, stops)}
+        seen = (kept or {}).get(KEPT_FOUR) if isinstance(kept, Mapping) else None
+        seen = seen if isinstance(seen, Mapping) else {}
+        out = {"evl_record": _record(now, f),
+               "evl_decide": _decide(now, f, kinds, stops, idle={"stop": stops, "pause": pauses}, seen=seen)}
+        if kept is not None:
+            kept[KEPT_FOUR] = four_kept(seen, f.get("four"), now)
         if _open(pauses):
             out["evl_verdicts"] = _not_judged("the House is paused (PAUSE): no verdict is asked while it stands")
         elif _ended_lately(pauses, now) is not None:
@@ -612,10 +1293,21 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
         out["evl_score"] = (_not_judged("no session in the last 10 days has passed its 23:00 ET") if latest is None
                             else _score(now, f, latest))
         out["evl_fills"] = _fills(now, event_twins(root))
+        out["evl_backfill"] = _backfill(now, f, backfill_reach(now))
+        # THE BOOK'S OWN ROWS (live.sqlite, read-only), each read on its own: one that cannot be read blinds only itself.
+        for cause, judge in (("evl_entries", lambda: _entries(now, entry_facts(root, auctions(now)))),
+                             ("evl_handback", lambda: _handback(now, handback_facts(root)))):
+            try:
+                with guard.readonly():
+                    out[cause] = judge()
+            except Exception as exc:  # noqa: BLE001 - said, and the other causes stand as judged
+                if errors is not None:
+                    errors.append(f"live.sqlite could not be read for {cause} ({type(exc).__name__}): it is not judged")
+                out[cause] = _not_judged(f"live.sqlite could not be read ({type(exc).__name__})")
         return out
     except Exception as exc:  # noqa: BLE001 - an alarm that cannot see says so, and the rest of the job goes on
         if errors is not None:
-            errors.append(f"the event lane's store could not be read ({type(exc).__name__}): its four causes are not judged")
+            errors.append(f"the event lane's store could not be read ({type(exc).__name__}): its causes are not judged")
         return {c: _not_judged(f"the event lane's store could not be read ({type(exc).__name__})") for c in CAUSES}
 
 
@@ -648,6 +1340,10 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
 
 __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "switched_off", "lane_on", "decisions",
            "entry_kinds", "sessions", "idle_windows", "made", "tally", "score_session", "verdict_line", "event_twins",
-           "fill_gaps", "FILL_LOOK", "FILL_GAP_BP", "FILL_MIN",
+           "fill_gaps", "FILL_LOOK", "FILL_GAP_BP", "FILL_MIN", "venue_cancel_ms", "unsent_reason", "sent_binding",
+           "auctions", "auctions_of", "decision_room", "auction_entries", "entry_facts", "entry_totals", "short_of",
+           "backfill_reach", "backfill_due", "handback_facts", "four_waiting", "four_kept", "four_decisions",
+           "empty_facts", "LIVE_DB", "ENTRY_HOURS", "ENTRY_FILL_SHARE", "AUCTION_SETTLE_MINUTES", "VENUE_CANCEL_S",
+           "BOUND", "UNSENT", "BACKFILL_DUE", "BACKFILL_STREAK_HOURS", "FOUR_REFILL_HOURS", "HANDBACK_HOURS", "KEPT_FOUR",
            "RECORD_MINUTES", "DECIDE_GRACE_MINUTES", "DECIDE_LOOKBACK_HOURS", "VERDICT_GRACE_MINUTES", "RESUME_MINUTES",
            "SCORE_BY", "FEEDS"]

@@ -30,7 +30,8 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   assert.equal(message.subject, 'LTCM daily 2026-10-20: shown +$2.94, net -$0.39; 2 alarms');
   const text = message.text.split('\n');
   for (const line of text) assert.ok(line.length <= REPORT_WIDTH, `${line.length}: ${line}`);
-  assert.ok(text.length <= 45, `one screen: ${text.length} lines`);
+  // (Release 1019f adds three lines, the day's real buys: A80 (2); the break-even edge a fourth once a Probe buy exists.)
+  assert.ok(text.length <= 47, `one screen: ${text.length} lines`);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -161,7 +162,9 @@ test('the composer reads every fact the House writes', () => {
     ? new Proxy(value, { get: (target, key) => (typeof key === 'string' && read.add(`${prefix}${key}`), spy(target[key], `${prefix}${String(key)}.`)) })
     : value);
   // Each program in two bands, so its by_band lines are read too.
-  const twoBands = { ...REPORT, programs: REPORT.programs.map(p => ({ ...p, by_band: [...p.by_band, { ...p.by_band[0], band: 'sized' }] })) };
+  // (Release 1019f: and a Probe buy on record, so the break-even edge is read too.)
+  const twoBands = { ...REPORT, programs: REPORT.programs.map(p => ({ ...p, by_band: [...p.by_band, { ...p.by_band[0], band: 'sized' }] })),
+    break_even: { ...REPORT.break_even, since: '2026-10-22', compute_per_session: 3.5, probe_per_session: 60, edge_bp: 583.3 } };
   composeReport(spy(twoBands, ''));
   const want = new Set();
   const walk = (value, prefix) => {
@@ -175,9 +178,35 @@ test('the composer reads every fact the House writes', () => {
   const seen = new Set([...read].map(key => key.replace(/\.\d+\./g, '.*.')));
   // Read by the router, not the composer (`kind`, `notice_id`), or kept for the House's own record (a program's
   // `intents`, its `buy_hold_why` and the total's `why`: the gateway words n/a itself and echoes no House text).
-  const unread = ['kind', 'notice_id', 'programs.*.intents', 'programs.*.buy_hold_why', 'buy_hold.why', 'costs.allowance.cap_usd'];
+  // (Release 1019f: `entries.why` and `break_even.why` likewise: the gateway words "none" and "n/a" itself.)
+  const unread = ['kind', 'notice_id', 'programs.*.intents', 'programs.*.buy_hold_why', 'buy_hold.why', 'costs.allowance.cap_usd',
+    'entries.why', 'break_even.why'];
   const missed = [...want].filter(key => !seen.has(key) && !unread.includes(key));
   assert.deepEqual(missed, [], 'every fact the House writes is read');
+});
+
+test('the day\'s real buys (A80 (2)): filled of planned, the venue\'s cancels and the re-sends, the never-sent by reason, the bound of each auction; the break-even edge once a Probe buy exists', () => {
+  const text = lines(REPORT);
+  for (const line of ['Real buys 7/9 filled; venue cancels 2 (re-sent 1, filled 1)',
+    ' never sent 1 (cash 1); not filled 0; room cut 2', ' By auction: open 4/6 bound cash; close 3/3 bound room']) {
+    assert.ok(text.includes(line), line);
+  }
+  assert.ok(!text.some(line => line.startsWith('Break-even')), 'no Probe buy yet: no line');
+  const probe = lines({ ...REPORT, break_even: { since: '2026-10-22', compute_per_session: 3.5, probe_per_session: 60,
+    edge_bp: 583.3, partial: false, why: null } });
+  assert.ok(probe.includes('Break-even edge +583.3 bp ($3.50 / $60.00 Probe, a session)'), probe.join('|'));
+  const unmeasured = lines({ ...REPORT, break_even: { ...REPORT.break_even, since: '2026-10-22', why: 'n/a: the meters' } });
+  assert.ok(unmeasured.includes('Break-even edge: n/a (compute not measured)'));
+  // Only the House's own names are worded; anything else is left out or reads unknown, never echoed.
+  const odd = lines({ ...REPORT, entries: { auctions: [{ at: 'Apple', planned: 3, filled: 1, bound: 'cash' },
+    { at: 'open', planned: 2, filled: 'AAPL', bound: 'AAPL 182.50' }],
+  totals: { ...REPORT.entries.totals, never: { cash: 2, 'Apple beats': 4, room: -1, budget: 1.5 }, filled: 'x' } } }).join(' ');
+  for (const banned of ['Apple', 'AAPL', '182.50']) assert.equal(odd.includes(banned), false, banned);
+  assert.ok(odd.includes('Real buys unknown/9 filled') && odd.includes('never sent 1 (cash 2)'), odd);
+  assert.ok(odd.includes('By auction: open unknown/2 bound none'), odd);
+  assert.ok(lines({ ...REPORT, entries: { auctions: [], totals: { ...REPORT.entries.totals, planned: 0 }, why: null } })
+    .includes('Real buys: none planned today'));
+  assert.ok(!lines({ ...REPORT, entries: undefined }).some(line => line.startsWith('Real buys')), 'an older House: no line');
 });
 
 test('through /v1/notify: one mail a day, keyed by its day, whatever id the House sends; a report with no day is refused', async () => {

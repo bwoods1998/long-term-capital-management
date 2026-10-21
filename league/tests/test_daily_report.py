@@ -17,7 +17,8 @@ from league.ops import budget as B
 from league.ops import daily_report as DR
 from league.ops import metered as MT
 from league.ops import stall as ST
-from league.tests.test_evl_health import CLEAN, StallHarness, et, iso
+from league.tests.evl_book_fakes import Book, cancel_at_once, entry_why
+from league.tests.test_evl_health import CLEAN, StallHarness, backfill_done, et, iso
 from league.tests.test_ops_budget import inputs as budget_inputs
 
 MON, TUE, WED, THU = dt.date(2026, 10, 19), dt.date(2026, 10, 20), dt.date(2026, 10, 21), dt.date(2026, 10, 22)
@@ -37,12 +38,27 @@ class Cal:
         return out
 
 
+def synthetic_book(root: Path, day: dt.date = TUE) -> None:
+    """The book's live.sqlite for the invented session (league/tests/evl_book_fakes.py): three real buys planned at the
+    open and one at the close, every one filled at once (release 1019f's `evl_entries` quiet)."""
+    book = Book(root)
+    try:
+        for at, n in (("open", 3), ("close", 1)):
+            for _ in range(n):
+                book.buy(day, at, orders=({"status": "filled", "filled": "2", "why": entry_why(at)},))
+    finally:
+        book.close()
+
+
 def synthetic_lane(root: Path, day: dt.date = TUE) -> None:
     """A lane store holding one invented session: filings, a news headline, verdicts, version 1 and 2 intents settled with
     invented returns, real fills of two programs (one at probe), the benchmark's invented bars, every receipt that keeps
-    the four causes quiet at 22:20 ET, and the lane's own report receipt."""
+    the causes quiet at 22:20 ET (release 1019f: the daily-index backfill of the reach done, PREREG-EVL-4's rows of each
+    close decided by themselves), the lane's own report receipt, and the book's live.sqlite (`synthetic_book`)."""
+    synthetic_book(root, day)
     st = ES.Store(root / "events")
     try:
+        backfill_done(st)
         C.refresh(st, Cal(), dt.date(2026, 10, 1), dt.date(2026, 12, 31))
         db = st.db
 
@@ -91,8 +107,10 @@ def synthetic_lane(root: Path, day: dt.date = TUE) -> None:
                 db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('SPY', ?, ?, ?, ?, ?, ?, "
                            "1e6, ?)", (day.isoformat(), adj, o, c, o, c, t("20:31")))
             receipts = (("record", "22:15", CLEAN, day), ("decide-close:" + MON.isoformat(), "15:47", {}, MON),
+                        ("decide-close-evl4:" + MON.isoformat(), "15:48", {}, MON),
                         ("decide-open:" + day.isoformat(), "09:15", {"verdicts": {"needed": 3, "answered": 3}}, day),
                         ("decide-close:" + day.isoformat(), "15:47", {"verdicts": {"needed": 0, "answered": 0}}, day),
+                        ("decide-close-evl4:" + day.isoformat(), "15:48", {}, day),
                         ("score", "20:30", {"day": day.isoformat(), "complete": True, "due": 7, "settled": 7}, day),
                         ("report", "21:05", {"day": day.isoformat()}, day))
             for job, hhmm, summary, on in receipts:
@@ -251,6 +269,39 @@ class DailyReport(ReportCase):
         trimmed = {**facts, "programs": facts["programs"][:1], "intents": facts["intents"][:1]}
         self.assertEqual(shape(trimmed), shape({**fixture, "programs": fixture["programs"][:1],
                                                 "intents": fixture["intents"][:1]}))
+
+    def test_the_days_real_buys_per_auction_and_the_break_even_edge(self):
+        """Release 1019f (the captain's A80 (2): the venue's cancels at once count as a fill gap): the day's real buys per
+        auction from the book's own rows, the constraint that bound each, and the break-even edge of Done's compute
+        clause (metered compute per session over the Probe dollars bought per session)."""
+        book = Book(self.root)   # (synthetic_book's rows are there: four buys filled)
+        book.buy(TUE, "open", orders=(cancel_at_once(TUE, "open"), {"status": "filled", "filled": "2",
+                                                                    "why": "A80's one re-send: " + entry_why("open")}))
+        book.buy(TUE, "open", status="refused", why="sizing: no whole share fits (cash): refused: no cash")
+        book.buy(TUE, "close", status="missed", why="not filled at the close auction (never sent: the event kind's day "
+                                                    "order count: 150 of 150 sent)")
+        book.decision(TUE, "close", {"EVL-NEWS-REACT-ON": {"picks": 5, "room": 3, "planned": 3, "skipped": {}}})
+        book.close()
+        facts = DR.facts(self.ctx(), self.root, self.now_, "2026-10-20", ledger=MT.load(self.root),
+                         budget=json.loads((self.root / "budget.json").read_text()))
+        entries = facts["entries"]
+        self.assertIsNone(entries["why"])
+        opening, closing = entries["auctions"]
+        self.assertEqual(opening, {"at": "open", "planned": 5, "filled": 4, "bound": "cash"})
+        self.assertEqual(closing, {"at": "close", "planned": 2, "filled": 1, "bound": "room"})
+        totals = entries["totals"]
+        self.assertEqual({k: totals[k] for k in DR.TOTAL_FIELDS},
+                         {"planned": 7, "filled": 5, "venue_cancels": 1, "resent": 1, "resent_filled": 1, "never_sent": 2,
+                          "unfilled": 0, "room_cut": 2})
+        self.assertEqual({k: n for k, n in totals["never"].items() if n}, {"cash": 1, "order_line": 1})
+        even = facts["break_even"]
+        self.assertEqual((even["since"], even["probe_per_session"], even["why"]), ("2026-10-20", 60.0, None),
+                         "one Probe buy, one session: 3 shares at an invented $20")
+        self.assertEqual(even["compute_per_session"], facts["profit"]["to_date"]["metered_usd"], "one session")
+        self.assertAlmostEqual(even["edge_bp"], even["compute_per_session"] / 60.0 * 1e4, delta=1.0)
+        self.assertEqual(DR.break_even(MT.load(self.root), None, TUE, self.now_)["why"], "n/a until a Probe buy")
+        for banned in ("XYZ", "12.34"):
+            self.assertNotIn(banned, json.dumps(entries), banned)
 
     def test_the_fill_gap_against_the_auction_prints_rides_the_report(self):
         """The goal's "fill gaps": the last 20 priced event twins' signed mean per side (the House's equity_twins job)."""

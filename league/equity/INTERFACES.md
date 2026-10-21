@@ -1554,6 +1554,18 @@ path.
   event lot so. The swarm's readers leave event programs out: league/ops/forward_register.py `live_instances`,
   league/ops/forward_twins.py `read_book`, league/ops/forward_report.py FW7 and FW9, league/ops/dlane_report.py
   `equity_closes`.
+- **10** (release 1019f; ops, READ-ONLY, the audit of the live House: alarms that did not exist): league/ops/evl_health.py
+  reads the book's own rows in `live.sqlite`, every open `mode=ro`, and writes nothing there. `entry_facts` (the stall
+  cause `evl_entries`, the daily report's real buys): `eq_event_intents` buys (`iid`, `program`, `version`, `day`, `at`)
+  joined with `eq_intents` (`status`, `why`: the book's own words at a buy's end, `_event_finish`, `_event_work_entry`,
+  `_size_event`), their `eq_orders` (`status`, `filled_qty`, `why`: "N shares at <band> (<binding>)", `tif`, `answer`:
+  `final`, `submitted_at`, `canceled_at`, `cancel_sent`, `cap`) and `eq_event_decisions.summary` (`programs`: `picks`,
+  `room`, `planned`, `skipped`); `handback_facts` (`evl_handback`): `eq_orders` with `filled_qty` > 0 joined with
+  `eq_lots` (`lane` "event", instance `:r`, `status`, `opened_at`, `closed_at`, `info.evl.event`), `eq_fills.at` and the
+  buy's `eq_intents` row (`status`, `updated_at`), against the lane's `real_fills`. A change of these columns or words
+  is a change of those readers (league/tests/test_evl_alarms_1019f.py writes them as the book does:
+  league/tests/evl_book_fakes.py, from live.py's and league/events/book.py's `SCHEMA`). Its `venue_cancel_ms` is the
+  rule of release 1019e's `live.venue_cancel_ms` (A80), read from the same stamps.
 - **Identities**: money `f4fc39ff` -> `285fa7af`, constitution `34bbe7a5` -> `fd38e4e1`; the options execution
   fingerprint, the equity identity, the xs identity and the gate contract do not move.
 - **Rollback**: `event.enabled` False (one owner deploy, one money-digest move: `25f5eb21` / `8a6a2160`); no lot is sold

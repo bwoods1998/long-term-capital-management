@@ -206,6 +206,13 @@ export const STALL_CAUSES = {
   // The goal's "fill gaps": the lane's real fills off the shadow's own auction prints by more than 15 bp either way (the
   // signed mean of a side over the last 20 priced fills: the House's event twins; worse or better, the House says).
   evl_fills: 'event-lane fills strayed from the auction prices',
+  // Release 1019f (the audit of the live House, lens "stalls": alarms that did not exist): the real buys of an auction
+  // that never became fills (under 90% filled, or one never sent: the venue's cancels at once, A80, and the constraint
+  // that bound), the daily-index backfill late or failing (the screen's looks wait on it), and real fills the book owes
+  // the lane's own record. Deploy the gateway first, as above.
+  evl_entries: 'event-lane real buys went unfilled or unsent',
+  evl_backfill: 'the event lane\'s daily-index backfill is late or failing',
+  evl_handback: 'real event fills are missing from the lane\'s record',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
@@ -299,6 +306,18 @@ const pct = value => (real(value) === null ? 'n/a' : `${Math.round(real(value))}
 const versionOf = value => (Number.isInteger(value) && value > 0 && value < 1000 ? value : null);
 const programOf = value => (typeof value === 'string' && PROGRAM_ID.test(value) ? value.slice(4) : null);
 const bandOf = value => (BANDS.includes(value) ? value : 'unknown');
+//: Release 1019f (league/ops/daily_report.py `day_entries`): why an event buy never reached the venue, and the
+//: constraint that bound an auction, as the House names them (league/ops/evl_health.py UNSENT and BOUND), in words.
+//: A name not here is not echoed.
+export const ENTRY_WORDS = {
+  order_line: 'order line', cash: 'cash', budget: 'loss budget', name_wall: 'name wall', invested: 'invested cap',
+  room: 'room', price: 'share price', min_order: 'minimum order', gateway: 'gateway', sale: 'same-cross sale',
+  busy: 'working order', blocked: 'a gate', unreadable: 'unread figure', other: 'other',
+};
+const AUCTIONS = { open: 'open', close: 'close' };
+const reasons = value => Object.entries(plain(value))
+  .filter(([name, n]) => Object.hasOwn(ENTRY_WORDS, name) && Number.isInteger(n) && n > 0)
+  .map(([name, n]) => `${ENTRY_WORDS[name]} ${n}`);
 
 /**
  * `text` as lines of at most `width` characters: as it is when it fits, else cut at the last space that fits (a word
@@ -415,6 +434,31 @@ export function composeReport(facts = {}) {
   if (Number.isInteger(gap.entry_n) && Number.isInteger(gap.exit_n) && gap.entry_n + gap.exit_n > 0) {
     add(` Fill gap vs the auction (worse +): entry ${bp(gap.entry_mean_bp)} (${count(gap.entry_n)}), exit `
       + `${bp(gap.exit_mean_bp)} (${count(gap.exit_n)})`, '   ');
+  }
+  // THE DAY'S REAL BUYS (release 1019f; A80 (2): the venue's cancels at once count as a fill gap): planned and
+  // filled, the venue's cancels and A80's re-sends, the never-sent by reason, sent and not filled, the decisions' room
+  // cut; per auction its filled of planned and the constraint that bound it. Then, once a Probe buy exists, THE
+  // BREAK-EVEN EDGE of Done's compute clause: metered compute per session over the Probe dollars bought per session.
+  const entries = plain(facts.entries), totals = plain(entries.totals);
+  if (Number.isInteger(totals.planned) && totals.planned > 0) {
+    add(`Real buys ${count(totals.filled)}/${count(totals.planned)} filled; venue cancels ${count(totals.venue_cancels)} `
+      + `(re-sent ${count(totals.resent)}, filled ${count(totals.resent_filled)})`, '   ');
+    const unsent = reasons(totals.never);
+    add(` never sent ${count(totals.never_sent)}${unsent.length ? ` (${unsent.join(', ')})` : ''}; not filled `
+      + `${count(totals.unfilled)}; room cut ${count(totals.room_cut)}`, '   ');
+    const per = list(entries.auctions).slice(0, 2)
+      .filter(row => row && Object.hasOwn(AUCTIONS, row.at) && Number.isInteger(row.planned) && row.planned > 0)
+      .map(row => `${AUCTIONS[row.at]} ${count(row.filled)}/${count(row.planned)} bound `
+        + `${Object.hasOwn(ENTRY_WORDS, row.bound) ? ENTRY_WORDS[row.bound] : 'none'}`);
+    if (per.length) out.push(...pack(' By auction:', per));
+  } else if (Number.isInteger(totals.planned)) {
+    add('Real buys: none planned today');
+  }
+  const even = plain(facts.break_even);
+  if (typeof even.since === 'string' && DAY.test(even.since)) {
+    add(real(even.edge_bp) === null ? 'Break-even edge: n/a (compute not measured)'
+      : `Break-even edge ${bp(even.edge_bp)} (${usd(even.compute_per_session)} / ${usd(even.probe_per_session)} `
+        + `Probe, a session)${even.partial === true ? ', costs partial' : ''}`, '   ');
   }
   const byId = new Map();
   let skipped = 0;
@@ -597,10 +641,19 @@ export function composeNotice(facts = {}) {
         const words = list.map(item => STALL_CAUSES[item.cause]);
         return words.length > 3 ? `${words.slice(0, 3).join(', ')} and ${words.length - 3} more` : words.join(', ');
       };
+      // Release 1019f: an INFO notice the House sends while an owner cause it told inside 12 hours still stands names
+      // that cause (`waiting_owner`, ids only, worded here; never part of the key): nothing NEW needs the owner.
+      const listed = new Set(entries.map(item => item.cause));
+      const waiting = owner.length ? [] : [...new Set(Array.isArray(facts.waiting_owner) ? facts.waiting_owner : [])]
+        .filter(cause => typeof cause === 'string' && Object.hasOwn(STALL_CAUSES, cause) && !listed.has(cause))
+        .slice(0, Object.keys(STALL_CAUSES).length);
       subject = owner.length ? `LTCM: needs you: ${named(owner)}` : `LTCM: stalled: ${named(entries)}`;
       lines.push(...(owner.length
         ? ['Only you can do this; the House keeps working around it meanwhile:', ...owner.map(item => `- ${item.step.replace(/\.$/, '')}.`)]
-        : ['Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.']), '');
+        : waiting.length
+          ? ['Nothing new here needs you: the House keeps working around it. Still waiting on you, as mailed within the '
+            + `last 12 hours: ${waiting.map(cause => STALL_CAUSES[cause]).join('; ')}.`]
+          : ['Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.']), '');
       for (const { entry, cause, step } of entries) {
         const numbers = entry.numbers && typeof entry.numbers === 'object' && !Array.isArray(entry.numbers)
           ? Object.entries(entry.numbers).filter(([name]) => FIGURE_NAME.test(name)).slice(0, STALL_NUMBERS) : [];
