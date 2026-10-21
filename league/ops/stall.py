@@ -130,8 +130,10 @@ open at 23:00 ET), from the lane's own store, judged only while the lane runs on
 `events.enabled`) and `ops.json` `stall.evl` is not false, and never while the lane's `events/STOP` stands (nor for 30
 minutes after it goes) nor, for `evl_verdicts`, while the House's `PAUSE` stands (the windows the job saw are kept:
 `stall.json` `evl_idle`); and `evl_fills` (the goal's "fill gaps": the lane's real fills off the shadow's auction prints
-by more than 15 bp either way, the signed mean of a side over the last 20 priced event twins); INFO, before the equity
-lanes' four in `CAUSES`, worded by the gateway.
+by more than 15 bp either way, the signed mean of a side over the last 20 priced event twins) and `evl_final` (A84,
+release 1019f: a seatable program's final record, league/events/screen.py `final_until`, more than 1 session behind
+what A69's fast path allows, the program and the judge's why named); INFO, before the equity lanes' four in `CAUSES`,
+worded by the gateway (deploy it first).
 
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
@@ -341,7 +343,7 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 #: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
-          "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills",
+          "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final",
           "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by

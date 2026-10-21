@@ -38,6 +38,43 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### A84: the fast path reads each feed by its own clean reads, and `evl_final`, on `fix/a84-fast-path-per-feed` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs` words `evl_final`), THEN THE HOUSE (`league/events/screen.py` is behind league/ci.py's wall, `league/ops/` is protected); before Oct 26 13:00Z, when the first looks' spans begin; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no setting, no money row)
+
+- **Why.** The audit of the live House (two lenses, independently): A69's fast path (league/events/screen.py
+  `_fast_passes`, A69 (i)) gave up on a close if ANY record pass of its ~48-hour span had a feed error. SEC's
+  getcurrent feed times out about four times a night (9 errored passes in 61 hours, 45-second timeouts between 22:25
+  and 00:50 ET, each followed by a clean pass within 2-4 minutes), so no span was ever whole and every look waited A66's
+  three sessions: the first looks would be written Mon Nov 2 / Tue Nov 3 instead of Thu Oct 29 / Fri Oct 30.
+- **THE JUDGE, A84 (the captain's reading, 19:58Z Oct 21, 2026, recorded before any look; the one judge change)**: "a
+  record pass whose read of a feed errored, was cut, or had no tickers copy is a MISSING read of that feed, not a broken
+  span; the span is whole when, for each of 8-K, Form 4 and news separately, clean reads of that feed are at most
+  FAST_RECORD_GAP (15 min) apart from before the span's start through its end." screen.py `_feed_problems` names, per
+  pass, the feeds it did not read cleanly (a pass `failed`, `running` or unreadable reads none; the 8-K read needs the
+  tickers copy; the news read must not be cut), and `_fast_passes` checks each of `RECORD_FEEDS` by its own clean reads;
+  the why names the feed, the gap and the first pass inside it that missed the feed, and how many did. Sound because
+  the feeds page back to the newest known accession and the news read restarts from the newest stored less 5 minutes.
+  (ii) and (iii) are unchanged, and so is A82's daily-index backfill, the completeness proof (iii) waits for.
+- **`evl_final`, an INFO stall cause** (league/ops/evl_health.py `final_lags`, `_final`, `FINAL_LAG_SESSIONS` 1;
+  league/ops/stall.py `CAUSES` after `evl_fills`; gateway/lib/email.mjs `STALL_CAUSES`: "event-lane looks wait longer
+  than the fast path allows"): a seatable program's final record (`screen.final_until` at the job's time) more than one
+  session behind what A69 allows (the session before the latest whose open decision has passed), the program lagging
+  most and the judge's own why named; read-only (league/ops/daily_report.py `ReadOnlyStore`, which gains `get_document`
+  for the tickers copy A69 (ii) reads); not judged for a retired program, one with every look written or one not yet
+  registered; quiet under `events/STOP`, judged through a `PAUSE`; its own reader (a failure is an entry of `errors`,
+  the other five stay judged).
+- **Tests** (league/tests/test_events_fast_path_a84.py, new; each fails on the base): the audit's replay (four
+  getcurrent timeouts a night on five nights, each followed by a clean pass 3 minutes later: whole, the look written one
+  session after its close), a feed with no clean read for 20 minutes (not whole, the feed named), the gap at exactly 15
+  minutes (whole) and 18 (not), a span's start, every pass missing one feed in turn (whole) and one feed's errors never
+  judging another, no tickers copy a missing 8-K read only, (ii), (iii) and A82's backfill unchanged, the House's own
+  record pass (a getcurrent timeout, then the filing accepted meanwhile fetched by the next clean pass, and 20 minutes
+  of timeouts not whole), and `evl_final` (standing with no fast path, clear on a whole record and on the replay, one
+  session tolerated, retired and unregistered programs left out, its failure isolated, nothing written, through the
+  stall job's mail). league/tests/test_events_1019c.py's A69 tests read A84: one bad pass among clean ones is now whole,
+  four in a row (no clean read of that feed for 40 minutes) keep A66. The gateway's stall-notice test words the cause.
+- **Deploy**: docs/operations.md, **A84** (the gateway first, then the House). **Rollback**: the House first, to the
+  release this one replaced; the gateway's word can stay.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head

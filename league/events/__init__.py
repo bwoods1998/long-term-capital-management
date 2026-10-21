@@ -12,7 +12,7 @@ Standard library only, like the rest of the league. Modules: store (events.sqlit
 (sessions, Eastern time), edgar (filings), news, universe, verdicts, programs, score, screen, report; the CLI is
 `python -m league.events <command> --state DIR`.
 
-THE EVENT LANE'S RECEIPTS, the House's contract with the lane (release 1019c). The stall job's four causes
+THE EVENT LANE'S RECEIPTS, the House's contract with the lane (release 1019c). The stall job's event-lane causes
 (league/ops/evl_health.py) read them read-only from `<state>/events/events.sqlite` `receipts` and judge what a pass DID,
 never its status alone (a pass that says `ok` and read nothing is no progress). Every writer keeps to this:
 - `record` (house.py `_record`): one a record pass, `ok` when it ran to its end (a bound reached mid-fetch included),
@@ -21,6 +21,10 @@ never its status alone (a pass that says `ok` and read nothing is no progress). 
   bound), each with `"error": "<why>"` when that read failed, and `"tickers": {"error": ...}` when no tickers copy could
   be read (no 8-K can be fetched then). A CLEAN pass finished `ok` with the three blocks, none in error, no EDGAR feed
   whose every fetch failed and no tickers error: `evl_record` stands when none finished in 30 minutes, naming the feeds.
+  The screen's fast path (league/events/screen.py, A69 (i) as A84 reads it) reads the same blocks FEED BY FEED: a pass
+  whose read of a feed errored, was cut (the news) or had no tickers copy (the 8-Ks) is a missing read of that feed, and
+  each feed's clean reads must be at most 15 minutes apart across a close's span; `evl_final` reads the horizon that
+  gives (`screen.final_until`), never a receipt of its own.
 - `decide-open:<day>` and `decide-close:<day>` (run.decide_open, run.decide_close; none under `ask_only`): one a
   decision run, `ok`, `pending` while a reading program waits for a verdict, `cut` (the House's bound) or `failed`. The
   summary carries `verdicts: {needed, answered}`, the distinct (event, prompt) verdicts the decision's reading programs

@@ -36,15 +36,23 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
   the mean gap; the review of r2/alarms, its major 3: a gap either way means the fills or the shadow's prices, the
   evidence the screen judges, are mis-measured), with at least `FILL_MIN` (5) of them; the text says which way. Not
   judged before the first real fill is priced.
+- `evl_final` (A84, release 1019f; the audit that found A69's fast path never fired): a seatable program's FINAL RECORD
+  (league/events/screen.py `final_until`, the horizon every look waits for) more than `FINAL_LAG_SESSIONS` (1) session
+  behind what A69 allows (the session before the latest whose open decision has passed: A69 makes a close final once
+  the session after it has had its open decision), the program and the judge's own why named (the first lagging the
+  most, in the table's order). A program retired, with every look written, or not yet registered is not judged. The
+  judge is READ, never run for a look: `final_until` reads the receipts, filings, calendar and meta of the same store
+  read-only (league/ops/daily_report.py `ReadOnlyStore`) and computes no outcome.
 
-IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the four are not judged,
+IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the six are not judged,
 nor for `RESUME_MINUTES` after it goes (the lane's first passes); a decision whose window fell inside it is excused for
 good. While the House's maintenance `<state>/PAUSE` stands (no paid call: no verdict) `evl_verdicts` is not judged, and a
-run of unanswered receipts is counted from the pause's end. The stall job keeps the windows it saw (`idle_windows`,
+run of unanswered receipts is counted from the pause's end; `evl_final` is judged through a pause (its why then names
+the decision that waits on a verdict: the looks wait all the same). The stall job keeps the windows it saw (`idle_windows`,
 stall.json `evl_idle`). WHEN THEY ARE JUDGED AT ALL: only while the lane runs on the House (league/config.json
 `events.enabled` true) and `<state>/ops.json` `stall.evl` is not false. A store that cannot be read is "Not judged" and an
-entry of the job's `errors`; a lane switched on with no store yet has recorded nothing (`evl_record` stands). All four are
-INFO with no owner step: each is the House's to fix (a release or the captain).
+entry of the job's `errors` (`evl_final` reads apart: its failure leaves the other five judged); a lane switched on
+with no store yet has recorded nothing (`evl_record` stands). All six are INFO with no owner step: each is the House's to fix (a release or the captain).
 """
 from __future__ import annotations
 
@@ -58,8 +66,8 @@ from zoneinfo import ZoneInfo
 from . import guard
 from . import schedule as S
 
-CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills")
-#: The stall job's key in `<state>/ops.json` that switches these four off: `{"stall": {"evl": false}}`.
+CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final")
+#: The stall job's key in `<state>/ops.json` that switches these six off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
 STORE = Path("events") / "events.sqlite"
@@ -81,6 +89,9 @@ FILL_LOOK = 20
 FILL_GAP_BP = 15.0
 FILL_MIN = 5
 TWINS_KEY = "equity_twins"
+#: THE FINAL RECORD (`evl_final`, A84): the most sessions a seatable program's final record may lag what A69's fast path
+#: allows before the cause stands (one: a day's backfill or one late decision; A66's three-session wait alone is two).
+FINAL_LAG_SESSIONS = 1
 #: The record pass's three reads (league/events/house.py `_record_steps`: the summary's blocks), and their names here.
 FEEDS = (("8-K", "8k"), ("4", "form4"), ("news", "news"))
 #: The idle windows the stall job keeps (`idle_windows`): this many of each kind, none older than this.
@@ -105,6 +116,13 @@ DOING = {
     "evl_score": ("The lane's nightly score settles every due intent at the listing exchange's auction prints once the tape "
                   "is 16 minutes old (league/events/score.py), resumable pass by pass; the next night's passes try again "
                   "what this one left. The screen's looks wait for every block they cover (PREREG-EVL-1 section 7)."),
+    "evl_final": ("The screen job writes each look as soon as its close is FINAL for the program: by A69's fast path "
+                  "once the session after it has had its open decision, when each feed was read whole (A84: the 8-K, "
+                  "Form 4 and news feeds each read cleanly at most 15 minutes apart), no filing of its windows is left "
+                  "listed or failed, the daily-index backfills have run and every decision through it is made; else by "
+                  "A66's three sessions. The record passes, their retries and the backfill fill most gaps by "
+                  "themselves; one that stays is the House's to fix (a release or the captain). A late look keeps its "
+                  "as-of date and its record: only the band move it makes comes later."),
     "evl_fills": ("Each real event lot buys at the opening or closing auction with a limit-on-open or limit-on-close order "
                   "and sells at its own auction; the House sets every closed lot beside the shadow's auction print (the "
                   "equity_twins job, daily and before each open). Once real fills exist PREREG-EVL-1 section 5 checks the "
@@ -121,7 +139,7 @@ def _get(ctx: Any, name: str, default: Any = None) -> Any:
 
 
 def switched_off(ctx: Any) -> bool:
-    """THE OWNER'S SWITCH (`<state>/ops.json` `stall.evl` false): the four are not judged; absent, they are."""
+    """THE OWNER'S SWITCH (`<state>/ops.json` `stall.evl` false): the six are not judged; absent, they are."""
     settings = _get(ctx, "settings")
     block = settings.get("stall") if isinstance(settings, Mapping) else None
     return isinstance(block, Mapping) and block.get(SWITCH) is False
@@ -353,6 +371,81 @@ def _fills(now: float, twins: list[Mapping[str, Any]]) -> dict[str, Any]:
             "doing": DOING["evl_fills"], "owner_step": None, "onset": None}
 
 
+def final_lags(root: str | Path, now: float) -> list[dict[str, Any]]:
+    """`evl_final`'s reads: for each seatable program (league/events/programs.py `SEATING`, in its order) registered by
+    `now`, neither retired (league/events/bands.py `bands`) nor with every look written (league/events/screen.py
+    `written_v2`), its final record (`screen.final_until` at `now`) beside what A69 allows: [{program, version, horizon,
+    allowed, lag, why, onset}], `lag` the sessions after `horizon` (from the program's registration day when none is
+    final) through `allowed`, `onset` when that lag first exceeded `FINAL_LAG_SESSIONS` (the open decision of the session
+    two after the last allowed within it). A program with no session A69 can make final yet is left out. Read-only."""
+    from ..events import bands as BA
+    from ..events import calendar as C
+    from ..events import programs as P
+    from ..events import screen as SC
+    from .daily_report import ReadOnlyStore
+
+    at = dt.datetime.fromtimestamp(now, dt.timezone.utc)
+    today = at.astimezone(NY).date()
+    out: list[dict[str, Any]] = []
+    with guard.readonly():
+        store = ReadOnlyStore(Path(root) / STORE.parent)
+        try:
+            band = BA.bands(store)
+            for prog in P.SEATING:
+                if prog.registered_at > at or band.get((prog.id, prog.version)) == "retired":
+                    continue
+                if SC.written_v2(store, prog.id, prog.version)["next"] is None:
+                    continue
+                first = prog.registered_at.astimezone(NY).date()
+                opened = [x for x in C.sessions(store, first, today) if x.open_decide <= at]
+                before = [y for y in C.previous(store, opened[-1].day, 1) if y.day >= first] if opened else []
+                if not before:
+                    continue        # (A69 can make no close final yet: the session after one has had no open decision)
+                allowed = before[-1].day
+                horizon, why = SC.final_until(store, prog.id, prog.version, today, at)
+                after = C.sessions(store, first if horizon is None else horizon + dt.timedelta(days=1), today)
+                lag = len([x for x in after if x.day <= allowed])
+                onset = after[FINAL_LAG_SESSIONS + 1].open_decide.timestamp() \
+                    if lag > FINAL_LAG_SESSIONS and len(after) > FINAL_LAG_SESSIONS + 1 else None
+                out.append({"program": prog.id, "version": int(prog.version), "horizon": horizon, "allowed": allowed,
+                            "lag": lag, "why": str(why), "onset": onset})
+        finally:
+            store.close()
+    return out
+
+
+def _final(now: float, rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """`evl_final` (the module docstring): a seatable program's final record more than `FINAL_LAG_SESSIONS` behind what
+    A69 allows, the one lagging most (the first in the table's order among them) named with the judge's why."""
+    if not rows:
+        return _not_judged("no seatable program has a close A69's fast path could make final yet")
+    lagging = [r for r in rows if int(r["lag"]) > FINAL_LAG_SESSIONS]
+    worst = max(lagging, key=lambda r: int(r["lag"]), default=None)    # (max keeps the first of equal lags)
+    allowed = max(r["allowed"] for r in rows)
+
+    def day(value: Any) -> str | None:
+        return None if value is None else value.isoformat()
+    if worst is None:
+        what = (f"Every seatable program's final record is within {FINAL_LAG_SESSIONS} session of what A69's fast path "
+                f"allows ({allowed.isoformat()}; {len(rows)} programs).")
+    else:
+        what = (f"The event lane's final record of {worst['program']} v{worst['version']} reaches "
+                f"{day(worst['horizon']) or 'no session'} while A69's fast path allows {worst['allowed'].isoformat()}: "
+                f"{worst['lag']} sessions behind, so its looks wait"
+                + (f" ({len(lagging)} programs lag more than {FINAL_LAG_SESSIONS} session)" if len(lagging) > 1 else "")
+                + f". The judge: {str(worst['why'])[:220]}.")
+    onsets = [float(r["onset"]) for r in lagging if r.get("onset") is not None]
+    return {"stalled": worst is not None, "judged": True, "what": what,
+            "numbers": {"programs": len(rows), "lagging": len(lagging),
+                        "program": None if worst is None else str(worst["program"]).lower(),
+                        "version": None if worst is None else worst["version"],
+                        "final_through": None if worst is None else day(worst["horizon"]),
+                        "a69_allows": allowed.isoformat() if worst is None else worst["allowed"].isoformat(),
+                        "lag_sessions": None if worst is None else worst["lag"],
+                        "max_lag_sessions": max(int(r["lag"]) for r in rows)},
+            "doing": DOING["evl_final"], "owner_step": None, "onset": min(onsets) if onsets else None}
+
+
 def _failing(row: Mapping[str, Any]) -> list[str]:
     """The feeds a finished record pass did not read cleanly (`FEEDS`' names), [] for a clean pass."""
     summary = _loads(row.get("summary"))
@@ -577,7 +670,7 @@ def _score(now: float, f: Mapping[str, Any], latest: Mapping[str, Any]) -> dict[
 
 def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None = None, idle: Any = None,
            line: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """THE STALL JOB'S CALL (league/ops/stall.py `run`): the four causes' checks (the module docstring). `idle` is
+    """THE STALL JOB'S CALL (league/ops/stall.py `run`): the six causes' checks (the module docstring). `idle` is
     `idle_windows`' answer (None: read now, with nothing kept); `line` the lane's verdict line and the day's spend
     ({line_usd, spent_usd}, `verdict_line`). Never raises: a store that cannot be read is "Not judged" and an entry of
     `errors`."""
@@ -612,10 +705,20 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
         out["evl_score"] = (_not_judged("no session in the last 10 days has passed its 23:00 ET") if latest is None
                             else _score(now, f, latest))
         out["evl_fills"] = _fills(now, event_twins(root))
+        if not (Path(root) / STORE).exists():
+            out["evl_final"] = _not_judged("the event lane has no store yet")
+        else:
+            try:    # (its own reader: a failure here blinds no other cause)
+                out["evl_final"] = _final(now, final_lags(root, now))
+            except Exception as exc:  # noqa: BLE001 - the judge's horizon could not be read: said, not raised
+                if errors is not None:
+                    errors.append(f"the event lane's final records could not be read ({type(exc).__name__}): evl_final "
+                                  "is not judged")
+                out["evl_final"] = _not_judged(f"the final records could not be read ({type(exc).__name__})")
         return out
     except Exception as exc:  # noqa: BLE001 - an alarm that cannot see says so, and the rest of the job goes on
         if errors is not None:
-            errors.append(f"the event lane's store could not be read ({type(exc).__name__}): its four causes are not judged")
+            errors.append(f"the event lane's store could not be read ({type(exc).__name__}): its six causes are not judged")
         return {c: _not_judged(f"the event lane's store could not be read ({type(exc).__name__})") for c in CAUSES}
 
 
@@ -648,6 +751,6 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
 
 __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "switched_off", "lane_on", "decisions",
            "entry_kinds", "sessions", "idle_windows", "made", "tally", "score_session", "verdict_line", "event_twins",
-           "fill_gaps", "FILL_LOOK", "FILL_GAP_BP", "FILL_MIN",
+           "fill_gaps", "FILL_LOOK", "FILL_GAP_BP", "FILL_MIN", "final_lags", "FINAL_LAG_SESSIONS",
            "RECORD_MINUTES", "DECIDE_GRACE_MINUTES", "DECIDE_LOOKBACK_HOURS", "VERDICT_GRACE_MINUTES", "RESUME_MINUTES",
            "SCORE_BY", "FEEDS"]

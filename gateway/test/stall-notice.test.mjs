@@ -286,6 +286,14 @@ test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and th
     worse: 'none', better: 'entry,exit' } };
   const betterText = composeNotice(notice(better)).text.split('\n');
   for (const line of ['- entry_mean_bp: -40', '- off: entry,exit', '- better: entry,exit']) assert.ok(betterText.includes(line), line);
+  // A84 (release 1019f): the final record behind what A69 allows, the program a lower-case token, its days dates.
+  const final = { ...BIRTHS, cause: 'evl_final', numbers: { programs: 12, lagging: 12, program: 'evl-ins-buy-o1', version: 2,
+    final_through: '2026-10-27', a69_allows: '2026-10-29', lag_sessions: 2, max_lag_sessions: 2 } };
+  assert.equal(composeNotice(notice(final)).subject, 'LTCM: stalled: event-lane looks wait longer than the fast path allows');
+  const finalText = composeNotice(notice(final)).text.split('\n');
+  for (const line of ['- program: evl-ins-buy-o1', '- final_through: 2026-10-27', '- a69_allows: 2026-10-29', '- lag_sessions: 2',
+    NONE_NEEDED]) assert.ok(finalText.includes(line), line);
+  assert.equal(stallKey(notice(final, fills)), 'stall:info:evl_fills+evl_final');
   // The cap breach hold (the review's major 1) is a yes or no among the cause's figures.
   assert.ok(composeNotice(notice({ ...cap, numbers: { ...cap.numbers, held: true } })).text.split('\n').includes('- held: yes'));
 });
