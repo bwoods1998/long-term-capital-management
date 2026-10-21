@@ -124,7 +124,8 @@ programs trades real money at learning size.
   FACTS (a SQLite authorizer refuses bars, marks, outcomes, looks, bands, band_history, real_fills, universe and meta),
   the VALIDATOR (>= 3 selected events a session over the last 20 sessions, Jaccard < 0.8 against every registered
   program, the stated budget: 0.10 a seatable birth, at most 2.0 over every seatable version ever registered with
-  PREREG's 0.9 included, at most 3 seatable births a night, records free), the PROPOSER (one claude-haiku-4-5-20251001
+  PREREG's 0.9 included, at most 3 seatable births a night, records free; in release 1019e A81's: the lane's stated
+  3.0, counted from SEATING's own sum, 1.2 with PREREG-EVL-4), the PROPOSER (one claude-haiku-4-5-20251001
   call a night at temperature 0, its prompt sha and answer stored in `birth_calls`, at most 6 specs, $0.25 a night cap)
   and the REGISTRATION (canonical lines appended to `docs/births/<night>.jsonl` through `POST /v1/github/docs`; the
   later of GitHub's commit time and the House's receipt is the registration time, kept in the store's new `births`

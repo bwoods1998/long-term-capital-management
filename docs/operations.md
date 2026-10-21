@@ -528,7 +528,7 @@ PAUSE; the night's facts, candidates and verdicts in `birth_calls` and `birth_ca
 `births`, each with its GitHub commit). The captain's own births, with no model call: `python3 -m league.events --state
 /workspace/state/events births --specs FILE` on the box (FILE a JSON list of `{spec, why}`; `--dry-run` validates and
 records only); the facts alone: `facts`. Watching: the daily report's "Births" line and "Expected false passes" (0.10 a
-seatable birth, at most 2.0 in all). Stopping: `events.births` false stops new births (a deploy); the registered
+seatable birth, at most the lane's stated 3.0 in all, A81). Stopping: `events.births` false stops new births (a deploy); the registered
 births go on trading at their bands, as any program (a new version is the only change; retirement is the screen's).
 A night whose registration got no answer reads `unknown` and is posted again the next night.
 

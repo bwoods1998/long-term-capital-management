@@ -2,7 +2,8 @@
 
 Held here: the GRAMMAR (its fields and only those, every family the lane reads, verdict thresholds on stored scores
 only) and the canonical sha; the VALIDATOR's refusals (rate, duplicate, id, budget, three a night) and its budget
-arithmetic (0.10 a seatable birth, 2.0 over every seatable version, PREREG's 0.9 included, records free); the FACTS
+arithmetic (A81: 0.10 a seatable birth, the lane's stated 3.0 over every seatable version, counted from SEATING's own
+sum with PREREG-EVL-1 to -4's 1.2 included, at most 3 a night, records free); the FACTS
 never reading bars, marks, outcomes, looks, bands (nor band_history, real_fills, the universe or meta); the PROPOSER
 through a fake gateway (one Haiku call at temperature 0, its prompt sha and answer stored, never asked twice, the
 night's $0.25 cap); REGISTRATION through a fake docs route (the later of GitHub's commit time and the House's receipt;
@@ -511,9 +512,9 @@ class Validation(unittest.TestCase):
         self.assertIn("fields outside the grammar", out[5]["reasons"][0])
         self.assertEqual(out[6]["jaccard"]["max"], 0.5)
 
-    def test_the_budget_charges_a_tenth_a_seatable_birth_to_two_and_three_a_night_records_free(self):
+    def test_the_budget_charges_a_tenth_a_seatable_birth_to_three_and_three_a_night_records_free(self):
         st = self.s.st
-        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.2, "limit": 2.0, "left": 0.8,
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.2, "limit": 3.0, "left": 1.8,
                                                      "seatable_left_tonight": 3, "charge": 0.1})
         four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
         out = BI.validate(st, BI.Facts(st, self.AS_OF), four, night=self.AS_OF)
@@ -522,16 +523,52 @@ class Validation(unittest.TestCase):
         record = self.candidate("EVL-B-8K-REC", ["3.01"], seatable=False)
         self.assertTrue(BI.validate(st, BI.Facts(st, self.AS_OF), four[:3] + [record], night=self.AS_OF)[3]["ok"],
                         "records are free")
-        for i in range(7):      # seven seatable births registered on earlier nights: 1.2 + 0.7 = 1.9
+        for i in range(17):     # seventeen seatable births registered on earlier nights: 1.2 + 1.7 = 2.9
             self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
                             night=f"2026-09-{10 + i}", seq=i)
         P.load_births(st)
-        self.assertEqual(SN.expected_false_passes(st)["versions"], 19)
+        self.assertEqual(SN.expected_false_passes(st)["versions"], 29)
         self.assertAlmostEqual(BI.budget(st, self.AS_OF)["left"], 0.1)
         out = BI.validate(st, BI.Facts(st, self.AS_OF), four[:2] + [record], night=self.AS_OF)
         self.assertEqual([c["ok"] for c in out], [True, False, True])
-        self.assertIn("the false-pass budget: 2.0 of 2.0 used", out[1]["reasons"][0])
+        self.assertIn("the false-pass budget: 3.0 of 3.0 used", out[1]["reasons"][0])
         self.assertEqual([c["charge"] for c in out], [1, 0, 0])
+
+    def test_a81_the_budget_is_the_lanes_stated_three_counted_from_seatings_own_sum(self):
+        """A81 (16:25Z Oct 21, 2026): the validator's lifetime cap is A71's stated 3.0 (the screen's LANE_BUDGET, never
+        R3's draft 2.0), counted from SEATING's own sum (PREREG-EVL-1 to -4: 1.2; never a written 0.9), 0.10 a seatable
+        birth, at most 3 a night: at most 18 seatable births ever; a retired program's looks stay counted."""
+        st = self.s.st
+        self.assertEqual((BI.BUDGET_TENTHS, BI.CHARGE_TENTHS, BI.SEATABLE_A_NIGHT), (30, 1, 3))
+        self.assertEqual((BI.BUDGET_TENTHS, BI.CHARGE_TENTHS), (round(SN.LANE_BUDGET * 10), round(SN.FALSE_PASS_RATE * 10)),
+                         "read from the screen, never restated")
+        self.assertEqual(SN.LANE_BUDGET, 3.0)
+        self.assertEqual(len(P.PREREG_SEATING), 12, "the nine version 2 rows and PREREG-EVL-4's three")
+        self.assertEqual({p.prereg for p in P.PREREG_SEATING}, {3, 4})
+        self.assertEqual(BI.budget_used_tenths(st), 12)
+        self.assertEqual(BI.budget(st, self.AS_OF)["used"], SN.expected_false_passes(st)["expected"])
+        # SEATING's own sum, whatever it holds: without PREREG-EVL-4's three it would read 0.9; with them 1.2.
+        with mock.patch.object(P, "SEATING", tuple(p for p in P.PREREG_SEATING if p.prereg != 4)):
+            self.assertEqual(BI.budget_used_tenths(st), 9)
+        self.assertEqual(BI.budget_used_tenths(st), 12)
+        # A retired program stays counted (a test that was run is never refunded).
+        from league.events import bands as BA
+
+        BA.set_band(st, "EVL-ERN-READ-O1", 2, "retired", since="2026-11-01T21:00:00Z", why="invented")
+        self.assertEqual(BI.budget_used_tenths(st), 12)
+        # 18 seatable births exhaust it: 1.2 + 1.8 = 3.0, and the 19th is refused.
+        for i in range(18):
+            self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
+                            night=f"2026-09-{10 + i}", seq=i)
+        P.load_births(st)
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 3.0, "limit": 3.0, "left": 0.0,
+                                                     "seatable_left_tonight": 0, "charge": 0.1})
+        [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])], night=self.AS_OF)
+        self.assertFalse(out["ok"])
+        self.assertIn("the false-pass budget: 3.0 of 3.0 used, a seatable birth adds 0.1", out["reasons"][0])
+        [rec] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"], seatable=False)],
+                            night=self.AS_OF)
+        self.assertTrue(rec["ok"], "records are free")
 
     def test_twenty_sessions_or_no_rate(self):
         st = self.s.st
@@ -578,7 +615,7 @@ class TheProposer(Validation):
         self.assertTrue(headers[V.REQUEST_HEADER].startswith("evl-births:2026-11-06:"))
         user = body["messages"][0]["content"]
         self.assertIn(json.dumps(sheet, sort_keys=True, separators=(",", ":")), user, "the facts, whole")
-        self.assertIn("1.2 of 2.0 used", user)
+        self.assertIn("1.2 of 3.0 used", user)
         row = dict(st.db.execute("SELECT * FROM birth_calls").fetchone())
         self.assertEqual((row["prompt_sha"], row["model"], row["status"], row["answer"], row["usd"]),
                          (BI.prompt_sha(), BI.MODEL, "ok", answer, 0.0042))

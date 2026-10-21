@@ -23,7 +23,8 @@ activity. The lane's page is [docs/events.md](docs/events.md).
 - **Births** (R3, built, not deployed): new programs born each night from outcome-free facts by the architect (Claude
   Haiku 4.5, one call, at most $0.25 a night) or the captain, validated by code and registered as lines of
   `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a seatable birth,
-  at most 2.0 in all ([docs/events.md](docs/events.md), "Births").
+  at most the lane's stated 3.0 in all, counted from every seatable version (1.2 before any birth), three a night (A81;
+  [docs/events.md](docs/events.md), "Births").
 - **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
   sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
 - **Cost follows profit**: metered compute at most $5 a day plus half the trailing week's realized net profit, never

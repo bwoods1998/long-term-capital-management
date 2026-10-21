@@ -26,7 +26,8 @@ they are and how the code runs them. When this page and a pre-registration disag
   (PREREG-EVL-4 section 3; 1.8 left for later births, each later file stating its draw).
 - [R3's births](#births-r3-not-yet-deployed) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free facts by
   the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`, judged
-  by PREREG-EVL-3's screen unchanged, rationed by a stated false-pass budget (0.10 a seatable birth, 2.0 in all).
+  by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable birth,
+  3.0 in all counted from the 1.2 above, at most 3 a night: at most 18 seatable births).
 
 ## The programs
 
@@ -493,8 +494,11 @@ last 20 sessions by selection count; Jaccard < 0.8 of the last 20 sessions' sele
 program (records, controls and births included: stricter than "every live program", and it reads no band) and against
 every birth accepted before it that night; and THE FALSE-PASS BUDGET, stated: each seatable birth adds 0.10 expected
 false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the stated charge), at
-most 2.0 over every seatable version ever registered in the lane (PREREG-EVL-3's nine use 0.9, so at most eleven
-seatable births ever), at most 3 seatable births a night; records are free. The captain's births go through the same
+most the lane's stated lifetime budget, 3.0 (A81, the captain's, 16:25Z Oct 21, 2026: A71's budget,
+`screen.LANE_BUDGET`, not R3's draft 2.0), over every seatable version ever registered in the lane, counted from
+SEATING's own sum as the report counts it (`screen.expected_false_passes`: PREREG-EVL-1 to -4's twelve use 1.2, so at
+most eighteen seatable births ever; a retired program stays counted), at most 3 seatable births a night; records are
+free. The captain's births go through the same
 validator and registration with no model call: `python -m league.events --state DIR births --specs FILE` (a JSON list
 of `{spec, why}`; `--dry-run` validates only); `facts [--specs FILE]` prints the night's facts, with each spec's
 selection count by session. Every candidate's verdict and figures (its count, its highest Jaccard and with whom) are

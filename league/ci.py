@@ -243,9 +243,10 @@ PENDING_GATEWAY += ("league/events/universe.py", "league/events/calendar.py", "l
 #: follow-up.
 PENDING_GATEWAY += ("league/events/house.py",)
 #: R3'S BIRTHS (Oct 19, 2026; goal-2026-10-19/R3-SPEC.md): league/events/births.py holds the grammar every birth's rule
-#: is read by (what a seated birth buys with real money), the validator and its stated false-pass budget (2.0 over
-#: every seatable version, 0.10 a seatable birth, three a night), the outcome-free facts' wall (no bar, mark, outcome,
-#: look or band reaches the architect) and the registration whose time a birth counts its events from: selection
+#: is read by (what a seated birth buys with real money), the validator and its stated false-pass budget (A81: the
+#: lane's 3.0 over every seatable version, counted from SEATING's own sum, 0.10 a seatable birth, three a night), the
+#: outcome-free facts' wall (no bar, mark, outcome, look or band reaches the architect) and the registration whose time
+#: a birth counts its events from: selection
 #: constants and a secrecy rule, like league/swarm/dlane.py. The registered lines themselves (docs/births/) are data the
 #: House appends through the gateway's docs route, never read back from the tree, so they stay outside the wall (the
 #: updater ships main past them). It waits here for the gateway's merge-list follow-up, as the lane's judges do.

@@ -52,11 +52,14 @@ THE VALIDATOR (`validate`, code, not a model): the grammar; a new id and sha; a 
 selected events a session over the last 20 sessions by selection count; no duplicate, the Jaccard of the last 20
 sessions' selected events < `JACCARD_MAX` (0.8) against every registered program (records, controls and births too:
 stricter than "every live program", and it reads no band) and every birth accepted before it the same night; and THE
-FALSE-PASS BUDGET (R3-SPEC section 3, stated): each seatable birth adds 0.10 expected false passes (the measured
-zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the stated charge), at most 2.0 over every
-seatable version ever registered in the lane, the PREREG files' 0.9 included (counted, as the report counts them, by
-league/events/screen.py `expected_false_passes`), and at most `SEATABLE_A_NIGHT` (3) seatable births a night. Records
-are free.
+FALSE-PASS BUDGET (R3-SPEC section 3 as the captain's A81 states it, 16:25Z Oct 21, 2026): each seatable birth adds
+0.10 expected false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the
+stated charge, the screen's `FALSE_PASS_RATE`), at most A71's stated lifetime budget of the lane, 3.0
+(league/events/screen.py `LANE_BUDGET`, PREREG-EVL-4 section 3), over every seatable version ever registered in the
+lane, counted from SEATING's own sum as the report counts it (league/events/screen.py `expected_false_passes`:
+PREREG-EVL-1 to -4's twelve seatable versions, 1.2, and every seatable birth once loaded; never a figure written
+here), and at most `SEATABLE_A_NIGHT` (3) seatable births a night: so at most 18 seatable births before the budget is
+spent. A retired program's past looks stay counted (a test that was run is never refunded). Records are free.
 
 THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 at temperature 0 (the lane's
 `/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict
@@ -92,6 +95,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import calendar as C
 from . import programs as P
+from . import screen as SN
 from . import store as S
 from . import verdicts as V
 
@@ -140,10 +144,12 @@ CONTROL_SUFFIX = "-CTRL"
 SESSIONS = 20
 MIN_RATE = 3
 JACCARD_MAX = 0.8
-#: The false-pass budget, in tenths of an expected false pass (integers: no float drift): each seatable birth 1 (0.10),
-#: every seatable version ever registered at most 20 (2.0), PREREG-EVL-3's nine already 9.
-CHARGE_TENTHS = 1
-BUDGET_TENTHS = 20
+#: The false-pass budget (A81), in tenths of an expected false pass (integers: no float drift): each seatable birth the
+#: screen's FALSE_PASS_RATE, 1 (0.10); every seatable version ever registered at most the lane's stated lifetime budget,
+#: LANE_BUDGET, 30 (3.0), read from the screen and never restated here; what is used is SEATING's own sum
+#: (`budget_used_tenths`: PREREG-EVL-1 to -4's twelve, 12, before any birth); at most 3 seatable births a night.
+CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
+BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
 
 #: THE PROPOSER (R3-SPEC section 2).
@@ -766,11 +772,11 @@ def _events(selected: Mapping[dt.date, Sequence[str]]) -> set[str]:
 
 # ----------------------------------------------------------------------------------------------------------- the budget
 def budget_used_tenths(store: Any) -> int:
-    """Tenths of an expected false pass already charged: 1 for every seatable version ever registered in the lane, the
-    PREREG files' nine and every seatable birth (league/events/screen.py `expected_false_passes`, after `load_births`)."""
-    from . import screen as SN
-
-    return int(SN.expected_false_passes(store)["versions"]) * CHARGE_TENTHS
+    """Tenths of an expected false pass already charged (A81): SEATING's own sum as the report counts it
+    (league/events/screen.py `expected_false_passes`, after `load_births`: 0.10 for every seatable version ever
+    registered in the lane, PREREG-EVL-1 to -4's twelve and every seatable birth, retired ones included, and any later
+    version of a seatable program the store has seen). Never a figure written here."""
+    return int(round(float(SN.expected_false_passes(store)["expected"]) * 10))
 
 
 def _tonight(store: Any, night: dt.date | None) -> int:
