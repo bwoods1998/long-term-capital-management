@@ -30,7 +30,8 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   assert.equal(message.subject, 'LTCM daily 2026-10-20: shown +$2.94, net -$0.39; 2 alarms');
   const text = message.text.split('\n');
   for (const line of text) assert.ok(line.length <= REPORT_WIDTH, `${line.length}: ${line}`);
-  assert.ok(text.length <= 45, `one screen: ${text.length} lines`);
+  // One screen: 44 lines before release 1019e's Done line (the goal V2), which takes three.
+  assert.ok(text.length <= 47, `one screen: ${text.length} lines`);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -193,4 +194,22 @@ test('through /v1/notify: one mail a day, keyed by its day, whatever id the Hous
   assert.equal(sent[0].subject, 'LTCM daily 2026-10-20: shown +$2.94, net -$0.39; 2 alarms');
   assert.equal((await post({ ...REPORT, day: 'today' }, NOW + 25 * HOUR)).status, 400);
   assert.equal(sent.length, 2);
+});
+
+test('the Done line: Probe+ events toward 300 by program, the next checkpoint and the bound (the goal V2)', () => {
+  const text = lines(REPORT);
+  const at = text.findIndex(line => line.startsWith('Done, Probe+ real events:'));
+  assert.ok(at > 0, text.join('\n'));
+  assert.deepEqual(text.slice(at, at + 3), [
+    'Done, Probe+ real events: 120 of 300, next at 200',
+    ' bound +12.5 bp (net of bench -3.1 bp); learning 46 beside',
+    ' ERN-READ-O1 70; INS-BUY-O1 50',
+  ]);
+  for (const line of text) assert.ok(line.length <= REPORT_WIDTH, `${line.length}: ${line}`);
+  const unread = lines({ ...REPORT, done: { ...REPORT.done, counted: null, by_program: [] } });
+  assert.ok(unread.includes('Done, Probe+ real events: not read yet'), unread.join('\n'));
+  const flags = lines({ ...REPORT, done: { ...REPORT.done, holds: true, pivot: true, stop: true } }).join(' ');
+  for (const words of ['DONE at a checkpoint', 'PIVOT: retire the lane', '$800 SPENT: stop all spend']) assert.ok(flags.includes(words), words);
+  const before = lines({ ...REPORT, done: undefined });
+  assert.ok(!before.some(line => line.startsWith('Done,')), 'a House before the reader sends no done block: no line');
 });

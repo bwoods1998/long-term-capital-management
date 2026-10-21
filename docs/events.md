@@ -238,7 +238,8 @@ order, so these rows are refused first; exits never.
 `edgar.py` and `news.py` (the recorders), `calendar.py` (sessions and decision moments), `universe.py` (eligibility),
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
-`screen.py` (the judge), `report.py` (the daily one-screen report), `house.py` (the lane on the House: its scheduler),
+`screen.py` (the judge), `report.py` (the daily one-screen report), `done.py` (the Done reader of the goal V2, read-only),
+`house.py` (the lane on the House: its scheduler),
 `__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`,
 `screen`, `report`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
 `league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one. Release
@@ -335,6 +336,35 @@ fees, the fill gap against the auction prints); for each version 2 program its b
 market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
+
+## The Done reader (the goal V2)
+
+The owner's Done is read by `league/events/done.py` under the pinned rule
+[docs/goals/DONE-RULE-EVL-2.md](goals/DONE-RULE-EVL-2.md) (its sha256 is `done.RULE_SHA256`; a test fails while the two
+differ). What counts: a settled real-money round trip of a seating program (`real_fills`, a buy and a sale) whose buy's
+band is probe or sized and whose buy came after the program's latest move to probe (`bands.probe_since`); learning
+events and Probe+ buys of an earlier stay are reported beside, never counted. It is read at every 100th such event:
+checkpoint c (100, 200, 300, ...) reads exactly the first c events in sale order and is never rewritten.
+
+| item | passes when |
+|---|---|
+| `events` | c >= 300 |
+| `programs` | >= 3 programs with >= 50 of the c events each |
+| `after_promotion` | every counted event was bought after its program's promotion (by construction; the others are `before_promotion`) |
+| `pnl` | the c events' realized after-fee P&L > $0 |
+| `bound` | the 95% issuer-block bootstrap lower bound of r (10,000 resamples, seed `DONE-RULE-EVL-2\|done\|issuer`, `screen.bootstrap_bounds`) > 0 |
+| `profit_vs_compute` | the lane's realized profit (every band) since the first promotion >= the metered compute over the span (`metered.since` over `metered.json`; partly measured fails) |
+| `fills` | the signed mean gap per side against the shadow's auction prices in `outcomes` (made raw again) within 15 bp |
+| `no_captain` | the last 100 settled with no operator edit (before-copies of swarm/ops/budget.json, swarm.json's and ops.json's modification time), no owner step in a stall run, and a stall run every UTC day |
+
+Beside: the benchmark-net figure (a = r - the shadow's b, its mean and bound), learning events (count, P&L). THE PIVOT:
+from checkpoint 400, the one-sided 95% upper bound of r below zero says retire the lane and move its budget. THE $800
+STOP: the loss budget's total realized plus open risk (`fast_lane.probe_budget` on `live.sqlite`) at $800 says stop all
+spend and report. The reader decides nothing and moves nothing: it reports. The House runs it in the nightly screen
+task, after the band review: `<state>/events/done.json` (every figure, the current reading, the checkpoints
+append-only) and a `done` receipt; a failing reader is a warning and never fails the screen. The daily report carries
+its line (Probe+ events toward 300 by program, the next checkpoint, the bound and the benchmark-net bound). The old
+`dlane` Done meter (DONE-RULE-A50) keeps running beside and is never read for this Done.
 
 ## Real money (release R2, shipped switched on in release 1019b; deployed 21:00Z Oct 19, 2026)
 

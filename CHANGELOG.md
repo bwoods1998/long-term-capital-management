@@ -38,6 +38,24 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; league/events/done.py and the hook in house.py ship as House files (house.py, outside the wall); the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
+
+- **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
+  `league/events/done.py` `RULE_SHA256` and a test (`2f92a153` at this entry).
+- **The reader** (`league/events/done.py`, pure and read-only over the lane's store and the House's records): the
+  Probe+ events (buy band probe or sized, bought after the latest move to probe), learning and pre-promotion events
+  beside; checkpoints at 100, 200, 300, ... over exactly the first c events, append-only in
+  `<state>/events/done.json`; each item pass or fail with its number (events, programs, after promotion, P&L, the 95%
+  issuer-block lower bound with 10,000 resamples and a fixed seed string, profit since the first promotion against
+  the metered compute, fills within 15 bp of the shadow's auction prices per side, the last 100 with no captain step
+  from the before-copies, swarm.json's and ops.json's times and the stall runs); the benchmark-net bound beside; the
+  pivot from 400 events and the $800 stop from the House's own loss figures.
+- **On the House**: the nightly screen task runs it after the band review (`league/events/house.py` `_screen`) and
+  keeps a `done` receipt; a failure is a warning, never the screen's.
+- **The daily report** (`league/ops/daily_report.py` `done_line`, the gateway's `composeReport`): one Done line, the
+  Probe+ events toward 300 by program, the next checkpoint and the bound (three short lines on a phone).
+- Docs: [docs/events.md](docs/events.md), "The Done reader (the goal V2)".
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
