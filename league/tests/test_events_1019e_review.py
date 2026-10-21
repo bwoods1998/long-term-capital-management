@@ -133,7 +133,7 @@ class EveryFamilyTradesWhatItsShadowDecides(unittest.TestCase):
     CLUSTER = ("KKK", "LLL", "MMM", "NNN", "OOO")
     SPECS = (spec("EVL-B-ERN-2", "ern", {"score_min": 2}, rank="score"),
              spec("EVL-B-8K-801", "8k", {"items": ["8.01"]}),
-             spec("EVL-B-INS-CL", "ins", {"value_min": 50000}, rank="value"),
+             spec("EVL-B-INS-CL", "ins", {"value_min": 50000}, rank="value", seatable=False),   # A89: a record
              spec("EVL-B-INSB-OFF", "ins-buy", {"value_min": 50000, "roles": "officer"}, rank="value"),
              spec("EVL-B-NEWS-GN", "news", {"sources": ["globenewswire"]}),
              spec("EVL-B-ERNR", "ern-react", {"react_min": 1.02}, rank="reaction", exit_="close"),
@@ -188,7 +188,9 @@ class EveryFamilyTradesWhatItsShadowDecides(unittest.TestCase):
     def test_every_seatable_births_real_money_picks_are_its_shadows_intents(self):
         s = self.week(Path(self.tmp.name) / "w")
         families = {json.loads(p.spec)["family"] for p in EB.seatable() if p.spec is not None}
-        self.assertEqual(families, set(BI.FAMILIES), "a seatable birth of every family the grammar has")
+        self.assertEqual(families, set(BI.FAMILIES) - {"ins"}, "a seatable birth of every family real money can read "
+                                                               "(A89: an ins cluster birth is a record only)")
+        self.assertNotIn("EVL-B-INS-CL", {p.id for p in EB.seatable()})
         ctx = R.Context(s.st, TH.FakeGateway(), lambda url: b"", now=lambda: dt.datetime(2026, 11, 7, 1, 0, tzinfo=UTC))
         for day in self.DAYS:
             R.decide_open(ctx, day)
@@ -210,8 +212,22 @@ class EveryFamilyTradesWhatItsShadowDecides(unittest.TestCase):
                 traded[p.id] = traded.get(p.id, 0) + len(picks)
         self.assertEqual({k for k, n in traded.items() if n}, {p.id for p in EB.seatable() if p.spec is not None},
                          f"every birth trades in the week: {traded}")
-        self.assertEqual(traded["EVL-B-INS-CL"], 3, "the cluster triggers of Wed-Fri, each the second insider's filing "
-                                                    "(Monday evening's, before 20:00 ET, is not the birth's)")
+
+    def test_a_seatable_ins_cluster_birth_is_refused_and_the_book_reads_no_cluster_rows(self):
+        # A89 (release 1019e's last review): a Form 4 cluster is judged over every Form 4 of the issuer in its window,
+        # including filings stored after a decision; real money may read only what was stored before it (A72). So an
+        # ins birth is a record (free), never seatable, and the House's book reads no rows for the family.
+        with self.assertRaises(BI.SpecError) as raised:
+            BI.parse(spec("EVL-B-INS-X", "ins", {"value_min": 50000}, rank="value"))
+        self.assertIn("A89", str(raised.exception))
+        self.assertFalse(BI.parse(spec("EVL-B-INS-X", "ins", {"value_min": 50000}, rank="value", seatable=False))["seatable"])
+        s = self.week(Path(self.tmp.name) / "w")
+        lane = EB.Lane(Path(s.st.root) / S.DB_NAME)
+        self.addCleanup(lane.close)
+        cluster = P.Program("EVL-B-INS-Y", 1, True, "ins", "open", 1, False, rule="birth", prereg=3,
+                            born_at=self.BORN_AT, spec="{}")
+        with self.assertRaises(LookupError):
+            EB.rows_for(lane, cluster, self.DAYS[2], C.session(lane, self.DAYS[2]).open_decide)
 
     def test_a_family_the_book_reads_no_rows_for_is_an_error_never_silence(self):
         s = self.week(Path(self.tmp.name) / "w")

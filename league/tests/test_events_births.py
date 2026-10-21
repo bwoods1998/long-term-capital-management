@@ -146,7 +146,7 @@ class TheGrammar(unittest.TestCase):
                      exit_="open"),
                 spec("EVL-B-8K-502", "8k", {"items": ["5.02", "1.02"]}),
                 spec("EVL-B-8K-READ", "8k", {"items": ["8.01"], "score_min": 2}, rank="score"),
-                spec("EVL-B-INS-BIG", "ins", {"value_min": 200000}, rank="value"),
+                spec("EVL-B-INS-BIG", "ins", {"value_min": 200000}, rank="value", seatable=False),   # A89: a record
                 spec("EVL-B-INS-DIR", "ins-buy", {"value_min": 100000, "roles": "director"}, rank="value"),
                 spec("EVL-B-NEWS-BZ", "news", {"sources": ["Benzinga"], "hours": [7, 8], "score_min": 2}, rank="score"),
                 spec("EVL-B-NEWSDAY", "news-day", {"score_max": -2}, exit_="open"),

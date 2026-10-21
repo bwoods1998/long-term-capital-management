@@ -572,7 +572,8 @@ def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.dateti
     `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
     (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`. Every family a seatable program can
     have reads its rows here as the lane's decision reads them (release 1019e's review: R3's `ins` family, Form 4
-    cluster triggers, was missing, so a seatable birth of it was decided and screened in shadow and never traded)."""
+    cluster triggers, is a record only (A89): its cluster reads Form 4s that may be stored after the decision, so the
+    book reads no rows for it and a seatable `ins` birth is refused by the births' grammar)."""
     family = program.family
     if program.entry_at == "close" and family in P.CLOSE_FAMILIES_4:
         since = program.registered_at
@@ -581,8 +582,6 @@ def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.dateti
         lo, hi = P.open_window(lane, day)
         if family in ("ern", "8k"):
             rows = P.filings_in(lane, "8-K", lo, hi)
-        elif family == "ins":
-            rows = P.ins_triggers(lane, lo, hi)
         elif family == "ins-buy":
             rows = P.ins_buys(lane, lo, hi)
         elif family == "news":

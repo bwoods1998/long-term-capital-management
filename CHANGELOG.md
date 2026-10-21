@@ -40,6 +40,16 @@ programs trades real money at learning size.
 
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
+- **The captain's round on the House re-review's major (A89).** The review round's new `ins` branch in
+  `league/events/book.py` `rows_for` let real money read a Form 4 CLUSTER judged over every Form 4 of the issuer in its
+  window, including filings stored after the decision (A72's look-ahead). An `ins` (Form 4 cluster) birth is now a
+  RECORD only: `league/events/births.py` `parse` refuses it seatable (free, shadow only), and the book reads no rows
+  for the family (a LookupError, never silence). This also answers the earlier finding that a seatable `ins` birth was
+  charged 0.10 of the budget for real money it could never take. Tests:
+  `test_events_1019e_review.test_a_seatable_ins_cluster_birth_is_refused_and_the_book_reads_no_cluster_rows`, the
+  every-family week without the `ins` family, and the grammar test's `ins` spec as a record; the lane, equity-book,
+  site, ci and identity modules pass on 3.14 and 3.11.
+
 - **What it carries**, merged `--no-ff` in this order (each entry below as its branch wrote it):
   `feat/evl-births` `ad9c8513` (#577, R3: births; built on `rel/1019b` `5cad27f2`, never merged with 1019c or 1019d
   before), `feat/site-events` `da0d0581` (#576, WP4: the public site follows the lane under `lane_v1`; built on

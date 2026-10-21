@@ -241,6 +241,12 @@ def parse(spec: Any) -> dict[str, Any]:
     elif seatable and hold != 1:
         why.append("a seatable birth holds one session (the screen's blocks are one-session blocks); a longer hold is a "
                    "record")
+    if seatable is True and spec.get("family") == "ins":
+        # A89 (the captain's, release 1019e's last review): a Form 4 CLUSTER is judged over every Form 4 of the issuer in
+        # its window, and real money may only read filings stored before its decision (A72); the House's book cannot
+        # read a cluster that way yet, so an `ins` birth is a record (free, shadow only), never seatable.
+        why.append("an ins (Form 4 cluster) birth is a record only: real money cannot read a cluster stored before its "
+                   "decision (A89); register it seatable false")
     out["seatable"] = seatable
     rank = spec["rank"]
     if rank not in RANKS[family]:
