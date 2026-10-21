@@ -174,7 +174,8 @@ class ReaderTest(Case):
         finally:
             w.close()
         rows = {row["id"]: row for row in view["programs"]}
-        self.assertEqual(len(rows), 18, "the nine version 2 programs and the nine that never seat, one row each")
+        self.assertEqual(len(rows), 23, "the twelve seating versions (the nine version 2 rows, PREREG-EVL-4's three) and "
+                                        "the eleven that never seat, one row each")
         self.assertEqual({row["band"] for row in rows.values()}, {"learning", "shadow"})
         self.assertEqual(sorted(i for i, r in rows.items() if r["band"] == "learning"),
                          sorted(site_lane.slug_of(p.id) for p in P.SEATING))
@@ -184,7 +185,10 @@ class ReaderTest(Case):
         self.assertEqual(rows["ctrl-ern-all-o1"], {"id": "ctrl-ern-all-o1", "name": "All earnings", "band": "shadow", "real": 0,
                                                    "shadow": 31, "look": None})
         self.assertEqual(rows["ern-react-c1"]["real"], 0, "its lot is still open: no settled real-money event yet")
-        self.assertEqual(view["funnel"], {"since": P.REGISTERED_AT, "shadow": 18, "learning": 9, "probe": 0, "sized": 0, "retired": 0})
+        self.assertEqual(rows["8k-read-on"], {"id": "8k-read-on", "name": "8-K read overnight", "band": "learning", "real": 0,
+                                              "shadow": 0, "look": {"need": 60, "to_go": 60}}, "PREREG-EVL-4's seating version 1")
+        self.assertEqual(rows["ctrl-newspm-on"]["band"], "shadow", "PREREG-EVL-4's control: a record of the lane")
+        self.assertEqual(view["funnel"], {"since": P.REGISTERED_AT, "shadow": 23, "learning": 12, "probe": 0, "sized": 0, "retired": 0})
         self.assertEqual(view["checkpoint"], {"events": 0, "next": 100}, "0 until a program is at Probe")
         self.assertEqual(view["verdict_usd"], "2.87", "three stated costs and a cent for the one the gateway did not state")
         self.assertEqual(view["as_of"], AT)
@@ -236,6 +240,47 @@ class ReaderTest(Case):
             self.assertTrue(publish.quote_free(name))
         self.assertEqual(site_lane.name_of(SimpleNamespace(id="EVL-NEW-O1", family="news")), "Morning news", "a later program: its family")
 
+    def test_the_registered_births_are_listed_as_the_lane_loads_them(self):
+        """R3's births (release 1019e): the view lists the lane as merged, each seatable birth at its band (learning
+        from birth) and its control and every record as shadow, each with a plain unique name and never its rule."""
+        from league.events import births as BI
+
+        w = fixture_world(self.dir)
+        try:
+            def register(sp: dict, seq: int) -> None:
+                text = BI.canonical(sp)
+                w.store.db.execute(
+                    "INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, received_at, path, "
+                    "commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'invented', "
+                    "'captain', '2026-10-20')", (sp["id"], BI.sha(sp), text, int(sp["seatable"]), "2026-10-21T01:20:00Z",
+                                                 "2026-10-21T01:20:00Z", "2026-10-21T01:20:00Z",
+                                                 "docs/births/2026-10-20.jsonl", "c" * 40, seq))
+            base = {"version": 1, "exit": "close", "hold": 1}
+            register(base | {"id": "EVL-B-8K-502", "family": "8k", "rule": {"items": ["5.02"]}, "entry": "open",
+                             "rank": "none", "seatable": True}, 0)
+            register(base | {"id": "EVL-B-ERN-TOP", "family": "ern", "rule": {"score_min": 3}, "entry": "open",
+                             "rank": "score", "seatable": True}, 1)
+            register(base | {"id": "EVL-B-8K-REC", "family": "8k", "rule": {"items": ["1.02"]}, "entry": "open",
+                             "rank": "none", "seatable": False}, 2)
+            view = site_lane.lane_view(self.dir, at=AT, start_at=RESET_AT)
+        finally:
+            w.close()
+            P.load_births(None)
+        rows = {row["id"]: row for row in view["programs"]}
+        self.assertEqual(len(rows), 27, "the twenty-three and four births' rows: two seatable, a control, a record")
+        self.assertEqual({k: (rows[k]["name"], rows[k]["band"]) for k in rows if k.startswith("b-")},
+                         {"b-8k-502": ("8-K birth 1", "learning"), "b-ern-top": ("Earnings birth 2", "learning"),
+                          "b-ern-top-ctrl": ("Earnings birth 2 control", "shadow"), "b-8k-rec": ("8-K birth 3", "shadow")})
+        self.assertEqual(rows["b-8k-502"]["look"], {"need": 60, "to_go": 60}, "PREREG-EVL-3's first look, as any seating version")
+        self.assertEqual((view["funnel"]["shadow"], view["funnel"]["learning"]), (27, 14))
+        names = [row["name"] for row in rows.values()]
+        self.assertEqual(len(set(names)), len(names), "every name unique")
+        for row in rows.values():
+            self.assertRegex(row["name"], publish._PROGRAM_NAME)
+        self.assertNotIn("5.02", json.dumps(view["programs"]), "a birth's rule never leaves")
+        self.assertEqual(allowlist(view, AT)["programs"], sorted(view["programs"], key=lambda r: publish.LANE_BAND_RANK[r["band"]]),
+                         "every row is one the page can draw")
+
 
 # --------------------------------------------------------------------------------------------- the allowlist
 def lane_input(root: Path) -> dict:
@@ -250,7 +295,7 @@ class AllowlistTest(Case):
     def test_the_view_is_built_key_by_key_and_adds_up(self):
         view = allowlist(lane_input(self.dir), AT)
         self.assertEqual(set(view), {"as_of", "programs", "funnel", "checkpoint", "verdict_usd", "lots"})
-        self.assertEqual([r["band"] for r in view["programs"]], ["learning"] * 9 + ["shadow"] * 9, "the higher steps first")
+        self.assertEqual([r["band"] for r in view["programs"]], ["learning"] * 12 + ["shadow"] * 11, "the higher steps first")
         lots = view["lots"]
         self.assertEqual(set(lots), {"as_of", "rows", "earlier", "pnl_usd"})
         self.assertEqual([r["id"] for r in lots["rows"]], ["lot:24", "lot:23", "lot:7", "lot:22", "lot:21", "lot:3"],
@@ -270,9 +315,9 @@ class AllowlistTest(Case):
         raw["programs"].append({"id": "y", "name": "Venue alpaca", "band": "learning", "real": 0, "shadow": 0, "look": None})
         raw["programs"][2] = {**raw["programs"][2], "code": "PARAMS = {}"}
         view = allowlist(raw, AT)
-        self.assertEqual(len(view["programs"]), 15, "three broken rows left out, two invented rows refused")
+        self.assertEqual(len(view["programs"]), 20, "three broken rows left out, two invented rows refused")
         self.assertNotIn("code", json.dumps(view))
-        self.assertIsNone(allowlist({**raw, "funnel": {**raw["funnel"], "probe": 12}}, AT)["funnel"], "a chain that widens is unknown")
+        self.assertIsNone(allowlist({**raw, "funnel": {**raw["funnel"], "probe": 13}}, AT)["funnel"], "a chain that widens is unknown")
         self.assertEqual(allowlist({**raw, "checkpoint": {"events": 230, "next": 1}}, AT)["checkpoint"], {"events": 230, "next": 300})
         self.assertIsNone(allowlist({**raw, "as_of": "2026-10-21T15:30:00.000Z"}, AT), "dated after the checkpoint")
 

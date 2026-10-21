@@ -712,6 +712,39 @@
         }
       },
       {
+        "id": "8k-react-on",
+        "name": "8-K reaction overnight",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
+        "id": "8k-read-on",
+        "name": "8-K read overnight",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
+        "id": "newspm-read-on",
+        "name": "Premarket news read overnight",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
         "id": "ern-read-o3",
         "name": "Earnings read, longer hold",
         "band": "shadow",
@@ -782,12 +815,28 @@
         "real": 0,
         "shadow": 0,
         "look": null
+      },
+      {
+        "id": "ctrl-8k-on",
+        "name": "All 8-Ks overnight",
+        "band": "shadow",
+        "real": 0,
+        "shadow": 0,
+        "look": null
+      },
+      {
+        "id": "ctrl-newspm-on",
+        "name": "All premarket news overnight",
+        "band": "shadow",
+        "real": 0,
+        "shadow": 0,
+        "look": null
       }
     ],
     "funnel": {
       "since": "2026-10-19T01:08:38.000Z",
-      "shadow": 18,
-      "learning": 9,
+      "shadow": 23,
+      "learning": 12,
       "probe": 0,
       "sized": 0,
       "retired": 0

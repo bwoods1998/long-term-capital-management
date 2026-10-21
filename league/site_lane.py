@@ -5,10 +5,13 @@ change: evolve the design, no redesign". The capital page keeps its five section
 lane's steps (Shadow, Learning, Probe, Sized) and its Positions list the equity book's lots beside the options rows. This
 module READS what that takes, read-only, from the House's state root, and the publisher allowlists it (`site_lane`):
 
-- PROGRAMS (`read_programs`, the lane's store `<state>/events/events.sqlite`): one row per registered program, version 2
-  of each seatable program (PREREG-EVL-3: real money at learning size from its first event; its band is the lane's,
-  league/events/bands.py) and version 1 of every program that never seats (the records and controls of PREREG-EVL-1
-  and -2: band "shadow"). Each row: a short plain name (`NAMES`, a fixed table: never a program's code or parameters),
+- PROGRAMS (`read_programs`, the lane's store `<state>/events/events.sqlite`, its registered births loaded by
+  league/events/book.py `open_lane`): one row per registered program, the SEATING version of each seatable program
+  (`Program.can_seat`: version 2 of PREREG-EVL-1's and -2's nine, version 1 of PREREG-EVL-4's three and of each
+  seatable birth of R3; real money at learning size from its first event; its band is the lane's,
+  league/events/bands.py) and version 1 of every program that never seats (the records and controls of PREREG-EVL-1,
+  -2 and -4, and R3's records and its READ births' controls: band "shadow"). Each row: a short plain name (`NAMES`, a
+  fixed table, or for a birth its family's name and its place among the births: never a program's code or parameters),
   its band, its settled events with real money (both sides filled, any band) and in shadow (the lane's settled
   outcomes), and its next look's events to go (league/events/screen.py `next_look_v2`: the look's threshold of settled
   TRADABLE events less those it has; None for a shadow-only program, a retired one, or one whose looks are all used).
@@ -91,9 +94,18 @@ NAMES = {
     "EVL-ERN-REACT-READ-C1": "Earnings reaction read",
     "EVL-ERN-READ3-O1": "Top earnings read",
     "EVL-CTRL-NEWS-DAY-ON": "All day news",
+    # PREREG-EVL-4's (registered 2026-10-19T16:01:05Z; each enters at D's close and exits at the next open)
+    "EVL-8K-REACT-ON": "8-K reaction overnight",
+    "EVL-8K-READ-ON": "8-K read overnight",
+    "EVL-NEWSPM-READ-ON": "Premarket news read overnight",
+    "EVL-CTRL-8K-ON": "All 8-Ks overnight",
+    "EVL-CTRL-NEWSPM-ON": "All premarket news overnight",
 }
 FAMILY_NAMES = {"ern": "Earnings", "ern-react": "Earnings reaction", "8k": "8-K", "news": "Morning news", "news-day": "Day news",
-                "news-react": "News reaction", "ins": "Insider cluster", "ins-buy": "Insider buy"}
+                "news-react": "News reaction", "ins": "Insider cluster", "ins-buy": "Insider buy",
+                "8k-react": "8-K reaction overnight", "8k-day": "8-K overnight", "news-pm": "Premarket news"}
+#: A registered birth's control (league/events/births.py `CONTROL_SUFFIX`): its name is its birth's and this.
+BIRTH_CONTROL = "-CTRL"
 
 
 def slug_of(program_id: Any) -> str:
@@ -103,8 +115,21 @@ def slug_of(program_id: Any) -> str:
 
 
 def name_of(program: Any) -> str:
-    """The program's plain name (`NAMES`), else its family's (`FAMILY_NAMES`), else "Event rule"."""
-    return NAMES.get(str(getattr(program, "id", "")), FAMILY_NAMES.get(str(getattr(program, "family", "")), "Event rule"))
+    """The program's plain name (`NAMES`), else its family's (`FAMILY_NAMES`), else "Event rule". A registered birth of
+    R3 (league/events/births.py: a spec, never a row of `NAMES`) reads as its family's name, "birth" and its place in
+    registration order among the births (its control: the same and "control"), so every name on the page is unique and
+    none is its id, code or parameters."""
+    pid = str(getattr(program, "id", ""))
+    family = FAMILY_NAMES.get(str(getattr(program, "family", "")), "Event rule")
+    if getattr(program, "spec", None) is None:
+        return NAMES.get(pid, family)
+    from .events import programs as P
+
+    control = pid.endswith(BIRTH_CONTROL)
+    base = pid[:-len(BIRTH_CONTROL)] if control else pid
+    born = [p.id for p in P.BIRTHS if not p.id.endswith(BIRTH_CONTROL)]
+    place = born.index(base) + 1 if base in born else len(born) + 1
+    return f"{family} birth {place}" + (" control" if control else "")
 
 
 def _epoch(value: Any) -> float | None:
@@ -229,7 +254,7 @@ def read_programs(lane: Any, today: dt.date) -> dict[str, Any]:
         elif p.version == 1 and p.id not in seating:
             band = "shadow"     # a record or a control: never real money
         else:
-            continue            # version 1 of a seatable program: its version 2 is the program on the page
+            continue            # version 1 of PREREG-EVL-1's and -2's seatable ids: their version 2 is on the page
         shadow = int(lane.db.execute("SELECT COUNT(*) FROM outcomes WHERE program=? AND version=? AND status='settled'",
                                      (p.id, p.version)).fetchone()[0])
         real = _real_events(lane, p.id, p.version, REAL_BANDS) if band != "shadow" else 0
