@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `515c26b6`, full digest `32c3cb25` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `018f1eeb` / `1541b612`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1602,3 +1602,31 @@ path.
   their sales refused at the House-wide line); with 120 options orders, 65 buys and all 65 sales, the House-wide line
   exactly full (before: 130 buys and all 130 sales refused); the row, its bounds and its digests);
   league/tests/equity_design.py `DIGESTS` regenerated, release 1019b's kept as `DIGESTS_R2`.
+
+## 23. The Probe band's shape (the captain's A86, Oct 21, 2026; money, as built; after release 1019e's section 22)
+
+- **The rows** (money; league/constitution.py `equity_money.event`, the one source: league/events/book.py `settings`
+  reads them, `_event_gate` and `_size_event` apply them): `position_share.probe` "0.05" -> "0.035", `max_open.probe`
+  6 -> 8, and a new `one_share_max.probe` "0.05" (`one_share_max` {learning "0.05", probe "0.05"}). Learning ("0.02",
+  8, one share at most "0.05") and Sized ("0.10", 8, no one-share row) do not move.
+- **The bounds** (`EQUITY_MONEY_BOUNDS`): `event.position_share.probe` [0, 0.035], `event.max_open.probe` [0, 8] (both
+  the new values as their loose end), the new `event.one_share_max.probe` [0, 0.05]; `equity_money_problems` holds the
+  new row under `per_name_share` as it holds learning's. No value inside them gives a Probe program more than
+  PREREG-EVL-1 section 8 could hold: 8 x 0.035 = 0.28 x E at target (6 x 0.05 = 0.30 before), 8 x 0.05 = 0.40 x E of
+  one-share lots in the worst case (6 up to the 10% wall, 0.60, before). A table missing the new row is outside its
+  bounds and opens nothing (`FALLBACK`).
+- **What it changes**: a Probe buy targets 0.035 x E in whole shares; when that rounds to none, one share only when one
+  share at the limit is at most 0.05 x E (`_event_gate` skips the pick "one_share" before it takes a slot,
+  `_size_event` refuses it at the send), where PREREG-EVL-1 bought one share up to the name's wall; a Probe program's
+  room is 8 less what it holds and has on order. ROOM, the walls, the loss budget, the open-risk weight, the day order
+  line (150; 2 x the live bands' `max_open` is 48 now, 44 before, at least 150) and the gateway do not move.
+- **Identities**: money `055e5313` -> `515c26b6`, constitution `a8d4cbd9` -> `32c3cb25`; the options execution
+  fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`
+  do not move.
+- **Rollback**: `event.enabled` False (money `8e034de9`, constitution `ca071751`), or the House release before it.
+- **Tests**: league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped "one_share", over the
+  wall "name_wall"; eight open at Probe; learning at 2% and Sized at 10% as before; the rows, their bounds, the
+  dollars' ceiling and the digests); league/tests/equity_design.py `DIGESTS` regenerated, release 1019c's kept as
+  `DIGESTS_1019C` (`before_a86` sets the three rows back; `before_1019c` does too); test_events_book.py and
+  test_events_1019c.py read the new Probe sizes.

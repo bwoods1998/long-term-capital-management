@@ -8,8 +8,9 @@ Held here: VERSION 2 of every seatable program trades real money from its first 
 gives it (learning from birth; Probe; Sized; retired trades nothing), and version 1 never trades; the real-money
 decision reads only events stored and verdicts answered before its decision time; the auction orders' shapes (a whole-
 share limit-on-open or limit-on-close buy at 1.25 x the previous SIP close, a market-on-close or market-on-open sale);
-the size (learning 2% of E, Probe 5%, Sized 10%, in whole shares; one share when that rounds to none and fits the walls
-and, at learning, one share is at most 5% of E; the book-wide 10% a name; the loss budget at the lot's own weight);
+the size (learning 2% of E, Probe 3.5% (the captain's A86; 5% before), Sized 10%, in whole shares; one share when that
+rounds to none and fits the walls and, at learning and at Probe, one share is at most 5% of E; the book-wide 10% a name;
+the loss budget at the lot's own weight);
 ROOM (Sized, then Probe, then learning; then the tables' order); the exits at the scheduled auction and the fallback
 ladder; the open risk of an event lot (max(0.10, 1.65 x sigma x sqrt(h)), 0.40 when sigma is unknown or the lot is past
 its exit); the kill switch, the kind's switch and the auction proof's BUY stage stopping buys and never sales; the real
@@ -360,10 +361,10 @@ class TheRows(unittest.TestCase):
         self.assertIs(CONSTITUTION["equity_money"]["enabled"], False, "the old lanes stay exits only")
         self.assertIs(s.enabled, True)
         self.assertEqual({band: s.share(band) for band in EB.LIVE_BANDS},
-                         {"learning": D("0.02"), "probe": D("0.05"), "sized": D("0.10")})
-        self.assertEqual({band: s.max_open(band) for band in EB.LIVE_BANDS}, {"learning": 8, "probe": 6, "sized": 8})
-        self.assertEqual((s.one_share_cap("learning"), s.one_share_cap("probe"), s.per_name, s.limit_ratio),
-                         (D("0.05"), None, D("0.10"), D("1.25")))
+                         {"learning": D("0.02"), "probe": D("0.035"), "sized": D("0.10")}, "Probe: the captain's A86")
+        self.assertEqual({band: s.max_open(band) for band in EB.LIVE_BANDS}, {"learning": 8, "probe": 8, "sized": 8})
+        self.assertEqual((s.one_share_cap("learning"), s.one_share_cap("probe"), s.one_share_cap("sized"), s.per_name,
+                          s.limit_ratio), (D("0.05"), D("0.05"), None, D("0.10"), D("1.25")))
         self.assertEqual((s.risk_floor, s.risk_z, s.sigma_sessions), (D("0.10"), D("1.65"), 60))
         self.assertEqual(dict(s.offsets), ES.EVENT_DEFAULTS)
         self.assertEqual([p.id for p in EB.seatable()],
@@ -661,7 +662,7 @@ class TheDay(EventTest):
     def test_probe_and_sized_bands_size_up_and_take_room_first(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME")                                   # READ-O1, learning: 2 shares at $20
-        earnings(h.lane, "o-1", CIK2, "OTHR", items=("8.01",))                 # 8K-READ-O1 at Probe: 5 shares at $20
+        earnings(h.lane, "o-1", CIK2, "OTHR", items=("8.01",))                 # 8K-READ-O1 at Probe: 3 shares at $20
         earnings(h.lane, "s-1", CIK3, "SIZD", items=("7.01",))                 # 8K-READ-O1 too: its next pick
         h.lane.band("EVL-8K-READ-O1", "probe")
         self.ready(h)
@@ -673,13 +674,13 @@ class TheDay(EventTest):
         self.assertIn(sent[0][0], ("OTHR", "SIZD"))
         self.assertEqual(sent[-1], ("ACME", "2"),
                          "ROOM: the Probe program's buys go before the learning program's, though its row is later")
-        self.assertEqual(dict(sent), {"OTHR": "5", "SIZD": "5", "ACME": "2"}, "Probe 5% of E, learning 2%")
+        self.assertEqual(dict(sent), {"OTHR": "3", "SIZD": "3", "ACME": "2"}, "Probe 3.5% of E (A86), learning 2%")
 
     def test_the_one_share_rule_and_its_caps(self):
         h = self.harness()
         earnings(h.lane, "a-1", CIK, "ACME", prev_close=60.0)            # learning: $40 target, limit $75: one share
         earnings(h.lane, "a-2", CIK2, "BETA", prev_close=100.0)          # learning: limit $125 > 5% of $2,000
-        earnings(h.lane, "o-1", CIK3, "GAMA", prev_close=150.0, items=("8.01",))   # Probe: limit $187.50 under 10%
+        earnings(h.lane, "o-1", CIK3, "GAMA", prev_close=72.0, items=("8.01",))    # Probe: limit $90 under 5% (A86)
         earnings(h.lane, "o-2", "0000000004", "DELT", prev_close=170.0, items=("8.01",))   # Probe: $212.50 over 10%
         h.lane.band("EVL-8K-READ-O1", "probe")
         self.ready(h)
@@ -688,7 +689,7 @@ class TheDay(EventTest):
         h.tick(9, 15)
         h.tick(9, 16)
         sent = {b["symbol"]: (b["qty"], b["limit_price"]) for b in h.bodies()}
-        self.assertEqual(sent, {"ACME": ("1", "75.00"), "GAMA": ("1", "187.50")})
+        self.assertEqual(sent, {"ACME": ("1", "75.00"), "GAMA": ("1", "90.00")})
         # (Release 1019b's second review: a pick no whole share of fits by price is skipped AT THE DECISION, before it
         # takes a slot of its program's room; the shadow keeps the event. `_size_event` still refuses one at the send.)
         self.assertEqual(sorted(r["symbol"] for r in h.event_intents("buy")), ["ACME", "GAMA"])
@@ -847,14 +848,14 @@ class TheDay(EventTest):
         [buy] = [r for r in h.event_intents("buy") if r["status"] != "refused"]
         self.assertEqual((buy["program"], buy["tif"], buy["exit_day"], buy["exit_at"]),
                          ("EVL-ERN-REACT-ON", "cls", NEXT.isoformat(), "open"))
-        self.assertEqual((h.bodies()[0]["time_in_force"], h.bodies()[0]["qty"]), ("cls", "5"))
+        self.assertEqual((h.bodies()[0]["time_in_force"], h.bodies()[0]["qty"]), ("cls", "3"), "Probe 3.5% of E (A86)")
         [lot] = h.lots()
         self.assertEqual(lot.info["evl_exit"], {"day": NEXT.isoformat(), "at": "open", "rung": 0})
         self.ready(h, NEXT)
         for hh, mm in ((9, 15), (9, 16), (9, 31)):
             h.tick(hh, mm, day=NEXT)
         sale = h.bodies()[-1]
-        self.assertEqual((sale["side"], sale["type"], sale["time_in_force"], sale["qty"]), ("sell", "market", "opg", "5"),
+        self.assertEqual((sale["side"], sale["type"], sale["time_in_force"], sale["qty"]), ("sell", "market", "opg", "3"),
                          "a market-on-open sale in the 09:16-09:27 window")
         self.assertEqual((h.lots()[0].status, h.lots()[0].exit_px), ("closed", D("17.200000")))
 

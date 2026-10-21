@@ -637,17 +637,21 @@ class TheEventKindsOwnDayCount(EventTest):
         pair = X.in_force()
         self.assertEqual((money_digest(), digest()), X.DIGESTS[pair])
         self.assertEqual(digest(), PINNED_DIGEST)
-        self.assertEqual((money_digest()[:8], digest()[:8]), ("055e5313", "a8d4cbd9"))
+        # (The captain's A86 moved them once more, the Probe band's three rows: release 1019c's pins are the table's
+        # with those rows set back, `before_a86`; league/tests/test_events_a86.py holds the move.)
+        at_1019c = X.before_a86()
+        self.assertEqual((money_digest(at_1019c), digest(at_1019c)), X.DIGESTS_1019C[pair], "release 1019c's pair")
+        self.assertEqual((money_digest(at_1019c)[:8], digest(at_1019c)[:8]), ("055e5313", "a8d4cbd9"))
         before = X.before_1019c()
         self.assertEqual((money_digest(before), digest(before)), X.DIGESTS_R2[pair], "release 1019b's pair, exactly")
         self.assertEqual((money_digest(before)[:8], digest(before)[:8]), ("285fa7af", "fd38e4e1"))
         for candidate in X.CANDIDATES:
-            at = X.constitution_at(*candidate)
-            self.assertEqual((money_digest(at), digest(at)), X.DIGESTS[candidate], candidate)
+            at = X.before_a86(X.constitution_at(*candidate))
+            self.assertEqual((money_digest(at), digest(at)), X.DIGESTS_1019C[candidate], candidate)
             back = X.before_1019c(at)
             self.assertEqual((money_digest(back), digest(back)), X.DIGESTS_R2[candidate], candidate)
-        self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_R2.values()), set())
-        off = copy.deepcopy(CONSTITUTION)
+        self.assertEqual(set(X.DIGESTS_1019C.values()) & set(X.DIGESTS_R2.values()), set())
+        off = X.before_a86()
         off["equity_money"]["event"]["enabled"] = False
         self.assertEqual((money_digest(off)[:8], digest(off)[:8]), ("1b7a5c22", "50e951c9"),
                          "the rollback: every event buy stopped, the row kept")
@@ -701,7 +705,7 @@ class TheEventKindsOwnDayCount(EventTest):
                           "EVL-INS-BUY-O1": 8})
         self.assertEqual(by["EVL-ERN-REACT-C1"], ["done"], "the Probe close entry sent and filled")
         [c1] = closes
-        self.assertEqual(c1["qty"], "80", "Probe: 5% of $2,000 at the $1.25 limit")
+        self.assertEqual(c1["qty"], "56", "Probe: 3.5% of $2,000 at the $1.25 limit (A86; 80 at the old 5%)")
         day = DAY.isoformat()
         from league.equity import live as L
 
