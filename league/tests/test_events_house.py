@@ -1023,6 +1023,27 @@ class TheBackfill(LaneCase):
             self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
         self.assertIsNone(self.due_day())
 
+    def test_an_8k_whose_filer_is_unlisted_since_its_failed_fetch_leaves_the_failed_set(self):
+        # Release 1019f's integration (fix/backfill-robust's check, a minor): an 8-K whose fetch failed while its filer
+        # was listed, and whose filer is unlisted at the next pass, is no event: it is seen as unlisted and leaves the
+        # day's failed set, so the day is done `ok`, never `done-failed` naming it.
+        flaky = "0000000003-26-000611"
+        self.sec.add(flaky, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [flaky]
+        self.sec.broken[flaky] = 1
+        t0 = et("2026-10-21", "06:00")
+        self.at(t0)
+        first = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertEqual((first["complete"], first["failed"], first["retrying"]), (False, 1, 1))
+        self.at(t0 + H.FETCH_BACKOFF[0])
+        real = R.Context.tickers
+        with mock.patch.object(R.Context, "tickers", new=property(
+                lambda ctx: {k: v for k, v in real.fget(ctx).items() if k != "0000000003"})):
+            second = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertEqual((second["complete"], second["failed"], second["unlisted"]), (True, 0, 1), second)
+        self.assertNotIn("unfetched", second)
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+
     def test_a_dead_document_is_tried_fetch_tries_times_then_named_and_its_day_done(self):
         # Release 1019f: a filing that never fetches (a dead document) is tried FETCH_TRIES times in all, at the
         # FETCH_BACKOFF steps after its first failure, as the record pass tries a live one; then the receipt names it
