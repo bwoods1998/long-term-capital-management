@@ -38,6 +38,20 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The close economics stop charging the cancelled subscriptions, on `fix/subs-end-economics` (unreleased; owner files `league/project_economics.py`, `league/ops/economics.py`; joins a release after 1019d)
+
+- **Why.** The owner cancelled ThetaData and Alpaca Algo Trader Plus on Oct 18, 2026. The site's cost figure stopped
+  accruing them at 2026-10-19T00:00:00Z in release 1019a (`publish.SUBSCRIPTIONS_ENDED_AT`), but the House's close
+  economics, and so the desk scoreboard's "Input costs since T0" and its daily burn, kept prorating both from the
+  financial start with no end: about $5.40 a day of costs that were not being paid (Oct 20's scoreboard: ThetaData
+  $64.57, Algo Trader Plus $67.26, each still growing).
+- **What.** `project_economics.subscription_months` prorates each subscription to the earlier of the cutoff and its
+  end in `SUBSCRIPTIONS_ENDED_AT` (one table for the site and the House) and marks the input `ended_at`; what accrued
+  before the end stays. `ops/economics.render` reads `ended_at`: a cancelled subscription's 24-hour burn rows are 0,
+  and the cost's basis names its end. No money or constitution row moves; no judge.
+- **Tests.** `test_project_economics.test_cancelled_subscriptions_stop_accruing_at_their_end`,
+  `test_ops_economics.test_a_cancelled_subscription_burns_nothing` (37 tests in the two modules, 3.14 and 3.11).
+
 ### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (unreleased; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **What it carries** (main `3230a884` and two merges, in this order, each `--no-ff`): `r3/lane-1019c` `6f53eeca`

@@ -157,6 +157,20 @@ class EconomicsReport(unittest.TestCase):
         self.assertEqual(out["cost_start"], "2026-09-26T06:23:14Z")
         self.assertEqual(out["financial_start"], "2026-09-26T06:25:30Z")
 
+    def test_cancelled_subscriptions_stop_accruing_at_their_end(self):
+        # The owner cancelled ThetaData and Alpaca Algo Trader Plus on Oct 18, 2026: what accrued before the end stays,
+        # nothing accrues after it, whatever the cutoff (the site's figure has stopped there since release 1019a).
+        from league.publish import SUBSCRIPTIONS_ENDED_AT
+        start, end = economics.epoch(economics.FINANCIAL_START), economics.epoch(SUBSCRIPTIONS_ENDED_AT["thetadata_usd"])
+        for at in (end + 86400, end + 30 * 86400):
+            months, ended = economics.subscription_months("thetadata_usd", at)
+            self.assertEqual(months, Decimal(str(end - start)) / economics.MONTH_SECONDS)
+            self.assertEqual(ended, SUBSCRIPTIONS_ENDED_AT["thetadata_usd"])
+        months, ended = economics.subscription_months("market_data_usd", economics.epoch(AT))
+        self.assertEqual(months, Decimal(str(economics.epoch(AT) - start)) / economics.MONTH_SECONDS)
+        self.assertIsNone(ended)
+        self.assertNotIn("ended_at", {k for k, v in self.report()["inputs"]["thetadata_usd"].items() if v})
+
     def test_fresh_but_asynchronous_sources_cannot_claim_reconciled_net(self):
         state = evidence()
         state["sources"]["broker_activity"]["as_of"] = economics.iso(economics.epoch(AT) - 60)
