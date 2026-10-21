@@ -445,8 +445,11 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
         earlier = sessions_between(st, dt.date(2026, 10, 19), dt.date(2026, 10, 30))   # PREREG-EVL-3's sessions before
         for day in earlier + later:
             for kind in ("open", "close"):
+                # (each a whole decision made with the births loaded: it names every program of its kind, as
+                # league/events/run.py's receipts do; release 1019e's review: one that names no birth is not made for it)
+                named = {SN.program_key(p.id, p.version): {"planned": 0} for p in P.PROGRAMS if p.entry_at == kind}
                 rid = st.start_receipt(f"decide-{kind}:{day}", now=now)
-                st.finish_receipt(rid, "ok", {}, now=now)
+                st.finish_receipt(rid, "ok", named, now=now)
         for day in ("2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10",
                     "2026-11-11", "2026-11-12"):
             st.set_meta(f"evl:backfill:{day}", "done")

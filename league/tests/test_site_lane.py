@@ -465,6 +465,24 @@ class PublisherTest(Case):
         self.assertEqual(body[LANE_KEY]["verdict_usd"], "2.87")
         self.assertEqual(body[LANE_KEY]["lots"]["pnl_usd"], "2.14")
 
+    def test_the_bill_holds_the_births_calls_too(self):
+        """Release 1019e's review: R3's births job pays its one Haiku call a night through the lane's gateway, stored in
+        `birth_calls`; the lane's verdict figure and Claude's part of the bill hold it (one stored with no cost at the
+        night's whole cap, $0.25), never understated."""
+        w = fixture_world(self.dir)
+        with w.store.tx() as db:
+            db.execute("INSERT INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, status, usd) "
+                       "VALUES('2026-10-20', 'p', 'm', 'r', '2026-10-21T01:15:30Z', '2026-10-21T01:16:00Z', 'ok', 0.21)")
+            db.execute("INSERT INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, status, usd) "
+                       "VALUES('2026-10-19', 'p', 'm', 'r', '2026-10-20T01:15:30Z', '2026-10-20T01:16:00Z', 'ok', NULL)")
+        w.close()
+        self.assertEqual(site_lane.read_verdict_usd(self.dir), Decimal("2.87") + Decimal("0.21") + Decimal("0.25"))
+        site = Site()
+        self.publisher(site).publish(self.house())
+        body = site.checkpoints()[-1]
+        self.assertEqual(body[LANE_KEY]["verdict_usd"], "3.33")
+        self.assertEqual(body["compute"]["claude_usd"], "44.53", "41.20 of research, 2.87 of verdicts, 0.46 of births")
+
     def test_an_older_site_gets_every_other_block_as_before_and_is_offered_the_view_again_in_half_an_hour(self):
         fixture_world(self.dir).close()
         site = Site(refuse_lane=True)

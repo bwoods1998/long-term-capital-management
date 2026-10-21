@@ -22,6 +22,18 @@ THE GATEWAY GOES FIRST. Identities, all release 1019d's (the tree's own function
 constitution `a8d4cbd9`, options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`,
 gate contract `397b22b7`; the standing grant pins the money digest, which does not move.
 
+**The review round** (the adversarial reviews of `4ab66a39`; league/tests/test_events_1019e_review.py, each test failing
+without its fix): THE BIRTHS CALL IS INSIDE THE LANE'S LINE (house.py `_spend_today` counts `birth_calls` by their
+answer time, and the call is made only when its worst case fits under `line_left`; budget.py `lane_spend` and
+site_lane.py `verdict_usd` count it too); THE BOOK READS THE `ins` FAMILY (book.py `rows_for`: a seatable birth of Form 4
+cluster triggers was decided and screened and never traded; a family it reads no rows for is now an error, and every
+family's real-money picks equal its shadow's intents in a test); A DECISION MADE WITHOUT A BIRTH IS NOT MADE FOR IT
+(screen.py `final_until` reads a birth's group like PREREG-EVL-4's named receipts, with the births' own decision,
+`decide-open-births` / `decide-close-births`, run by the lane and the CLI's catchup as a backfill for every older such
+decision: `births_made_without`); A BIRTH'S LOOK WAITS ON ITS CONTROL'S FAILED OR PENDING PART; THE LIMIT AT ENTRY FOR
+ANY PROGRAM THE PROCESS DOES NOT KNOW (score.py, fail closed); A BIRTHS TABLE READ ERROR KEEPS THE BIRTHS LAST READ
+(programs.py `load_births`). No PREREG program's selection, judge or constant moves; no identity moves.
+
 **Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
 green on the exact head; release 1019d live first, and main at its head):
 1. THE GATEWAY from this head: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`
@@ -38,7 +50,9 @@ green on the exact head; release 1019d live first, and main at its head):
    before 21:15 ET of a session night). Verify after 21:15 ET: the lane's `births` receipt `ok`, its `budget` reading
    `used` 1.2 and `limit` 3.0 before any birth; at most three seatable births a night; each registered line in
    `docs/births/<night>.jsonl` on main and its row in the store's `births`; the next turn's decisions name each birth;
-   ROOM puts every birth after the twelve PREREG seating versions.
+   ROOM puts every birth after the twelve PREREG seating versions; `lane.json` `verdict_usd_today` holds the births
+   call's cost from the next task on (the line is the lane's, births included); `SN.births_made_without(st, today)`
+   prints `{}`.
 
 **Rollback**: `events.births` false stops new births (registered births keep trading at their bands). The House by
 `floor_box.py rollback` and repoint release 1019d's deployed head (`5a17bd25` unless it deployed from another): the
@@ -47,6 +61,17 @@ exit by their own stored plans (`live._event_exits` reads the lot's plan, never 
 re-sent buy that filled is an ordinary event lot to it). The gateway last, by `wrangler rollback` to the version step 1
 replaced, or never (the House without births sends no append). The instant stop of event buys is release 1019b's
 (**Release 1019b**, Rollback).
+
+**What a House rollback costs once births exist** (release 1019e's review): release 1019d knows no birth, so while it
+runs (a) every decision it makes leaves the births' events out of their shadow records, and (b) its score settles a
+birth's planned or entered intents with no limit at entry (it reads every program it does not know as PREREG-EVL-1's).
+Release 1019e, deployed again, reads (a) as decisions NOT MADE for the births (`screen.final_until`): their looks wait,
+and the lane decides the births by themselves (`decide-open-births`, `decide-close-births`) for every such decision its
+hourly re-decision no longer reaches, once (verify: `SN.births_made_without(st, today)` prints `{}` within the hour,
+each such decision with one births-only receipt `ok`). (b) is not undone: a birth's entry above 1.25 x the previous
+close that release 1019d settled filled stays in its record. So once births are registered, PREFER `events.births`
+false plus the instant stop of event buys over a House rollback; roll the House back only for a fault in the House
+itself, and read the births' settled intents of the rollback's sessions before their next look.
 
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
@@ -563,8 +588,10 @@ the owner's. R3 adds `league/events/births.py` (the births' grammar, validator a
 **Births (R3, on `feat/evl-births`, not deployed; [events.md](events.md), "Births").** Deploy THE GATEWAY FIRST (its
 docs route admits `docs/births/<YYYY-MM-DD>.jsonl` appends), then the House release with `league/config.json`
 `events.births` true: the lane then runs the births job once a session night at 21:15 ET after the report (receipt
-`births`; the architect's one Haiku call, at most $0.25 a night, inside the lane's verdict line and refused under
-PAUSE; the night's facts, candidates and verdicts in `birth_calls` and `birth_candidates`; registered births in
+`births`; the architect's one Haiku call, at most $0.25 a night, refused under PAUSE and INSIDE THE LANE'S LINE since
+release 1019e's review: made only when its worst case fits under what is left of the lane's line that UTC day, its
+stored cost counted in that line, in `budget.lane_spend` and in the site's Claude bill; the night's facts, candidates
+and verdicts in `birth_calls` and `birth_candidates`; registered births in
 `births`, each with its GitHub commit). The captain's own births, with no model call: `python3 -m league.events --state
 /workspace/state/events births --specs FILE` on the box (FILE a JSON list of `{spec, why}`; `--dry-run` validates and
 records only); the facts alone: `facts`. Watching: the daily report's "Births" line and "Expected false passes" (0.10 a

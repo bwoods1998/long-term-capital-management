@@ -28,6 +28,7 @@ import dataclasses
 import datetime as dt
 import json
 import threading
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from . import calendar as C
@@ -171,6 +172,21 @@ PREREG_SEATING = SEATING
 #: by its derived control (a record).
 BIRTHS: tuple[Program, ...] = ()
 _LOAD = threading.Lock()
+#: (the store's root, the births) of the last load that READ its store's `births` table (`load_births`): what a later
+#: load of the SAME store keeps when its read fails (release 1019e's review).
+_LAST_READ: tuple[str | None, tuple[Program, ...]] = (None, ())
+
+
+def _where(store: Any) -> str | None:
+    """The store's root, resolved (the lane's `Store` and the book's read-only `Lane` of one store give the same), or
+    None when it has none."""
+    root = getattr(store, "root", None)
+    if root is None:
+        return None
+    try:
+        return str(Path(root).resolve())
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 def registered() -> dt.datetime:
@@ -188,21 +204,33 @@ def load_births(store: Any) -> tuple[Program, ...]:
     selection, judge or constant moves), so the lane's decisions, its screen (`screen.expected_false_passes` counts each
     seatable birth's 0.10 through SEATING), its bands and the House's event book (league/events/book.py, which reads
     SEATING and BY_KEY) take them like any version 2 program. `store` is the lane's store or the book's read-only view
-    of it (`.db`); a store without the table, or one that cannot be read, loads none (and a load that would give two
-    rows one key loads none); None unloads every birth. Returns the births loaded."""
-    global PROGRAMS, BY_KEY, BY_ID, SEATING, BIRTHS
+    of it (`.db`); a store without the table loads none (and a load that would give two rows one key loads none); None
+    unloads every birth. A store whose `births` table CANNOT BE READ keeps the births last read from that same store
+    (release 1019e's review: the rows are process-wide and both House threads, the lane's and the book's, load them,
+    so a read error that unloaded them would have the next decision made, and the next record settled, as if a
+    registered birth did not exist: its events left out of its shadow record and its entries settled with no limit at
+    entry); a store never read before loads none (fail closed: nothing seats). Returns the births loaded."""
+    global PROGRAMS, BY_KEY, BY_ID, SEATING, BIRTHS, _LAST_READ
     from . import births as BI
 
+    where = None if store is None else _where(store)
     try:
         born = () if store is None else tuple(BI.registered_programs(store))
-    except Exception:  # noqa: BLE001 - an unreadable births table seats nothing (fail closed), the PREREG rows stand
-        born = ()
+        read = True
+    except Exception:  # noqa: BLE001 - an unreadable births table: the same store's last read births, else none
+        last_where, last_born = _LAST_READ
+        born = last_born if where is not None and where == last_where else ()
+        read = False
     with _LOAD:
         programs = PREREG_PROGRAMS + born
         by_key = {(p.id, p.version): p for p in programs}
         if len(by_key) != len(programs):
             born, programs = (), PREREG_PROGRAMS
             by_key = {(p.id, p.version): p for p in programs}
+        if store is None:
+            _LAST_READ = (None, ())
+        elif read:
+            _LAST_READ = (where, born)
         BIRTHS = born
         BY_KEY = by_key
         BY_ID = {p.id: p for p in programs if p.version == 1}

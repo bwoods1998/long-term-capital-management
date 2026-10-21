@@ -65,7 +65,10 @@ THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 
 `/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict
 (`birth_calls`: a night's stored answer is read again, never asked again), at most `K` specs a night, under a cost cap
 of `NIGHT_USD` ($0.25) a night: the call's worst case (its input at about 3 characters a token and its max_tokens, at
-Haiku 4.5's $1 and $5 a million tokens) must fit under what the night has left, or no call is made.
+Haiku 4.5's $1 and $5 a million tokens) must fit under what the night has left, or no call is made. On the House the
+call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is left of the lane's
+line today (league/events/house.py `line_left`), and its stored cost counts in that line, in the budget rule's measure
+of the lane (league/ops/budget.py `lane_spend`) and in the site's bill (league/site_lane.py `verdict_usd`).
 
 REGISTRATION (`register`): the accepted specs' canonical lines are appended to `docs/births/<night>.jsonl` on main
 through the gateway's GitHub docs route (`POST /v1/github/docs`, gateway/lib/desk.mjs: that path pattern, appends of
@@ -973,10 +976,12 @@ def parse_answer(text: str, *, k: int = K) -> tuple[list[dict[str, Any]], int]:
 
 
 def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, now: Callable[[], dt.datetime],
-            k: int = K, cap: float = NIGHT_USD) -> dict[str, Any]:
+            k: int = K, cap: float = NIGHT_USD, line_left: float | None = None) -> dict[str, Any]:
     """THE ARCHITECT'S ONE CALL A NIGHT (the module docstring): {status, proposals, offered, usd, prompt_sha,
     facts_sha}. A night's stored answer is read again (never asked again); no answer is stored for a call that got none
-    (a refusal by the gateway or the lane, a transport failure, a 5xx): the night proposes nothing."""
+    (a refusal by the gateway or the lane, a transport failure, a 5xx): the night proposes nothing. `line_left` (the
+    House's lane, league/events/house.py `line_left`): what is left of the lane's line today; the call's worst case must
+    fit under it too (release 1019e's review: the call is inside the lane's line), or no call is made."""
     psha = prompt_sha()
     facts_text = json.dumps(facts, sort_keys=True, separators=(",", ":"))
     fsha = hashlib.sha256(facts_text.encode("utf-8")).hexdigest()
@@ -993,6 +998,10 @@ def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, no
     if already + worst > cap:
         return base | {"status": "cap", "proposals": [], "offered": 0, "usd": 0.0,
                        "why": f"the call's worst case ${worst:.4f} over the night's ${cap - already:.4f} left"}
+    if line_left is not None and worst > line_left:
+        return base | {"status": "cap", "proposals": [], "offered": 0, "usd": 0.0,
+                       "why": f"the call's worst case ${worst:.4f} over the ${max(0.0, line_left):.4f} left of the lane's "
+                              "line today"}
     request_id = f"evl-births:{night.isoformat()}:{psha[:12]}"
     body = {"model": MODEL, "max_tokens": MAX_TOKENS, "temperature": TEMPERATURE, "system": SYSTEM,
             "messages": [{"role": "user", "content": user}]}
@@ -1110,11 +1119,11 @@ def reconcile(store: Any, gw: Any, *, now: Callable[[], dt.datetime]) -> list[di
 # ----------------------------------------------------------------------------------------------------------- the night
 def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime],
           proposals: Sequence[Mapping[str, Any]] | None = None, k: int = K, cap: float = NIGHT_USD,
-          dry_run: bool = False) -> dict[str, Any]:
+          dry_run: bool = False, line_left: float | None = None) -> dict[str, Any]:
     """THE BIRTHS JOB of the night of `today` (receipt `births`): the unknown registrations of earlier nights posted
-    again; the outcome-free facts; the architect's one call (or `proposals`, the captain's own {spec, why}: no call);
-    the validator; the accepted lines registered (`dry_run`: validated and recorded, never registered); the births
-    loaded again. Returns its summary."""
+    again; the outcome-free facts; the architect's one call (or `proposals`, the captain's own {spec, why}: no call),
+    held to the night's cap and to `line_left` (`propose`); the validator; the accepted lines registered (`dry_run`:
+    validated and recorded, never registered); the births loaded again. Returns its summary."""
     P.load_births(store)
     rid = store.start_receipt(JOB, now=now())
     out: dict[str, Any] = {"night": today.isoformat()}
@@ -1128,7 +1137,7 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         fsha = hashlib.sha256(json.dumps(sheet, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         call = None
         if proposals is None:
-            call = propose(store, gw, sheet, night=today, now=now, k=k, cap=cap)
+            call = propose(store, gw, sheet, night=today, now=now, k=k, cap=cap, line_left=line_left)
             proposals = call["proposals"]
             out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why")}
             psha = call.get("prompt_sha")

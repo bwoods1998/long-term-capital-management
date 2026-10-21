@@ -457,18 +457,27 @@ def news_verdict(ctx: Context, row: Mapping[str, Any]) -> int | None:
 
 
 # ---------------------------------------------------------------------------------------------------- decisions
-def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False) -> dict[str, Any]:
+def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False,
+                births_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every open-entry program at session `day`'s open.
 
     `ask_only`: the decision's own windows, eligibility and verdict asks, and nothing else: no intent and no receipt is
     written, and `pending` counts each reading program's eligible events still without a stored verdict. The House's
     event lane (league/events/house.py) asks a session's verdicts this way from 07:30 ET, so the decision finds them
-    stored; the verdicts and universe rows it stores are the very ones the decision reads."""
+    stored; the verdicts and universe rows it stores are the very ones the decision reads.
+
+    `births_only` (release 1019e's review): R3'S REGISTERED BIRTHS DECIDED BY THEMSELVES, for a session a release, or a
+    turn, without their rows decided (league/events/screen.py `births_made_without`; the House's lane and the CLI's
+    catchup run it, as a backfill): the decision's reads and its eligibility call exactly as the whole decision makes
+    them, then the births alone (their verdicts, their intents); NO PREREG PROGRAM's verdict is asked or intent
+    written, so a session final for a PREREG program gains nothing. Its receipt is `decide-open-births:<day>`
+    (screen.BIRTHS_KIND), which the judge reads for the births only (`screen.final_until`)."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    rid = None if ask_only else st.start_receipt(f"decide-open:{day}", now=ctx.now())
+    job = f"decide-{SN.BIRTHS_KIND['open'] if births_only else 'open'}:{day}"
+    rid = None if ask_only else st.start_receipt(job, now=ctx.now())
     lo, hi = P.open_window(st, day)
     e8k = P.filings_in(st, "8-K", lo, hi)
     ins = P.ins_triggers(st, lo, hi)
@@ -553,7 +562,7 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
 
     for prog in P.PROGRAMS:
-        if prog.entry_at != "open":
+        if prog.entry_at != "open" or (births_only and prog.spec is None):
             continue
         _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
@@ -732,7 +741,7 @@ def _skip_excluded(st: S.Store, day: dt.date, excluded: set[str], filed: set[str
 
 
 def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False,
-                 evl4_only: bool = False) -> dict[str, Any]:
+                 evl4_only: bool = False, births_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
     REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON), then PREREG-EVL-4's
     (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their two controls: `_rows_4`).
@@ -769,12 +778,19 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     (reads, verdicts, `_skip_excluded`, intents); NO EARLIER ROW'S verdict is asked or intent written, so a close final
     for an earlier program gains nothing. Its receipt is `decide-close-evl4:<day>` (screen.FOUR_KIND), which the judge
     reads for their programs only (`screen.final_until`): the session's `decide-close:<day>` receipts, which the House's
-    lane, its book and the judge read for every earlier row, are left as they are."""
+    lane, its book and the judge read for every earlier row, are left as they are.
+
+    `births_only` (release 1019e's review): R3'S REGISTERED BIRTHS DECIDED BY THEMSELVES, as `decide_open`'s: the
+    decision's reads and its eligibility call as the whole decision makes them, then the close-entry births alone (no
+    PREREG row, PREREG-EVL-4's part not run); its receipt `decide-close-births:<day>` (screen.BIRTHS_KIND)."""
+    if evl4_only and births_only:
+        raise ValueError("a decision of PREREG-EVL-4's rows by themselves or of the births by themselves, not both")
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    job = f"decide-{SN.FOUR_KIND if evl4_only else 'close'}:{day}"
+    kind = SN.FOUR_KIND if evl4_only else SN.BIRTHS_KIND["close"] if births_only else "close"
+    job = f"decide-{kind}:{day}"
     rid = None if ask_only else st.start_receipt(job, now=ctx.now())
     lo, hi = P.close_window(st, day)
     e8k = [r for r in P.filings_in(st, "8-K", lo, hi) if "2.02" in P.items_of(r)]
@@ -961,10 +977,12 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     # after every PREREG row.
     if not evl4_only:       # (PREREG-EVL-4's rows by themselves: no earlier row is decided again)
         for prog in P.PROGRAMS:
-            if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4:
+            if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
+                    not (births_only and prog.spec is None):
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
-        four_part()
+        if not births_only:     # (the births by themselves: no PREREG-EVL-4 row is decided again)
+            four_part()
     except Deadline:
         raise
     except Exception as exc:  # noqa: BLE001 - PREREG-EVL-4's part fails alone (A83 (3)(i)); never with evl4_only

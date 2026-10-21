@@ -570,7 +570,9 @@ def rows_4(lane: Lane, day: dt.date, decided_at: dt.datetime) -> dict[str, list[
 def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime) -> list[Mapping[str, Any]]:
     """The events `program`'s decision of entry session `day` reads (league/events/run.py's windows), STORED before
     `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
-    (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`."""
+    (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`. Every family a seatable program can
+    have reads its rows here as the lane's decision reads them (release 1019e's review: R3's `ins` family, Form 4
+    cluster triggers, was missing, so a seatable birth of it was decided and screened in shadow and never traded)."""
     family = program.family
     if program.entry_at == "close" and family in P.CLOSE_FAMILIES_4:
         since = program.registered_at
@@ -579,19 +581,21 @@ def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.dateti
         lo, hi = P.open_window(lane, day)
         if family in ("ern", "8k"):
             rows = P.filings_in(lane, "8-K", lo, hi)
+        elif family == "ins":
+            rows = P.ins_triggers(lane, lo, hi)
         elif family == "ins-buy":
             rows = P.ins_buys(lane, lo, hi)
         elif family == "news":
             rows = P.news_in(lane, *P.news_window(lane, day))
-        else:
-            rows = []
+        else:       # (never silent: that program plans nothing this auction, and the book records why)
+            raise LookupError(f"the book reads no rows for the {family} family at the open")
     else:
         if family == "ern-react":
             rows = [r for r in P.filings_in(lane, "8-K", *P.close_window(lane, day)) if "2.02" in P.items_of(r)]
         elif family in ("news-day", "news-react"):
             rows = P.news_in(lane, *P.day_news_window(lane, day))
         else:
-            rows = []
+            raise LookupError(f"the book reads no rows for the {family} family at the close")
     if family in P.NEWS_FAMILIES:
         by_symbol = {str(r["symbol"]).upper(): str(r["cik"]) for r in universe_rows(lane, day).values()}
         rows = [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in rows]

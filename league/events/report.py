@@ -115,12 +115,14 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
 def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
     """{decision key (`id`, or `id@vN` for a later version): {"events", "unjudged"}}: the event ids the finished decisions
     of the entry sessions through `day` left out of each program's record (their summaries' `kept` entries, written by
-    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, included), each event once; an event listed unjudged by one run and taken on a stored verdict
-    by a later one counts as left out (`events`) only."""
+    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, and the births' own,
+    `decide-open-births` and `decide-close-births`, included), each event once; an event listed unjudged by one run and
+    taken on a stored verdict by a later one counts as left out (`events`) only."""
     events: dict[str, set[str]] = {}
     unjudged: dict[str, set[str]] = {}
     for row in store.db.execute("SELECT job, summary FROM receipts WHERE (job LIKE 'decide-open:%' OR job LIKE "
-                                "'decide-close:%' OR job LIKE 'decide-close-evl4:%') AND status IN ('ok', 'pending')"):
+                                "'decide-close:%' OR job LIKE 'decide-close-evl4:%' OR job LIKE 'decide-open-births:%' "
+                                "OR job LIKE 'decide-close-births:%') AND status IN ('ok', 'pending')"):
         if str(row["job"]).split(":", 1)[1] > day.isoformat():
             continue
         try:

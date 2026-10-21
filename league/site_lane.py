@@ -21,9 +21,11 @@ module READS what that takes, read-only, from the House's state root, and the pu
 - THE CHECKPOINT the goal's Done reads (every 100): the settled real-money events whose buy was at Probe size or above
   (`bands.real_events`, PROBE_PLUS: necessarily after the program's promotion), and the next reading. 0 until a program
   is at Probe.
-- THE VERDICT SPEND (`verdict_usd`): every Claude verdict the lane paid for, from its store (an answered verdict whose
-  cost the gateway did not state counts `VERDICT_USD_UNKNOWN`, as the lane's own daily line does). The publisher adds
-  it to the costs' Claude part, which the swarm's ledger alone does not hold.
+- THE VERDICT SPEND (`verdict_usd`): every Claude call the lane paid for, from its store: its verdicts (an answered
+  verdict whose cost the gateway did not state counts `VERDICT_USD_UNKNOWN`, as the lane's own daily line does) and R3's
+  births calls (`birth_calls`, the births job's one Haiku call a night through the lane's gateway; one stored with no
+  cost counts `BIRTH_USD_UNKNOWN`; release 1019e's review: the bill is never understated). The publisher adds it to the
+  costs' Claude part, which the swarm's ledger alone does not hold.
 - THE LOTS (`read_lots`, the equity book's tables in `<state>/live.sqlite`): every lot real money held since the reset,
   the event lane's (`lane` "event": `source` "program", `owner` its program's id on the page) and the older equity
   lanes' (`source` "agent", `owner` the agent's id), open and closed. A lot's P&L
@@ -65,6 +67,8 @@ REAL_BANDS = ("learning", "probe", "sized")
 CHECKPOINT_EVERY = 100
 #: An answered verdict whose cost the gateway did not state (league/events/house.py `VERDICT_USD_UNKNOWN`).
 VERDICT_USD_UNKNOWN = Decimal("0.01")
+#: An answered births call stored with no cost (league/events/house.py `BIRTH_USD_UNKNOWN`: the night's whole cap).
+BIRTH_USD_UNKNOWN = Decimal("0.25")
 #: An event lot's `eq_lots.lane` (league/events/book.py `LANE`, league/equity/live.py `EVENT_LANE`).
 EVENT_LANE = "event"
 CENT = Decimal("0.01")
@@ -191,11 +195,18 @@ def _table(db: sqlite3.Connection, name: str) -> bool:
 
 
 def verdict_usd(lane: Any) -> Decimal:
-    """Every verdict the lane paid for, in dollars (unrounded): the stated costs, and `VERDICT_USD_UNKNOWN` for each
-    answered verdict whose cost the gateway did not state."""
+    """Every Claude call the lane paid for, in dollars (unrounded): its verdicts' stated costs, `VERDICT_USD_UNKNOWN` for
+    each answered verdict whose cost the gateway did not state, and (R3) every births call's stored cost
+    (`birth_calls`: the stated one, else its worst case; `BIRTH_USD_UNKNOWN` for one stored with none) when the store
+    has that table."""
     row = lane.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(CASE WHEN usd IS NULL AND answered_at IS NOT NULL "
                           "THEN 1 ELSE 0 END), 0) FROM verdicts").fetchone()
-    return Decimal(str(row[0] or 0)) + VERDICT_USD_UNKNOWN * int(row[1] or 0)
+    total = Decimal(str(row[0] or 0)) + VERDICT_USD_UNKNOWN * int(row[1] or 0)
+    if _table(lane.db, "birth_calls"):
+        born = lane.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(CASE WHEN usd IS NULL AND answered_at IS NOT "
+                               "NULL THEN 1 ELSE 0 END), 0) FROM birth_calls").fetchone()
+        total += Decimal(str(born[0] or 0)) + BIRTH_USD_UNKNOWN * int(born[1] or 0)
+    return total
 
 
 def read_verdict_usd(state_root: str | Path) -> Decimal | None:

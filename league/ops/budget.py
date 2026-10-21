@@ -1252,40 +1252,52 @@ def book_net(root: str | Path, now: float, *, sessions: int = PROFIT_SESSIONS) -
 #: A verdict whose cost the gateway did not state counts this much (league/events/house.py `VERDICT_USD_UNKNOWN`: the
 #: lane's own line counts it so, and so does its measure here).
 VERDICT_USD_UNKNOWN = 0.01
+#: R3's births call stored with no cost counts the night's whole cap (league/events/house.py `BIRTH_USD_UNKNOWN`,
+#: league/events/births.py `NIGHT_USD`), as the lane's own line counts it.
+BIRTH_USD_UNKNOWN = 0.25
 
 
 def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) -> dict[str, Any]:
-    """THE LANE'S MEASURED VERDICT SPEND (RULE_VERSION 3): from `<root>/events/events.sqlite` (league/events/store.py,
-    read-only), the gateway's settled cost of every verdict answered over the trailing `days` days, a day (`usd_day`),
-    its heaviest UTC day of them (`peak_usd_day`, today's part included: what sizes the lane's part, `cost_rule`), and
-    since 00:00 UTC (`today_usd`). A verdict with no cost on record counts `VERDICT_USD_UNKNOWN`, as the lane's own line
-    counts it. {usd_day: None, peak_usd_day: None, ...} with no store or one that cannot be read: the lane's part is then
-    `LANE_USD_DAY`."""
+    """THE LANE'S MEASURED CLAUDE SPEND (RULE_VERSION 3): from `<root>/events/events.sqlite` (league/events/store.py,
+    read-only), the gateway's settled cost of every verdict answered over the trailing `days` days and of R3's births
+    call (`birth_calls`, by the time it was answered: the births job's one Haiku call a night goes through the lane's
+    gateway, on the same Claude meter, and the swarm books none of it; release 1019e's review), a day (`usd_day`), its
+    heaviest UTC day of them (`peak_usd_day`, today's part included: what sizes the lane's part, `cost_rule`), and since
+    00:00 UTC (`today_usd`). A verdict with no cost on record counts `VERDICT_USD_UNKNOWN`, a births call
+    `BIRTH_USD_UNKNOWN`, as the lane's own line counts them. {usd_day: None, peak_usd_day: None, ...} with no store or
+    one that cannot be read: the lane's part is then `LANE_USD_DAY`."""
     path = Path(root) / LANE_STORE
     none = {"usd_day": None, "peak_usd_day": None, "today_usd": 0.0}
     if not path.exists():
         return {**none, "source": "no event lane store"}
-    cost = f"COALESCE(SUM(COALESCE(usd, {VERDICT_USD_UNKNOWN})), 0)"
     try:
         conn = _read_only(path)
         try:
             if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='verdicts'").fetchone() is None:
                 return {**none, "source": "the event lane store has no verdicts table"}
-            window = conn.execute(f"SELECT {cost}, COUNT(*) FROM verdicts WHERE answered_at>=? AND answered_at<=?",
+            # (every paid call of the lane, one row each: its answer time and its cost, an unstated one at its own figure)
+            calls = (f"SELECT answered_at, COALESCE(usd, {VERDICT_USD_UNKNOWN}) AS usd, 'verdict' AS kind FROM verdicts "
+                     "WHERE answered_at IS NOT NULL")
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='birth_calls'").fetchone() is not None:
+                calls += (f" UNION ALL SELECT answered_at, COALESCE(usd, {BIRTH_USD_UNKNOWN}) AS usd, 'births' AS kind "
+                          "FROM birth_calls WHERE answered_at IS NOT NULL")
+            window = conn.execute(f"SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(kind='verdict'), 0), "
+                                  f"COALESCE(SUM(kind='births'), 0) FROM ({calls}) WHERE answered_at>=? AND answered_at<=?",
                                   (_iso(now - days * 86400), _iso(now))).fetchone()
-            peak = conn.execute(f"SELECT MAX(usd) FROM (SELECT {cost} AS usd FROM verdicts WHERE answered_at>=? AND "
-                                "answered_at<=? GROUP BY substr(answered_at, 1, 10))",
+            peak = conn.execute(f"SELECT MAX(usd) FROM (SELECT COALESCE(SUM(usd), 0) AS usd FROM ({calls}) WHERE "
+                                "answered_at>=? AND answered_at<=? GROUP BY substr(answered_at, 1, 10))",
                                 (_iso(_day_start(now) - (days - 1) * 86400), _iso(now))).fetchone()
-            today = conn.execute(f"SELECT {cost} FROM verdicts WHERE answered_at>=? AND answered_at<=?",
+            today = conn.execute(f"SELECT COALESCE(SUM(usd), 0) FROM ({calls}) WHERE answered_at>=? AND answered_at<=?",
                                  (_iso(_day_start(now)), _iso(now))).fetchone()
         finally:
             conn.close()
     except (sqlite3.Error, TypeError, ValueError) as exc:
         return {**none, "source": f"the event lane store could not be read ({type(exc).__name__})"}
-    spent, count = _amount(window[0]) or 0.0, int(window[1] or 0)
+    spent, count, births = _amount(window[0]) or 0.0, int(window[1] or 0), int(window[2] or 0)
+    what = f"{count} verdicts" + (f" and {births} births calls" if births else "")
     return {"usd_day": round(spent / days, 4), "peak_usd_day": round(_amount(peak[0]) or 0.0, 4),
             "today_usd": round(_amount(today[0]) or 0.0, 4),
-            "source": f"{count} verdicts answered in the last {days} days, ${spent:.2f}"}
+            "source": f"{what} answered in the last {days} days, ${spent:.2f}"}
 
 
 def lane_allowance(root: str | Path, now: float | None = None) -> dict[str, Any]:

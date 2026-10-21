@@ -499,6 +499,10 @@ architect. A react family's reaction is a price after the event: never read, so 
 **The architect and the validator.** One gateway call a night (`births.propose`): claude-haiku-4-5-20251001, temperature
 0, max_tokens 3,000, its prompt's sha256 and its answer stored in `birth_calls` like a verdict (a night's answer is read
 again, never asked again), at most 6 specs a night, under a cost cap of $0.25 a night (the call's worst case must fit).
+On the House the call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is
+left of the lane's line that UTC day, and its stored cost counts in that line (the next verdict is refused once births
+and verdicts reach it), in the budget rule's measure of the lane (`budget.lane_spend`: its window, its heaviest day and
+today) and in the site's Claude bill (`site_lane.verdict_usd`).
 The validator is code (`births.validate`): the grammar; a new id and sha; at least 3 selected events a session over the
 last 20 sessions by selection count; Jaccard < 0.8 of the last 20 sessions' selected events against every registered
 program (records, controls and births included: stricter than "every live program", and it reads no band) and against
@@ -534,11 +538,23 @@ learning size from its first event at its own version 1, like any version 2 prog
 program goes first (Sized, Probe, learning, then the tables' order) and the births after them, in registration order
 (R3-SPEC section 4). Expected false passes in the report count every seatable birth. A birth's failure is its own: a
 birth whose part of a decision raises is kept in the decision's `births_failed` (the decision is made for every other
-program, as before) and the screen holds that birth's looks until a later pass decides it.
+program, as before) and the screen holds that birth's looks until a later pass decides it; a READ birth's look waits
+the same way when its control's part raised or is pending (the look compares the two records). A DECISION MADE WITHOUT
+A BIRTH IS NOT MADE FOR IT (release 1019e's review): a decision after the birth's registration whose receipt does not
+name the birth (and its control), made by a release without births or in a turn whose loader had none, leaves the
+birth's looks waiting until the births' own decision (`decide-open-births:<day>` or `decide-close-births:<day>`,
+`run.decide_open`/`decide_close` with `births_only`, a backfill that decides the births alone, never a PREREG row)
+names it; the House's lane runs it once for every such decision older than its hourly re-decision's reach, and the
+CLI's `catchup` too (`screen.births_made_without`). A read error of the births table keeps the births last read from
+that store (never unloading them mid-run), and the score applies the limit at entry to any program the process does not
+know (only a birth can be one). The House's book reads every family a seatable birth can have, the `ins` family's Form
+4 cluster triggers included (a test trades a seatable birth of each of the eight families and finds its real-money
+picks equal to its shadow's intents at every auction).
 
 **On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
-paused or over the day's verdict line). It ships false: switching it on needs the gateway release with the births
+paused or over the day's verdict line, made only when its worst case fits under what is left of that line, and counted
+in it). It ships false: switching it on needs the gateway release with the births
 route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
 fallback after two failing nights of Haiku proposals, and a ranking of learning room by look statistics (a later,
 pre-registered version).

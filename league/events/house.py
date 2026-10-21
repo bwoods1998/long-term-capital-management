@@ -21,7 +21,9 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    a missed one, then a pending
    one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass;
    so does PREREG-EVL-4'S ROWS' OWN DECISION, `decide-close-evl4`, of every older close a release without them decided:
-   release 1019c's review, `_refill_redecide`);
+   release 1019c's review, `_refill_redecide`; and THE BIRTHS' OWN DECISION, `decide-open-births` and
+   `decide-close-births`, of every older decision a release or a turn without the registered births made: release
+   1019e's review);
 2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending (a close
    decision waiting on verdicts only its session's OPEN decision asks, PREREG-EVL-4's PM rows, has those asked by the
    open decision's own code; a wait no call of the pass could answer backs off like one the gateway refused);
@@ -31,8 +33,8 @@ once an hour per task, so the House's repeat rule never turns it into an error),
 4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen (with PREREG-EVL-3's band review
    of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it; then, on a session
    night with `events.births` on, R3's BIRTHS job at 21:15 ET (league/events/births.py `night`: the outcome-free facts,
-   the architect's one Haiku call under $0.25 a night, the validator, the registration through the gateway's docs
-   route), once a night;
+   the architect's one Haiku call under $0.25 a night and inside what is left of the lane's line, below, the
+   validator, the registration through the gateway's docs route), once a night;
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
@@ -52,7 +54,9 @@ day's from 00:00 ET, two lines in one UTC day): the lower of `events.verdict_usd
 the budget rule's allowance for the lane's verdicts (league/ops/budget.py `lane_allowance`: the Claude meter's lane part
 in `<state>/budget.json`, its no-profit floor when the file is not usable, 0 under the cap breach hold), so the verdicts
 and every other metered dollar stay under the day's cap (budget rule 3; release 1019c). Over it, READ events wait
-(PREREG-EVL-1 section 4), as they do for any call with no answer.
+(PREREG-EVL-1 section 4), as they do for any call with no answer. R3's births call is the lane's too (release 1019e's
+review): its stored cost counts in the line (`_spend_today`, `birth_usd`), and it is made only when its worst case fits
+under what is left of the line (`line_left`).
 Market-data reads are spaced `DATA_INTERVAL` apart (Alpaca's Basic plan is shared
 with the House's own book).
 """
@@ -124,6 +128,13 @@ LOOKBACK = SN.FINAL_LOOKBACK
 #: re-decision no longer reaches (league/events/screen.py `made_without`, the judge's: until it is made the close is not
 #: final for those programs). The earlier rows of such a close are never decided again by it.
 FOUR_KIND = SN.FOUR_KIND
+#: R3'S BIRTHS DECIDED BY THEMSELVES (release 1019e's review): the decision kinds (their receipts
+#: `decide-open-births:<day>` and `decide-close-births:<day>`, league/events/run.py `decide_open` / `decide_close` with
+#: `births_only`) the lane runs, once and as a backfill, for every decision a release or a turn without the registered
+#: births made and the hourly re-decision no longer reaches (league/events/screen.py `births_made_without`, the judge's:
+#: until it is made the session is not final for those births). Its PREREG rows are never decided again by it.
+BIRTH_KINDS = dict(SN.BIRTHS_KIND)
+BACKFILL_KINDS = (FOUR_KIND, *BIRTH_KINDS.values())
 URGENT_BEFORE = dt.timedelta(minutes=30)
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
@@ -158,6 +169,9 @@ DATA_INTERVAL = 0.5
 ASSETS_TTL = 1800.0
 VERDICT_USD_DAY = 3.0                         # league/config.json events.verdict_usd_day (the goal's cost rule)
 VERDICT_USD_UNKNOWN = 0.01                    # a verdict whose cost the gateway did not state
+#: R3's births call stored with no cost (league/events/births.py `propose` stores its worst case then; a NULL counts the
+#: night's whole cap, `births.NIGHT_USD`).
+BIRTH_USD_UNKNOWN = 0.25
 
 
 class LaneCut(OSError):
@@ -293,6 +307,7 @@ class EventLane:
         self._redecide: set[tuple[str, dt.date]] = set()
         self._redecide_next = self._born
         self._four: set[dt.date] = set()        # closes whose PREREG-EVL-4 rows wait for their own decision
+        self._births_redo: set[tuple[str, dt.date]] = set()   # decisions whose births wait for their own (`BIRTH_KINDS`)
         self._looks: dict[tuple[str, dt.date], VerdictLook] = {}
         self._events_at = self._born            # when a record pass last stored something new
         self._universe_told: set[dt.date] = set()
@@ -388,13 +403,22 @@ class EventLane:
         self._usd["usd"] += max(0.0, usd)
 
     def _spend_today(self, st: S.Store, now: dt.datetime) -> None:
-        """The day's verdict dollars so far, from the store, and the line the next call is held to (`verdict_line`). THE
-        DAY is the UTC day (`verdict_day`: budget rule 3's, every other line's and the cap breach's)."""
+        """The day's Claude dollars of the lane so far, from the store, and the line the next call is held to
+        (`verdict_line`). THE DAY is the UTC day (`verdict_day`: budget rule 3's, every other line's and the cap
+        breach's). Its Claude dollars are its verdicts' and R3's births call's (`birth_usd`: the births job's one Haiku
+        call a night goes through this lane's gateway, on the same Claude meter, so it is inside the same line; release
+        1019e's review), each at its stated cost (a verdict with none at `VERDICT_USD_UNKNOWN`, a births call at
+        `BIRTH_USD_UNKNOWN`)."""
         day, (lo, hi) = verdict_day(now)
         row = st.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(usd IS NULL), 0) FROM verdicts WHERE "
                             "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()
-        self._usd = {"day": day, "usd": float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1])}
+        usd = float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1]) + birth_usd(st.db, lo, hi)
+        self._usd = {"day": day, "usd": usd}
         self._line = self.verdict_line(now)
+
+    def line_left(self) -> float:
+        """What is left of the lane's line today (`_spend_today`'s line less its spend, never below 0)."""
+        return max(0.0, float(self._line["usd_day"]) - float(self._usd["usd"]))
 
     def verdict_line(self, now: dt.datetime) -> dict[str, Any]:
         """THE LANE'S LINE (the module docstring): {usd_day, source}, the lower of `events.verdict_usd_day` and the budget
@@ -686,12 +710,17 @@ class EventLane:
 
     def _decision_times(self, st: S.Store, first: dt.date, last: dt.date) -> Iterable[tuple[C.Session, str, dt.datetime, dt.datetime]]:
         """(session, kind, scheduled time, the time it is run from) for every decision of the sessions in [first, last],
-        and PREREG-EVL-4's rows' own decision (`FOUR_KIND`) of each close that waits for it (`_four`)."""
+        PREREG-EVL-4's rows' own decision (`FOUR_KIND`) of each close that waits for it (`_four`) and the births' own
+        decision (`BIRTH_KINDS`) of each decision whose births wait for it (`_births_redo`)."""
         for s in C.sessions(st, first, last):
             yield s, "open", s.open_decide, s.open_decide
+            if ("open", s.day) in self._births_redo:
+                yield s, BIRTH_KINDS["open"], s.open_decide, s.open_decide
             yield s, "close", s.close_decide, s.close_decide + CLOSE_GRACE
             if s.day in self._four:
                 yield s, FOUR_KIND, s.close_decide, s.close_decide + CLOSE_GRACE
+            if ("close", s.day) in self._births_redo:
+                yield s, BIRTH_KINDS["close"], s.close_decide, s.close_decide + CLOSE_GRACE
 
     def _refill_redecide(self, st: S.Store, now: dt.datetime, today: dt.date,
                          latest: Mapping[str, tuple[str, dt.datetime]] | None = None) -> None:
@@ -702,7 +731,12 @@ class EventLane:
         `FOUR_KIND`, once, as a backfill: release 1019b's closes from 16:01:05Z Oct 19 to this release's deploy that
         the hourly re-decision no longer reaches. A close it still reaches is decided again whole by it, and a close
         whose latest decision is pending is decided again whole by its retry: each names their rows then. One decided
-        by themselves and then again by such a release (stale) is decided again."""
+        by themselves and then again by such a release (stale) is decided again.
+
+        THE BIRTHS' OWN DECISIONS (release 1019e's review) the same way: every older open and close decision that a
+        release or a turn without the registered births made last (league/events/screen.py `births_made_without`) gets
+        the births' own decision (`BIRTH_KINDS`), once, as a backfill; one whose births-only receipt is stale, or named
+        not every birth (a birth's part failed), is decided again, once an hour."""
         self._redecide_next = now + REDECIDE_EVERY
         start = P.registered().astimezone(C.NY).date()
         due = [s for s in C.sessions(st, max(start, today - dt.timedelta(days=14)), today) if s.open_decide <= now]
@@ -722,6 +756,15 @@ class EventLane:
             if stale:
                 self._redecide.add((FOUR_KIND, day))
         self._four = four
+        births: set[tuple[str, dt.date]] = set()
+        for (kind, day), again in SN.births_made_without(st, today, first=(now - LOOKBACK).astimezone(C.NY).date()).items():
+            status = latest.get(f"decide-{kind}:{day.isoformat()}", (None, None))[0]
+            if day in reached or status != "ok":
+                continue    # (decided again whole, by the hourly re-decision or its pending retry: naming them then)
+            births.add((kind, day))
+            if again:
+                self._redecide.add((BIRTH_KINDS[kind], day))
+        self._births_redo = births
 
     def _due_decision(self, st: S.Store, now: dt.datetime, latest: Mapping[str, tuple[str, dt.datetime]],
                       soon: list[dt.datetime]) -> tuple[int, dt.datetime, str, dt.date, bool] | None:
@@ -737,11 +780,11 @@ class EventLane:
                 continue
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
-            live = kind != FOUR_KIND and R.live_run(scheduled, now)   # PREREG-EVL-4's rows' own: always a backfill
+            live = kind not in BACKFILL_KINDS and R.live_run(scheduled, now)   # (their rows' own: always a backfill)
             # (Release 1019b's second review: the receipt's own status first, then this lane's cut: a decision cut once
             # and failing since waits as a failed one does, never every turn.)
             if status is None:
-                rank = 3 if kind == FOUR_KIND else (0 if live else 1)   # (a re-decision: after the record pass)
+                rank = 3 if kind in BACKFILL_KINDS else (0 if live else 1)   # (a re-decision: after the record pass)
             elif status == "ok":
                 if key not in self._redecide:
                     continue
@@ -785,6 +828,10 @@ class EventLane:
                 out = R.decide_open(ctx, day, backfill_run=not live)
             elif kind == FOUR_KIND:
                 out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
+            elif kind == BIRTH_KINDS["open"]:
+                out = R.decide_open(ctx, day, backfill_run=True, births_only=True)
+            elif kind == BIRTH_KINDS["close"]:
+                out = R.decide_close(ctx, day, backfill_run=True, births_only=True)
             else:
                 out = R.decide_close(ctx, day, backfill_run=not live)
         except LaneDeadline:
@@ -845,6 +892,8 @@ class EventLane:
             for day, kind in pending:
                 if kind == FOUR_KIND and day not in self._four:
                     continue    # (its close was decided again whole since: that decision's own wait is the one read)
+                if kind in BIRTH_KINDS.values() and (_base_kind(kind), day) not in self._births_redo:
+                    continue    # (the same for the births' own decision)
                 if day != today and self._verdicts_due((kind, day), now, soon, fresh=False):
                     urgent = (kind, day, False)
                     break
@@ -876,11 +925,16 @@ class EventLane:
         elif kind == FOUR_KIND:     # PREREG-EVL-4's rows' own decision (a backfill): their verdicts alone
             def decide(ctx: Any, day: dt.date, *, backfill_run: bool, ask_only: bool) -> dict[str, Any]:
                 return R.decide_close(ctx, day, backfill_run=True, ask_only=ask_only, evl4_only=True)
+        elif kind in BIRTH_KINDS.values():      # the births' own decision (a backfill): their verdicts alone
+            whole = R.decide_open if kind == BIRTH_KINDS["open"] else R.decide_close
+
+            def decide(ctx: Any, day: dt.date, *, backfill_run: bool, ask_only: bool) -> dict[str, Any]:
+                return whole(ctx, day, backfill_run=True, ask_only=ask_only, births_only=True)
         else:
             decide = R.decide_close
         try:
             out = decide(ctx, day, backfill_run=not live, ask_only=True)
-            if kind in ("close", FOUR_KIND) and R.waits_on_open(out):
+            if kind in ("close", FOUR_KIND, BIRTH_KINDS["close"]) and R.waits_on_open(out):
                 session = C.session(ctx.store, day)
                 opened = R.live_run(session.open_decide, ctx.now()) if session is not None else False
                 R.decide_open(ctx, day, backfill_run=not opened, ask_only=True)
@@ -899,7 +953,7 @@ class EventLane:
         if gw.counts.get("cut_cap"):
             self.warn("verdict line", f"the day's ${self._line['usd_day']:.2f} line for verdicts is reached "
                                       f"({self._line['source']}); READ events wait for the next day's")
-        if kind != FOUR_KIND and day not in self._universe_told and isinstance(out.get("events"), Mapping):
+        if kind not in BACKFILL_KINDS and day not in self._universe_told and isinstance(out.get("events"), Mapping):
             self._universe_told.add(day)
             self._receipted(ctx.store, "universe", "ok", {"day": day.isoformat(), "decision": kind,
                                                           **dict(out["events"])})
@@ -1192,11 +1246,14 @@ class EventLane:
 
     def _births(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
         """R3's births job of the night (league/events/births.py `night`, its own receipt `births`): its Claude call goes
-        through the lane's gateway (refused while the House is paused or over the day's line, and counted)."""
+        through the lane's gateway (refused while the House is paused or over the day's line, and counted), and is made
+        only when its worst case fits under what is left of the lane's line today (`line_left`, release 1019e's review:
+        the births call is inside the lane's line, as every verdict, never beside it), as well as under the night's own
+        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`)."""
         from . import births as BI
 
         now = ctx.now()
-        out = BI.night(ctx.store, ctx.gw, today=now.astimezone(C.NY).date(), now=ctx.now)
+        out = BI.night(ctx.store, ctx.gw, today=now.astimezone(C.NY).date(), now=ctx.now, line_left=self.line_left())
         status = str(out.pop("_status", "ok"))
         if status != "ok":
             self.warn("births", f"the births job of {out.get('night')} ended {status}: "
@@ -1376,6 +1433,21 @@ def _iso_epoch(value: float) -> str | None:
         return None
 
 
+def _base_kind(kind: str) -> str:
+    """The entry kind ("open" | "close") of a births-only decision kind (`BIRTH_KINDS`)."""
+    return next(base for base, born in BIRTH_KINDS.items() if born == kind)
+
+
+def birth_usd(db: Any, lo: str, hi: str) -> float:
+    """R3's births calls answered in [lo, hi) (`birth_calls`, league/events/births.py `propose`: its stated cost, or its
+    worst case when the gateway stated none; a NULL at `BIRTH_USD_UNKNOWN`), 0 when the store has no such table."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='birth_calls'").fetchone() is None:
+        return 0.0
+    row = db.execute("SELECT COALESCE(SUM(COALESCE(usd, ?)), 0) FROM birth_calls WHERE answered_at>=? AND answered_at<?",
+                     (BIRTH_USD_UNKNOWN, lo, hi)).fetchone()
+    return float(row[0] or 0.0)
+
+
 def verdict_day(now: dt.datetime) -> tuple[dt.date, tuple[str, str]]:
     """THE DAY THE LANE'S LINE IS HELD ON (the module docstring): the UTC day of `now` and its [00:00, 24:00) UTC as the
     store's strings, the day budget rule 3 holds every line on and the cap breach is judged on (league/ops/metered.py
@@ -1386,4 +1458,4 @@ def verdict_day(now: dt.datetime) -> tuple[dt.date, tuple[str, str]]:
 
 
 __all__ = ["EventLane", "LanePublisher", "LaneGateway", "LaneContext", "LaneCut", "LaneDeadline", "attach",
-           "events_enabled", "verdict_day", "ROOT_NAME", "BACKGROUND_KEY"]
+           "events_enabled", "verdict_day", "birth_usd", "ROOT_NAME", "BACKGROUND_KEY"]
