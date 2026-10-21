@@ -102,9 +102,10 @@ programs trades real money at learning size.
   alarms table and the notice's pace); docs/operations.md (the stall table's three rows, `evl_decide`'s and `dlane`'s,
   the notice's pace and the report's real buys); league/equity/INTERFACES.md section 20 (the read-only readers of the
   book's rows).
-- **Tests.** league/tests/test_evl_alarms_1019f.py (19): the venue's cancel at once read off its own stamps (5 ms; 60 s
+- **Tests.** league/tests/test_evl_alarms_1019f.py (20): the venue's cancel at once read off its own stamps (5 ms; 60 s
   inside, 60.001 s outside; a sale, a day order, a fill, the House's own cancel, a replaced order, a stamp missing or
-  zoneless are none); the never-sent reasons from the book's own words and the gateway's caps; an auction 7 of 10 filled
+  zoneless are none), and the same verdicts as release 1019e's `live.venue_cancel_ms` on the same orders (skipped on a
+  tree without it; it passes on a trial merge with `rel/1019e` `c485dcfe`, beside its test_events_venue_cancel); the never-sent reasons from the book's own words and the gateway's caps; an auction 7 of 10 filled
   with two venue cancels, one re-sent and filled, one stopped by the day order count and one sized out on cash, bound by
   room; 9 of 10 filled is quiet but one never sent stands; no book, no event table and an unreadable book (only the two
   causes unjudged); a weekday late at noon of the next weekday, a waiting streak over 6 h, a done day with failed
