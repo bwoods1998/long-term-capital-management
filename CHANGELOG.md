@@ -186,7 +186,7 @@ programs trades real money at learning size.
   plans, and the old code seats none of them; on a later redeploy the closes the old code decided are decided again
   for the new rows the same way.
 
-### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; joins release 1019e; A82)
+### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; in release 1019c's head `f85cc152`, so in release 1019d too; A82)
 
 - **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,
   an 8-K under each co-registrant. The House's backfill (`EventLane._backfill`) marked a day done only when the
@@ -224,7 +224,7 @@ programs trades real money at learning size.
   `verdicts: {needed, answered}`; a kept program is asked no verdict, so its events are not in the tally and
   `evl_verdicts` never waits on them (league/events/__init__.py's receipts contract names `kept` now). The two
   release entries here and in docs/operations.md stand side by side, with this release's deploy above them.
-- **Known issue, fixed in release 1019d** (A76): budget rule 3 at the UTC day boundary when the cap FALLS (until the
+- **Known issue, still open** (A76; release 1019d does not carry its fix, A78 having made 1019d PREREG-EVL-4's release; the fix is owed in a later release, before the first day the cap falls): budget rule 3 at the UTC day boundary when the cap FALLS (until the
   budget job's first run of a UTC day the guard holds the previous day's research lines against counters reset at
   00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the higher). The
   cap moves only with realized profit; at no realized profit it is a constant $5, so it cannot bite before the lane's

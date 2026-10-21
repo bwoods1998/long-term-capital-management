@@ -281,7 +281,7 @@ turn, the most urgent due first.
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
 
-THE BACKFILL GOES FILING BY FILING (A82, release 1019e): EDGAR's daily index lists a filing once per filer (a Form 4
+THE BACKFILL GOES FILING BY FILING (A82, release 1019c): EDGAR's daily index lists a filing once per filer (a Form 4
 under its issuer and its reporting owner, an 8-K under each co-registrant: Oct 19, 2026's index had 1,189 rows and 665
 filings), so a day is complete when every filing is seen, and an 8-K is a listed filer's when any of its filers is
 listed. Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path

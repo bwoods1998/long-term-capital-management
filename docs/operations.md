@@ -16,6 +16,11 @@ merged in (main's desk pages, a test's write time and A82's backfill filing by f
 1019c as it deploys plus PREREG-EVL-4 (if release 1019c deploys from a later head still, that head is merged in first
 and this release tested again). It deploys AFTER release 1019c is live,
 as an owner deploy of THE HOUSE ALONE: no file of `gateway/` differs from release 1019c's, no setting, no money row.
+OR IN ONE DEPLOY WITH RELEASE 1019c (the captain's A83, Oct 21, 2026): since this head holds all of release 1019c, one
+deploy does both: release 1019c's step 1 (the gateway, from this head: its `gateway/` is release 1019c's), then the
+House at this head by the ship script with PR #581, then release 1019c's step 3 (`ops.json` `stall.research` false),
+then both releases' verify lists. Its rollback floor is then release 1019b (`3230a884`, money `285fa7af`, constitution
+`fd38e4e1`, gateway `29ed37e1`), as release 1019c's **Rollback** reads.
 Identities, all release 1019c's (the tree's own functions, 3.14 and 3.11): money `055e5313`, constitution `a8d4cbd9`,
 options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`, gate contract `397b22b7`;
 the rollback pair with `equity_money.event.enabled` False stays `1b7a5c22` / `50e951c9`. The standing grant pins the
@@ -143,7 +148,7 @@ alarms' new files as **Release 1019c, alarms and costs** says; then the gateway,
 29ed37e1-896e-4d7a-b753-51a0c448af17`, or never (its composer still reads 1019b's stall notices). A look the fast path
 wrote stands.
 
-**Known issue, fixed in release 1019d** (the captain's A76): budget rule 3 at the UTC day boundary when the cap FALLS
+**Known issue, still open** (the captain's A76; release 1019d does not carry its fix, which is owed before the first day the cap falls): budget rule 3 at the UTC day boundary when the cap FALLS
 (until the budget job's first run of a UTC day the guard holds the previous day's research lines against counters
 reset at 00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the
 higher). The cap moves only with realized profit; at no realized profit it is a constant $5, so the issue cannot bite
@@ -3932,7 +3937,7 @@ buy, and the House release after it gates each one on its own event switch and a
 The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 (section 2), with PREREG-EVL-1
 sections 3, 5 and 8 and PREREG-EVL-2: VERSION 2 of each of the nine seatable programs of league/events/programs.py trades
 REAL money from its first event, at the band the event lane's store gives it, in whole shares, entered and exited in the
-listing exchange's auctions. Version 1 of each is a shadow record and never trades. From release 1019c, PREREG-EVL-4's
+listing exchange's auctions. Version 1 of each is a shadow record and never trades. From release 1019d, PREREG-EVL-4's
 three programs (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON) trade the same way at their VERSION 1, after the
 nine in ROOM's order, and `eq_event_programs` holds twelve rows ([docs/events.md](events.md), "PREREG-EVL-4"; their
 controls never trade). The House side is THE EQUITY BOOK'S
