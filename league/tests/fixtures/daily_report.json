@@ -159,5 +159,33 @@
  "alarms": [
   "cap_breach",
   "evl_verdicts"
- ]
+ ],
+ "done": {
+  "counted": 120,
+  "toward": 300,
+  "next_checkpoint": 200,
+  "lower_bp": 12.5,
+  "lower_a_bp": -3.1,
+  "learning": 46,
+  "holds": false,
+  "pivot": false,
+  "stop": false,
+  "by_program": [
+   {
+    "id": "EVL-ERN-READ-O1",
+    "version": 2,
+    "n": 70
+   },
+   {
+    "id": "EVL-INS-BUY-O1",
+    "version": 2,
+    "n": 50
+   },
+   {
+    "id": "EVL-NEWS-READ-O1",
+    "version": 2,
+    "n": 0
+   }
+  ]
+ }
 }

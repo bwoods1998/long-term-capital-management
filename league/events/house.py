@@ -29,7 +29,8 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
 4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen (with PREREG-EVL-3's band review
-   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it;
+   of the real fills: demotion and Sized, league/events/bands.py `review`, then THE DONE READER of the goal V2,
+   league/events/done.py `run`: `<state>/events/done.json` and a `done` receipt) and the report after it;
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
@@ -68,6 +69,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from . import bands as BA
 from . import calendar as C
+from . import done as DN
 from . import edgar as E
 from . import gw as G
 from . import news as N
@@ -1169,6 +1171,12 @@ class EventLane:
         else:
             summary["review"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in moved]
         self._receipted(ctx.store, "screen", status, summary)
+        try:   # THE DONE READER (goal V2, docs/goals/DONE-RULE-EVL-2.md): after the band review, read-only but done.json
+            done = DN.receipt(DN.run(ctx.store, now=now))
+        except Exception as exc:  # noqa: BLE001 - the screen stands; the reader is read again next night
+            self.warn("done", exc)
+        else:
+            self._receipted(ctx.store, DN.JOB, "ok", done)
         return summary | {"_status": status}
 
     def _report(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
