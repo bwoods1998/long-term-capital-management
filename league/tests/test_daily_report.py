@@ -169,7 +169,10 @@ class DailyReport(ReportCase):
         self.assertEqual(to_date["net_usd"], round(2.94 - to_date["metered_usd"], 2))
         # By program and band: the Nets share the measured compute per settled real event and add up to the lane's.
         programs = {p["id"]: p for p in facts["programs"]}
-        self.assertEqual(len(facts["programs"]), 9, "the nine version 2 programs, in the tables' order")
+        self.assertEqual(len(facts["programs"]), 12, "the programs that may trade real money, in the tables' order: the "
+                         "nine version 2 programs, then PREREG-EVL-4's three at version 1 (release 1019d)")
+        self.assertEqual([(p["id"], p["version"]) for p in facts["programs"]][-3:],
+                         [("EVL-8K-REACT-ON", 1), ("EVL-8K-READ-ON", 1), ("EVL-NEWSPM-READ-ON", 1)])
         read, ins = programs["EVL-ERN-READ-O1"], programs["EVL-INS-BUY-O1"]
         self.assertEqual((read["band"], read["real"], read["shadow_tradable"], read["shown_usd"]), ("learning", 2, 3, 1.47))
         self.assertEqual((ins["band"], ins["real"], ins["by_band"][0]["band"], ins["shown_usd"]), ("probe", 1, "probe", 1.47))
@@ -186,7 +189,8 @@ class DailyReport(ReportCase):
         self.assertEqual(facts["events"], {"8k_202": 1, "8k_other": 1, "form4": 1, "news": 1, "failed": 0})
         self.assertEqual(facts["verdicts"], {"ok": 2, "unparsed": 1, "refused": 0, "usd": 0.01})
         self.assertIn({"id": "EVL-ERN-READ-O1", "version": 1, "n": 3, "skipped": 0}, facts["intents"])
-        self.assertEqual((facts["expected_false_passes"], facts["seatable_versions"], facts["alarms"]), (0.9, 9, []))
+        self.assertEqual((facts["expected_false_passes"], facts["seatable_versions"], facts["alarms"]), (1.2, 12, []),
+                         "0.10 x the twelve seatable versions (release 1019d: PREREG-EVL-4's three join the nine)")
         # No symbol, headline, summary or price in the facts; no figure in the receipt or stall.json.
         sent = json.dumps(facts)
         for banned in ("ACME", "MIRACLE", "secret summary", "123.45", "124.56", "BETA", "DELT", "SPY", "51.0", "39.5"):
