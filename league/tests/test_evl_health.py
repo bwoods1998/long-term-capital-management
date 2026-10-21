@@ -100,7 +100,7 @@ class WhenJudged(Lane):
             switched = self.check(cause, now, settings={"stall": {"evl": False}})
             self.assertIn("switched off (ops.json stall.evl is false)", switched["what"])
         self.assertEqual(EV.checks({}, self.root, now)["evl_record"]["judged"], False, "no config: the lane is off")
-        self.assertEqual(ST.CAUSES[-9:-4], EV.CAUSES, "the five, before the equity lanes' own four")
+        self.assertEqual(ST.CAUSES[-10:-4], EV.CAUSES, "the six (A84's evl_final last), before the equity lanes' own four")
 
     def test_a_lane_switched_on_with_no_store_has_recorded_nothing(self):
         empty = Path(self.tmp.name) / "bare"
@@ -117,7 +117,7 @@ class WhenJudged(Lane):
         errors: list[str] = []
         out = EV.checks(self.ctx(), self.root, et(TUE, "12:00"), errors=errors)
         self.assertTrue(all(not c["stalled"] and c["judged"] is False for c in out.values()))
-        self.assertEqual(errors, ["the event lane's store could not be read (DatabaseError): its four causes are not judged"])
+        self.assertEqual(errors, ["the event lane's store could not be read (DatabaseError): its six causes are not judged"])
 
     def test_the_lanes_stop_file_idles_all_four_and_excuses_its_window(self):
         """events/STOP idles the lane by design (league/events/house.py): nothing is judged while it stands, nor for the

@@ -97,21 +97,30 @@ a later receipt of its rows' own decision names it (`screen.names`, `made_withou
 under "PREREG-EVL-4"), so no look reads a record its rows never decided; the earlier files' programs read their
 receipts as before.
 
-THE FAST PATH TO A FINAL RECORD (the captain's amendment A69; release 1019c, not yet deployed): the three sessions' wait
-is for late data, so when there is provably none a close X is final for a program as soon as the session after X has
-had its open decision, if (i) every record pass from the start of the earliest window that feeds X's decisions (09:00 ET
-of the session before X, never before the program's registration) through that open decision finished `ok` with its
-8-K, Form 4 and news reads whole (no `error` in any, the news read not cut, the tickers copy read) and the passes ran
-at most 15 minutes apart (`screen.FAST_RECORD_GAP`: a pass that never ran proves nothing); (ii) no filing knowable in
-those windows that the lane would fetch is still `listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a
-filer in X's tickers copy; an unlisted filer's 8-K is never fetched and never an event of X); (iii) the daily-index
-backfill of every weekday from the session before X through X has run; and (iv) every decision of the program's entry
-kind through X is made (`ok`, or `pending` only on another program's verdicts) and the next session's open decision is
-made. Otherwise A66's rules apply unchanged, and finality stays contiguous: X is final by the fast path only when every
-session before it is final. The record receipts the House already writes prove (i) (league/events/house.py `_record`:
-a failed feed read is an `error` in its part of the summary, a news read cut short is `cut`, a pass that raised is
-`failed`, one that never finished stays `running`), so no new record was added. A clean record is final one session
-after its close, about two sessions sooner than A66's; the as-of date, the record and the look are the same.
+THE FAST PATH TO A FINAL RECORD (the captain's amendment A69, release 1019c; (i) as A84 reads it, release 1019f): the
+three sessions' wait is for late data, so when there is provably none a close X is final for a program as soon as the
+session after X has had its open decision, if (i) EACH FEED WAS READ WHOLE from the start of the earliest window that
+feeds X's decisions (09:00 ET of the session before X, never before the program's registration) through that open
+decision: as the captain's A84 reads it (19:58Z Oct 21, 2026, recorded before any look; release 1019f), for each of the
+8-K, Form 4 and news feeds separately, that feed's CLEAN reads (a record pass finished `ok` whose read of it has no
+`error`; the 8-K read with the tickers copy read, the news read not cut) at most 15 minutes apart
+(`screen.FAST_RECORD_GAP`) from before that start through that decision; a pass whose read of a feed errored, was cut or
+had no tickers copy is a missing read of THAT feed, not a broken span, and a pass that raised or never finished reads
+none (a pass that never ran proves nothing). Sound because EDGAR's current feeds page back to the newest known accession
+and the news read restarts from the newest stored less 5 minutes, so a clean read after a missing one recovers what it
+missed. (A69 first read "every pass whole": SEC's getcurrent feed times out in about four passes a night, 45 seconds
+each and a clean pass 2-4 minutes later, so no span was ever whole and every look waited A66's three sessions;
+`screen._fast_passes`, `_feed_problems`); (ii) no filing knowable in those windows that the lane would fetch is still
+`listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a filer in X's tickers copy; an unlisted filer's
+8-K is never fetched and never an event of X); (iii) the daily-index backfill of every weekday from the session before X
+through X has run; and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
+another program's verdicts) and the next session's open decision is made. Otherwise A66's rules apply unchanged, and
+finality stays contiguous: X is final by the fast path only when every session before it is final. The record receipts
+the House already writes prove (i) (league/events/house.py `_record`: a failed feed read is an `error` in its part of
+the summary, a news read cut short is `cut`, a pass that raised is `failed`, one that never finished stays `running`),
+so no new record was added. A clean record is final one session after its close, about two sessions sooner than A66's;
+the as-of date, the record and the look are the same. When a seatable program's final record falls more than one session
+behind what A69 allows, the stall job's `evl_final` says so, naming the program and the judge's why (Alarms, below).
 
 WHAT A RE-DECISION WRITES (A66's owed rule and A69; release 1019c, `run._scope`): no decision ever writes an intent
 under a look already written, and A LOOK FREEZES ITS WHOLE GROUP (release 1019c's judges review, A74 (5);
@@ -338,6 +347,7 @@ mail at its pace:
 | `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
 | `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
 | `evl_fills` | the real fills off the shadow's own auction prints by more than 15 bp either way (worse or better, said), the signed mean of a side over the last 20 priced fills (the House's event twins) |
+| `evl_final` | a seatable program's final record (`screen.final_until`, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named, with the judge's own why (A84, release 1019f; read-only, the judge read and never run for a look; judged through a `PAUSE`) |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |
 
 None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while

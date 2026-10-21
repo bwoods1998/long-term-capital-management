@@ -101,6 +101,14 @@ class ReadOnlyStore:
         row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return None if row is None else str(row[0])
 
+    def get_document(self, digest: str) -> bytes:
+        """A stored document's bytes, read as the store reads them (league/events/store.py `Store.get_document`: its
+        gzip file under `docs/`, checked against its digest), for the screen's readers (`evl_final`: the tickers copy
+        A69 (ii) reads)."""
+        from ..events.store import Store
+
+        return Store.get_document(self, digest)  # type: ignore[arg-type]
+
     def close(self) -> None:
         self.db.close()
 
