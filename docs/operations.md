@@ -10,8 +10,11 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
-One merge on release 1019c's final head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
-**PREREG-EVL-4's three event programs and two controls**, below), `--no-ff`. It deploys AFTER release 1019c is live,
+One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
+**PREREG-EVL-4's three event programs and two controls**, below), `--no-ff`; then release 1019c's later head `f85cc152`
+merged in (main's desk pages, a test's write time and A82's backfill filing by filing), so release 1019d is release
+1019c as it deploys plus PREREG-EVL-4 (if release 1019c deploys from a later head still, that head is merged in first
+and this release tested again). It deploys AFTER release 1019c is live,
 as an owner deploy of THE HOUSE ALONE: no file of `gateway/` differs from release 1019c's, no setting, no money row.
 Identities, all release 1019c's (the tree's own functions, 3.14 and 3.11): money `055e5313`, constitution `a8d4cbd9`,
 options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`, gate contract `397b22b7`;
@@ -40,7 +43,8 @@ green on the exact head; release 1019c live first, and main at its head):
 3. Real money for the new rows at the first close decision after the release is live, the auction paper proof's BUY
    stage passed (PREREG-EVL-3 section 2), at learning, after the nine in ROOM's order.
 
-**Rollback**: the House back to release 1019c (`floor_box.py rollback`, repoint `b35c018f`); the grant stands (the same
+**Rollback**: the House back to release 1019c (`floor_box.py rollback`, repoint its deployed head, `f85cc152` unless it
+deployed from another); the grant stands (the same
 money digest). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release
 1019c seats none of them. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
 

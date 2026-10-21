@@ -38,9 +38,11 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
-### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c's final head `b35c018f` and one merge, `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
+### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
-- **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy) and
+- **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
+  `b35c018f`, where `feat/evl-4` was merged, and then `f85cc152`, merged in after: main's two desk scoreboard pages, the
+  band review test's write time (`bb3a1ee9`) and the daily-index backfill filing by filing, A82, its entry below) and
   `feat/evl-4` `699c5e69` (#579, re-reviewed "ship"; A71, A75; its entry below, as its branch wrote it):
   PREREG-EVL-4's five rows (EVL-8K-REACT-ON, EVL-8K-READ-ON and EVL-NEWSPM-READ-ON seatable at learning from birth,
   after the nine in ROOM's order; the controls EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON), the named receipts
@@ -90,13 +92,14 @@ programs trades real money at learning size.
 - **Deploy** (docs/operations.md, **Release 1019d**): the House alone, by the captain's ship script from the exact head
   (`ship_house.sh <head> <PR> r1019d 055e5313 a8d4cbd9`), once release 1019c is live and main is its head; no gateway
   step (no gateway file differs from release 1019c's). Verify as PREREG-EVL-4's entry says (After the deploy).
-- **Rollback**: the House back to release 1019c (`floor_box.py rollback` and repoint `b35c018f`); the money and
+- **Rollback**: the House back to release 1019c (`floor_box.py rollback` and repoint release 1019c's deployed head,
+  `f85cc152` unless it deployed from another); the money and
   constitution digests are the same, so the grant stands. The instant stop of event buys is release 1019b's
   (`STOCK_EVENT_BUYS` off at the gateway, or `equity_money.event.enabled` False: money `1b7a5c22`, constitution
   `50e951c9`). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release 1019c
   seats none of them, and a later redeploy decides the closes it decided again for the new rows the same way.
 
-### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; ships in release 1019d (A78), merged onto release 1019c's final head `b35c018f`; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's (release 1019b's; in release 1019d, release 1019c's `055e5313` / `a8d4cbd9`), read with the tree's own functions; no setting, no money row, no gateway change)
+### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; ships in release 1019d (A78), merged onto release 1019c at `b35c018f`; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's (release 1019b's; in release 1019d, release 1019c's `055e5313` / `a8d4cbd9`), read with the tree's own functions; no setting, no money row, no gateway change)
 
 - **Why.** The owner's goal V2 (item 2: "Births come from your architect agents and from you ... rationed by an
   expected-false-pass budget you state") and the frozen [PREREG-EVL-4](docs/prereg/PREREG-EVL-4.md) (registered
@@ -173,6 +176,24 @@ programs trades real money at learning size.
   ROLLBACK: the previous release; the new rows' intents and lots stay in the stores, their lots exit by their own
   plans, and the old code seats none of them; on a later redeploy the closes the old code decided are decided again
   for the new rows the same way.
+
+### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; joins release 1019e; A82)
+
+- **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,
+  an 8-K under each co-registrant. The House's backfill (`EventLane._backfill`) marked a day done only when the
+  accessions it had seen numbered the index's ROWS, so no day with a multi-filer filing ever completed: Oct 19, 2026's
+  index (1,189 rows, 665 filings; 991 duplicate Form 4 rows and 13 duplicate 8-K rows) answered `partial` every two
+  minutes from Oct 20 09:01Z, and the days after it were never reached (the job takes the oldest day first). The
+  screen waits on `evl:backfill:<day>` (A66's reach, A69's condition (iii)), so every look would have waited the full
+  reach and the fast path would never have run. A co-registered 8-K whose first row named an unlisted filer was also
+  skipped as unlisted.
+- **The fix.** The index's rows are grouped by accession; the pass goes filing by filing and the day is complete when
+  every filing is seen; an 8-K is a listed filer's, under that filer's CIK, when any of its rows names one (a Form 4's
+  issuer is read from its document, as before). Summaries carry `filings` beside `rows`. No judge moves: the screen
+  reads the same meta.
+- **Tests.** `test_events_house.TheBackfill`: a filing listed once per filer is one filing and the day completes (a
+  Form 4-like owner row and an 8-K whose unlisted co-registrant comes first); a day cut by its deadline completes on
+  the next pass.
 
 ### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (unreleased; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
