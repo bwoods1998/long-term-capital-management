@@ -130,10 +130,17 @@ open at 23:00 ET), from the lane's own store, judged only while the lane runs on
 `events.enabled`) and `ops.json` `stall.evl` is not false, and never while the lane's `events/STOP` stands (nor for 30
 minutes after it goes) nor, for `evl_verdicts`, while the House's `PAUSE` stands (the windows the job saw are kept:
 `stall.json` `evl_idle`); and `evl_fills` (the goal's "fill gaps": the lane's real fills off the shadow's auction prints
-by more than 15 bp either way, the signed mean of a side over the last 20 priced event twins) and `evl_final` (A84,
-release 1019f: a seatable program's final record, league/events/screen.py `final_until`, more than 1 session behind
-what A69's fast path allows, the program and the judge's why named); INFO, before the equity lanes' four in `CAUSES`,
-worded by the gateway (deploy it first).
+by more than 15 bp either way, the signed mean of a side over the last 20 priced event twins); INFO, before the equity
+lanes' four in `CAUSES`, worded by the gateway (deploy it first). Since release 1019f (the audit of the live House,
+lenses "looks" and "stalls": alarms that did not exist) four more: `evl_final` (A84: a seatable program's final record,
+league/events/screen.py `final_until`, more than 1 session behind what A69's fast path allows, the program and the
+judge's why named), `evl_entries` (an auction of the last 24 h at which under 90% of the planned real buys
+filled or one was never sent, from the book's own rows in live.sqlite: the venue's cancels at once (A80), the re-sends,
+the never-sent by reason and the constraint that bound), `evl_backfill` (a weekday of the daily-index backfill's reach
+not done by 12:00 ET of the next weekday, a run of passes that are not `ok` over 6 h, or a done day whose passes failed
+to fetch a filing) and `evl_handback` (a real event fill the book owes the lane's `real_fills` over 1 h and not there);
+and `evl_decide` also stands for PREREG-EVL-4's rows of a close still to decide by themselves 2 h after the job first saw
+it (`stall.json` `evl_kept`), `evl_verdicts` reads their `decide-close-evl4` tallies too.
 
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
@@ -156,6 +163,7 @@ carry the day, never a figure.
 THE RESEARCH SWITCH (release R1): `<state>/ops.json` `stall.research` false marks `RESEARCH_CAUSES` "not judged" and
 drops the direction lane's research alarms (`RESEARCH_ALARMS`) from `dlane`, so no mail and no owner step comes of the
 old lanes' research being off (A60, by settings); no pause file (`PAUSE` holds entries and is an owner step after 6 h).
+Since release 1019f the switch drops A4 too, the closed lane's room (`CLOSED_LANE_ALARMS`), which would stand for good.
 THE HOUSE AT RISK IS NO RESEARCH (release 1019c's House review): under the switch `braked` is still judged for a brake
 that is not the budget's own daily stop alone (`BUDGET_BRAKES`; `_house_brake`), and a brake the owner alone can lift
 (the Sail balance under the House's line, the state disk) that the guard holds now is the owner's step at once, as the
@@ -170,7 +178,11 @@ through the same gateway client the budget's funding notice uses (`budget._notif
   once every `OWNER_EVERY_SECONDS` (12 h);
 - when none has: at once when a standing cause was told by no notice in the last 24 h (`mail.told`; since the review
   of the no-captain build, so one cause standing for days holds no new one back), else at most once every
-  `INFO_EVERY_SECONDS` (24 h) after the last notice of either kind.
+  `INFO_EVERY_SECONDS` (24 h) after the last notice of either kind;
+- when some has and every one was told inside the 12 h (release 1019f; the audit of the live House): at once, as an
+  INFO notice of the causes needing nothing alone (`notice_causes`, its facts naming the owner causes still waiting:
+  `waiting_owner`), when one of those was told by no notice in the last 24 h. Before it an owner cause told once held
+  every new INFO cause (an event-lane decision missed, a feed down, a fill gap) back up to 12 h.
 
 The gateway holds the same pace by its own clock (it keys an owner notice on the owner causes, `stall:owner:<causes>`,
 for 12 h, and one with none on the causes it tells, `stall:info:<causes>`, for 24 h), so a lost state file never mails
@@ -343,8 +355,8 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 #: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
-          "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final",
-          "elane_dq", "elane_births", "elane_idle", "elane_refused")
+          "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
+          "evl_backfill", "evl_handback", "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
 #: league/tests/test_elane_xs.py) and their Train runs on the House are their own: none masks a stalled options
@@ -363,7 +375,8 @@ RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked",
 #: alarms (`RESEARCH_ALARMS`: no birth, a cleared best with no Validation try or look, Validation or gate waits, the
 #: birth yield, the unit) from the `dlane` cause, so no mail and no owner step comes of research being off. No pause file:
 #: `PAUSE` holds new entries and becomes an owner step after 6 h. Absent, it is true (the release ships it so); the
-#: House sets it false while the old lanes' research is off. The money alarms (A4, A5, PL1, PT1, K5, DC1) stand either way.
+#: House sets it false while the old lanes' research is off. The money alarms (A5, PL1, PT1, K5, DC1) stand either way; A4,
+#: the closed lane's room, is not judged under the switch either (`CLOSED_LANE_ALARMS`, release 1019f).
 #: THE HOUSE AT RISK IS NO RESEARCH (release 1019c's House review, its major): the switch silences only a brake by the
 #: budget's own daily stop (`BUDGET_BRAKES`), which research switched off makes stand by design. A brake with any other
 #: cause (the Sail balance under the House's line, the state disk, an unreadable balance or budget rule, no reading) is
@@ -371,6 +384,15 @@ RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked",
 #: owner's step at once, as the research causes carried it before the switch (`research_step`, release 1019b).
 RESEARCH_SWITCH = "research"
 RESEARCH_ALARMS = ("A1", "A2", "A3", "A6", "A7")
+#: THE CLOSED LANE'S ROOM (release 1019f; the audit of the live House, lens "stalls"): the direction lane's A4 (the Probe
+#: loss budget has under one unit of room while a direction Candidate or Probe has fewer than 5 real closes: "no path to
+#: Sized") reads the progress of a lane closed to new programs (A60: research off; the old lanes exits only since Oct 19),
+#: against the loss budget the event lane now uses. The House's report of Oct 21 carried it beside A1 and A2, which the
+#: switch drops: under the switch `dlane` would stand on A4 alone for good, told again every 24 h, and, with an owner
+#: cause standing, keep an INFO notice due every day for nothing new. It is not judged while research is switched off, named in the numbers'
+#: `not_judged` like the research alarms; with research on it stands as before. It moves no money and guards no wall:
+#: the loss budget itself is the book's (league/equity/live.py `_budget_room`) and K5, PL1, PT1, A5 and DC1 stand either way.
+CLOSED_LANE_ALARMS = ("A4",)
 #: The Sail guard's brakes that are THE BUDGET's own daily stop (league/swarm/guard.py `BUDGET_CAUSES`, which a test
 #: holds equal: this job imports nothing of the swarm). Every other cause of a brake is the House at risk or a guard
 #: that cannot see.
@@ -1870,8 +1892,9 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
     so the last one stays on disk for good; reading its alarms raised `dlane` (K5's owner step for a lane that is off)
     and `done` at every run until someone deleted the file. While the lane is off neither cause reads the report.
 
-    THE RESEARCH SWITCH (release R1): with `research_on` False the research pipeline's alarms (`RESEARCH_ALARMS`) are not
-    judged (named in the numbers' `not_judged`); every other warning stands as before.
+    THE RESEARCH SWITCH (release R1): with `research_on` False the research pipeline's alarms (`RESEARCH_ALARMS`) and,
+    since release 1019f, the closed lane's room (`CLOSED_LANE_ALARMS`: A4) are not judged (named in the numbers'
+    `not_judged`); every other warning stands as before.
 
     THE DONE CLAIM, KEPT UNTIL TOLD (same review): the `done` cause read the report's A8, which one report says once (it
     is deduplicated against the previous report), so a House start or a failed notice before the next stall run lost the
@@ -1884,7 +1907,7 @@ def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | No
     stale = bool(report) and not off and (age is None or age > DLANE_STALE_HOURS * 3600)
     alarms = [] if off else report.get("alarms") or []
     warnings = [a for a in alarms if a.get("level") == "warning"]
-    unjudged = [] if research_on else [a for a in warnings if a.get("id") in RESEARCH_ALARMS]
+    unjudged = [] if research_on else [a for a in warnings if a.get("id") in RESEARCH_ALARMS + CLOSED_LANE_ALARMS]
     warnings = [a for a in warnings if a not in unjudged]
     k5_alarm = next((a for a in warnings if a.get("id") == "K5"), None)
     k5 = {} if off else report.get("k5") or {}
@@ -2129,12 +2152,24 @@ def notice_id(owner: list[str], causes: list[str] | None = None) -> str:
     return "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
 
 
-def notice_facts(entries: list[dict[str, Any]], now: float) -> dict[str, Any]:
-    """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first."""
+def notice_facts(entries: list[dict[str, Any]], now: float, *, waiting_owner: list[str] | None = None) -> dict[str, Any]:
+    """The `stall` notice's facts: every cause it tells (`cause_facts`), owner steps first. `waiting_owner`: the owner
+    causes standing that an INFO notice leaves out (`notice_causes`: told inside their 12 hours), named so the mail says
+    an owner step still waits (gateway/lib/email.mjs: "still waiting on you"); never part of the gateway's key."""
     ordered = [e for e in entries if e.get("owner_step")] + [e for e in entries if not e.get("owner_step")]
     return {"kind": "stall", "notice_id": notice_id([e["cause"] for e in entries if e.get("owner_step")],
                                                     [e["cause"] for e in entries]),
-            "causes": ordered, "at": S.iso(now)}
+            "causes": ordered, "at": S.iso(now), **({"waiting_owner": sorted(waiting_owner)} if waiting_owner else {})}
+
+
+def notice_causes(entries: list[dict[str, Any]], kind: str, owner: list[str]) -> list[dict[str, Any]]:
+    """The causes a notice of `kind` tells: an owner notice every cause standing; an INFO notice due while an owner cause
+    stands (`due_notice`, release 1019f) the causes needing nothing alone, so the gateway keys it as the INFO notice it is
+    (`stall:info:<those causes>`, 24 h) and never as the owner notice it already sent inside 12 h
+    (`stall:owner:<the owner causes>`: a `duplicate`, nothing mailed)."""
+    if kind == "owner" or not owner:
+        return list(entries)
+    return [e for e in entries if e["cause"] not in owner]
 
 
 def send_report(ctx: Any, root: Path, now: float, *, told: Mapping[str, Any], ledger: Mapping[str, Any] | None,
@@ -2214,11 +2249,22 @@ def due_notice(stalled: list[str], owner: list[str], mail: Mapping[str, Any], no
     """Why a notice is due now ("owner" or "info"), or None: the pace in the module docstring. A stall needing nothing is
     due 24 hours after the last notice, or AT ONCE when a cause stands that no notice told in the last 24 hours (the review
     of the no-captain build, Oct 10, 2026: one cause standing for days held every new one back up to a day, the early
-    warning of `birth_yield` among them)."""
+    warning of `birth_yield` among them).
+
+    WHILE AN OWNER CAUSE STANDS (release 1019f; the audit of the live House, lens "stalls"): an owner notice is due at once
+    for an owner cause the last one did not tell, else every 12 hours; and, between them, an INFO notice is due AT ONCE when
+    a standing cause that needs nothing was told by no notice in the last 24 hours (`told_lately`). Before it, a standing,
+    already-told owner cause held every new INFO cause back up to 12 hours: an event-lane decision missed, a feed down, a
+    fill gap. `run` sends that notice with the causes needing nothing alone (`notice_causes`): the owner ones were told
+    inside their 12 hours and are told again at their pace."""
     owner_at, info_at = S.epoch(mail.get("owner_at")), S.epoch(mail.get("info_at"))
     if owner:
         told = set(mail.get("owner_causes") or []) if _within(owner_at, now, OWNER_EVERY_SECONDS) else set()
-        return "owner" if set(owner) - told else None
+        if set(owner) - told:
+            return "owner"
+        rest = set(stalled) - set(owner)
+        lately = told_lately(mail, now)
+        return "info" if rest and lately is not None and rest - lately else None
     if stalled:
         last = max([t for t in (owner_at, info_at) if t is not None], default=None)
         if not _within(last, now, INFO_EVERY_SECONDS):
@@ -2335,7 +2381,8 @@ def run(ctx: Any) -> dict[str, Any]:
             line = EV.verdict_line(ctx, root, now)
         except Exception as exc:  # noqa: BLE001 - the cause is judged without the line
             errors.append(f"the event lane's verdict line could not be read ({type(exc).__name__})")
-    found.update(EV.checks(ctx, root, now, errors=errors, idle=idle, line=line))
+    evl_kept = dict(state.get("evl_kept")) if isinstance(state.get("evl_kept"), dict) else {}
+    found.update(EV.checks(ctx, root, now, errors=errors, idle=idle, line=line, kept=evl_kept))
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -2369,8 +2416,11 @@ def run(ctx: Any) -> dict[str, Any]:
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(EH.mailed(entries, found), now)  # the equity causes' entries as the gateway prints them
+        told_now = notice_causes(entries, kind, owner)
+        facts = notice_facts(EH.mailed(told_now, found), now,  # the equity causes' entries as the gateway prints them
+                             waiting_owner=owner if kind == "info" else None)
         notice["notice_id"] = facts["notice_id"]
+        notice["causes"] = [e["cause"] for e in told_now]
         notify = _notifier(ctx)
         if notify is None:
             notice["why"] = "no gateway to notify through"
@@ -2381,13 +2431,13 @@ def run(ctx: Any) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 - not told: the next run tries again
                 ok, words = False, f"the notice failed ({type(exc).__name__} {getattr(exc, 'code', '') or ''})".replace(" )", ")")
             notice.update(sent=ok, why=words)
-            if ok and "done" in stalled:
+            if ok and any(e["cause"] == "done" for e in told_now):   # (a notice that lists it: release 1019f)
                 done_told = sorted(set(done_told) | set(found["done"].get("keys") or []))
             if ok:
                 # Every cause a sent notice lists is told (`told_lately`): a new one is mailed at once, the rest by the pace.
                 lately = {c: at for c, at in (mail.get("told") or {}).items()
                           if _within(S.epoch(at), now, INFO_EVERY_SECONDS)} if isinstance(mail.get("told"), Mapping) else {}
-                mail["told"] = {**lately, **{c: S.iso(now) for c in stalled}}
+                mail["told"] = {**lately, **{e["cause"]: S.iso(now) for e in told_now}}
             if ok and kind == "owner":
                 # A notice for a new owner cause inside the 12 h starts them again: what both told is not told twice.
                 fresh = _within(S.epoch(mail.get("owner_at")), now, OWNER_EVERY_SECONDS)
@@ -2417,7 +2467,7 @@ def run(ctx: Any) -> dict[str, Any]:
         receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
                                    "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running,
-                                   "report": told_report, "evl_idle": idle})
+                                   "report": told_report, "evl_idle": idle, "evl_kept": evl_kept})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice, "report": report,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}
@@ -2434,4 +2484,4 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "JAM_HOURS", "JAM_PASSES", "ALERT_HOURS", "ALERT_STEPS", "ALERT_SELF_HEALING", "UNDERSPEND_SHARE",
            "UNDERSPEND_MIN_HOURS", "UNDERSPEND_MIN_USD", "UNDERSPEND_BRAKE_HOURS", "ARCHITECT_HOLD_USD", "JAM_OWNER_KINDS",
            "PACED_METERS", "ALERT_LOOKBACK_KINDS", "ALERT_STATE_DAYS", "GAME_T0_KEY", "alert_states", "release_settings",
-           "told_lately"]
+           "told_lately", "notice_causes", "CLOSED_LANE_ALARMS"]
