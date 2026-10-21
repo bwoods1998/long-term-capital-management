@@ -12,6 +12,12 @@ Decision windows (league.events.calendar):
 - NEWS-READ on D takes single-symbol articles created after P's 16:00 ET and before D's 09:00 ET.
 - PREREG-EVL-2's day-news programs on D take single-symbol articles knowable after D's 09:00 ET and at or before T29
   (15:29 ET on a full day); they enter at D's close and exit at the next session's open.
+- PREREG-EVL-4's programs on D (all enter at D's close and exit at the next session's open) take, from issuers not
+  EXCLUDED on D (an issuer with an item 2.02 8-K in D's close window, ERN(D), or an article of D's day-news window,
+  DAY(D), whatever their knowable times relative to any registration time): F8K(D), the 8-Ks of D's close window with
+  EVL-8K-READ-O1's items (1.01, 2.01, 7.01, 8.01, no 2.02), and PM(D), the articles of EVL-NEWS-READ-O1's window of D
+  (EVL-NEWSPM-READ-ON skips an issuer with any F8K(D) filing). The sets that skip are read with no registration floor
+  (`filings_window`, `news_rows`, `close_rows_4`); the events are each program's own, knowable after ITS registration.
 Eligibility (league.events.universe) is decided before any verdict is asked, so verdicts are paid only for eligible
 issuers; controls take every eligible event of their program's family, any verdict.
 """
@@ -32,6 +38,14 @@ REGISTERED_AT: str | None = "2026-10-19T01:08:38Z"  # A61: tag prereg-evl-1, com
 REGISTERED_AT_2: str = "2026-10-19T03:04:07Z"  # A63: tag prereg-evl-2, commit 93cd4877
 #: PREREG-EVL-3's registration time: version 2 of the nine seatable programs, real money at learning size from birth.
 REGISTERED_AT_3: str = "2026-10-19T05:23:06Z"  # A64: tag prereg-evl-3, commit 6d3fa8d1
+#: PREREG-EVL-4's registration time (births by the captain): three new seatable programs, VERSION 1 their seating
+#: version, at PREREG-EVL-3's learning band from birth, and two controls. Its programs count only events knowable after
+#: THIS time (not PREREG-EVL-1's, -2's or -3's). None refuses every decision of its programs.
+REGISTERED_AT_4: str | None = "2026-10-19T16:01:05Z"  # A71: tag prereg-evl-4, commit cef9810a
+#: The files whose seatable rows may trade real money: PREREG-EVL-3 (version 2 of the nine seatable programs of
+#: PREREG-EVL-1 and -2) and PREREG-EVL-4 (version 1 of its three: its ids are new, so their version 1 is registered
+#: with PREREG-EVL-3's bands, section 2). Version 1 of PREREG-EVL-1's and -2's ids, records and controls never seat.
+SEATING_PREREGS = (3, 4)
 
 ERN_ITEMS = frozenset({"2.02"})
 OTHER_ITEMS = frozenset({"1.01", "2.01", "7.01", "8.01"})
@@ -53,7 +67,7 @@ class Program:
     id: str
     version: int
     seatable: bool
-    family: str          # ern | ern-react | 8k | ins | news
+    family: str          # ern | ern-react | 8k | ins | news | ins-buy | news-day | news-react | 8k-react | 8k-day | news-pm
     entry_at: str        # open | close
     hold: int            # sessions held (block length); C1 enters at day 0's close and exits at the next close
     reads: bool          # needs a verdict (its rule below reads the score)
@@ -67,15 +81,28 @@ class Program:
 
     @property
     def registered_at(self) -> dt.datetime:
+        """The program's OWN registration time, its file's (an event counts only when knowable after it): PREREG-EVL-1's,
+        -2's, -3's or -4's; never another file's (PREREG-EVL-4: "not PREREG-EVL-1's, -2's or -3's"). A file this code
+        does not know has none (ValueError), so no event of it is ever counted under another file's time."""
         if self.prereg == 1:
             return registered()
-        return S.parse_iso(REGISTERED_AT_2 if self.prereg == 2 else REGISTERED_AT_3)
+        if self.prereg == 2:
+            return S.parse_iso(REGISTERED_AT_2)
+        if self.prereg == 3:
+            return S.parse_iso(REGISTERED_AT_3)
+        if self.prereg == 4:
+            if REGISTERED_AT_4 is None:
+                raise RuntimeError("PREREG-EVL-4 is not pinned: none of its programs decides before its registration time")
+            return S.parse_iso(REGISTERED_AT_4)
+        raise ValueError(f"no registration time is pinned for PREREG-EVL-{self.prereg}")
 
     @property
     def can_seat(self) -> bool:
         """Whether this version may ever trade real money: PREREG-EVL-3 section 1, version 2 of the nine seatable
-        programs (prereg 3) only. Version 1 of every program stays a shadow record with its own screen, never seated."""
-        return self.seatable and self.prereg >= 3
+        programs (prereg 3), and PREREG-EVL-4 section 2, version 1 of its three seatable programs (prereg 4: its seating
+        version). Version 1 of PREREG-EVL-1's and -2's programs stays a shadow record with its own screen, never seated;
+        a record or a control (`seatable` False) never seats, whatever its file."""
+        return self.seatable and self.prereg in SEATING_PREREGS
 
 
 PROGRAMS = (
@@ -102,11 +129,24 @@ PROGRAMS = (
 #: PREREG-EVL-3 (registered 2026-10-19T05:23:06Z): version 2 of every seatable program, the same events and rules as
 #: its version 1 (PREREG-EVL-2's limit at entry for all nine: prereg >= 2), real money at learning size from birth.
 PROGRAMS = PROGRAMS + tuple(dataclasses.replace(p, version=2, prereg=3) for p in PROGRAMS if p.seatable)
+#: PREREG-EVL-4 (registered 2026-10-19T16:01:05Z; births by the captain): three seatable programs at PREREG-EVL-3's
+#: learning band from birth, VERSION 1 their seating version (section 2), in section 1.2's order (ROOM's order within a
+#: band follows it, after every row of PREREG-EVL-1 and -2), and two controls (section 4: free records that never seat).
+#: Each enters at the CLOSE of D and exits at the OPEN of the next session (hold 1), with PREREG-EVL-2's limit at entry
+#: (score.py: prereg >= 2). Appended AFTER PREREG-EVL-3's version 2 copies, so no version 2 of these ids exists.
+PROGRAMS = PROGRAMS + (
+    Program("EVL-8K-REACT-ON", 1, True, "8k-react", "close", 1, False, exit_at="open", rule="none", prereg=4),
+    Program("EVL-8K-READ-ON", 1, True, "8k-day", "close", 1, True, exit_at="open", prereg=4),
+    Program("EVL-NEWSPM-READ-ON", 1, True, "news-pm", "close", 1, True, exit_at="open", prereg=4),
+    Program("EVL-CTRL-8K-ON", 1, False, "8k-day", "close", 1, False, exit_at="open", rule="none", prereg=4),
+    Program("EVL-CTRL-NEWSPM-ON", 1, False, "news-pm", "close", 1, False, exit_at="open", rule="none", prereg=4),
+)
 #: Every program version by (id, version).
 BY_KEY = {(p.id, p.version): p for p in PROGRAMS}
 #: Version 1 of every program by id (the records and controls exist at version 1 only).
 BY_ID = {p.id: p for p in PROGRAMS if p.version == 1}
-#: The versions that may ever trade real money (PREREG-EVL-3 section 1).
+#: The versions that may ever trade real money (PREREG-EVL-3 section 1, PREREG-EVL-4 section 2), in the tables' order:
+#: the nine version 2 rows (PREREG-EVL-1's four, then PREREG-EVL-2's five), then PREREG-EVL-4's three (version 1).
 SEATING = tuple(p for p in PROGRAMS if p.can_seat)
 
 
@@ -185,6 +225,107 @@ def news_in(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[st
         if isinstance(symbols, list) and len(symbols) == 1:
             out.append(dict(r) | {"symbol": str(symbols[0]).upper()})
     return out
+
+
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-4
+#: PREREG-EVL-4's families: its two 8-K rows read F8K(D) (EVL-8K-READ-O1's item rule) and its news rows read PM(D).
+FAMILY_8K = ("8k", "8k-react", "8k-day")
+CLOSE_FAMILIES_4 = ("8k-react", "8k-day", "news-pm")
+
+
+def filings_window(store: S.Store, form: str, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+    """Fetched filings of `form` knowable in [lo, hi), oldest first, with NO registration floor: PREREG-EVL-4's sets that
+    skip an issuer (ERN(D), F8K(D)) carry no registration condition (its section 1.2, the adversarial check's build note
+    (i)). The events of a program are still only those knowable after its own registration time (`select`).
+    `filings_in`, the earlier files' reader, is unchanged."""
+    rows = store.db.execute("SELECT * FROM filings WHERE form=? AND status='fetched' AND knowable_at>=? AND knowable_at<? "
+                            "ORDER BY knowable_at, accession", (form, S.iso(lo), S.iso(hi)))
+    return [dict(r) for r in rows]
+
+
+def news_rows(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+    """Single-symbol articles KNOWABLE in (lo, hi], oldest first, PREREG-EVL-1 section 3's non-live exclusion applied,
+    each with its one `symbol`, and NO registration floor (PREREG-EVL-4: DAY(D) and PM(D) as the sets that skip carry
+    none; `select` keeps as a program's events only those knowable after its own registration time). `news_in`, the
+    earlier files' reader, is unchanged."""
+    rows = store.db.execute("SELECT * FROM news WHERE knowable_at>? AND knowable_at<=? ORDER BY knowable_at, id",
+                            (S.iso(lo), S.iso(hi)))
+    out = []
+    for r in rows:
+        if not r["live"] and r["updated_at"] and \
+                S.parse_iso(r["updated_at"]) - S.parse_iso(r["created_at"]) > NEWS_UPDATE_LIMIT:
+            continue  # backfilled and edited more than 10 minutes after publication (PREREG-EVL-1 section 3)
+        try:
+            symbols = json.loads(r["symbols"] or "[]")
+        except ValueError:
+            continue
+        if isinstance(symbols, list) and len(symbols) == 1:
+            out.append(dict(r) | {"symbol": str(symbols[0]).upper()})
+    return out
+
+
+def family_8k(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """F8K's item rule (EVL-8K-READ-O1's family, PREREG-EVL-1 section 6): the 8-K rows with any of items 1.01, 2.01, 7.01,
+    8.01 and without item 2.02 (the filing's own items, as the lane stores them)."""
+    out = []
+    for r in rows:
+        items = items_of(r)
+        if items & OTHER_ITEMS and not items & ERN_ITEMS:
+            out.append(r)
+    return out
+
+
+def ern_ciks(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """ERN(D)'s issuers: the CIKs of the 8-K rows (D's close window) with item 2.02, whatever their verdict or reaction."""
+    return {str(r["cik"]) for r in rows if r.get("cik") and items_of(r) & ERN_ITEMS}
+
+
+def day_ciks(articles: Iterable[Mapping[str, Any]], symbol_of: Callable[[str], str | None]) -> set[str]:
+    """DAY(D)'s issuers: those of the day-news window's articles (each carrying its issuer's `cik`) whose one symbol is
+    the issuer's ELIGIBLE ticker for D (`symbol_of(cik)`; None when the issuer is not eligible), whatever their verdict or
+    reaction."""
+    out = set()
+    for a in articles:
+        cik = a.get("cik")
+        if not cik:
+            continue
+        symbol = symbol_of(str(cik))
+        if symbol is not None and symbol == a.get("symbol"):
+            out.add(str(cik))
+    return out
+
+
+def f8k_ciks(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """The issuers with any F8K(D) filing among the 8-K rows of D's close window (EVL-NEWSPM-READ-ON's skip, whatever the
+    filing's verdict, reaction or knowable time relative to any registration time)."""
+    return {str(r["cik"]) for r in family_8k(rows) if r.get("cik")}
+
+
+def excluded(ern_rows: Iterable[Mapping[str, Any]], day_articles: Iterable[Mapping[str, Any]],
+             symbol_of: Callable[[str], str | None]) -> set[str]:
+    """EXCLUDED on D (PREREG-EVL-4 section 1.1): an issuer in ERN(D) (`ern_rows`: the 8-Ks of D's close window, any
+    items; those with 2.02 count) or in DAY(D) (`day_articles`, `symbol_of` as `day_ciks`). Every program and control of
+    PREREG-EVL-4 skips it, whatever the knowable times of the rows that put it there."""
+    return ern_ciks(ern_rows) | day_ciks(day_articles, symbol_of)
+
+
+def close_rows_4(all8k: Iterable[Mapping[str, Any]], day_articles: Iterable[Mapping[str, Any]],
+                 pm_articles: Iterable[Mapping[str, Any]], symbol_of: Callable[[str], str | None]
+                 ) -> dict[str, list[Mapping[str, Any]]]:
+    """PREREG-EVL-4's rows of entry session D before each program's own rule (section 1.2): {"8k-react", "8k-day": the
+    F8K(D) filings of issuers not EXCLUDED on D; "news-pm": the PM(D) articles of issuers not EXCLUDED on D and with no
+    F8K(D) filing}. `all8k`: every fetched 8-K of D's close window; `day_articles`: PREREG-EVL-2's day-news window of D;
+    `pm_articles`: EVL-NEWS-READ-O1's window of D; every article carrying its issuer's `cik`; all read with NO
+    registration floor (`filings_window`, `news_rows`). `symbol_of(cik)`: the issuer's eligible ticker for D, or None.
+    The filters here carry no registration condition; `select` takes as a program's events only the rows knowable after
+    its own registration time, and applies eligibility (the eligible ticker for an article) and the program's rule."""
+    rows8k = list(all8k)
+    skip = excluded(rows8k, day_articles, symbol_of)
+    fam = family_8k(rows8k)
+    filed = {str(r["cik"]) for r in fam if r.get("cik")}
+    f8k = [r for r in fam if str(r.get("cik")) not in skip]
+    pm = [a for a in pm_articles if a.get("cik") and str(a["cik"]) not in skip and str(a["cik"]) not in filed]
+    return {"8k-react": f8k, "8k-day": list(f8k), "news-pm": pm}
 
 
 def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
@@ -342,9 +483,13 @@ def write_intents(store: S.Store, program: Program, day: dt.date, candidates: It
     return counts
 
 
-#: Families whose events are news articles; the first two rank by verdict score (one per issuer per D, the highest
-#: score, then the earliest), the third takes the earliest (no model).
-NEWS_FAMILIES = ("news", "news-day", "news-react")
+#: Families whose events are news articles; "news", "news-day" and PREREG-EVL-4's "news-pm" rank by verdict score (one
+#: per issuer per D, the highest score, then the earliest: `BEST_SCORE`), "news-react" takes the earliest (no model).
+NEWS_FAMILIES = ("news", "news-day", "news-react", "news-pm")
+#: The families whose one event per issuer per D is the highest stored score, then the earliest (their controls too).
+BEST_SCORE = ("news", "news-day", "news-pm")
+#: The REACT families: the reaction (C1's ratio at T29) >= REACT_RATIO, ranked by it; a missing price takes nothing.
+REACT_FAMILIES = ("ern-react", "news-react", "8k-react")
 
 
 def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Callable[[str], Mapping[str, Any] | None],
@@ -356,18 +501,21 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     C1's ratio (the close of the last SIP minute bar ending at or before 15:30 ET on day 0 over the last SIP daily close
     before the acceptance time), None when a price is missing (the event is then not taken); `guidance(row)` -> the
     stored PROMPT-DOC verdict's guidance (PREREG-EVL-2's GUIDE). An event knowable at or before the program's own
-    registration time is never taken."""
+    registration time is never taken. PREREG-EVL-4's families take rows already windowed and cleared of the issuers its
+    sets skip (`close_rows_4`): "8k-react" and "8k-day" apply EVL-8K-READ-O1's item rule (event `8k:<accession>`), the
+    first ranked by the reaction (>= 1.04, no model), the second by the stored PROMPT-DOC score; "news-pm" ranks by the
+    stored PROMPT-NEWS score, one per issuer (the highest, then the earliest), its `verdict` the stored reader alone."""
     out = []
     since = program.registered_at
     for row in rows:
         family = program.family
         if S.parse_iso(row.get("knowable_at")) <= since:
             continue
-        if family in ("ern", "ern-react", "8k"):
+        if family in ("ern", "ern-react") or family in FAMILY_8K:
             items = items_of(row)
             if family in ("ern", "ern-react") and not items & ERN_ITEMS:
                 continue
-            if family == "8k" and (not items & OTHER_ITEMS or items & ERN_ITEMS):
+            if family in FAMILY_8K and (not items & OTHER_ITEMS or items & ERN_ITEMS):
                 continue
             event = f"8k:{row['accession']}"
         elif family in ("ins", "ins-buy"):
@@ -380,7 +528,7 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
             continue
         if family in NEWS_FAMILIES and uni["symbol"] != row.get("symbol"):
             continue
-        score = verdict(row) if (program.reads or family in ("news", "news-day")) else None
+        score = verdict(row) if (program.reads or family in BEST_SCORE) else None
         if program.reads:
             if score is None:
                 continue
@@ -391,7 +539,7 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
             if program.rule == "guide" and (score < GUIDE_MIN_SCORE or guidance is None or guidance(row) != "raised"):
                 continue
         rank = float(score) if score is not None else None
-        if family in ("ern-react", "news-react"):
+        if family in REACT_FAMILIES:
             ratio = reaction(row, uni) if reaction is not None else None
             if ratio is None or ratio < REACT_RATIO:
                 continue
@@ -401,7 +549,7 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
         if family == "ins-buy":
             rank = float(row.get("purchase_value") or 0.0)
         out.append(Candidate(event, cik, uni["symbol"], S.parse_iso(row.get("knowable_at")), rank, score, row))
-    if program.family in ("news", "news-day"):
+    if program.family in BEST_SCORE:
         best: dict[str, Candidate] = {}
         for c in out:
             have = best.get(c.cik)
@@ -413,6 +561,8 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     return out
 
 
-__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "REGISTERED_AT_3", "Program", "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window",
-           "close_window", "news_window", "day_news_window", "filings_in", "news_in", "ins_triggers", "ins_buys", "select",
-           "write_intents", "items_of", "NEWS_FAMILIES"]
+__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "REGISTERED_AT_3", "REGISTERED_AT_4", "SEATING_PREREGS", "Program",
+           "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window", "close_window", "news_window",
+           "day_news_window", "filings_in", "news_in", "ins_triggers", "ins_buys", "select", "write_intents", "items_of",
+           "NEWS_FAMILIES", "BEST_SCORE", "REACT_FAMILIES", "FAMILY_8K", "CLOSE_FAMILIES_4", "filings_window", "news_rows",
+           "family_8k", "ern_ciks", "day_ciks", "f8k_ciks", "excluded", "close_rows_4"]

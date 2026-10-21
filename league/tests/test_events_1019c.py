@@ -607,8 +607,14 @@ class TheEventKindsOwnDayCount(EventTest):
         self.assertEqual(CONSTITUTION["equity_money"]["order_path"]["max_orders_day"], 60, "the old lanes keep 60")
         live = sum(event["max_open"][band] for band in EB.LIVE_BANDS)
         self.assertEqual(event["max_orders_day"], max(2 * live, 150), "2 x the max_open of the live bands, at least 150")
-        self.assertGreaterEqual(event["max_orders_day"], 2 * len(EB.seatable()) * event["max_open"]["learning"],
-                                "every program's full learning room bought and sold in one day")
+        # A78 (release 1019d, the reading that trades less): with PREREG-EVL-4's three, the twelve seatable programs' full
+        # learning rooms bought and sold in one day (2 x 12 x 8 = 192) are above the line, and the line STAYS 150 (the
+        # House-wide line leaves it at most 190: the bound below); on a day that would need more, entries stop in ROOM's
+        # order, so PREREG-EVL-4's rows are refused first, and exits never.
+        self.assertEqual(len(EB.seatable()), 12)
+        self.assertLess(event["max_orders_day"], 2 * len(EB.seatable()) * event["max_open"]["learning"],
+                        "A78: twelve programs' full learning rooms are above the line; it is not raised for them")
+        self.assertEqual(2 * 9 * event["max_open"]["learning"], 144, "the nine's fit under it, as release 1019c read it")
         self.assertLessEqual(event["max_orders_day"], CONSTITUTION["options_money"]["gateway"]["max_day_orders"])
         self.assertEqual(EQUITY_MONEY_BOUNDS["event.max_orders_day"], ("0", "300"))
         self.assertEqual((EB.settings().max_orders_day, EB.FALLBACK.max_orders_day), (150, 0))

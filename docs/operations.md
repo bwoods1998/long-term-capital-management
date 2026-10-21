@@ -8,6 +8,74 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
+
+One merge on release 1019c's final head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
+**PREREG-EVL-4's three event programs and two controls**, below), `--no-ff`. It deploys AFTER release 1019c is live,
+as an owner deploy of THE HOUSE ALONE: no file of `gateway/` differs from release 1019c's, no setting, no money row.
+Identities, all release 1019c's (the tree's own functions, 3.14 and 3.11): money `055e5313`, constitution `a8d4cbd9`,
+options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`, gate contract `397b22b7`;
+the rollback pair with `equity_money.event.enabled` False stays `1b7a5c22` / `50e951c9`. The standing grant pins the
+money digest, which does not move.
+
+The merge kept both sides (CHANGELOG, **Release 1019d**): release 1019c's A69 fast path, A74 (5)'s group freeze and
+A79's whole re-decisions, with PREREG-EVL-4's named receipts, `decide-close-evl4` and the House's backfill of the new
+rows. A written look of a PREREG-EVL-4 group (EVL-8K-READ-ON with EVL-CTRL-8K-ON, EVL-NEWSPM-READ-ON with
+EVL-CTRL-NEWSPM-ON, EVL-8K-REACT-ON alone) freezes it in every re-decision of its close, `decide-close-evl4`
+included, and a receipt that KEPT a program names it (league/events/screen.py `names`), so the freeze never holds its
+next look back. The verdict tally counts the new rows' verdicts. The event kind's day order count stays 150 with twelve
+programs (A78): on a day that needs more, entries stop in ROOM's order, PREREG-EVL-4's rows first, and exits never.
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
+green on the exact head; release 1019c live first, and main at its head):
+1. THE HOUSE from the exact head, by the captain's ship script: `ship_house.sh <head> <PR> r1019d 055e5313 a8d4cbd9`
+   (it checks the PR's head, CI, the fast-forward of main, the options fingerprint and the equity identity, and that no
+   order is in flight). Verify: promoted, `real_money` true, failures []; the ids `b60410ad` / `a8d4cbd9` / `055e5313`
+   and the grant on `055e5313`; `release.live.equity.events.enabled` true.
+2. THE NEW ROWS, read-only on the box within the hour, as **PREREG-EVL-4's three event programs** step 2 says: each
+   close since 16:01:05Z Oct 19 that release 1019b or 1019c decided and the hourly re-decision no longer reaches has one
+   `decide-close-evl4:<day>` receipt `ok`; `SN.made_without(...)` prints `{}`; at the first event decision
+   `eq_event_programs` holds twelve rows. The closes the hourly re-decision still reaches are decided again whole, naming
+   the new rows.
+3. Real money for the new rows at the first close decision after the release is live, the auction paper proof's BUY
+   stage passed (PREREG-EVL-3 section 2), at learning, after the nine in ROOM's order.
+
+**Rollback**: the House back to release 1019c (`floor_box.py rollback`, repoint `b35c018f`); the grant stands (the same
+money digest). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release
+1019c seats none of them. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
+
+## PREREG-EVL-4's three event programs and two controls: `feat/evl-4`, in release 1019d, not deployed
+
+Cut from `rel/1019b`; it ships in release 1019d on top of release 1019c (**Release 1019d**, above, is how it deploys): the frozen [PREREG-EVL-4](prereg/PREREG-EVL-4.md)'s rows
+(EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON at their version 1, seatable at learning from birth after the nine
+in ROOM's order; the controls EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON never seat), as [events.md](events.md),
+"PREREG-EVL-4", describes. An owner deploy of the House alone (league/events/'s judges, run.py and book.py are behind
+league/ci.py's wall; league/equity/ is protected): no gateway change, no setting, no money row; the options execution
+fingerprint, the equity and xs identities, the money and constitution digests and the gate contract are its base's
+(release 1019b's; in release 1019d, release 1019c's).
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
+green on the exact head):
+1. THE HOUSE from the merged head. At its start the lane decides every close from 16:01:05Z Oct 19 on for the new rows:
+   the last three sessions' closes again whole (the hourly re-decision), and each OLDER close release 1019b decided,
+   for the new rows BY THEMSELVES (`decide-close-evl4:<day>`, once each, as a backfill, after the record pass, oldest
+   first). Until a close is decided for them, the judge reads it as not made for them (their looks wait), and the
+   earlier rows of those closes are never decided again (CHANGELOG, "The deploy gap").
+2. VERIFY (read-only, within the hour): `sqlite3 -readonly /workspace/state/events/events.sqlite "SELECT job, status
+   FROM receipts WHERE job LIKE 'decide-close-evl4:%' ORDER BY id"` lists one `ok` row for each close older than the
+   last three sessions, back to Oct 19 (`pending` only while their verdicts are asked; none when the House started
+   while Oct 19 was still among the last three, before 09:15 ET Thu Oct 22), and `lane.json`'s `tasks` then holds
+   `decide-close-evl4`; from the release's tree, `python3 -c "import datetime as d; from league.events import book as
+   EB, screen as SN; print(SN.made_without(EB.Lane('/workspace/state/events/events.sqlite'), d.date.today()))"` (the
+   store opened `mode=ro`) prints `{}`. At the first event decision `eq_event_programs` holds twelve rows.
+3. Real money for the new rows starts at the first decision after the release is live, once the auction paper proof's
+   BUY stage has passed (PREREG-EVL-3 section 2), as for the nine.
+
+**Rollback**: the previous House release (release 1019c's, in release 1019d). The new rows' intents and lots stay in the stores and
+their lots exit by their own plans; the old code seats none of them, and its receipts again name none of them, so a
+later redeploy decides those closes again for the new rows the same way. The instant stop of event buys is release
+1019b's (**Release 1019b**, Rollback).
+
 ## Release 1019c (Oct 20, 2026): alarms and the daily report, the lane's fast finality and order line: `rel/1019c`, not deployed
 
 One release, on main `3230a884` (release 1019b as deployed), carries the two sections below, merged in this order, each
@@ -3860,7 +3928,10 @@ buy, and the House release after it gates each one on its own event switch and a
 The owner's goal as he re-set it at 05:15Z Oct 19, 2026 and the frozen PREREG-EVL-3 (section 2), with PREREG-EVL-1
 sections 3, 5 and 8 and PREREG-EVL-2: VERSION 2 of each of the nine seatable programs of league/events/programs.py trades
 REAL money from its first event, at the band the event lane's store gives it, in whole shares, entered and exited in the
-listing exchange's auctions. Version 1 of each is a shadow record and never trades. The House side is THE EQUITY BOOK'S
+listing exchange's auctions. Version 1 of each is a shadow record and never trades. From release 1019c, PREREG-EVL-4's
+three programs (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON) trade the same way at their VERSION 1, after the
+nine in ROOM's order, and `eq_event_programs` holds twelve rows ([docs/events.md](events.md), "PREREG-EVL-4"; their
+controls never trade). The House side is THE EQUITY BOOK'S
 EVENT KIND: league/equity/live.py (`_event_step` and the methods after it), its adapter league/events/book.py
 (`BOOKS["event"]`, on league/xs/book.py's precedent; the rules), the auction paper proof league/events/proof.py, and the
 money rows `equity_money.event` (league/constitution.py). The lane itself (its store, its shadow decisions, its screen,

@@ -5,9 +5,11 @@ failed counts; the verdicts by status and their cost; each program's intents (pl
 entering that day and to date; its settled outcomes to date (n, issuers, sessions, mean r, mean a, mean a of the
 TRADABLE events, the market direction); for a seatable program its next look and its last look's result; the gap
 between the auction prints and the daily bars of the day's settled events; the expected false passes (0.10 x every
-seatable version registered); the events its decisions KEPT OUT of each program's record (release 1019c: a session a
-look of its group stands over is decided again for nothing, and its decision receipt lists what it left out;
-PREREG-EVL-1 section 3's late share); and the receipts of the day's jobs, the missed and failed ones listed. `build`
+seatable version registered, of the lane's stated budget); the events its decisions KEPT OUT of each program's record
+(release 1019c: a session a look of its group stands over is decided again for nothing, and its decision receipt lists
+what it left out, PREREG-EVL-4's rows' own decision `decide-close-evl4` included; PREREG-EVL-1 section 3's late share);
+the shadow's difference from real money by storage time (`late_rows`: events whose row was stored after their
+decision, intents a later row excluded); and the receipts of the day's jobs, the missed and failed ones listed. `build`
 returns the report as JSON-ready data, `render` as a few lines of plain text.
 
 Licensing: Alpaca's data and Benzinga's headlines are not redistributed. Neither form carries a price, a headline, a
@@ -113,12 +115,12 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
 def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
     """{decision key (`id`, or `id@vN` for a later version): {"events", "unjudged"}}: the event ids the finished decisions
     of the entry sessions through `day` left out of each program's record (their summaries' `kept` entries, written by
-    league/events/run.py `_left_out`), each event once; an event listed unjudged by one run and taken on a stored verdict
+    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, included), each event once; an event listed unjudged by one run and taken on a stored verdict
     by a later one counts as left out (`events`) only."""
     events: dict[str, set[str]] = {}
     unjudged: dict[str, set[str]] = {}
     for row in store.db.execute("SELECT job, summary FROM receipts WHERE (job LIKE 'decide-open:%' OR job LIKE "
-                                "'decide-close:%') AND status IN ('ok', 'pending')"):
+                                "'decide-close:%' OR job LIKE 'decide-close-evl4:%') AND status IN ('ok', 'pending')"):
         if str(row["job"]).split(":", 1)[1] > day.isoformat():
             continue
         try:
@@ -132,6 +134,62 @@ def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
                 unjudged.setdefault(str(key), set()).update(str(e) for e in entry.get("unjudged") or [])
     return {key: {"events": events.get(key, set()), "unjudged": unjudged.get(key, set()) - events.get(key, set())}
             for key in set(events) | set(unjudged)}
+
+
+def _stored_at(store: S.Store, event: str) -> dt.datetime | None:
+    """When the lane STORED an event's row (PREREG-EVL-1 section 3, the time a real-money decision reads it by, as
+    league/events/book.py `_stored_before` reads it): a news article when it was read (`received_at`); a filing when its
+    documents were fetched (the latest `documents.stored_at` of its raw and text documents, never before its listing,
+    `received_at`), and never (the latest time there is: real money fails closed) when a document it names has no time
+    on record. None when the row is not found."""
+    kind, _, ident = str(event).partition(":")
+    try:
+        if kind == "news":
+            row = store.db.execute("SELECT received_at FROM news WHERE id=?", (ident,)).fetchone()
+            return None if row is None else S.parse_iso(row["received_at"])
+        if kind in ("8k", "f4"):
+            row = store.db.execute("SELECT received_at, raw_sha, text_sha FROM filings WHERE accession=?",
+                                   (ident,)).fetchone()
+            if row is None:
+                return None
+            when = S.parse_iso(row["received_at"])
+            for sha in (row["raw_sha"], row["text_sha"]):
+                if not sha:
+                    continue
+                doc = store.db.execute("SELECT stored_at FROM documents WHERE sha=?", (sha,)).fetchone()
+                if doc is None or not doc["stored_at"]:
+                    return dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+                when = max(when, S.parse_iso(doc["stored_at"]))
+            return when
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def late_rows(store: S.Store, program: str, version: int, day: dt.date) -> dict[str, int]:
+    """THE SHADOW'S DIFFERENCE FROM REAL MONEY BY STORAGE TIME (PREREG-EVL-1 section 3; PREREG-EVL-4 section 1.3: "a row
+    stored later counts in the shadow only, and the report counts the difference"): of the program's intents entering
+    by `day`, those taken whose event row the lane stored after the intent's decision time (real money could not read
+    it), today and to date, and those a re-decision marked `skipped:excluded` (PREREG-EVL-4: a row stored later put the
+    issuer in EXCLUDED or the F8K(D) skip; real money read the rows stored before its decision)."""
+    out = {"stored_late_today": 0, "stored_late": 0, "excluded_late": 0}
+    for r in store.db.execute("SELECT event, decided_at, entry_day, status FROM intents WHERE program=? AND version=? AND "
+                              "entry_day<=?", (program, version, day.isoformat())):
+        status = str(r["status"])
+        if status == "skipped:excluded":
+            out["excluded_late"] += 1
+            continue
+        if status.startswith("skipped"):
+            continue
+        when = _stored_at(store, str(r["event"]))
+        try:
+            late = when is not None and when > S.parse_iso(r["decided_at"])
+        except (TypeError, ValueError):
+            late = False
+        if late:
+            out["stored_late"] += 1
+            out["stored_late_today"] += int(r["entry_day"] == day.isoformat())
+    return out
 
 
 def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
@@ -186,6 +244,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
         "next_look": SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day),
         "last_look": last_out, "held_looks": sum(1 for r in looks if r["held"]),
+        "late_rows": late_rows(store, program, version, day),
     }
 
 
@@ -285,6 +344,10 @@ def render(report: Mapping[str, Any]) -> str:
         ko = p.get("kept_out") or {}
         if ko.get("events") or ko.get("unjudged"):
             line += f"; kept out {ko.get('events', 0)}" + (f" (+{ko['unjudged']} unjudged)" if ko.get("unjudged") else "")
+        lr = p.get("late_rows") or {}
+        if lr.get("stored_late") or lr.get("excluded_late"):
+            line += (f"; stored after its decision {lr.get('stored_late', 0)} (today {lr.get('stored_late_today', 0)}), "
+                     f"excluded by a later row {lr.get('excluded_late', 0)}")
         if p["seatable"]:
             nl, ll = p["next_look"], p["last_look"]
             if nl.get("k") is None:
@@ -311,7 +374,10 @@ def render(report: Mapping[str, Any]) -> str:
         f"{side} n {g['n']}" + (f", mean {g['mean_bp']:+.1f} bp, size {g['mean_abs_bp']:.1f} bp" if g["n"] else "")
         for side, g in gp.items()))
     efp = report["expected_false_passes"]
-    lines.append(f"Expected false passes: {efp['expected']:.1f} (0.10 x {efp['versions']} seatable versions)")
+    line = f"Expected false passes: {efp['expected']:.1f} (0.10 x {efp['versions']} seatable versions)"
+    if efp.get("budget") is not None:
+        line += f" of the lane's stated {efp['budget']:.1f} (PREREG-EVL-4 section 3; {efp['left']:.1f} left)"
+    lines.append(line)
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"
@@ -319,5 +385,5 @@ def render(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["build", "render", "events", "verdicts", "program_status", "kept_out", "gaps", "jobs", "day_bounds", "FAMILIES",
-           "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS"]
+__all__ = ["build", "render", "events", "verdicts", "program_status", "kept_out", "late_rows", "gaps", "jobs",
+           "day_bounds", "FAMILIES", "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS"]

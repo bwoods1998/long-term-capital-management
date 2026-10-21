@@ -1105,7 +1105,11 @@ class UntradableOnTheHouse(LaneCase):
         self.at(et("2026-10-20", "10:20"))
         self.mark_recorded()
         self.turns()
-        self.assertEqual(self.results("2026-10-20", "0000000001"), {"backfill": 1})
+        # (PREREG-EVL-4: AAA's late 8.01 filing is also in Tuesday's close window, an F8K(Tue) event of that file's 8-K
+        # rows, so the close decision's verdicts asked during the session (`ask_only`, a live decision's) check AAA
+        # under the live rule after the hourly re-decision of the open judged it under the backfill rule: tradable
+        # false, ineligible, kept. One result a (session, CIK, rule); the open's backfill result stands for the open.)
+        self.assertEqual(self.results("2026-10-20", "0000000001"), {"backfill": 1, "live": 0})
         self.assertIn(("EVL-CTRL-8K-ALL-O1", 1, "AAA", "open", "backfill"), self.intents("2026-10-20"),
                       "the late event decided by the backfill rule (PREREG-EVL-1 section 3: an outage removes nothing)")
         with self.store() as st:
