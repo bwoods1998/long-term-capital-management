@@ -88,8 +88,12 @@ programs trades real money at learning size.
   the kill switch engaged: held, missed naming the hold; (f) the gateway refuses the re-send: a cap ends it refused at
   once, a reading it could not make sends it again the next minute (two orders at the venue, done); (g) an exit
   cancelled at once: unchanged, its ladder; (h) a buy that filled before the cancel: no re-send, done with what filled.
-  The event, equity and live modules with test_ci, test_constitution, test_e3_identities and test_e4_e2e: 87 modules,
-  2,173 OK on 3.14 and on 3.11.
+  On `971db229` (the code, its tests and docs, with A82 merged in): the full league suite on 3.14, by the exact `python
+  -m unittest discover -s league/tests -t .`, 12,620 OK (33 skipped, 1,468 s); on 3.11 the event, equity and live
+  modules with test_ci, test_constitution, test_e3_identities, test_e4_e2e and the CHANGELOG readers, 91 modules, 2,397
+  OK; `python -m league.ci --base origin/main --branch fix/venue-cancel-retry --no-tests` passed; the identities,
+  computed with the tree's own functions on both Pythons, as in the heading (with `equity_money.event.enabled` False
+  `1b7a5c22` / `50e951c9`). No gateway file changes.
 - **Deploy.** The House from a head that contains the deployed House release's head (A80 names release 1019e); no
   money digest move, so the grant needs no new ratification; verify it still reads `055e5313`.
 - **Rollback.** The previous House release (a re-sent buy that filled is an ordinary event lot to it); or
