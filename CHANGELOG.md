@@ -38,6 +38,69 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The screen after the open, the House's close re-read of the bands, the night by session, on `fix/screen-after-open` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, which the captain integrates on top of release 1019e; an owner deploy of the House alone: league/events/house.py and book.py are behind league/ci.py's wall, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO RULE AND NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the gate contract `397b22b7`, the same on 3.14 and 3.11)
+
+- **Why.** The read-only audit of the live House (lenses looks and probe), "BANDS MOVE A SESSION LATE": the judge
+  (league/events/screen.py `final_until`) makes a close X final at an OPEN decision (A69's fast path once the session
+  after X has had its open decision; A66's three sessions likewise move at an open), and the intents a look as of X
+  covers were settled by X's own 20:30 ET score; but the lane ran the screen only after the 20:30 ET score
+  (league/events/house.py nightly) and the House's event book read the bands once a session, at its first decision. So
+  the seven close-entry programs reached Probe a session after their look could be written (PREREG-EVL-3 section 2:
+  "Probe from the first decision after a passed look", which is that session's close), and open-entry programs a day
+  after that. A score that ran past midnight ET also left its session with no screen until the next evening: the night
+  was keyed on the calendar day.
+- **(1) The screen after the open** (league/events/house.py `_screen_open_due`, `_screen_open`; constants
+  `SCREEN_OPEN_AT` 09:40 ET, `SCREEN_OPEN_EVERY` 10 minutes, `SCREEN_OPEN_JOB` "screen-open", `SCREEN_CLEAR` 5
+  minutes): from 09:40 ET of a session whose open decision is made (its receipt `ok` or `pending`) until 5 minutes
+  before its close decision, the lane reads the final horizon of every seating version (`_horizons`: `final_until` of
+  each `programs.SEATING` version as of that session, about 0.15 s for the twelve on an invented store of 23,000
+  receipts) at most every 10 minutes; when any differs from the horizons the last screen receipt kept (`_last_horizons`:
+  the newest finished `screen` or `screen-open` receipt), it runs `screen.run` for the seating versions alone, receipted
+  `screen-open`. The band review of the real fills (demotion, Sized) stays nightly. A look is written once
+  (`write_look`, INSERT OR IGNORE; version 2 resumes after the last look on record) with its band move in its own
+  transaction, whichever run writes it, so the night's screen writes nothing the morning wrote and the same horizons are
+  never screened twice. The task comes after the nightly jobs and before the ticker snapshot, the early verdicts and the
+  backfill in the plan (decisions, their verdicts and the record pass first); no screen, morning or nightly, starts
+  within 5 minutes of the lane's next decision (`_clear_of_decision`: a screen has no bound, and the House's book waits
+  on the lane's own decision).
+- **(2) The House's event book reads the bands again at the close decision** (league/equity/live.py
+  `_event_bands_due`, kv `EVENT_BAND_MARK` = `eq_event_band_mark`; league/events/book.py `band_mark`, the newest
+  `band_history` id, 0 with no lane, table or row, None when unreadable): `_event_sync` keeps the mark it read before
+  the bands; the close decision syncs again when the lane's mark differs or cannot be read (fail closed: the sync then
+  says whether the bands can be read), and the decision's summary says why it synced (`band_sync` `first` | `moved`).
+  INTERFACES section 23.
+- **(3) The night is the session's** (`_night`): the nightly score, screen and report are those of today's session from
+  20:30 ET, else of the session before today. A score made `ok` at or after that session's 20:30 ET, and a nightly
+  `screen` receipt likewise, close it (a `screen-open` receipt never does); `_score` keeps its once-a-night set and its
+  receipt's `day` on the session, so a pass past midnight ET goes on with each intent tried once; the screen runs as of
+  that session (`screen.run(store, night)`), and a night finished after midnight writes that session's report
+  (`reports/<night>.txt`) when it is missing. A House down that evening makes the night's jobs the next morning.
+- **(4) The screen's receipts keep why each look waits**: `screen` (`run` "night") and `screen-open` (`run` "open")
+  receipts carry `waits` (program, version, k, why; why to 300 characters, at most 60), `looks` (program, version, k,
+  held, passed, band of each look written), `horizons` and `day` beside the counts (`written`, `waiting` stay
+  integers, so `lane.json`'s task brief is unchanged).
+- **Tests** (league/tests/test_events_1019f.py, each failing without its fix; 13): `ScreenAfterTheOpen` (EVL-INS-BUY-O1
+  v2, 80 invented events Oct 20-29 at +1%, every record pass clean: the night of Oct 29 waits, its receipt saying "look 1
+  falls due at 2026-10-29, not final yet: ... the session after it (2026-10-30) has not had its open decision"; at 09:41
+  ET Oct 30, after the open decision, `screen-open` writes look 1 as of Oct 29 and its Probe move (`written_at` 09:41
+  ET); no second one at 09:52, 10:03, 11:30 or 15:30 ET; the night of Oct 30 writes nothing; not before 09:40, not
+  without the open decision, not within 5 minutes of the close decision; the seating versions alone),
+  `TheNightIsTheSessions` (a score at 23:58 ET cut by its bound goes on at 00:03 ET as Tuesday's night, each intent once,
+  then Tuesday's screen and report, once; a missed night is made the next morning and its screen waits out the 09:15
+  decision) and `TheCloseDecisionReadsTheBandsAgain` with `TheBandMark` (the House's lane at 10:00 ET of Nov 4 writes
+  EVL-ERN-REACT-ON v2's look as of Oct 30, A66 making it final at Nov 4's open; the book's 15:46 ET close decision gives
+  ACME to REACT-ON at Probe's 5 shares, `band_sync` "moved", where without the fix the earlier row EVL-ERN-REACT-C1
+  takes it at learning's 2). league/tests/test_events_house.py's harness gains Monday night's score, screen and report
+  (as the House made them) and keeps the screen after the open to its own tests, as it does the hourly re-decision.
+- **Runs** (the modules touched and their neighbours, on 3.14 and 3.11 alike; the full suite is the integration's):
+  the event lane's 24 modules (test_events_*, test_evl_*, test_cost_day), 401 OK; the 48 modules that import the
+  equity book or its week fixtures, 1,857 OK (5 skipped); the six CHANGELOG and docs readers (test_ci,
+  test_e3_identities, test_done_a50, test_equity_rehearsal, test_elane_health, test_gen_universe), 282 OK;
+  `python -m league.ci --base origin/main --branch fix/screen-after-open --no-tests` passed; the identities by the
+  tree's own functions, as in the heading.
+- **Rollback**: the House to the release before (`floor_box.py rollback`); the looks and band moves written stay (the
+  judge's, whichever run wrote them), and that code goes back to the nightly screen and the first-decision band read.
+
 ### Sail's spend response changed fields: the budget's fixed line and the close economics read the boxes' bill again, on `fix/sail-spend-fields` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, on top of release 1019e; owner files `league/ops/budget.py`, `league/ops/economics.py`, `league/project_economics.py`, and `league/sailbox.py`; an owner deploy of the House alone, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no setting, no money row, no gateway change)
 
 - **Why.** The audit of the live House (Oct 21, 2026, its cost lens): Sail's `GET /sailboxes/spend` no longer carries

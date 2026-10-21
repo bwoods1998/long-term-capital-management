@@ -334,6 +334,9 @@ VENUE_STAMP_SLACK_S = 0.001
 VENUE_CANCEL_SAID = "eq_venue_cancel_said"
 #: What an A80 re-send held by a gate says on its intent (`_event_work_entry`); the auction's end reads it back.
 A80_HELD = "A80's one re-send held: "
+#: kv: the lane's band mark (league/events/book.py `band_mark`) the session's last band sync read (release 1019f): the
+#: close decision reads the bands again when the lane's mark differs (`_event_bands_due`).
+EVENT_BAND_MARK = "eq_event_band_mark"
 #: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
 #: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
 ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
@@ -5110,12 +5113,19 @@ class EquityBook:
 
     # ---------------------------------------------------------------- the band sync
     def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
-        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision: each seating version's band AS THE LANE'S
+        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision, and again at its close decision when the
+        lane's band history moved since (`_event_bands_due`, release 1019f): each seating version's band AS THE LANE'S
         STORE SAYS IT (league/events/book.py `bands`: learning from birth, Probe, Sized, retired; PREREG-EVL-3 section
         2) written to `eq_event_programs`, and its instance (`<program>@<version>:r`, kind "event", lane "event") made,
         updated or retired. A program that leaves the live bands decides no more; its open lots exit at their own
         scheduled auctions (nothing is sold by a band move). None when the lane's band table cannot be read: nothing is
-        written, no buy is planned this decision, and the next decision reads it again."""
+        written, no buy is planned this decision, and the next decision reads it again. The lane's band mark
+        (`book.band_mark`) is read BEFORE the bands and kept with the sync (kv `eq_event_band_mark`), so a move the lane
+        writes between the two reads is read at the next decision."""
+        try:
+            mark = adapter.band_mark(lane)
+        except Exception:  # noqa: BLE001 - an unread mark makes the close decision read the bands again
+            mark = None
         bands = adapter.bands(lane, s)
         if bands is None:
             return None
@@ -5150,11 +5160,29 @@ class EquityBook:
                         self.alert("warning", f"equity: event program {b.program} v{b.version} is now {b.band}: "
                                               f"{b.why[:200]}")
             self.state.put("eq_event_synced", day.isoformat())
+            self.state.put(EVENT_BAND_MARK, mark)
         if born:
             self.alert("warning", f"equity: {len(born)} event program(s) trade real money from {day.isoformat()} at "
                                   f"their lane's bands ({', '.join(born)[:300]}); every buy waits on the gateway's "
                                   "STOCK_EVENT_BUYS and the auction paper proof's BUY stage")
         return bands
+
+    def _event_bands_due(self, day: str, at: str, adapter: Any, lane: Any) -> str | None:
+        """Why the band sync runs at this decision, or None: "first", the session's first decision (`eq_event_synced`
+        is another day); "moved", THE CLOSE DECISION when the lane's band mark (`book.band_mark`: the newest
+        `band_history` id) is not the one the session's sync kept, or cannot be read (release 1019f: the lane's screen
+        runs its looks after the open, so a look written that morning moves its program's band before the close, and
+        PREREG-EVL-3 section 2 gives Probe "from the first decision after a passed look"). The open decision is always
+        a session's first; a band moved after the close decision is read at the next session's first."""
+        if (self.state.get("eq_event_synced") or "") != day:
+            return "first"
+        if at != "close":
+            return None
+        try:
+            mark = adapter.band_mark(lane)
+        except Exception:  # noqa: BLE001 - read the bands again: `_event_sync` says whether they can be read
+            mark = None
+        return "moved" if mark is None or mark != self.state.get(EVENT_BAND_MARK) else None
 
     # ---------------------------------------------------------------- the decision
     def _event_decide(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
@@ -5186,10 +5214,13 @@ class EquityBook:
             return
         exits = self._event_sales(day, at)
         readable = True
-        if lane is not None and (self.state.get("eq_event_synced") or "") != day:
+        synced = self._event_bands_due(day, at, adapter, lane) if lane is not None else None
+        if synced is not None:
             readable = self._event_sync(now, em.day, s, adapter, lane) is not None
         summary: dict[str, Any] = {"exits": exits, "lane": lane is not None, "enabled": bool(s.enabled), "programs": {},
                                    "bands": readable}
+        if synced is not None:
+            summary["band_sync"] = synced
         planned: list[tuple[Any, Any, Any]] = []
         sigmas: dict[str, float | None] = {}
         if not readable:

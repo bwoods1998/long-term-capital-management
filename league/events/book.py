@@ -25,9 +25,11 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
 - THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
   `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
   House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a seating version with no row
-  is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision; a store
-  whose band table cannot be read trades nothing that decision (fail closed), one with no band table yet is every
-  seating version at learning.
+  is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision, and
+  again at the close decision when the lane's `band_history` moved since (`band_mark`, release 1019f: a look the
+  lane's screen wrote after the open trades from that session's close, PREREG-EVL-3's "the first decision after a
+  passed look"); a store whose band table cannot be read trades nothing that decision (fail closed), one with no band
+  table yet is every seating version at learning.
 - A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
@@ -418,6 +420,24 @@ def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
             band, why = "retired", f"the lane's band table names {row.get('band')!r}, no band of PREREG-EVL-3: no real money"
         out.append(Band(program.id, int(program.version), band, row.get("since"), why[:400]))
     return out
+
+
+def band_mark(lane: Lane | None) -> int | None:
+    """THE LANE'S BAND MARK (release 1019f): the newest `band_history` id. Every band move the lane writes raises it
+    (league/events/bands.py `set_band`: a look's Probe or retirement, written by the screen whenever it runs, the night's
+    review), so the book reads the bands again at a close decision when it differs from the mark of the morning's sync
+    (league/equity/live.py `_event_decide`). 0 with no lane, no such table or no row; None when the table is there and
+    cannot be read (the book then reads the bands again, and `bands` says whether they can be read)."""
+    if lane is None:
+        return 0
+    try:
+        tables = {r[0] for r in lane.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "band_history" not in tables:
+            return 0
+        row = lane.db.execute("SELECT max(id) FROM band_history").fetchone()
+        return int(row[0] or 0)
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
 
 
 def sessions_back(day: dt.date, n: int) -> dt.date:
@@ -905,4 +925,4 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
-           "publish"]
+           "publish", "band_mark"]

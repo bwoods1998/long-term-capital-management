@@ -75,9 +75,10 @@ review, the reading that trades less), so a program demoted from Sized earns Siz
 reached at the same close are one look; the skew check starts and caps at 0.018 (A65). Room when short: Sized, then
 Probe, then learning (how the book gives it out: "Real money" below). The lane writes the
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
-with the same module's `bands(store)` and writes every real fill to `real_fills` with its `record_fill` (a posted fee
-updates its row); on the House the lane reviews the real fills after each night's screen (`bands.review`: demotion and
-Sized), whatever the screen did.
+with the same module's `bands(store)` at each session's first decision, and again at the close decision when the
+lane's `band_history` moved since (release 1019f, below: "The screen after the open"), and writes every real fill to
+`real_fills` with its `record_fill` (a posted fee updates its row); on the House the lane reviews the real fills after
+each night's screen (`bands.review`: demotion and Sized), whatever the screen did.
 
 A LOOK READS A FINAL RECORD (release 1019b's review; `screen.final_until`, version 1 and version 2 alike): a look as of
 a close is computed once nothing more can be added to the sessions it covers: the hourly re-decision of the last three
@@ -121,6 +122,32 @@ the summary, a news read cut short is `cut`, a pass that raised is `failed`, one
 so no new record was added. A clean record is final one session after its close, about two sessions sooner than A66's;
 the as-of date, the record and the look are the same. When a seatable program's final record falls more than one session
 behind what A69 allows, the stall job's `evl_final` says so, naming the program and the judge's why (Alarms, below).
+
+THE SCREEN AFTER THE OPEN (release 1019f, not yet deployed; the audit of the live House, "bands move a session late"):
+the judge makes a close final at an OPEN decision (A69's fast path once the next session's open decision is made; A66's
+three sessions likewise move at an open), and the intents a look as of that close covers were settled by that close's
+own score, but the lane ran the screen only after the 20:30 ET score and the House's book read the bands once a
+session, at its first decision: a look the open made final was written that evening, so a close-entry program reached
+Probe at the next session's close instead of that day's. Now, on the House, from 09:40 ET of a session whose open
+decision is made (its receipt `ok` or `pending`) until 5 minutes before its close decision, the lane reads the final
+horizon (`screen.final_until`) of every seating version at most every 10 minutes, and when any differs from the
+horizons the last screen receipt kept (the nightly's or the morning's) it runs the screen's looks of the seating
+versions (`house.py` `_screen_open`, receipt `screen-open`); the band review of the real fills (demotion, Sized) stays
+nightly. A look is written once (`write_look`, INSERT OR IGNORE; version 2 resumes after the last look on record) and
+its band move in its own transaction, whichever run writes it, so the night's screen writes nothing the morning wrote,
+and the same horizons are never screened twice. The House's book reads the bands again at the close decision when the
+lane's band mark (`book.band_mark`: the newest `band_history` id) is not the one its morning sync kept (kv
+`eq_event_band_mark`; an unreadable mark reads them again, fail closed): PREREG-EVL-3 section 2's "Probe from the first
+decision after a passed look" is that session's close. The decision's summary says why it synced (`band_sync`: `first`,
+or `moved` at the close). No rule moves: the judge says when a close is final; the House reads it sooner. Open-entry
+programs still trade a morning look from the next session's open, the first decision after it.
+
+THE NIGHT IS THE SESSION'S (release 1019f): the nightly score, screen and report are keyed on the session, not the
+calendar day. The night is today's session from 20:30 ET, else the session before today: a score that ran past midnight
+ET goes on as that session's night (each due intent still tried once) and that session's screen and report follow the
+next day; a House down that evening makes the night's jobs the next morning (no screen within 5 minutes of a decision).
+Each screen receipt keeps the horizons it read (`horizons`), the looks it wrote (`looks`) and why each look waits
+(`waits`: program, version, k, why).
 
 WHAT A RE-DECISION WRITES (A66's owed rule and A69; release 1019c, `run._scope`): no decision ever writes an intent
 under a look already written, and A LOOK FREEZES ITS WHOLE GROUP (release 1019c's judges review, A74 (5);
@@ -302,7 +329,8 @@ turn, the most urgent due first.
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
-| 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report; then R3's births job (`events.births`) | close + 3 min; 20:30 ET; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
