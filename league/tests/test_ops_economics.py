@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from league import project_economics as PE
@@ -65,6 +66,32 @@ class Render(unittest.TestCase):
         self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-27T18:10:00Z"))), "2026-11-27T18:00:00Z")  # an early close
         self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-02T21:10:00Z"))), "2026-11-02T21:00:00Z")  # winter
         self.assertEqual(E.zulu(E.cutoff_of(at("2026-10-10T12:00:00Z"))), "2026-10-09T20:00:00Z")  # a Saturday: Friday's
+
+    def test_sails_one_cost_field_is_the_box_billing(self):
+        """Sail's spend response since Oct 2026 (invented figures) carries one `cost_usd_nanos` a window where the split
+        was: each window reads the same dollars as the split it replaces (was $0), and a window that carries no cost
+        field is a check of its own, never a silent $0."""
+        legacy = load("sail.json")
+        one = {window: {"cost_usd_nanos": str(int(row["finalized_cost_usd_nanos"]) + int(row["estimated_active_cost_usd_nanos"])),
+                        "sailboxes": []} for window, row in legacy.items()}
+        self.assertEqual(E.box_totals(legacy["last24h"]), (Decimal("2.1"), Decimal("0.3")), "the legacy split, unchanged")
+        self.assertEqual(E.box_totals(one["last24h"]), (Decimal("2.4"), Decimal(0)))
+        self.assertEqual(E.box_totals({"sailboxes": []}), (Decimal(0), Decimal(0)))
+
+        def render(sail):
+            return E.render(load("house.json"), load("library.json"), sail, load("external.json"),
+                            lib_meta={"snapshot": None, "idempotent": True}, typesafe_before_t0=TYPESAFE_BEFORE_T0)
+
+        before, after = render(legacy), render(one)
+        for key in ("net", "burn_per_day", "total_costs_usd", "total_costs_settled_basis_usd"):
+            self.assertEqual(after[key], before[key], key)
+        self.assertEqual([(c["service"], c["usd"], c["settled_usd"]) for c in after["costs"]],
+                         [(c["service"], c["usd"], c["settled_usd"]) for c in before["costs"]])
+        self.assertEqual(after["checks"], before["checks"])
+        gone = dict(one, last24h={"sailboxes": []})
+        checks = [c for c in render(gone)["checks"] if "no cost field" in c]
+        self.assertEqual(len(checks), 1, "one window without a cost: one check")
+        self.assertIn("last24h", checks[0])
 
     def test_the_markdown_carries_the_net_and_p30(self):
         summary = E.render(load("house.json"), load("library.json"), load("sail.json"), load("external.json"),
