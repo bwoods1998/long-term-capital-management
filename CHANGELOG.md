@@ -66,7 +66,10 @@ programs trades real money at learning size.
   today's sizes with no program at Probe (and a retired one), a Probe program of the same auction reserves nothing, a
   Probe buy is never held, the median of five decisions with an unread one passed over, the room cap and the buys'
   weights, the cash this auction's sales give back, the loss budget held by R x the weight, and round-robin at the
-  decision and at the send (two Probe programs with cash for two buys: one each). Docs: docs/events.md,
+  decision and at the send (two Probe programs with cash for two buys: one each). `test_events_1019c`'s forty
+  learning open buys beside a Probe close entry seed C1's last five close decisions at one pick each (with none on
+  record A85 holds its whole room, six $100 buys, and 34 of the forty go: the House has every program's decisions from
+  release 1019b on, so a Probe program always has them). Docs: docs/events.md,
   docs/operations.md ("The event lane's real money on the House": the day's sends, the slots, ROOM, the reservation, the size),
   league/equity/INTERFACES.md section 20.
 

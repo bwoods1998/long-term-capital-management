@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from league.constitution import (CONSTITUTION, EQUITY_MONEY_BOUNDS, PINNED_DIGEST, digest, equity_money_problems,
                                  money_digest)
+from league.equity import schedule as ES
 from league.events import book as EB
 from league.events import calendar as C
 from league.events import edgar as E
@@ -687,6 +688,15 @@ class TheEventKindsOwnDayCount(EventTest):
             h.lane.universe(DAY, sym, cik, 1.0)
         c1_event(h, 0)             # the close's entry: EVL-ERN-REACT-C1 at Probe (5% of E)
         h.lane.band("EVL-ERN-REACT-C1", "probe")
+        # (The captain's A85: a learning OPEN buy leaves the close's Probe program its room. C1's last five close
+        # decisions read one pick each, so $100 is held for it, and the forty $40 learning buys still fit the $1,950
+        # above the reserve. With no decision on record its whole room, six $100 buys, would be held: 34 would go.)
+        d = DAY
+        for _ in range(5):
+            d = ES.previous_session(d)
+            h.state.upsert("eq_event_decisions", {
+                "day": d.isoformat(), "at": "close", "decided_at": "x", "status": "done", "created_at": 0.0,
+                "summary": json.dumps({"programs": {"EVL-ERN-REACT-C1": {"picks": 1, "room": 8}}})}, "day, at")
         self.ready(h)
         h.day()
         opens = [b for b in h.bodies() if b["side"] == "buy" and b["time_in_force"] == "opg"]
