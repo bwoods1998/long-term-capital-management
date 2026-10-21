@@ -8,6 +8,49 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The screen after the open, the night by session (Oct 21, 2026): `fix/screen-after-open`, in release 1019f, not deployed
+
+Cut from `rel/1019d` `5a17bd25`; release 1019f integrates it on top of release 1019e. The audit of the live House
+("bands move a session late"): the judge makes a look's close final at an open decision, but the screen ran only after
+the 20:30 ET score and the House's event book read the bands once a session, at its first decision, so a close-entry
+program reached Probe a session after its look could be written, and a score that ran past midnight ET left that
+session with no screen. [events.md](events.md), **The screen after the open** and **The night is the session's**, says
+what it does. No rule moves (the judge says when a close is final; the House reads it sooner), no setting, no money
+row; an owner deploy of the House alone (league/events/house.py and book.py are behind league/ci.py's wall,
+league/equity/ is protected): money `055e5313`, constitution `a8d4cbd9`, options execution fingerprint `b60410ad`,
+equity identity `78022ca6`, gate contract `397b22b7`, all unmoved.
+
+**What changes on the House**:
+- the lane (league/events/house.py): from 09:40 ET of a session whose open decision is made until 5 minutes before its
+  close decision, every 10 minutes at most, it reads the final horizon of every seating version
+  (`screen.final_until`); when any differs from the horizons the last screen receipt kept, it runs the screen's looks of
+  the seating versions (task and receipt `screen-open`; no band review). THE NIGHT IS THE SESSION'S: the nightly score,
+  screen and report are those of today's session from 20:30 ET, else of the session before today, so a night not
+  finished by midnight ET (or a House down that evening) is finished the next day, once, and no screen starts within 5
+  minutes of a decision. Every screen receipt (`screen` and `screen-open`) keeps `horizons`, `looks` and `waits`
+  (program, version, k, why);
+- the House's event book (league/equity/live.py `_event_bands_due`): at the close decision it reads the bands again
+  when the lane's band mark (league/events/book.py `band_mark`, the newest `band_history` id) differs from the one its
+  morning sync kept (kv `eq_event_band_mark`), or cannot be read; the decision's summary has `band_sync` (`first` at a
+  session's first decision, `moved` at such a close).
+
+**Deploy** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI green on
+the exact head): with release 1019f, the House by the captain's ship script (`ship_house.sh <head> <PR> r1019f
+055e5313 a8d4cbd9`). Nothing to switch.
+
+**Verify** (read-only on the box): the first session morning after the deploy, from 09:40 ET, `sqlite3 -readonly
+/workspace/state/events/events.sqlite "SELECT started_at, status, summary FROM receipts WHERE job='screen-open' ORDER BY
+id DESC LIMIT 3"` shows one `ok` receipt (the open moved the horizons the night's receipt kept; a receipt from before the
+deploy kept none), `run` "open", its `horizons` a session later than the night's (`job='screen'`) for the programs the
+open made final, and no second one while they stand; `lane.json` `tasks` holds `screen-open`. A look it writes is in `looks` with its band move
+in `band_history` (`written_at` that morning); at that session's close decision the House's
+`eq_event_decisions` row (`at` 'close') has `"band_sync": "moved"` and `eq_event_programs` the new band. Each night's
+`screen` receipt has `run` "night", `day` the session, `horizons` and `waits`.
+
+**Rollback**: the House to the release before (`floor_box.py rollback`); the looks and band moves written stay (they
+are the judge's, whichever run wrote them), and the old code goes back to the nightly screen and the first-decision
+band read. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,

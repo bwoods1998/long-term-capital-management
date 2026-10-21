@@ -236,16 +236,25 @@ class LaneCase(unittest.TestCase):
             for kind, wall in (("open", "09:15"), ("close", "15:47")):   # Monday's decisions: the desktop made them
                 rid = st.start_receipt(f"decide-{kind}:2026-10-19", now=et("2026-10-19", wall))
                 st.finish_receipt(rid, "ok", {}, now=et("2026-10-19", wall))
+            # Monday night's score, screen and report, as the House made them (release 1019f keys the night on the
+            # session: a session before today without them has them made first)
+            for job, wall in (("score", "20:31"), ("screen", "20:32"), ("report", "20:33")):
+                rid = st.start_receipt(job, now=et("2026-10-19", wall))
+                st.finish_receipt(rid, "ok", {"day": "2026-10-19"}, now=et("2026-10-19", wall))
+            (st.root / "reports").mkdir(exist_ok=True)
+            (st.root / "reports" / "2026-10-19.txt").write_text("Monday's report\n", encoding="utf-8")
             st.set_meta("evl:backfill:2026-10-15", "done")
             st.set_meta("evl:backfill:2026-10-16", "done")
         self.gw.gets.clear()
         self.lane = self.new_lane()
 
-    def new_lane(self, redecide=False, **settings):
+    def new_lane(self, redecide=False, screen_open=False, **settings):
         lane = H.EventLane(self.house, self.root, gateway=self.gw, sec=self.sec, settings=settings, monotonic=self.mono,
                            sleep=self.mono.advance)
         if not redecide:   # the hourly re-decision is its own test's
             lane._redecide_next = dt.datetime(2100, 1, 1, tzinfo=UTC)
+        if not screen_open:   # so is the screen after the open (release 1019f: ScreenAfterTheOpen)
+            lane._open_checked = dt.datetime(2100, 1, 1, tzinfo=UTC)
         return lane
 
     def at(self, when):
@@ -874,7 +883,8 @@ class Nightly(LaneCase):
                 second = self.lane._score(ctx, self.mono() + H.SCORE_BUDGET)
                 self.assertTrue(second["complete"])
                 self.assertEqual(settled, [f"8k:{n}" for n in range(5)])  # each once
-        self.assertEqual([r["status"] for r in self.receipts("score")], ["partial", "ok"])
+        self.assertEqual([r["status"] for r in self.receipts("score") if r["started_at"] >= S.iso(et("2026-10-20", "00:00"))],
+                         ["partial", "ok"])   # (Monday night's is the fixture's)
 
     def test_the_tickers_snapshot_at_seven_on_a_weekday(self):
         with self.store() as st:
