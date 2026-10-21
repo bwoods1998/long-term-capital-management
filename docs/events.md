@@ -178,7 +178,11 @@ the issuer-days no earlier close-to-open row trades. For entry session D (P the 
   knowable during D is asked during D's session by the close decision's verdict asks; a TEXT under 200 characters has
   no verdict); both one event per issuer per D, the earliest knowable filing the rule takes. EVL-NEWSPM-READ-ON: the
   stored PROMPT-NEWS verdict of `news:<id>`, `ok` with score >= 2, the highest score then the earliest; it ASKS NO
-  VERDICT OF ITS OWN (EVL-NEWS-READ-O1 asks it for its open decision of D) and waits for it.
+  VERDICT OF ITS OWN (EVL-NEWS-READ-O1 asks it for its open decision of D) and waits for it. Once a written look of
+  EVL-NEWS-READ-O1's group freezes that group over D, its open decision asks nothing, so D's close decision asks the
+  verdicts these rows need itself (A83 (3)(ii), release 1019e: no new prompt, the same stored PROMPT-NEWS and the article
+  rendered as the open decision renders it, one verdict an event, stored once; the frozen group is still asked nothing
+  and written nothing).
 - Each enters at D's close (decided at the close - 14 minutes) and exits at the next session's open auction, with the
   fallback ladder; the limit at entry (1.25 x the previous close) binds shadow and real alike. Only events knowable
   after 16:01:05Z Oct 19 count, for every purpose.
@@ -209,7 +213,13 @@ issuer EXCLUDED or skipped is never judged for them). A re-decision marks an int
 (`_skip_excluded`); a settled one keeps its record. The T29 minutes of EVL-8K-REACT-ON's names are read in batches of
 100 (`_marks_1530`, the same rule as `_mark_1530`). On the House, a close decision waiting on PM verdicts has the
 session's open decision's own asks made (`run.waits_on_open`; league/events/house.py `_verdicts`), and a verdict wait
-no call of a pass could answer backs off (`_look`). THE PROOF that no earlier program changes: league/tests/
+no call of a pass could answer backs off (`_look`). THIS FILE'S PART FAILS ALONE (A83 (3)(i), release 1019e): an
+exception in it (its reads, `_skip_excluded`, the 15:30 marks, its verdicts, its intents) that is not the task's time
+bound finishes the close decision with the earlier rows' results (their receipt `ok`, or `pending` on their own
+verdicts), the error in the summary's `evl4_error` (the House warns), and none of this file's programs named in it, so
+the judge reads that close as made without their rows and their own decision (`decide-close-evl4`, below) or the next
+whole re-decision decides them; the earlier rows' looks never wait on it. A time bound stops the whole task as before
+(the next turn decides the close again), and a failure of their own decision is that decision's. THE PROOF that no earlier program changes: league/tests/
 test_events_evl4.py decides a synthetic week (league/tests/evl4_world.py) with and without these rows, and the same
 week decided by release 1019b's code gives every earlier program the same intents and real-money picks.
 

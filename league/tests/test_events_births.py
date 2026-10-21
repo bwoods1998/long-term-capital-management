@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from decimal import Decimal as D
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from league.events import births as BI
@@ -307,6 +308,13 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
             s.doc_verdict(h, 2)
             s.news_verdict(s.article("BBB", et(day, 11)), 3)
             s.news_verdict(s.article("III", et(day, 13), "prnewswire"), -1)
+            # PREREG-EVL-4's rows (release 1019e: the merged tree's twelve seatable versions): JJJ's 8.01 8-K inside D's
+            # close window (F8K(D): EVL-8K-REACT-ON at its stored 15:30 mark, 21.2 / 20 = 1.06; EVL-8K-READ-ON at
+            # score 2; their control), and the pre-market articles above (PM(D): EVL-NEWSPM-READ-ON, its control).
+            j = s.filing("JJJ", et(day, 11), ("8.01",))
+            s.doc_verdict(j, 2)
+            s.st.db.execute("INSERT OR REPLACE INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('JJJ', ?, "
+                            "'1530', 21.2, 'x', 'sip-1min', 'x')", (day.isoformat(),))
         if births:
             for i, sp in enumerate(self.SPECS):
                 s.register(sp, self.BORN_AT, seq=i)
@@ -319,20 +327,68 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
             R.decide_open(ctx, day)
             R.decide_close(ctx, day)
         self.assertEqual(gw.claude_calls, [], "every verdict read was stored: none asked")
+        for row in s.st.db.execute("SELECT job, status, summary FROM receipts WHERE job LIKE 'decide-%'"):
+            body = json.loads(row["summary"])
+            self.assertEqual(row["status"], "ok", row["job"])
+            self.assertNotIn("evl4_error", body, f"{row['job']}: PREREG-EVL-4's part ran whole")
         rows = [dict(r) for r in s.st.db.execute("SELECT * FROM intents ORDER BY program, version, event")]
+        self.picks = self.real_picks(s.st)
         if keep:
             self.addCleanup(s.st.close)
             return rows, s.st
         s.st.close()
         return rows
 
+    def real_picks(self, st: S.Store) -> dict[str, list[tuple]]:
+        """THE REAL-MONEY PICKS (league/events/book.py `picks`, on the lane's store read-only as the House's book reads
+        it) of every program real money trades at each auction of the week, at its decision time: {"program@vN@day":
+        [(event, symbol, cik, rank, adv20, prev_close)]}. A REACT row's ratio is read as 1.05 (the book's T29 reading).
+        A program whose picks raise plans nothing that auction, the others go on (league/equity/live.py's event
+        decision): its entry is the error's name."""
+        from league.events import book as EB
+
+        out: dict[str, Any] = {}
+        lane = EB.Lane(Path(st.root) / S.DB_NAME)
+        try:
+            for day in self.DAYS:
+                session = C.session(lane, day)
+                for p in EB.seatable():
+                    moment = session.open_decide if p.entry_at == "open" else session.close_decide
+                    key = f"{p.id}@v{p.version}@{day.isoformat()}"
+                    try:
+                        got = EB.picks(lane, p, day, decided_at=moment, reaction=lambda row, uni: 1.05)
+                    except Exception as exc:  # noqa: BLE001 - as the House's book: that program plans nothing
+                        out[key] = type(exc).__name__
+                        continue
+                    out[key] = [(x.event, x.symbol, x.cik, x.rank, x.adv20, str(x.prev_close)) for x in got]
+        finally:
+            lane.close()
+        return out
+
     def test_every_prereg_programs_intents_are_identical_with_and_without_births(self):
         without = self.week(Path(self.tmp.name) / "a", births=False)
+        picks_without = self.picks
         with_births = self.week(Path(self.tmp.name) / "b", births=True)
+        picks_with = self.picks
         prereg = {p.id for p in P.PREREG_PROGRAMS}
         mine = [r for r in with_births if r["program"] in prereg]
         self.assertGreater(len(without), 60)
         self.assertEqual(mine, without, "no PREREG program's selection moves")
+        four = {p.id for p in P.PREREG_PROGRAMS if p.prereg == 4}
+        self.assertEqual(four, {r["program"] for r in without} & four,
+                         "every PREREG-EVL-4 program decides in the week: the merged tree's twelve seatable versions")
+        # THE REAL-MONEY PICKS (release 1019e): every PREREG program real money trades picks the same events at every
+        # auction with and without the five births (the twelve seating versions, PREREG-EVL-4's three included).
+        seating = {f"{p.id}@v{p.version}" for p in P.PREREG_SEATING}
+        self.assertEqual(len(seating), 12)
+        prereg_with = {k: v for k, v in picks_with.items() if k.rsplit("@", 1)[0] in seating}
+        self.assertEqual(set(picks_without), set(prereg_with), "the same programs and auctions")
+        self.assertEqual(prereg_with, picks_without, "no PREREG program's real-money pick moves")
+        picked = {k.split("@")[0] for k, v in picks_without.items() if v}
+        self.assertTrue({"EVL-ERN-READ-O1", "EVL-INS-BUY-O1", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON"} <= picked, picked)
+        self.assertEqual(sum(len(v) for v in picks_without.values()) > 20, True)
+        born_picks = {k.split("@")[0] for k, v in picks_with.items() if v and k.rsplit("@", 1)[0] not in seating}
+        self.assertTrue({"EVL-B-INS-DIR", "EVL-B-ERN-TOP"} <= born_picks, "the seatable births pick their own events")
         born = [r for r in with_births if r["program"] not in prereg]
         by = {}
         for r in born:

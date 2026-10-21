@@ -165,8 +165,9 @@ class LaneCut(OSError):
     the verdict is asked again later (league.events.verdicts.ask treats it as a transport failure)."""
 
 
-class LaneDeadline(Exception):
-    """A network read past the task's bound: the task stops, and the next turn goes on from what it stored."""
+class LaneDeadline(R.Deadline):
+    """A network read past the task's bound: the task stops, and the next turn goes on from what it stored (a
+    `run.Deadline`, so a decision's isolated part never takes it for its own failure)."""
 
 
 def events_enabled(config: Mapping[str, Any], *, canary: bool = False) -> bool:
@@ -800,6 +801,8 @@ class EventLane:
                                 f"{type(exc).__name__}: {str(exc)[:160]}", status="failed")
             raise
         self._cut.discard(key)
+        if out.get("evl4_error"):   # (A83 (3)(i): PREREG-EVL-4's part failed alone; its own decision or the next whole one)
+            self.warn("PREREG-EVL-4 part of a close decision", f"{day.isoformat()}: {out['evl4_error']}")
         missing = sum((out.get("pending") or {}).values())
         self._look(key, missing, self._stored_verdicts(ctx.store) - before, ctx.gw)
         return {"day": day.isoformat(), "live": live, "pending": missing,
