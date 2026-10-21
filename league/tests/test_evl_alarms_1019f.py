@@ -55,6 +55,26 @@ class Entries(Lane):
                         {"answer": {**order["answer"], "canceled_at": "2026-10-20T13:16:01"}}):  # no zone: no time
             self.assertIsNone(EV.venue_cancel_ms({**order, **changed}), changed)
 
+    def test_the_rule_is_the_books_own_once_release_1019e_is_merged(self):
+        """league/equity/live.py `venue_cancel_ms` (release 1019e, A80's re-send) and this reader judge the same orders
+        alike: read here from the rows, there from the book's `Order`. Skipped on a tree without the re-send."""
+        from league.equity import live as L
+
+        if not hasattr(L, "venue_cancel_ms"):
+            self.skipTest("release 1019e's re-send is not in this tree")
+        specs = [cancel_at_once(TUE, "open", ms) for ms in (0.0, 5.0, 59_999.0, 60_000.0, 60_001.0, 180_000.0)]
+        specs += [{**cancel_at_once(TUE, "open"), "filled": "1"}, {"status": "filled", "filled": "3"}, {"status": "expired"},
+                  {"status": "canceled", "answer": {**cancel_at_once(TUE, "open")["answer"], "cancel_sent": 1.0}},
+                  {"status": "canceled", "answer": {**cancel_at_once(TUE, "open")["answer"], "final": "replaced"}},
+                  {**cancel_at_once(TUE, "open"), "side": "sell"}]
+        iid = self.book.buy(TUE, "open")
+        for spec in specs:
+            self.book.order(iid, TUE, "open", **spec)
+        self.book.db.row_factory = sqlite3.Row
+        rows = [dict(r) for r in self.book.db.execute("SELECT * FROM eq_orders ORDER BY eid")]
+        self.assertEqual([EV.venue_cancel_ms(r) for r in rows], [L.venue_cancel_ms(L.Order.of(r)) for r in rows])
+        self.assertEqual(sum(1 for r in rows if EV.venue_cancel_ms(r) is not None), 4)
+
     def test_why_a_buy_was_never_sent_is_named_by_the_books_own_words(self):
         said = {
             "not filled at the open auction (never sent: the event kind's day order count: 148 of 150 sent, 2 kept for "
