@@ -29,7 +29,16 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
 4. NIGHTLY: the account equity after the close, the score at 20:30 ET, the screen (with PREREG-EVL-3's band review
-   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it;
+   of the real fills: demotion and Sized, league/events/bands.py `review`) and the report after it, KEYED ON THE
+   SESSION (release 1019f): the night is today's session from 20:30 ET, else the session before today, so a score that
+   ran past midnight ET (or a House that was down that evening) still gets that session's screen and report the next
+   day; then THE SCREEN AFTER THE OPEN (release 1019f, `screen-open`): from 09:40 ET of a session whose open decision is
+   made, until 5 minutes before its close decision, whenever the judge's final horizon (league/events/screen.py
+   `final_until`) of any seating version moved since the last screen receipt, the screen's looks of the seating
+   versions run again (never the band review, which stays nightly), so a look the judge makes final at the open is
+   written that morning and its Probe move trades from that session's close (PREREG-EVL-3 section 2: "the first
+   decision after a passed look"; the House's event book reads the bands again at the close decision when the lane's
+   `band_history` moved since its morning sync, league/equity/live.py `_event_decide`);
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
@@ -128,6 +137,27 @@ TICKERS_AT = dt.time(7, 0)
 TICKERS_RETRY = dt.timedelta(minutes=5)
 SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
+#: THE SCREEN AFTER THE OPEN (release 1019f; the audit's "bands move a session late"). The judge makes a close X final
+#: (league/events/screen.py `final_until`: A66's three sessions, A69's fast path once the session after X has had its
+#: open decision), and the intents a look as of X covers were settled by X's own score, so the look can be written the
+#: morning after X; the nightly screen alone wrote it at 20:30 ET, after that session's close decision. So from
+#: SCREEN_OPEN_AT of a session whose open decision is made until SCREEN_CLEAR before its close decision, the lane reads
+#: the final horizon of every seating version at most every SCREEN_OPEN_EVERY and runs the screen's looks of the
+#: seating versions (`SCREEN_OPEN_JOB`, a receipt of its own: the daily report's nightly `screen` stays the nightly's)
+#: whenever any moved since the last screen receipt (nightly or not), so nothing is screened twice for the same
+#: horizons. A look is written once (screen.py `write_look`, INSERT OR IGNORE; version 2 resumes after the last look
+#: on record) and its band move in its own transaction, whichever run writes it; the band review of the real fills
+#: (demotion, Sized) stays the nightly's. No rule moves: the judge says when a close is final, the House only reads it
+#: sooner.
+SCREEN_OPEN_AT = dt.time(9, 40)
+SCREEN_OPEN_EVERY = dt.timedelta(minutes=10)
+SCREEN_OPEN_JOB = "screen-open"
+SCREEN_JOBS = ("screen", SCREEN_OPEN_JOB)
+#: A screen (CPU only, no bound: `Task.budget` None) never starts this close to the lane's next decision.
+SCREEN_CLEAR = dt.timedelta(minutes=5)
+#: What a screen receipt keeps of the screen's `waiting` (program, version, k, why), so the record says why a look waits.
+WAITS_KEPT = 60
+WHY_CHARS = 300
 EQUITY_AFTER = dt.timedelta(minutes=3)
 EQUITY_RETRY = dt.timedelta(minutes=10)
 BACKFILL_WEEKDAYS = SN.FINAL_BACKFILL_WEEKDAYS
@@ -289,6 +319,7 @@ class EventLane:
         self._universe_told: set[dt.date] = set()
         self._attempts: dict[str, dt.datetime] = {}
         self._score_seen: dict[dt.date, set[tuple[str, int, str]]] = {}
+        self._open_checked: dt.datetime | None = None   # when the screen after the open last read the horizons
         self._backfill_seen: dict[dt.date, set[str]] = {}
         self._index_rows: dict[dt.date, list[dict[str, Any]]] = {}
         self._usd = {"day": None, "usd": 0.0}
@@ -642,6 +673,9 @@ class EventLane:
         nightly = self._nightly(st, now, today, session, soon)
         if nightly is not None:
             return nightly, now
+        screen = self._screen_open_due(st, now, today, session, soon)
+        if screen is not None:
+            return screen, now
         if self._tickers_due(st, now, today, soon) and not self._quiet("tickers", now, soon):
             return Task("tickers", self._snapshot, None), now
         if early is not None:
@@ -1066,17 +1100,25 @@ class EventLane:
                     soon.append(close_after)
                 elif self._retry_ok("equity", now, EQUITY_RETRY, soon) and not self._quiet("equity", now, soon):
                     return Task("equity", self._equity, None)
-            if now < evening:
-                soon.append(evening)
-            else:
-                if not self._receipt_since(st, "score", evening, status="ok"):
-                    if not self._quiet("score", now, soon):
-                        return Task("score", self._score, SCORE_BUDGET)
-                    return None
-                if not self._receipt_since(st, "screen", evening):
-                    if not self._quiet("screen", now, soon):
-                        return Task("screen", self._screen, None)
-                    return None
+        # THE NIGHT IS A SESSION'S, NOT A CALENDAR DAY'S (release 1019f): today's session from 20:30 ET, else the session
+        # before today. Its score is made when an `ok` score receipt started at or after its 20:30 ET (a later pass
+        # settles everything an earlier one would), its screen when a nightly `screen` receipt did (the screen after the
+        # open writes `screen-open`, never this one). A score that ran past midnight ET, or a House down that evening,
+        # finishes that session's score, then its screen and its report, the next day.
+        night = self._night(st, now, today, session, soon)
+        if night is not None:
+            since = _wall(night, SCORE_AT)
+            if not self._receipt_since(st, "score", since, status="ok"):
+                if not self._quiet("score", now, soon):
+                    return Task("score", lambda ctx, deadline: self._score(ctx, deadline, night), SCORE_BUDGET)
+                return None
+            if not self._receipt_since(st, "screen", since):
+                if not self._quiet("screen", now, soon) and self._clear_of_decision(st, now, soon):
+                    return Task("screen", lambda ctx, deadline: self._screen(ctx, deadline, night), None)
+                return None
+            if night != today and not (st.root / "reports" / f"{night.isoformat()}.txt").exists() and \
+                    not self._quiet("report", now, soon):
+                return Task("report", lambda ctx, deadline: self._report(ctx, deadline, night), None)
         report_at = evening if session is not None else _wall(today, REPORT_AT)
         if now < report_at:
             soon.append(report_at)
@@ -1085,6 +1127,27 @@ class EventLane:
                 not self._quiet("report", now, soon):
             return Task("report", self._report, None)
         return None
+
+    @staticmethod
+    def _night(st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+               soon: list[dt.datetime]) -> dt.date | None:
+        """The session whose nightly score and screen are due (release 1019f): today's from its 20:30 ET, else the last
+        session before today (None when the calendar holds none)."""
+        if session is not None:
+            evening = _wall(today, SCORE_AT)
+            if now >= evening:
+                return today
+            soon.append(evening)
+        before = C.previous(st, today, 1)
+        return before[-1].day if before else None
+
+    def _clear_of_decision(self, st: S.Store, now: dt.datetime, soon: list[dt.datetime]) -> bool:
+        """Whether a screen (CPU only, unbounded) may start now: not within SCREEN_CLEAR of the lane's next decision."""
+        nxt = self._next_decision(st, now)
+        if nxt is not None and nxt - now < SCREEN_CLEAR:
+            soon.append(nxt)
+            return False
+        return True
 
     def _retry_ok(self, what: str, now: dt.datetime, every: dt.timedelta, soon: list[dt.datetime]) -> bool:
         tried = self._attempts.get(what)
@@ -1109,11 +1172,13 @@ class EventLane:
         self._receipted(ctx.store, "equity", "ok", {k: v for k, v in out.items() if k != "equity"})
         return {k: v for k, v in out.items() if k != "equity"}
 
-    def _score(self, ctx: LaneContext, deadline: float) -> dict[str, Any]:
+    def _score(self, ctx: LaneContext, deadline: float, night: dt.date | None = None) -> dict[str, Any]:
         """The score job (league.events.score.settle), resumable: each due intent is tried once a night, in order,
-        while the bound lasts; the night's pass is `ok` once every one has been tried."""
+        while the bound lasts; the night's pass is `ok` once every one has been tried. The night is the SESSION's
+        (`night`, `_night`; release 1019f): a pass that runs past midnight ET goes on with the same night, each intent
+        still tried once, and its receipt's `day` is that session."""
         st, now = ctx.store, ctx.now()
-        day = now.astimezone(C.NY).date()
+        day = night or now.astimezone(C.NY).date()
         for other in [d for d in self._score_seen if d != day]:
             self._score_seen.pop(other)
         seen = self._score_seen.setdefault(day, set())
@@ -1142,24 +1207,18 @@ class EventLane:
             self.warn("score", f"{len(errors)} intents could not be settled this pass, the first: {errors[0]}")
         return summary | {"_status": "ok" if complete else "partial"}
 
-    def _screen(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
+    def _screen(self, ctx: LaneContext, deadline: float | None, night: dt.date | None = None) -> dict[str, Any]:
         """The screen (league.events.screen.run: the looks, and the band moves a look makes in its own transaction:
         Probe, retired), then PREREG-EVL-3's review of the real fills the House's book wrote back
         (league.events.bands.review: demotion to learning, Sized), WHATEVER THE SCREEN DID (release 1019b's review: a
         failing look stopped every program's demotion and Sized). A program whose looks failed, or a review that failed,
-        is a warning and the screen's receipt says so (`partial`); it runs again next night."""
+        is a warning and the screen's receipt says so (`partial`); it runs again next night. The screen is as of the
+        night's SESSION (`night`, `_night`; release 1019f), whenever it runs; its receipt keeps the final horizons it
+        read (`horizons`, the screen after the open compares them) and why each look waits (`waits`)."""
         now = ctx.now()
-        try:
-            out = SN.run(ctx.store, now.astimezone(C.NY).date(), now=now)
-        except Exception as exc:  # noqa: BLE001 - the review below runs all the same
-            out = {"written": [], "waiting": [], "errors": [{"error": f"{type(exc).__name__}: {str(exc)[:200]}"}]}
-        summary: dict[str, Any] = {"day": now.astimezone(C.NY).date().isoformat(),
-                                   "written": len(out.get("written") or []), "waiting": len(out.get("waiting") or [])}
-        status = "ok"
-        if out.get("errors"):
-            status = "partial"
-            summary["errors"] = list(out["errors"])[:5]
-            self.warn("screen", f"{len(out['errors'])} program(s) could not be screened, the first: {out['errors'][0]}")
+        day = night or now.astimezone(C.NY).date()
+        status, summary = self._looks_pass(ctx.store, day, now, "screen", None, self._horizons(ctx.store, day, now))
+        summary["run"] = "night"
         try:
             moved = BA.review(ctx.store, now=now)
         except Exception as exc:  # noqa: BLE001 - the looks are written; the review is read again next night
@@ -1171,10 +1230,109 @@ class EventLane:
         self._receipted(ctx.store, "screen", status, summary)
         return summary | {"_status": status}
 
-    def _report(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
-        """The daily one-screen report into `<root>/reports/<day>.txt` and `.json`, as the CLI's `report` writes it."""
+    def _screen_open_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                         soon: list[dt.datetime]) -> Task | None:
+        """THE SCREEN AFTER THE OPEN (release 1019f; `SCREEN_OPEN_AT`'s comment): due from SCREEN_OPEN_AT of a session
+        whose open decision is made (its receipt `ok` or `pending`) until SCREEN_CLEAR before its close decision, when
+        the final horizons of the seating versions (`_horizons`, read at most every SCREEN_OPEN_EVERY) differ from those
+        the last screen receipt kept, nightly or not (`_last_horizons`): the same horizons are never screened twice."""
+        if session is None:
+            return None
+        start, until = _wall(today, SCREEN_OPEN_AT), session.close_decide - SCREEN_CLEAR
+        if now < start:
+            soon.append(start)
+            return None
+        if now >= until or not self._open_made(st, today):
+            return None
+        if self._open_checked is not None and now < self._open_checked + SCREEN_OPEN_EVERY:
+            soon.append(self._open_checked + SCREEN_OPEN_EVERY)
+            return None
+        if self._quiet(SCREEN_OPEN_JOB, now, soon) or not self._clear_of_decision(st, now, soon):
+            return None
+        self._open_checked = now
+        horizons = self._horizons(st, today, now)
+        if horizons == self._last_horizons(st):
+            soon.append(now + SCREEN_OPEN_EVERY)
+            return None
+        return Task(SCREEN_OPEN_JOB, lambda ctx, deadline: self._screen_open(ctx, deadline, today, horizons), None)
+
+    def _screen_open(self, ctx: LaneContext, deadline: float | None, day: dt.date,
+                     horizons: Mapping[str, Any]) -> dict[str, Any]:
+        """The screen's looks of the seating versions as of session `day` (league.events.screen.run, its own `final_until`
+        and every rule as the nightly screen reads them), receipted `screen-open` with the horizons that made it due.
+        No band review (the real fills' demotion and Sized stay nightly)."""
         now = ctx.now()
-        day = now.astimezone(C.NY).date()
+        status, summary = self._looks_pass(ctx.store, day, now, SCREEN_OPEN_JOB, self._seating(), dict(horizons))
+        summary["run"] = "open"
+        self._receipted(ctx.store, SCREEN_OPEN_JOB, status, summary)
+        return summary | {"_status": status}
+
+    def _looks_pass(self, st: S.Store, day: dt.date, now: dt.datetime, task: str,
+                    programs: list[tuple[str, int]] | None, horizons: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """One run of the screen's looks as of session `day` (every program the store holds when `programs` is None),
+        and its receipt's summary: the counts, the looks written (`looks`), why each look waits (`waits`: program,
+        version, k, why) and the final horizons read before it (`horizons`)."""
+        try:
+            out = SN.run(st, day, programs=programs, now=now)
+        except Exception as exc:  # noqa: BLE001 - the caller's receipt says so
+            out = {"written": [], "waiting": [], "errors": [{"error": f"{type(exc).__name__}: {str(exc)[:200]}"}]}
+        written, waiting = list(out.get("written") or []), list(out.get("waiting") or [])
+        summary: dict[str, Any] = {
+            "day": day.isoformat(), "written": len(written), "waiting": len(waiting),
+            "looks": [{k: w.get(k) for k in ("program", "version", "k", "held", "passed", "band")} for w in written],
+            "waits": [{"program": w.get("program"), "version": w.get("version"), "k": w.get("k"),
+                       "why": str(w.get("why") or "")[:WHY_CHARS]} for w in waiting[:WAITS_KEPT]],
+            "horizons": dict(horizons)}
+        status = "ok"
+        if out.get("errors"):
+            status = "partial"
+            summary["errors"] = list(out["errors"])[:5]
+            self.warn(task, f"{len(out['errors'])} program(s) could not be screened, the first: {out['errors'][0]}")
+        return status, summary
+
+    @staticmethod
+    def _seating() -> list[tuple[str, int]]:
+        """(program, version) of every version that may seat (league/events/programs.py `SEATING`, read at each call)."""
+        return [(p.id, int(p.version)) for p in P.SEATING if p.can_seat]
+
+    def _horizons(self, st: S.Store, day: dt.date, now: dt.datetime) -> dict[str, str | None]:
+        """{program key: the last close the judge holds final for it (league/events/screen.py `final_until` as of
+        session `day` at `now`), ISO, or None} for every seating version; a version whose horizon cannot be read is
+        `error: <type>` (a stable mark, so one that keeps failing is not screened again for it)."""
+        out: dict[str, str | None] = {}
+        for program, version in self._seating():
+            key = SN.program_key(program, version)
+            try:
+                until = SN.final_until(st, program, version, day, now)[0]
+            except Exception as exc:  # noqa: BLE001 - the screen itself says why that program waits
+                out[key] = f"error: {type(exc).__name__}"
+                continue
+            out[key] = None if until is None else until.isoformat()
+        return out
+
+    @staticmethod
+    def _last_horizons(st: S.Store) -> dict[str, Any] | None:
+        """The final horizons the latest finished screen receipt (nightly or after the open) kept, or None (none kept)."""
+        row = st.db.execute("SELECT summary FROM receipts WHERE job IN (?, ?) AND finished_at IS NOT NULL ORDER BY id DESC "
+                            "LIMIT 1", SCREEN_JOBS).fetchone()
+        try:
+            body = json.loads(row[0] or "{}") if row is not None else None
+        except (TypeError, ValueError):
+            return None
+        horizons = body.get("horizons") if isinstance(body, dict) else None
+        return horizons if isinstance(horizons, dict) else None
+
+    @staticmethod
+    def _open_made(st: S.Store, day: dt.date) -> bool:
+        """Whether session `day`'s open decision is made (a receipt finished `ok` or `pending`)."""
+        return st.db.execute("SELECT 1 FROM receipts WHERE job=? AND status IN ('ok', 'pending') LIMIT 1",
+                             (f"decide-open:{day.isoformat()}",)).fetchone() is not None
+
+    def _report(self, ctx: LaneContext, deadline: float | None, day: dt.date | None = None) -> dict[str, Any]:
+        """The daily one-screen report into `<root>/reports/<day>.txt` and `.json`, as the CLI's `report` writes it: of
+        today, or of the night's session when its nightly jobs finished after midnight ET (`day`, release 1019f)."""
+        now = ctx.now()
+        day = day or now.astimezone(C.NY).date()
         rep = RP.build(ctx.store, day, now=now)
         folder = ctx.store.root / "reports"
         folder.mkdir(exist_ok=True)

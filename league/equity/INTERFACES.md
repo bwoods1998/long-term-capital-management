@@ -1494,7 +1494,8 @@ path.
   limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at) and `eq_event_decisions` (one row a session
   and auction: counts only; `sale_to_later` {skipped program: {selling program: n}} when the sale gate skipped an
   earlier row's pick because a later row's lot sells the name at that auction: PREREG-EVL-4 section 1.3's count,
-  `_event_sale_takers`, also in the decision's `equity.event_decide` record). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
+  `_event_sale_takers`, also in the decision's `equity.event_decide` record; `band_sync` `first` | `moved`
+  when the decision ran the band sync, release 1019f: section 23). kv `eq_event_synced`, `eq_event_band_mark`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
   `paper_proof_auction`, `paper_proof_auction_buy`, `paper_proof_auction_sell`. A lot's `info.evl` (program, version,
   event, cik, band, weight, sigma, prev_close, limit), `info.evl_exit` {day, at, rung, first, zero} and `info.evl_fills`
   (what was written back).
@@ -1508,7 +1509,8 @@ path.
   House's rules for the old lanes (`_house_exits` skips it); it may sell in the session it was bought (the minimum hold
   is the old lanes'). `_open_block` asks an event instance the kind's switch and the auction proof
   (`_event_open_block`) and its band (`_event_seat_block`) in place of `equity_money.enabled` and the SPY day-order
-  proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session; `_event_send` orders the buys by
+  proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session (and again at the close decision when
+  the lane's band mark moved: section 23); `_event_send` orders the buys by
   ROOM (`book.room_key`). `_size_event` calls `size_entry` with `usd` = the band's `position_share` x E (E the
   `last_equity` of the account, never above the sizing equity), `position_share` = `per_name_share` (the name's
   book-wide value as `account_symbol_value`), `weight` = the lot's own; whole shares; one share by `size_entry` at
@@ -1602,3 +1604,31 @@ path.
   their sales refused at the House-wide line); with 120 options orders, 65 buys and all 65 sales, the House-wide line
   exactly full (before: 130 buys and all 130 sales refused); the row, its bounds and its digests);
   league/tests/equity_design.py `DIGESTS` regenerated, release 1019b's kept as `DIGESTS_R2`.
+
+## 23. The close decision reads the bands again when the lane's band history moved (release 1019f, Oct 2026; after section 22, release 1019e's A80; book, as built)
+
+- **Why**: the audit of the live House ("bands move a session late"): the lane's screen now runs its looks after the
+  open decision too (league/events/house.py `_screen_open`, docs/events.md **The screen after the open**), so a look the
+  open made final moves its program's band that morning; the book read the bands once a session, at its first decision,
+  so a close-entry program traded learning at that day's close although PREREG-EVL-3 section 2 gives Probe "from the
+  first decision after a passed look". No rule moves.
+- **The adapter** (league/events/book.py; plumbing, in no identity): `band_mark(lane) -> int | None`, the newest
+  `band_history` id (every `bands.set_band` writes a row: a look's Probe or retirement, the night's review); 0 with no
+  lane, no such table or no row; None when the table is there and cannot be read.
+- **The book** (league/equity/live.py; plumbing, outside the equity identity): `EVENT_BAND_MARK` = kv
+  `eq_event_band_mark`, written by `_event_sync` beside `eq_event_synced` with the mark it read BEFORE the bands (a move
+  written between the two reads is read at the next decision); `_event_bands_due(day, at, adapter, lane) -> "first" |
+  "moved" | None`: "first" when `eq_event_synced` is another day (the session's first decision, as before), "moved" at
+  THE CLOSE DECISION when the lane's mark differs from the kept one or cannot be read (fail closed: `_event_sync` then
+  says whether the bands can be read; unreadable, no buy is planned that decision), else None. `_event_decide` runs the
+  sync when it is due and writes `band_sync` in the decision's summary. The open decision is always a session's first;
+  a band moved after the close decision is read at the next session's first. A re-sync is the same `_event_sync`: the
+  rows of `eq_event_programs`, the instances' bands, the `equity.band` records and the band alerts, so `_event_seat_block`
+  and ROOM (`book.room_key`) at that close read the new band, and its buys are sized at it (`s.share(inst.band)`).
+- **Identities**: none moves (money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`,
+  the equity identity `78022ca6`, the gate contract `397b22b7`).
+- **Tests**: league/tests/test_events_1019f.py `TheCloseDecisionReadsTheBandsAgain` (the lane's screen at 10:00 ET of
+  DAY writes EVL-ERN-REACT-ON v2's look 1 as of Oct 30 and its Probe move; the 15:46 ET close decision gives ACME to it
+  at Probe's 5 shares, `band_sync` "moved", where without the move the earlier row EVL-ERN-REACT-C1 takes it at
+  learning's 2 and the bands are read once; an unreadable mark reads them again; the next session's open is its first)
+  and `TheBandMark`.
