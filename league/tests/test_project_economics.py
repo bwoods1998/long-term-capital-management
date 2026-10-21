@@ -150,6 +150,31 @@ class EconomicsReport(unittest.TestCase):
         usage["start_at"] = economics.FINANCIAL_START
         self.assertIsNone(self.report(usage=usage)["inputs"]["sail_boxes"]["usd"])
 
+    def test_sails_one_cost_field_is_the_app_scoped_bill(self):
+        """Sail's spend response since Oct 2026 (invented figures): each box row's one `cost_usd_nanos` is its bill, read
+        as the legacy split it replaces (all finalized, nothing active); a row of no cost, or a bad one, is no bill."""
+        usage = boxes()
+        usage["cost_usd_nanos"] = usage.pop("finalized_cost_usd_nanos")
+        for row in usage["sailboxes"]:
+            row["cost_usd_nanos"] = row.pop("estimated_total_cost_usd_nanos")
+            del row["finalized_cost_usd_nanos"], row["estimated_active_cost_usd_nanos"]
+        out = self.report(usage=usage)
+        self.assertEqual((out["inputs"]["sail_boxes"]["usd"], out["inputs"]["sail_boxes"]["estimated_active_usd"]),
+                         ("5.000000", "0.000000"), "the app's one box: the other app's bill is never added")
+        self.assertIn("cost_usd_nanos", out["inputs"]["sail_boxes"]["basis"])
+        self.assertEqual(self.report()["inputs"]["sail_boxes"]["basis"], "provider app-scoped box billing")
+        self.assertTrue(out["complete"], out["unresolved"])
+        for bad in ({}, {"cost_usd_nanos": -1}, {"cost_usd_nanos": "lots"}, {"cost_usd_nanos": None}):
+            broken = copy.deepcopy(usage)
+            del broken["sailboxes"][0]["cost_usd_nanos"]
+            broken["sailboxes"][0].update(bad)
+            self.assertIsNone(self.report(usage=broken)["inputs"]["sail_boxes"]["usd"], bad)
+        # A legacy row is still held to its own total: a partial split is no bill, whatever `cost_usd_nanos` says.
+        partial = boxes()
+        del partial["sailboxes"][0]["estimated_total_cost_usd_nanos"]
+        partial["sailboxes"][0]["cost_usd_nanos"] = 5_000_000_000
+        self.assertIsNone(self.report(usage=partial)["inputs"]["sail_boxes"]["usd"])
+
     def test_subscriptions_keep_the_financial_basis_not_the_earlier_cost_start(self):
         out = self.report()
         expected = Decimal(80) * Decimal(86400) / economics.MONTH_SECONDS

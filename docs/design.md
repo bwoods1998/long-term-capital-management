@@ -910,8 +910,9 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
   realized net profit) / 7), "the trailing week" being the last 5 closed sessions (one trading week) of every real book
   (the options book's closed positions with the broker's fee corrections, the equity book's closed real lots, where the
   event lane's real lots live) and its half spread over the 7 days a week of compute runs; a losing week lifts nothing
-  and takes nothing from the $5. The fixed costs (the House's and the data box's Sail billing, Cloudflare's $5 a month,
-  market data, $0 since the owner cancelled ThetaData and Alpaca's Algo Trader Plus on Oct 18) count inside it; the
+  and takes nothing from the $5. The fixed costs (the Sail billing of every box of the House's app but the Gym pool's:
+  the House, the data box and any other the swarm books nowhere; Cloudflare's $5 a month; market data, $0 since the
+  owner cancelled ThetaData and Alpaca's Algo Trader Plus on Oct 18) count inside it; the
   event lane's verdicts (Claude Haiku 4.5) are the Claude line's first part, at least $3 or half as much again as their
   heaviest day of the last 7, never more than the room; the old research roles share the remainder, Sail 0.8 and Claude
   0.2 (at the $5 cap with no profit and Sail's fixed $1.50: research $0.34 a day, Sail $0.27 and the Claude roles
