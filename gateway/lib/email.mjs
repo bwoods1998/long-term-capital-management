@@ -494,6 +494,28 @@ export function composeReport(facts = {}) {
     }
     out.push('');
   }
+  // THE DONE LINE (the goal V2, docs/goals/DONE-RULE-EVL-2.md; league/ops/daily_report.py `done_line`): the settled
+  // real-money events at Probe size or above toward 300 by program, the next checkpoint and the 95% issuer-block lower
+  // bound of the per-event after-cost return; figures and the programs' own ids only.
+  const done = plain(facts.done);
+  if (Object.keys(done).length) {
+    const toward = Number.isInteger(done.toward) ? done.toward : 300;
+    if (Number.isInteger(done.counted)) {
+      add(`Done, Probe+ real events: ${count(done.counted)} of ${count(toward)}, next at ${count(done.next_checkpoint)}`);
+      add(` bound ${bp(done.lower_bp)} (net of bench ${bp(done.lower_a_bp)}); learning ${count(done.learning)} beside`, '   ');
+    } else {
+      add('Done, Probe+ real events: not read yet');
+    }
+    const parts = [];
+    for (const row of list(done.by_program)) {
+      const id = programOf(row?.id), version = versionOf(row?.version);
+      if (id && version && Number.isInteger(row.n) && row.n > 0) parts.push(`${id} ${row.n}`);
+    }
+    if (done.holds === true) parts.push('DONE at a checkpoint');
+    if (done.pivot === true) parts.push('PIVOT: retire the lane');
+    if (done.stop === true) parts.push('$800 SPENT: stop all spend');
+    if (parts.length) out.push(...pack('', parts, '; ', REPORT_WIDTH, '  ').map(line => ` ${line.trimStart()}`));
+  }
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);
   add(`Same-risk buy-and-hold: ${real(hold.usd) === null ? (traded ? 'n/a' : 'n/a until real fills') : signedUsd(hold.usd)}`);

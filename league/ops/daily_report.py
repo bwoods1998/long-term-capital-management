@@ -54,6 +54,12 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   first real Probe or Sized buy (metered.py `since`, as far as metered.json covers it) over the dollars bought at Probe
   or Sized size per session, in basis points of those dollars: what each Probe dollar must earn after costs, on
   average, for the clause to hold. "n/a until a Probe buy" before.
+- `done`: THE DONE READER'S LINE (the goal V2, docs/goals/DONE-RULE-EVL-2.md): from `<state>/events/done.json`, which the
+  House's nightly screen writes after the band review (league/events/done.py `run`), so it is the night's own reading:
+  the settled real-money events at Probe size or above counted toward 300 by program, the next checkpoint (100, 200,
+  ...), the 95% issuer-block lower bound of the per-event after-cost return (bp) and the benchmark-net one beside it,
+  the learning events beside (never counted), and whether Done holds at a checkpoint, the pivot or the $800 stop is
+  read. Every figure None while no done.json is read (a release before the reader, or its first night not yet run).
 Standard library only.
 """
 from __future__ import annotations
@@ -170,6 +176,39 @@ def due(ctx: Any, root: str | Path, now: float, *, told: Any = None) -> dict[str
         if ran or now >= deadline:
             return {"day": key, "lane_report": ran}
     return None
+
+
+# ---------------------------------------------------------------------------------------------- the Done line
+def done_line(root: str | Path) -> dict[str, Any]:
+    """The `done` fact (the module docstring) from `<root>/events/done.json`, figures only; the same keys always."""
+    from ..events import done as DN
+    from ..events import programs as P
+
+    doc = DN.load(Path(root) / LANE / DN.FILE) or {}
+    current = doc.get("current") if isinstance(doc.get("current"), Mapping) else {}
+    fig = current.get("figures") if isinstance(current.get("figures"), Mapping) else {}
+    bound = fig.get("bound") if isinstance(fig.get("bound"), Mapping) else {}
+    a = fig.get("a") if isinstance(fig.get("a"), Mapping) else {}
+    a_bound = a.get("bound") if isinstance(a.get("bound"), Mapping) else {}
+    rows = {(str(r.get("id")), int(r.get("version") or 0)): r for r in (doc.get("programs") or [])
+            if isinstance(r, Mapping)} if isinstance(doc.get("programs"), list) else {}
+
+    def flag(name: str, key: str) -> bool | None:
+        block = doc.get(name)
+        return bool(block.get(key)) if isinstance(block, Mapping) and block.get(key) is not None else None
+
+    def bp(value: Any) -> float | None:
+        number = _num(value)
+        return None if number is None else round(number * 1e4, 1)
+    counted = doc.get("counted")
+    learning = doc.get("learning") if isinstance(doc.get("learning"), Mapping) else {}
+    return {"counted": counted if isinstance(counted, int) else None, "toward": DN.DONE_EVENTS,
+            "next_checkpoint": doc.get("next_checkpoint") if isinstance(doc.get("next_checkpoint"), int) else None,
+            "lower_bp": bp(bound.get("lower")), "lower_a_bp": bp(a_bound.get("lower")),
+            "learning": learning.get("n") if isinstance(learning.get("n"), int) else None,
+            "holds": flag("done", "holds"), "pivot": flag("pivot", "retire"), "stop": flag("stop", "spent"),
+            "by_program": [{"id": p.id, "version": p.version,
+                            "n": (rows.get((p.id, p.version)) or {}).get("n") if doc else None} for p in P.SEATING]}
 
 
 # ---------------------------------------------------------------------------------------------- the money
@@ -414,6 +453,7 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
         "alarms": sorted(str(a) for a in (alarms or [])),
         "entries": entries,
         "break_even": break_even(ledger, probe, on, now),
+        "done": done_line(root),
     }
 
 
@@ -485,5 +525,5 @@ def break_even(ledger: Mapping[str, Any], probe: Mapping[str, Any] | None, on: d
             "why": None}
 
 
-__all__ = ["due", "facts", "buy_and_hold", "ReadOnlyStore", "KIND", "REPORT_BY", "STALE_AFTER", "day_entries",
-           "probe_buys", "break_even", "AUCTION_FIELDS", "TOTAL_FIELDS"]
+__all__ = ["due", "facts", "done_line", "buy_and_hold", "ReadOnlyStore", "KIND", "REPORT_BY", "STALE_AFTER",
+           "day_entries", "probe_buys", "break_even", "AUCTION_FIELDS", "TOTAL_FIELDS"]

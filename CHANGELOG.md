@@ -38,6 +38,35 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py joins the wall on this branch (`PENDING_GATEWAY`), beside its rule file under docs/goals/, which was behind it already; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
+
+- **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
+  `league/events/done.py` `RULE_SHA256` and a test (`8eb743e5` at this entry, after A84; `2f92a153` before it).
+- **The reader** (`league/events/done.py`, pure and read-only over the lane's store and the House's records): the
+  Probe+ events (buy band probe or sized, bought after the program's promotion, its EARLIEST move to probe), learning
+  events beside and a guard for a Probe+ buy with no promotion on record; checkpoints at 100, 200, 300, ... over
+  exactly the first c events, append-only in `<state>/events/done-history.jsonl` and `<state>/events/done.json`; each
+  item pass or fail with its number (events, programs, after promotion, P&L, the 95% issuer-block lower bound with
+  10,000 resamples and a fixed seed string, profit since the first promotion against the metered compute, fills within
+  15 bp of the shadow's auction prices per side, the last 100 with no captain step); the benchmark-net bound beside;
+  the pivot from 400 events and the $800 stop from the House's own loss figures.
+- **Its review's fix round (A84; rule re-pinned before any promotion: 0 rows in `bands` and `band_history` on the
+  House at 19:36Z Oct 21)**: (1) a demotion and a return to Probe drop nothing (the latest-stay count dropped the
+  demoted stay, losers by construction, and let Done hold on 300 winners); `after_promotion` fails on a guard event in
+  the span; the pivot reads the same events. (2) `league/events/done.py` joins the wall. (3) A Done record that cannot
+  be read (done.json at another schema or cut, a cut log line, a checkpoint a `done` receipt names that no file holds)
+  is never written over: `done.Unreadable`, the House warns, nothing is written. (4) `no_captain` is never a pass from
+  the House's records alone (no record covers a Sail exec, the ship scripts or the gateway's admin): it reads `fail`
+  when a step shows (every `.before` copy, swarm.json, ops.json, PAUSE and swarm.stop by stamp, mtime and ctime; a
+  stall run's owner step, pause or kill switch; a day with no stall run) and `unverifiable` otherwise, and Done at a
+  checkpoint whose other items pass waits on the captain's attestation of its exact span
+  (`<state>/events/done-attest.jsonl`, `steps` 0; a deploy's hand steps count, the ship script's own run does not).
+- **On the House**: the nightly screen task runs it after the band review (`league/events/house.py` `_screen`) and
+  keeps a `done` receipt; a failure is a warning, never the screen's.
+- **The daily report** (`league/ops/daily_report.py` `done_line`, the gateway's `composeReport`): one Done line, the
+  Probe+ events toward 300 by program, the next checkpoint and the bound (three short lines on a phone).
+- Docs: [docs/events.md](docs/events.md), "The Done reader (the goal V2)".
+
 ### A86 REVISED, Probe smaller inside the trade-less envelope: the Probe band at 3.5% of equity with at most 6 open, on `fix/a86-probe-more-smaller` as release 1019f integrates it (unreleased; cut from `rel/1019d` `5a17bd25`; integrated ONLY in A86 REVISED's form; an owner deploy of the House: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (the Probe band's two rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no setting)
 
 - **Why.** The captain's A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event;
