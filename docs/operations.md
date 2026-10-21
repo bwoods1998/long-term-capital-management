@@ -8,6 +8,26 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The daily-index backfill's retries and SEC holidays (Oct 21, 2026): `fix/backfill-robust`, joins release 1019f, not deployed
+
+Cut from `rel/1019d` `5a17bd25`; the captain integrates it on top of release 1019e as release 1019f. It changes
+league/events/house.py alone (behind the wall: an owner deploy, never by the updater). No judge moves: the screen still
+reads `evl:backfill:<day>` "done". No setting, no money row and no gateway file changes, and no identity moves
+(money `055e5313`, constitution `a8d4cbd9`, options execution fingerprint `b60410ad`, equity identity `78022ca6`, gate
+contract `397b22b7`, read with the tree's own functions). As [events.md](events.md) says, a failed daily-index fetch no
+longer counts as seen. It is tried again 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, and its
+day is done only then, with the filing named. A federal holiday's 404 index (`SEC_HOLIDAYS`, 2026-2027) is done as
+`no index: SEC holiday`.
+
+**Read on the box** (read-only, `?mode=ro`): `SELECT status, summary FROM receipts WHERE job='backfill' ORDER BY id DESC
+LIMIT 5`. A day waiting on retries is `partial` with `retrying` and `next_try`; a day done with a dead document is
+`done-failed` with `unfetched` (accession, form, tries, error), and that filing stays `failed:` in `filings`; Wed Nov 11,
+2026 is `ok` with `why` `no index: SEC holiday`. The retry counts live in the House's process: a restart reads the day's
+index again and gives each failed filing six fresh tries. **Before a closure by executive order** (a Christmas Eve) or
+**before Jan 2028**, add the day(s) to `SEC_HOLIDAYS`: otherwise the day's backfill waits an hour at a time while it is
+in reach, as every holiday did before this fix. **Rollback**: the release before it; a day this fix marked done stays
+done.
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
