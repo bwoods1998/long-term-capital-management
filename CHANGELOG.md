@@ -38,6 +38,67 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (unreleased; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
+
+- **Why.** The captain's A80 (16:10Z Oct 21, 2026; the goal's item 5, fill the gaps): the venue cancels about a quarter
+  of the event lane's auction buys (whole-share limit-on-open or limit-on-close orders) 5-6 ms after it accepted them,
+  with no reason and nothing filled, and the book finished each such intent missed at the auction's end ("not filled at
+  the open auction (canceled)"). Every one was an event real money missed while its shadow kept it, so real settled
+  events came about 25% slower. Not the price, the buying power, the size, the account or the gateway: the cause is the
+  venue's and unknown. No wall or judge moves.
+- **The change** (league/equity/live.py; plumbing, outside the equity identity): `VENUE_CANCEL_RETRY_S` 60;
+  `venue_cancel_ms(order)` reads the venue's own stamps on the order (`answer.submitted_at`, `answer.canceled_at`, RFC
+  3339, by `league.live.venue.parse_time`; `_absorb` keeps them) and is the milliseconds the venue took when the order
+  is an auction BUY it ended `canceled` within 60 s of its submission, nothing filled, no cancel of the House's own
+  sent. `_event_last(intent, entry=True)` (asked by `_event_work_entry` alone) lets such a last order go again when it
+  is the intent's only venue cancel at once: AT MOST ONE RE-SEND an intent for this cause, so at most two orders from
+  venue cancels. The re-send takes the normal path: every gate of a real open again (the House's block, the kill switch,
+  the kind's switch, the auction proof, the freezes, the band), the eligible list, no sale of the name at the auction,
+  one working order a symbol, the day's order count (the re-send is one more order, the cancelled one counts too), the
+  program's room, `_size_event` (the same size rule) and `_send` (nothing written or POSTed at or after the window's
+  cut-off on the wall clock: 09:27 ET at the open, 15:49 at a full day's close); the same symbol, side, limit, `tif` and
+  `otype` under a new client id, `replaces` the cancelled order; the gateway judges every cap again (a cap ends it
+  refused at once, as any refused buy; a reading it could not make sends it again the next minute, still the one
+  re-send). A second cancel at once ends it missed at the auction's end; a cancel later than 60 s (the venue ends every
+  unfilled auction order at its cross, minutes after it was sent) is never re-sent; exits (`_event_work_exit`) are
+  unchanged: a sale the venue cancelled climbs its ladder as before.
+- **What it records.** The re-sent order's `why` opens "A80's one re-send (the venue cancelled the first buy N ms after
+  its submission, nothing filled): event entry at the ..." (so its `equity.order` record says it too); the minute's
+  summary counts the re-sends it wrote (`equity.venue_cancel_resends`); a gate, a sizing wait or the cut-off that holds
+  it writes its reason on the intent after "A80's one re-send held: "; the intent's end names the cancels
+  (`venue_cancel_note`: "the venue cancelled the first buy 5 ms after its submission and A80's one re-send 6 ms after
+  its own, nothing filled", the one and why its re-send did not go, or the re-send beside its fill or refusal). ONE
+  INFO ALERT A SESSION, from the close's end (`_venue_cancel_said`): the day's event buys the venue cancelled at once,
+  how many went again and how many of those filled, with an `equity.alert` record of the counts; kv
+  `eq_venue_cancel_said` is written only on a day it said one (a book of share programs leaves no new key: the golden
+  ETF week is unchanged).
+- **Docs.** The module docstring of league/equity/live.py ("A missed entry is recorded, never chased" now states A80's
+  one exception, and a lost order is still never re-sent), league/equity/INTERFACES.md section 22, docs/events.md (the
+  real-money section) and docs/operations.md (**The event lane's real money on the House**: the day's table and a
+  bullet beside **A buy**).
+- **Tests.** league/tests/test_events_venue_cancel.py (9 tests; the rule's and (a), (b), (d), (e) and (f) fail on
+  `bb3a1ee9`, while (c), (g) and (h) hold what it already did, (c) naming the new kv): the rule's reading of the stamps
+  (5 ms; 60 s inside, 60.001 s and 180 s outside; a cancel inside its own millisecond is 0 ms; a sale, a day order, a
+  fill, a replaced order, the House's own cancel and a missing, unreadable or zoneless stamp are none); through the real
+  book and `size_entry`: (a) a buy cancelled 5 ms after its submission goes again once with the same body and a new
+  client id and fills: the intent done, one lot, its fill written back once, two orders, the minute's count 1 and the
+  session's one alert after the close; (b) a second cancel at once: missed at the auction's end naming both, no third
+  order; (c) the auction's own cancel 3 minutes after submission: no re-send, missed as before, nothing said; (d) the
+  window's cut-off passed when the cancel is read, by the minute or by the wall clock at the send: nothing written; (e)
+  the kill switch engaged: held, missed naming the hold; (f) the gateway refuses the re-send: a cap ends it refused at
+  once, a reading it could not make sends it again the next minute (two orders at the venue, done); (g) an exit
+  cancelled at once: unchanged, its ladder; (h) a buy that filled before the cancel: no re-send, done with what filled.
+  On `971db229` (the code, its tests and docs, with A82 merged in): the full league suite on 3.14, by the exact `python
+  -m unittest discover -s league/tests -t .`, 12,620 OK (33 skipped, 1,468 s); on 3.11 the event, equity and live
+  modules with test_ci, test_constitution, test_e3_identities, test_e4_e2e and the CHANGELOG readers, 91 modules, 2,397
+  OK; `python -m league.ci --base origin/main --branch fix/venue-cancel-retry --no-tests` passed; the identities,
+  computed with the tree's own functions on both Pythons, as in the heading (with `equity_money.event.enabled` False
+  `1b7a5c22` / `50e951c9`). No gateway file changes.
+- **Deploy.** The House from a head that contains the deployed House release's head (A80 names release 1019e); no
+  money digest move, so the grant needs no new ratification; verify it still reads `055e5313`.
+- **Rollback.** The previous House release (a re-sent buy that filled is an ordinary event lot to it); or
+  `equity_money.event.enabled` False, which stops every event buy, re-sends included.
+
 ### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; joins release 1019e; A82)
 
 - **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,

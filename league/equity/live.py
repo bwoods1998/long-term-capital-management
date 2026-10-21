@@ -14,8 +14,8 @@ THE ORDER PATH (the options path's discipline): a row is written `pending` BEFOR
 `lq-<nonce>-<eid>-<family>` (`client_id`: the process nonce of `LiveState`, as the options book's ids, so a rolled-back
 state never sends an id the venue has seen); a lost answer is `unknown` and is looked up by its client id, never
 re-sent blind (an order the venue still does not show by its client id after `LOST_AFTER_S` is `lost`: an entry is then
-missed, never re-sent; an exit goes again only while the account still holds what the book expects of the symbol,
-`_lost_sale_check`); one working order per symbol
+missed, never re-sent, A80's one exception below reading only a cancel the venue itself stamped; an exit goes again only
+while the account still holds what the book expects of the symbol, `_lost_sale_check`); one working order per symbol
 across BOTH books (wash-trade protection: the options book's `busy()` symbols, the venue's working orders that are not
 this book's, e.g. the House's assignment-share closes, and the equity book's). CANCEL THEN RESEND (A8.4): a
 replacement goes only once the old order is terminal (filled, canceled, expired, rejected), sized target minus filled;
@@ -59,8 +59,15 @@ at the open, sized on the cash after the exits), marketable limits re-priced eve
 recorded missed. In either window an entry sized to nothing is not final while an exit may still fill (`_exits_due`): it
 is sized again each minute, and its cut-off records it missed with the reason. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
 dividend posted overnight); the windows' orders are the decide's intents (`eq_intents`), each written `pending` at its
-own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
-and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
+own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased, with
+ONE exception, the event kind's (the captain's A80, Oct 21, 2026: the venue cancelled about a quarter of the event
+lane's auction buys milliseconds after it accepted them, with no reason): an event ENTRY whose last order THE VENUE
+cancelled within `VENUE_CANCEL_RETRY_S` (60 s) of that order's own submission, nothing filled, is sent again ONCE, the
+same symbol, side, size rule, limit, time in force and type under a new client id, through every gate, the sizing and
+the cut-off again, while its auction's window is open (`_event_last`, `venue_cancel_ms`); a second such cancel, or one
+later than 60 s (the auction's own end of an unfilled order), leaves it missed, and an exit is never re-sent so. An exit
+the windows could not fill is recorded missed and carried to the next session's open (a "house_exit" intent of the same
+reason). MIN HOLD: a lot never sells in the
 session it was bought (kill switch and stops included; the gateway's kill blocks sells too). REAL SALES WAIT for the
 stock paper proof's SELL stage (A10.1; the practice sale goes first in its window), AND THAT WAIT HAS AN END (A28): the
 session's entry cut-off (`schedule.Moments.entry_until`, 09:45), the minute the book stops trying the open entries. From
@@ -312,6 +319,21 @@ EVENT_STRICT_WEIGHT = Decimal("0.40")
 #: The bands an event program trades in (league/events/book.py `LIVE_BANDS`, PREREG-EVL-3 section 2; a test holds them
 #: equal): learning from birth, Probe, Sized.
 EVENT_LIVE_BANDS = ("learning", "probe", "sized")
+#: THE CAPTAIN'S A80 (16:10Z Oct 21, 2026: the venue cancelled about a quarter of the event lane's auction buys 5-6 ms
+#: after it accepted them, with no reason and nothing filled; the cause is the venue's and unknown). An event ENTRY
+#: whose last order THE VENUE cancelled within this many seconds of that order's own submission (`venue_cancel_ms`: the
+#: venue's `canceled_at` less its `submitted_at`), nothing filled, is sent again ONCE (`EquityBook._event_last`). The
+#: venue ends every unfilled auction order at its cross, minutes after it was sent: such a cancel is past this, and the
+#: buy stays missed.
+VENUE_CANCEL_RETRY_S = 60
+#: ... the venue writes `submitted_at` to the nanosecond and `canceled_at` to the millisecond, so a cancel inside the
+#: order's own millisecond can read up to this much BEFORE its submission (and is read as 0 ms).
+VENUE_STAMP_SLACK_S = 0.001
+#: kv: the New York day of A80's one alert of a session (`EquityBook._venue_cancel_said`), written only on a day it
+#: said one.
+VENUE_CANCEL_SAID = "eq_venue_cancel_said"
+#: What an A80 re-send held by a gate says on its intent (`_event_work_entry`); the auction's end reads it back.
+A80_HELD = "A80's one re-send held: "
 #: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
 #: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
 ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
@@ -877,6 +899,50 @@ def order_body(order: Order) -> dict[str, Any]:
     return body
 
 
+def venue_cancel_ms(order: Order) -> int | None:
+    """A80: the milliseconds THE VENUE took to cancel this order after its own submission, read off the venue's own
+    stamps (`answer.submitted_at`, `answer.canceled_at`, RFC 3339, `league.live.venue.parse_time`), when it is an
+    AUCTION BUY (an event entry's) the venue ended `canceled` within `VENUE_CANCEL_RETRY_S` of its submission with
+    nothing filled and no cancel of the House's own sent (`cancel_sent`). None otherwise: a sale, a fill, an order the
+    House cancelled, one the venue replaced or ended otherwise, a stamp missing or unreadable, a cancel later than that
+    (the auction's own end of an unfilled order) or one stamped before its submission (beyond `VENUE_STAMP_SLACK_S`)."""
+    answer = order.answer
+    if order.side != "buy" or not order.auction or order.status != "canceled" or answer.get("final") != "canceled":
+        return None
+    if order.filled_qty > 0 or "cancel_sent" in answer:
+        return None
+    submitted, canceled = parse_time(answer.get("submitted_at")), parse_time(answer.get("canceled_at"))
+    if submitted is None or canceled is None:
+        return None
+    took = canceled - submitted
+    if not -VENUE_STAMP_SLACK_S <= took <= VENUE_CANCEL_RETRY_S:
+        return None
+    return max(0, int(round(took * 1000)))
+
+
+def venue_cancels(orders: Sequence[Order]) -> list[tuple[Order, int]]:
+    """A80: the orders of one event buy (in send order) the venue cancelled at once (`venue_cancel_ms`), each with the
+    milliseconds it took."""
+    return [(o, n) for o in orders for n in (venue_cancel_ms(o),) if n is not None]
+
+
+def venue_cancel_note(orders: Sequence[Order], why: str = "") -> str:
+    """A80's words for the end of an event buy whose orders the venue cancelled at once ("" when it did not): both
+    cancels; the one, and why its re-send did not go (`why`, the intent's, when a gate held it: `A80_HELD`); or the
+    one re-send that went."""
+    cancels = venue_cancels(orders)
+    if not cancels:
+        return ""
+    first, took = cancels[0]
+    if len(cancels) > 1:
+        return (f"the venue cancelled the first buy {took} ms after its submission and A80's one re-send "
+                f"{cancels[1][1]} ms after its own, nothing filled")
+    if orders[-1].eid == first.eid:
+        held = why if why.startswith(A80_HELD) else "A80's one re-send did not go before the window's cut-off"
+        return f"the venue cancelled it {took} ms after its submission, nothing filled; {held}"
+    return f"A80's one re-send of the buy the venue cancelled {took} ms after its submission"
+
+
 def _sha(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
@@ -958,6 +1024,9 @@ class EquityBook:
         #: event adapter's table is in this state (the windows of the old lanes leave its intents to `_event_step`).
         self._auction: Any = None
         self._event_lane: Any = None
+        #: A80: the New York day whose venue cancels this process has read for the session's one alert
+        #: (`_venue_cancel_said`).
+        self._venue_said: str | None = None
         #: instance -> (code sha, params) loaded in the decider child this process; its NEEDS as the child read them.
         self._loaded: dict[str, tuple[str, str]] = {}
         self._needs: dict[str, dict[str, Any]] = {}
@@ -5536,7 +5605,10 @@ class EquityBook:
         """THE AUCTIONS' ENDS: every event intent of an auction that has passed (and `EVENT_SETTLE_S` more), its orders
         no longer working, is finished: a buy "done" when it filled, "missed" when not (an auction order does not fill
         above its limit, nor with no print); a sale "done" when its lot is sold, else "missed" and the lot climbs the
-        ladder (`_event_ladder`). A lot whose planned auction passed with no sale planned at all climbs it too."""
+        ladder (`_event_ladder`). A lot whose planned auction passed with no sale planned at all climbs it too. A buy
+        whose order the venue cancelled at once (A80) says so on its end, with its one re-send's outcome or why that
+        re-send did not go (`venue_cancel_note`); once the session's close has ended, A80's one alert of the session
+        (`_venue_cancel_said`)."""
         today = em.day.isoformat()
 
         def passed(day: str, at: str) -> bool:
@@ -5562,11 +5634,14 @@ class EquityBook:
             if r["e_side"] == "buy":
                 last = orders[-1] if orders else None
                 cause = (last.answer.get("reject_reason") or last.answer.get("error") or "") if last is not None else ""
+                note = venue_cancel_note(orders, intent.why)     # (A80: "" unless the venue cancelled one at once)
                 self._finish(intent, "done" if filled > 0 else "missed",
-                             f"filled {qty_text(filled)} shares at the {r['e_at']}" if filled > 0 else
+                             f"filled {qty_text(filled)} shares at the {r['e_at']}{' (' + note + ')' if note else ''}"
+                             if filled > 0 else
                              f"not filled at the {r['e_at']} auction ({last.status if last is not None else 'never sent'}"
                              f"{': ' + str(cause)[:160] if cause else ''}"
-                             f"{': ' + intent.why if intent.why and last is None else ''})")
+                             f"{': ' + intent.why if intent.why and last is None else ''}"
+                             f"{'; ' + note if note else ''})")
                 continue
             lot = self._lot(r["e_lid"])
             if lot is None or lot.status == LOT_CLOSED or lot.qty <= 0:
@@ -5589,6 +5664,41 @@ class EquityBook:
                 continue
             with self.state.transaction():
                 self._event_ladder(lot, "no sale was planned at its auction (the House missed its decision)", adapter)
+        if passed(today, "close") and self._venue_said != today:
+            self._venue_cancel_said(today)
+
+    def _venue_cancel_said(self, day: str) -> None:
+        """A80'S ONE ALERT OF A SESSION (info), once the session's close has ended (`_event_finish`): how many of the
+        day's event buys the venue cancelled at once (an intent counted once), how many went again and how many of
+        those filled; with an `equity.alert` record of the counts. Said only on a day with such a cancel (kv
+        `VENUE_CANCEL_SAID`, written only then); a day with none is read once a process (`_venue_said`) and leaves no
+        trace."""
+        self._venue_said = day
+        if self.state.get(VENUE_CANCEL_SAID) == day:
+            return
+        by_intent: dict[int, list[Order]] = {}
+        for r in self.state.rows("SELECT * FROM eq_orders WHERE day=? AND side='buy' AND tif IN ('opg', 'cls') AND "
+                                 "iid IS NOT NULL ORDER BY eid", (day,)):
+            o = Order.of(r)
+            by_intent.setdefault(int(o.iid), []).append(o)
+        cut = went = filled = 0
+        for orders in by_intent.values():
+            cancels = venue_cancels(orders)
+            if not cancels:
+                continue
+            cut += 1
+            first = cancels[0][0].eid
+            if any(o.eid > first and o.status != "refused" for o in orders):
+                went += 1
+                filled += int(sum((o.filled_qty for o in orders), ZERO) > 0)
+        if not cut:
+            return
+        self.state.put(VENUE_CANCEL_SAID, day)
+        what = (f"A80: the venue cancelled {cut} event buy{'' if cut == 1 else 's'} of {day} at once (within "
+                f"{VENUE_CANCEL_RETRY_S} s of {'its' if cut == 1 else 'their'} submission, nothing filled); "
+                f"{went} went again once ({filled} filled), {cut - went} did not (the window's cut-off or a gate)")
+        self.record("equity.alert", {"what": what, "day": day, "venue_cancels": cut, "resent": went, "filled": filled})
+        self.alert("info", f"equity: {what}")
 
     def _event_zero(self, lot: Lot, plan: Mapping[str, Any], now: float, em: S.EventMoments, adapter: Any) -> None:
         """PREREG-EVL-1 section 5's LAST RUNG: a lot still held when the `book.ZERO_AFTER`th session after its planned
@@ -5639,13 +5749,22 @@ class EquityBook:
             except Exception as exc:  # noqa: BLE001 - the next intent goes on
                 self._error(f"event {r['e_side']} {r['iid']}", exc, out)
 
-    def _event_last(self, intent: Intent) -> tuple[Order | None, bool]:
+    def _event_last(self, intent: Intent, *, entry: bool = False) -> tuple[Order | None, bool]:
         """(the intent's last order, whether a new one may go now): none yet, or the last one refused with nothing sent
-        (`again`); never while one may still fill or after a final answer."""
+        (`again`); never while one may still fill or after a final answer. THE CAPTAIN'S A80 (`entry`: an event BUY's
+        orders; `_event_work_entry` alone asks it): a last order THE VENUE cancelled at once (`venue_cancel_ms`: within
+        `VENUE_CANCEL_RETRY_S` of its own submission, nothing filled) may go again, ONCE: only when no earlier order of
+        the intent was cancelled so, so at most two orders of an intent come from venue cancels (a re-send the gateway
+        refused with nothing sent goes again by `again`, as any refusal of a reading, and stays the one re-send). An
+        exit's last order is read as before: a sale the venue cancelled is never sent again here (the ladder carries
+        it)."""
         orders = self._intent_orders(intent.iid)
         current = orders[-1] if orders else None
         if current is None:
             return None, True
+        if entry and current.status == "canceled":
+            cancels = venue_cancels(orders)
+            return current, len(cancels) == 1 and cancels[0][0].eid == current.eid
         if current.working or current.status in ("filled", "canceled", "expired"):
             return current, False
         return current, current.again
@@ -5690,14 +5809,23 @@ class EquityBook:
         at this auction (an exit never waits on an entry: release 1019b's second review; a sale whose send the gateway
         refused for a reading it could not make, a 424 or 409, goes again next minute, and a buy of the name sent in
         between would hold it to the cut-off), one working order a symbol, the day's order count, the program's room,
-        then `_size_event`'s whole shares at the limit."""
+        then `_size_event`'s whole shares at the limit. THE CAPTAIN'S A80: a buy whose order the venue cancelled at once
+        (`_event_last`) goes again ONCE through all of it, the same symbol, side, size rule, limit, time in force and
+        type under a new client id, while its window is open (`_send`'s wall clock); the re-sent order's why says so and
+        how many ms the venue took, the minute counts it (`out["venue_cancel_resends"]`), and a gate that holds it
+        says so on the intent (`A80_HELD`), which the auction's end reads back."""
         if side is None:
             self._finish(intent, "refused", "an event buy with no side row")
             return
-        current, may = self._event_last(intent)
+        current, may = self._event_last(intent, entry=True)
         if not may:
             self._event_final(intent, current)
             return
+        # A80: an order of this buy the venue cancelled at once makes this send its one re-send (or that re-send again,
+        # after a gateway refusal of a reading with nothing sent).
+        cancels = venue_cancels(self._intent_orders(intent.iid)) if current is not None else []
+        resend = cancels[0] if cancels else None
+        held = A80_HELD if resend is not None else ""
         inst = self._instance(intent.instance)
         why = self._open_block(real_block, inst, killed)
         if why is None:
@@ -5712,6 +5840,7 @@ class EquityBook:
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why:
+            why = held + why
             if intent.why != why:
                 intent.why = why
                 self._save_intent(intent)
@@ -5722,31 +5851,50 @@ class EquityBook:
             return
         sized = self._size_event(intent, inst, side, limit, day, s)
         if sized is None:
+            self._resend_held(intent, held)
             return
         qty, why = sized
         if qty < 1:
-            self._finish(intent, "refused", f"sizing: {why}")
+            self._finish(intent, "refused", f"sizing: {why}" + (
+                f" (A80's one re-send of the buy the venue cancelled {resend[1]} ms after its submission)"
+                if resend is not None else ""))
             return
+        lead = "" if resend is None else (f"A80's one re-send (the venue cancelled the first buy {resend[1]} ms after "
+                                          "its submission, nothing filled): ")
         order = self._send(intent, side="buy", symbol=str(intent.symbol), klass=config.STOCK, qty=qty, limit=limit,
                            collar=0, day=day, lid=None, replaces=current.eid if current is not None else None,
-                           probe=inst.band != "sized", why=f"event entry at the {at} ({why})"[:300], at=at, tick=now,
-                           until=until, tif="opg" if at == "open" else "cls", otype="limit")
+                           probe=inst.band != "sized", why=f"{lead}event entry at the {at} ({why})"[:300], at=at,
+                           tick=now, until=until, tif="opg" if at == "open" else "cls", otype="limit")
+        if order is None:
+            self._resend_held(intent, held)     # (the window's cut-off passed on the wall clock: nothing was written)
+        elif resend is not None:
+            out["venue_cancel_resends"] = int(out.get("venue_cancel_resends") or 0) + 1
         if order is not None and order.status == "refused" and order.answer.get("cap") == "stock_eligible":
             # The gateway holds no eligible list of the day (lost or replaced): the list is published again before the
             # buy goes again next minute (kv `eq_event_list` said it was there).
             self.state.put("eq_event_list", {})
         self._event_final(intent, order)
 
+    def _resend_held(self, intent: Intent, held: str) -> None:
+        """A80: the why a wait wrote on the intent (`_size_event`'s, `_send`'s cut-off), marked as holding the buy's one
+        re-send (`held`, `A80_HELD`; nothing when this send is no re-send)."""
+        if held and not intent.why.startswith(held):
+            intent.why = held + intent.why
+            self._save_intent(intent)
+
     def _event_final(self, intent: Intent, current: Order | None) -> bool:
         """Whether an event buy's last order has its FINAL answer short of a fill (the venue rejected it, it was lost,
         or the gateway refused it for a cap that is no reading it could not make): the intent ends at once in the
-        answer's words, as `_work_entry`'s does, not at the auction's end."""
+        answer's words, as `_work_entry`'s does, not at the auction's end (an A80 re-send's end names the venue's cancel
+        it followed: `venue_cancel_note`)."""
         if current is None:
             return False
         if not (current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)):
             return False
         cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
-        self._finish(intent, "refused" if current.status == "refused" else "missed", f"the {current.status} buy: {cause}")
+        note = venue_cancel_note(self._intent_orders(intent.iid))
+        self._finish(intent, "refused" if current.status == "refused" else "missed",
+                     f"the {current.status} buy: {cause}" + (f" ({note})" if note else ""))
         if current.answer.get("cap") == "stock_event_buys" and self.state.get("eq_event_off_said") != intent.exec_day:
             # The gateway's own switch is the owner's step at the first Probe (operations.md): said once a session.
             self.state.put("eq_event_off_said", intent.exec_day)
