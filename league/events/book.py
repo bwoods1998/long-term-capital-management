@@ -9,18 +9,25 @@ gateway checks every event buy against (`eligible`, `publish`), the real fills i
 module of league/events but through league/equity/kinds.py `BOOKS["event"]`.
 
 THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner's goal as re-set at 05:15Z Oct 19,
-2026), with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2 for everything it does not change:
-- THE PROGRAMS are the lane's own `SEATING` rows of league/events/programs.py (`Program.can_seat`: VERSION 2 of the
-  nine seatable programs, `REAL_VERSION`; `seatable()`, `program_of()` by `BY_KEY`), in the tables' order
-  (PREREG-EVL-1's four, then PREREG-EVL-2's five). Version 1 of each is a shadow record and NEVER trades: no real event
-  order is ever for anything but a version 2 intent. A program is a pre-registered rule, never a swarm family and never
-  code a program wrote.
+2026), with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2 for everything it does not change, and
+docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
+- THE PROGRAMS are the lane's own `SEATING` rows of league/events/programs.py (`Program.can_seat`, the one gate:
+  VERSION 2 of the nine seatable programs of PREREG-EVL-1 and -2, `REAL_VERSION`, and VERSION 1 of PREREG-EVL-4's three,
+  their seating version; `seatable()`, `program_of()` by `BY_KEY`), in the tables' order (PREREG-EVL-1's four, then
+  PREREG-EVL-2's five, then PREREG-EVL-4's three). Version 1 of PREREG-EVL-1's and -2's programs is a shadow record and
+  NEVER trades, nor does any record or control: no real event order is ever for an intent of a version that cannot
+  seat. A program is a pre-registered rule, never a swarm family and never code a program wrote.
+- PREREG-EVL-4 (section 1.3): its rows' real-money events are the shadow rule over the rows STORED before the decision
+  time, EXCLUDED on D and the F8K(D) skip read from those rows too (`rows_for`); and EVL-8K-REACT-ON and EVL-8K-READ-ON
+  never buy for a filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok` with score >= 2, or
+  not yet answered, at the decision time: EVL-8K-READ-O1's event at the next open (`NEXT_OPEN_GUARD`). The shadow keeps
+  every such event.
 - THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
   `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
-  House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a version 2 program with no row
+  House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a seating version with no row
   is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision; a store
   whose band table cannot be read trades nothing that decision (fail closed), one with no band table yet is every
-  version 2 program at learning.
+  seating version at learning.
 - A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
@@ -59,7 +66,7 @@ THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner'
   prints) each session after; and once `ZERO_AFTER` sessions after the planned exit have closed with the lot still
   held, the loss budget counts it AT 0 (its whole value as lost) while its day sale goes on: every rung alarmed.
 
-THE TABLES (`SCHEMA`, created in live.sqlite beside E1's by the book): `eq_event_programs`, the band of each version 2
+THE TABLES (`SCHEMA`, created in live.sqlite beside E1's by the book): `eq_event_programs`, the band of each seating
 program as the book last read it from the lane (with since and why), one row each; `eq_event_intents`, ONE ROW PER
 EVENT INTENT of the book (`eq_intents.iid`): which program and event, its band, the auction (`tif` opg | cls) and the
 order type, the symbol and issuer, the rank, the previous close and the limit, sigma and the weight, the exit plan of a
@@ -100,8 +107,14 @@ TAG = "evl"
 EXIT_TAG = "evl_exit"
 #: The fallback ladder's last rung: a day sale in the open window (no side row: the book's normal exit path sends it).
 LATE_TAG = "evl_late"
-#: PREREG-EVL-3 section 1: the version of the seatable programs that trades real money (version 1 never does).
+#: PREREG-EVL-3 section 1: the version of PREREG-EVL-1's and -2's seatable programs that trades real money (their version
+#: 1 never does). Not a gate since PREREG-EVL-4 (whose new ids seat at version 1): `Program.can_seat` is the one gate.
 REAL_VERSION = 2
+#: PREREG-EVL-4 section 1.3, NO REAL-MONEY TAKING FROM AN EARLIER ROW: in real money only, these programs never buy for a
+#: filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok` with score >= 2, or is not yet
+#: answered, at D's close decision time (EVL-8K-READ-O1's event at the next open, whose buy this row's sale there would
+#: take by the sale gate).
+NEXT_OPEN_GUARD = ("EVL-8K-REACT-ON", "EVL-8K-READ-ON")
 #: PREREG-EVL-3 section 2's bands, and the ones that trade.
 BANDS = ("learning", "probe", "sized", "retired")
 LIVE_BANDS = ("learning", "probe", "sized")
@@ -129,20 +142,22 @@ CENT = Decimal("0.01")
 
 
 def seatable() -> tuple[P.Program, ...]:
-    """The programs real money trades (PREREG-EVL-3 section 1): the lane's `programs.SEATING` (the versions that may
-    ever trade, `Program.can_seat`) at `REAL_VERSION`, in the tables' order. Read at each call."""
-    return tuple(p for p in P.SEATING if p.can_seat and int(p.version) == REAL_VERSION)
+    """The programs real money trades (PREREG-EVL-3 section 1, PREREG-EVL-4 section 2): the lane's `programs.SEATING`
+    (the versions that may ever trade, `Program.can_seat`: version 2 of the nine, version 1 of PREREG-EVL-4's three), in
+    the tables' order. Read at each call."""
+    return tuple(p for p in P.SEATING if p.can_seat)
 
 
 def program_of(program: str, version: int) -> P.Program | None:
-    """The version 2 program `program` (the lane's `programs.BY_KEY` row when it may seat; None for any other version:
-    version 1 never trades)."""
+    """The seating version `version` of `program` (the lane's `programs.BY_KEY` row when it may seat,
+    `Program.can_seat`); None for any version that cannot: version 1 of PREREG-EVL-1's and -2's programs, every record
+    and control."""
     p = P.BY_KEY.get((str(program), int(version)))
-    return p if p is not None and p.can_seat and int(p.version) == REAL_VERSION else None
+    return p if p is not None and p.can_seat else None
 
 
 def order_of(program: str) -> int:
-    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's)."""
+    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's, then PREREG-EVL-4's)."""
     for i, p in enumerate(seatable()):
         if p.id == program:
             return i
@@ -331,7 +346,7 @@ def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
 # ----------------------------------------------------------------------------------------------------------- the bands
 @dataclasses.dataclass(frozen=True)
 class Band:
-    """One version 2 program's band as the lane's table says it (PREREG-EVL-3 section 2): `band` (one of `BANDS`),
+    """One seating version's band as the lane's table says it (PREREG-EVL-3 section 2): `band` (one of `BANDS`),
     `since` (the lane's), why."""
 
     program: str
@@ -349,7 +364,7 @@ def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | Non
     """THE LANE'S BANDS AS THE LANE READS THEM: league/events/bands.py `bands(store)` ({(program, version): band} for
     every seating version, no row = learning), each with its row's since and why beside ({band, since, why, row}, `row`
     whether the lane's table holds one); {} when there is no lane or its store holds no band table yet (a store from
-    before PREREG-EVL-3: every version 2 program is then at learning); None when the table is there and cannot be read
+    before PREREG-EVL-3: every seating version is then at learning); None when the table is there and cannot be read
     (no real event money this decision)."""
     if lane is None:
         return {}
@@ -370,7 +385,7 @@ def lane_bands(lane: Lane | None) -> dict[tuple[str, int], dict[str, Any]] | Non
 
 
 def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
-    """Every version 2 program's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
+    """Every seating version's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
     learning, `DEFAULT_BAND`; a band the rules do not name trades nothing, read as retired and said so). None when the
     lane's band table cannot be read."""
     table = lane_bands(lane)
@@ -514,11 +529,38 @@ def _answered(lane: Lane, event: str, prompt: Any, decided_at: dt.datetime) -> M
         return None
 
 
+def rows_4(lane: Lane, day: dt.date, decided_at: dt.datetime) -> dict[str, list[Mapping[str, Any]]]:
+    """PREREG-EVL-4's rows for a real-money decision of entry session `day` (its section 1.3: "the shadow rule over the
+    events STORED ... before D's close decision time. It applies EXCLUDED and the F8K(D) skip to the filings and
+    articles stored before that time"): every fetched 8-K of D's close window, PREREG-EVL-2's day-news window and PM(D),
+    each STORED before `decided_at` (`_stored_before`: a filing when its documents were fetched, an article when it was
+    read), each article with the CIK of the live rule's eligible universe row whose symbol it names, read with NO
+    registration floor; then EXCLUDED on D and the F8K(D) skip applied (`programs.close_rows_4`). {"8k-react", "8k-day",
+    "news-pm": rows}; `rows_for` keeps a program's events (knowable after its registration)."""
+    lo, hi = P.close_window(lane, day)
+    all8k = [r for r in P.filings_window(lane, "8-K", lo, hi) if _stored_before(r, decided_at, lane)]
+    uni = universe_rows(lane, day)
+    by_symbol = {str(r["symbol"]).upper(): str(cik) for cik, r in uni.items()}
+
+    def with_cik(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in rows
+                if _stored_before(r, decided_at, lane)]
+
+    def symbol_of(cik: str) -> str | None:
+        row = uni.get(str(cik))
+        return None if row is None else row["symbol"]
+    return P.close_rows_4(all8k, with_cik(P.news_rows(lane, *P.day_news_window(lane, day))),
+                          with_cik(P.news_rows(lane, *P.news_window(lane, day))), symbol_of)
+
+
 def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime) -> list[Mapping[str, Any]]:
     """The events `program`'s decision of entry session `day` reads (league/events/run.py's windows), STORED before
     `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
-    (the universe row whose symbol is the article's)."""
+    (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`."""
     family = program.family
+    if program.entry_at == "close" and family in P.CLOSE_FAMILIES_4:
+        since = program.registered_at
+        return [r for r in rows_4(lane, day, decided_at)[family] if S.parse_iso(r["knowable_at"]) > since]
     if program.entry_at == "open":
         lo, hi = P.open_window(lane, day)
         if family in ("ern", "8k"):
@@ -557,6 +599,35 @@ def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> boo
     return row is not None
 
 
+def next_open_event(lane: Lane, row: Mapping[str, Any], session: C.Session | None, decided_at: dt.datetime) -> bool:
+    """PREREG-EVL-4 section 1.3 (NO REAL-MONEY TAKING FROM AN EARLIER ROW), for `NEXT_OPEN_GUARD`'s programs: True when
+    real money does NOT buy for this filing, being EVL-8K-READ-O1's event at the next open: knowable at or after 09:00 ET
+    of D (`session`, D) and its stored PROMPT-DOC verdict `ok` with score >= 2, or not yet answered at `decided_at` (no
+    stored answer, or one answered after it; a filing whose TEXT gets no verdict is never answered: the reading that
+    trades less). A filing knowable before 09:00 ET of D is EVL-8K-READ-O1's at D's open, whose sale at D's close the
+    sale gate already keeps this buy out of; an answer that is not `ok` (unparsed, refused) or scores under 2 leaves the
+    buy. Unreadable inputs read as barred (fail closed)."""
+    if session is None:
+        return True
+    try:
+        knowable = S.parse_iso(str(row["knowable_at"]))
+        accession = str(row["accession"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    if knowable < session.open_cutoff:
+        return False
+    got = V.stored(lane, f"8k:{accession}", V.PROMPTS["doc"])
+    if not got or not got.get("answered_at"):
+        return True
+    try:
+        if S.parse_iso(str(got["answered_at"])) > decided_at:
+            return True
+        score = None if got.get("score") is None else int(got["score"])
+    except (TypeError, ValueError):
+        return True
+    return got.get("status") == "ok" and score is not None and score >= P.READ_MIN_SCORE
+
+
 def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
           reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
           held: Callable[[str], bool] | None = None) -> list[Pick]:
@@ -566,9 +637,12 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     or held within `ISSUER_GAP_SESSIONS` sessions (the shadow's intents of earlier decisions in the lane,
     `held_recently`, and `held(cik)` for real money's own lots and buys) skipped; ranked higher first, then ADV.
     `reaction(row, universe_row)`: the REACT rows' ratio (the book's reading of the SIP bars), None when a price is
-    missing."""
+    missing. For `NEXT_OPEN_GUARD`'s programs (PREREG-EVL-4 section 1.3) the issuer's one event is not bought when it is
+    EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it."""
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
+    guard = program.id in NEXT_OPEN_GUARD
+    session = C.session(lane, day) if guard else None
 
     def verdict(row: Mapping[str, Any]) -> int | None:
         if news:
@@ -589,6 +663,8 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
         if c.cik in taken:
             continue
         taken.add(c.cik)
+        if guard and next_open_event(lane, c.row, session, decided_at):
+            continue        # (PREREG-EVL-4 section 1.3: the shadow keeps the event)
         if held_recently(lane, program, c.cik, day) or (held is not None and held(str(c.cik))):
             continue
         row = uni[str(c.cik)]
@@ -809,6 +885,7 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
            "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
            "settings", "Lane", "lane_path", "open_lane", "decided", "LIVE_ROWS", "eligible", "universe_rows", "Band",
-           "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "held_recently",
-           "picks", "allocate", "one_name_an_auction", "t29", "minute_close", "last_session_before", "reaction_reader",
-           "limit_price", "sigma", "weight", "exit_plan", "publish"]
+           "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
+           "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
+           "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
+           "publish"]

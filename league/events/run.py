@@ -8,7 +8,8 @@ they ran live or as a backfill (`why` says which): a backfilled decision uses on
 scheduled time (filings by knowable time, the universe from the sessions before D, C1's 15:30 minute bar and the
 last daily close before the acceptance). Verdicts are asked only for eligible events of the reading programs.
 A decision made again (release 1019c, `_scope`), inside the House's re-decision window or outside it (a backfill after
-an outage, a decision pending on verdicts, the CLI's catchup), writes intents for every program but those of a GROUP
+an outage, a decision pending on verdicts, the CLI's catchup, PREREG-EVL-4's rows' own `decide-close-evl4`: release
+1019d), writes intents for every program but those of a GROUP
 over whose session a look of the group is written (the group: every version of a program's id, its control, and every
 version of every READ program of that control; A66's owed purpose, A74 (5)); the summary's `kept` names each program it
 left as it was, why, and the events it left out of that program's record (`_left_out`), which the daily report counts.
@@ -24,6 +25,7 @@ from . import calendar as C
 from . import edgar as E
 from . import news as N
 from . import programs as P
+from . import screen as SN
 from . import store as S
 from . import universe as U
 from . import verdicts as V
@@ -214,9 +216,12 @@ def eligibility(ctx: Context, day: dt.date, ciks: Iterable[str], *, live: bool =
         raise RuntimeError("Alpaca's asset list came back empty: no eligibility is decided on it")
     tickers = ctx.tickers_for(day)
     symbols = sorted({t for c in todo for t, _ in tickers.get(c, []) if U._listed(assets.get(t), live)})
-    have = {r[0] for r in st.db.execute(
-        "SELECT symbol FROM bars WHERE adj='raw' AND day=? GROUP BY symbol", (prior[-1].day.isoformat(),))}
-    missing = [s for s in symbols if s not in have]
+    # EVERY ONE OF THE 20 SESSIONS' BARS, NOT ONLY THE LAST (release 1019c's review): a symbol judged for a LATER entry
+    # session first has the last of these sessions' bars and not the first, so a check of the last alone fetched
+    # nothing and the issuer read as ineligible here (a re-decision of an older session, PREREG-EVL-4's rows decided
+    # by themselves). A symbol with all of them stored is not fetched again, as before.
+    window = [x.day for x in prior]
+    missing = [s for s in symbols if len(U.bars(st, s, window, "raw")) < len(window)]
     if missing:
         U.fetch_daily_bars(st, ctx.gw, missing, prior[0].day, prior[-1].day, now=ctx.now())
     for cik in todo:
@@ -251,8 +256,29 @@ def _first_fetched(st: S.Store, rows: Iterable[Mapping[str, Any]]) -> dict[str, 
 
 
 def _key(prog: P.Program) -> str:
-    """A decision summary's key: the id for version 1 (unchanged), `id@vN` for a later version (PREREG-EVL-3)."""
-    return prog.id if prog.version == 1 else f"{prog.id}@v{prog.version}"
+    """A decision summary's key: the id for version 1 (unchanged), `id@vN` for a later version (PREREG-EVL-3). The judge
+    reads a receipt by the same key (league/events/screen.py `program_key`, `names`), defined there once."""
+    return SN.program_key(prog.id, prog.version)
+
+
+#: The families whose verdicts the OPEN decision of the same session asks, never their own close decision (PREREG-EVL-4:
+#: EVL-NEWSPM-READ-ON and its control read the PROMPT-NEWS verdicts EVL-NEWS-READ-O1 asks for its open decision of D).
+OPEN_ASKED = ("news-pm",)
+
+
+def waits_on_open(out: Mapping[str, Any]) -> bool:
+    """Whether a close decision's summary (`decide_close`'s, `ask_only` or not) is pending for a program that waits on
+    verdicts only the OPEN decision of the same session asks (`OPEN_ASKED`): the House's lane then asks that open
+    decision's own verdicts (`decide_open` with `ask_only`), so such a wait is never left to the hourly re-decision."""
+    for key in (out.get("pending") or {}):
+        pid, _, version = str(key).partition("@v")
+        try:
+            prog = P.BY_KEY.get((pid, int(version) if version else 1))
+        except ValueError:
+            continue
+        if prog is not None and prog.family in OPEN_ASKED:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------------------------------- re-decisions
@@ -540,17 +566,158 @@ def _mark_1530(ctx: Context, symbol: str, day: dt.date, *, fetch: bool = True) -
     return float(last["c"])
 
 
-def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False) -> dict[str, Any]:
+#: THE T29 MINUTES OF PREREG-EVL-4's EVL-8K-REACT-ON, read together (its F8K(D) names run to about 50 a session, after
+#: the earlier rows' own reads at 15:47 ET): this many names a request, page by page. Each name's mark is exactly the one
+#: `_mark_1530` reads alone (the close of the last SIP minute bar ending by 15:30 ET, 30 minutes before an early close);
+#: a name with no such bar in the answer gets no mark here and is read alone by `_mark_1530`, as every other row's is.
+MARK_BATCH = 100
+MARK_PAGES = 40
+
+
+def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
+    """The 15:30 marks (label '1530') of `symbols` on session `day` that the store does not hold yet, read in batched
+    SIP 1-minute requests (`MARK_BATCH` names each): the same rule and the same row `_mark_1530` writes. Returns how many
+    marks were stored. Nothing is read before the bar is on the Basic plan's tape (`U.SIP_DELAY` after 15:30 ET)."""
+    st = ctx.store
+    session = C.session(st, day)
+    if session is None:
+        return 0
+    end = session.at(dt.time(15, 30)) if not session.early else session.close_at - dt.timedelta(minutes=30)
+    if ctx.now() < end + U.SIP_DELAY:
+        return 0
+    have = {str(r[0]) for r in st.db.execute("SELECT symbol FROM marks WHERE day=? AND label='1530'", (day.isoformat(),))}
+    names = sorted({str(x) for x in symbols if x} - have)
+    stored = 0
+    for i in range(0, len(names), MARK_BATCH):
+        chunk = names[i:i + MARK_BATCH]
+        got: dict[str, list[Mapping[str, Any]]] = {}
+        token = None
+        for _ in range(MARK_PAGES):
+            page = ctx.gw.get_json("/v1/alpaca/v2/stocks/bars", {"symbols": ",".join(chunk), "timeframe": "1Min",
+                                                                 "start": S.iso(session.open_at), "end": S.iso(end),
+                                                                 "feed": "sip", "adjustment": "raw", "limit": 10000,
+                                                                 "page_token": token}) or {}
+            for sym, bars in (page.get("bars") or {}).items():
+                got.setdefault(str(sym), []).extend(bars or [])
+            token = page.get("next_page_token")
+            if not token:
+                break
+        for sym in chunk:
+            rows = [b for b in got.get(sym, []) if S.parse_iso(b["t"]) + dt.timedelta(minutes=1) <= end]
+            if not rows:
+                continue
+            last = rows[-1]
+            st.db.execute("INSERT OR REPLACE INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, '1530', "
+                          "?, ?, 'sip-1min', ?)", (sym, day.isoformat(), float(last["c"]), last["t"], S.iso(ctx.now())))
+            stored += 1
+    return stored
+
+
+def _rows_4(ctx: Context, day: dt.date, window: tuple[dt.datetime, dt.datetime], by_ticker: Mapping[str, str],
+            elig: Mapping[str, Mapping[str, Any] | None], *, live: bool) -> dict[str, Any]:
+    """PREREG-EVL-4's rows of the close decision of D (its section 1): every fetched 8-K of D's close window, the
+    day-news window's articles and PM(D)'s (each with its issuer's CIK by SEC's tickers), ALL READ WITH NO REGISTRATION
+    FLOOR (the adversarial check's build note (i)); EXCLUDED on D and the F8K(D) skip (`programs.close_rows_4`); and the
+    eligibility its rows read: the decision's own (`elig`, the earlier rows', untouched), with, judged here once per
+    (entry session, CIK) by the decision's rule as every other result, the issuers of the day-news window not judged yet
+    (DAY(D) reads each article's eligible ticker) and those of these rows' EVENTS (knowable after the registration time,
+    not EXCLUDED, and for PM(D) with no F8K(D) filing) not judged yet. An issuer EXCLUDED or skipped is never judged for
+    them. Returns {rows: {family: rows}, elig, excluded, filed, counts}."""
+    st = ctx.store
+    all8k = P.filings_window(st, "8-K", *window)
+
+    def with_cik(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [dict(a) | {"cik": by_ticker.get(a["symbol"])} for a in rows]
+    day_all = with_cik(P.news_rows(st, *P.day_news_window(st, day)))
+    pm_all = with_cik(P.news_rows(st, *P.news_window(st, day)))
+    table: dict[str, Mapping[str, Any] | None] = dict(elig)
+    need = sorted({str(a["cik"]) for a in day_all if a.get("cik")} - set(table))
+    if need:
+        table.update(eligibility(ctx, day, need, live=live, kind="close",
+                                 stored=_first_fetched(st, [a for a in day_all if a.get("cik") in need])))
+
+    def symbol_of(cik: str) -> str | None:
+        uni = table.get(cik)
+        return None if uni is None else uni.get("symbol")
+    rows = P.close_rows_4(all8k, day_all, pm_all, symbol_of)
+    times = [p.registered_at for p in P.PROGRAMS if p.family in P.CLOSE_FAMILIES_4]
+    events = [r for family in ("8k-day", "news-pm") for r in rows[family]
+              if times and r.get("cik") and S.parse_iso(r["knowable_at"]) > min(times)]
+    need = sorted({str(r["cik"]) for r in events} - set(table))
+    if need:
+        table.update(eligibility(ctx, day, need, live=live, kind="close",
+                                 stored=_first_fetched(st, [r for r in events if str(r["cik"]) in need])))
+    excluded = P.excluded(all8k, day_all, symbol_of)
+    filed = P.f8k_ciks(all8k)
+    counts = {"f8k": len(P.family_8k(all8k)), "pm": len(pm_all), "excluded": len(excluded),
+              "eligible_4": sum(1 for c in {str(r["cik"]) for r in events} if table.get(c))}
+    return {"rows": rows, "elig": table, "excluded": excluded, "filed": filed, "counts": counts}
+
+
+def _skip_excluded(st: S.Store, day: dt.date, excluded: set[str], filed: set[str], *,
+                   keep: Callable[[P.Program], bool] | None = None) -> int:
+    """THE ADVERSARIAL CHECK'S BUILD NOTE (ii) for PREREG-EVL-4's rows: a re-decision of D's close marks an intent of
+    those rows for D that has not settled (planned or entered) `skipped:excluded` when a row stored after the intent was
+    written now puts its issuer in EXCLUDED on D (for EVL-NEWSPM-READ-ON and its control, also in the F8K(D) skip): the
+    shadow is the rule over every event knowable at the decision time, whenever the recorder stored it. A settled intent
+    is never changed (its record is final; store.py's forward-only status); one skipped already stays as it is; a
+    program `keep` names (a written look of its group freezes it over D: run.py `_scope`, A74 (5)) is never touched
+    (release 1019d). Returns how many moved."""
+    moves: list[tuple[P.Program, str, str]] = []
+    for prog in P.PROGRAMS:
+        if prog.family not in P.CLOSE_FAMILIES_4 or prog.entry_at != "close":
+            continue
+        if keep is not None and keep(prog):
+            continue
+        drop = (excluded | filed) if prog.family == "news-pm" else excluded
+        if not drop:
+            continue
+        for r in st.db.execute("SELECT event, cik FROM intents WHERE program=? AND version=? AND entry_day=? AND status IN "
+                               "('planned', 'entered')", (prog.id, prog.version, day.isoformat())).fetchall():
+            if r["cik"] and str(r["cik"]) in drop:
+                why = ("EXCLUDED on D (ERN(D) or DAY(D)), by a row stored after the decision" if str(r["cik"]) in excluded
+                       else "an F8K(D) filing of the issuer, stored after the decision")
+                moves.append((prog, str(r["event"]), why))
+    if not moves:
+        return 0
+    moved = 0
+    with st.tx():
+        for prog, event, why in moves:
+            moved += bool(st.move_intent(prog.id, prog.version, event, "skipped:excluded", why))
+    return moved
+
+
+def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False,
+                 evl4_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
-    REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON).
+    REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON), then PREREG-EVL-4's
+    (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their two controls: `_rows_4`).
+
+    The earlier rows read exactly what they read before PREREG-EVL-4 (their windows, their eligibility call, their
+    verdicts, in the same order); PREREG-EVL-4's rows come after them, with their own reads: every 8-K of the close window
+    (F8K(D) and ERN(D)), the day-news window (DAY(D)) and PM(D), with no registration floor for the sets that skip;
+    their PROMPT-DOC verdicts asked as EVL-8K-READ-O1's own (one verdict an event, stored once: a filing knowable during
+    D is asked during D's session by `ask_only`), their PROMPT-NEWS verdicts read only, never asked (EVL-NEWS-READ-O1
+    asks them for its open decision of D: the adversarial check's build note (iii)); their READ events wait for their
+    verdicts. A re-decision marks such a row's unsettled intent `skipped:excluded` when a row stored later puts its
+    issuer in EXCLUDED or the F8K(D) skip (`_skip_excluded`, build note (ii)).
 
     `ask_only`: as decide_open's (the verdicts the close decision will read, asked during the session: no intent, no
-    receipt, and no reaction, whose 15:29 bar is not on the tape before the decision)."""
+    receipt, and no reaction, whose 15:29 bar is not on the tape before the decision).
+
+    `evl4_only` (release 1019c's review): PREREG-EVL-4'S ROWS DECIDED BY THEMSELVES, for a close a release without them
+    decided (league/events/screen.py `made_without`; the House's lane and the CLI's catchup run it once, as a backfill):
+    the decision's reads and its eligibility call exactly as the whole decision makes them, then their rows as above
+    (reads, verdicts, `_skip_excluded`, intents); NO EARLIER ROW'S verdict is asked or intent written, so a close final
+    for an earlier program gains nothing. Its receipt is `decide-close-evl4:<day>` (screen.FOUR_KIND), which the judge
+    reads for their programs only (`screen.final_until`): the session's `decide-close:<day>` receipts, which the House's
+    lane, its book and the judge read for every earlier row, are left as they are."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    rid = None if ask_only else st.start_receipt(f"decide-close:{day}", now=ctx.now())
+    job = f"decide-{SN.FOUR_KIND if evl4_only else 'close'}:{day}"
+    rid = None if ask_only else st.start_receipt(job, now=ctx.now())
     lo, hi = P.close_window(st, day)
     e8k = [r for r in P.filings_in(st, "8-K", lo, hi) if "2.02" in P.items_of(r)]
     dlo, dhi = P.day_news_window(st, day)
@@ -559,6 +726,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 if S.parse_iso(a["knowable_at"]) > S.parse_iso(P.REGISTERED_AT_2)]
     elig = eligibility(ctx, day, [r["cik"] for r in e8k] + [a["cik"] for a in articles if a["cik"]],
                        live=not backfill_run, kind="close", stored=_first_fetched(st, [*e8k, *articles]))
+    four: dict[str, Any] = {}               # PREREG-EVL-4's reads, made once the earlier rows are decided (`_rows_4`)
+    elig4: dict[str, Mapping[str, Any] | None] = {}
     scores: dict[str, int | None] = {}
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -568,6 +737,23 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
             scores[key] = None if uni is None else (
                 news_verdict(ctx, row) if "accession" not in row else doc_verdict(ctx, row, uni))
         return scores[key]
+
+    scores4: dict[str, int | None] = {}
+
+    def verdict4(row: Mapping[str, Any]) -> int | None:
+        """PREREG-EVL-4's 8-K rows: the PROMPT-DOC verdict of `8k:<accession>`, EVL-8K-READ-O1's own (asked once, stored
+        once, the first stored answer final), for an issuer eligible on D."""
+        key = str(row["accession"])
+        if key not in scores4:
+            uni = elig4.get(row.get("cik"))
+            scores4[key] = None if uni is None else doc_verdict(ctx, row, uni)
+        return scores4[key]
+
+    def stored_news(row: Mapping[str, Any]) -> int | None:
+        """EVL-NEWSPM-READ-ON and its control: the STORED PROMPT-NEWS verdict of `news:<id>` (the one EVL-NEWS-READ-O1
+        asks for its open decision of D), read only; this row asks none of its own."""
+        got = V.stored(st, f"news:{row['id']}", V.PROMPTS["news"])
+        return got["score"] if got and got["status"] == "ok" else None
 
     def reaction(row: Mapping[str, Any], uni: Mapping[str, Any], fetch: bool = True) -> float | None:
         # an 8-K's base is C1's (the last close before the acceptance time); an article's, before its knowable time
@@ -603,38 +789,91 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 unanswered.add((event, prompt.sha))
         return missing
 
+    def pending4(prog: P.Program, rows: list[Mapping[str, Any]]) -> int:
+        """PREREG-EVL-4's READ events wait for their verdicts (the shadow rule), and its news control for the stored
+        scores it ranks by: how many of `prog`'s eligible events have none stored yet. The 8-K rows' PROMPT-DOC is asked
+        here (TEXT >= 200 characters: a shorter TEXT has no verdict and is not taken); PM(D)'s PROMPT-NEWS is never
+        asked here (it waits for EVL-NEWS-READ-O1's ask). Each is in the decision's verdict tally as the earlier rows'
+        are (release 1019d: a wait of these rows reaches the stall job's evl_verdicts, as their `pending` did before the
+        tally)."""
+        news = prog.family == "news-pm"
+        if not (prog.reads or news):
+            return 0
+        prompt = V.PROMPTS["news" if news else "doc"]
+        missing = 0
+        for row in rows:
+            uni = elig4.get(row.get("cik"))
+            if uni is None:
+                continue
+            if news and uni["symbol"] != row.get("symbol"):
+                continue
+            if not news and not (row.get("text_sha") and (row.get("text_len") or 0) >= 200):
+                continue
+            if not news:
+                verdict4(row)
+            event = f"news:{row['id']}" if news else f"8k:{row['accession']}"
+            needed.add((event, prompt.sha))
+            if V.stored(st, event, prompt) is None:
+                missing += 1
+                unanswered.add((event, prompt.sha))
+        return missing
+
     out: dict[str, Any] = {"pending": {}}
     why = "backfill" if backfill_run else None
     kept = _scope(st, "close", day, ctx.now())
-    later: list[tuple[P.Program, list[Mapping[str, Any]]]] = []
-    for prog in P.PROGRAMS:
-        if prog.entry_at != "close":
-            continue
-        rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
-        rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
-        frozen = kept(prog)
-        if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
-            out.setdefault("kept", {})[_key(prog)] = frozen
-            later.append((prog, rows))
-            continue
-        waiting = pending(prog, rows)
-        if ask_only:
+    later: list[tuple[P.Program, list[Mapping[str, Any]], Mapping[str, Mapping[str, Any] | None]]] = []
+    # THE EARLIER ROWS FIRST, exactly as before PREREG-EVL-4 (their reads, verdicts and intents), then PREREG-EVL-4's,
+    # whose own reads come after them: a failure or a time bound in those never holds an earlier row's decision. A
+    # program a written look of its group freezes (`_scope`, A74 (5)) is kept in either part: asked nothing, fetched
+    # nothing, written nothing (no intent, no `skipped:excluded` move: `_skip_excluded` passes it over).
+    for mine in (False, True):
+        if evl4_only and not mine:
+            continue        # (PREREG-EVL-4's rows by themselves: no earlier row is decided again)
+        if mine:
+            four.update(_rows_4(ctx, day, (lo, hi), by_ticker, elig, live=not backfill_run))
+            elig4.update(four["elig"])
+            if not ask_only:
+                late = _skip_excluded(st, day, four["excluded"], four["filed"],
+                                      keep=lambda prog: kept(prog) is not None)
+                if late:
+                    out["skipped_excluded"] = late
+        for prog in P.PROGRAMS:
+            if prog.entry_at != "close" or (prog.family in P.CLOSE_FAMILIES_4) != mine:
+                continue
+            if mine:
+                rows, table, wait = four["rows"][prog.family], elig4, pending4
+                read = stored_news if prog.family == "news-pm" else verdict4
+            else:
+                rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
+                table, wait, read = elig, pending, verdict
+            rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+            frozen = kept(prog)
+            if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
+                out.setdefault("kept", {})[_key(prog)] = frozen
+                later.append((prog, rows, table))
+                continue
+            waiting = wait(prog, rows)
+            if ask_only:
+                if waiting:
+                    out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
+                continue
             if waiting:
-                out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
-            continue
-        if waiting:
-            out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
-            continue
-        cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, reaction=reaction)
-        out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
-    for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
-        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c),
+                out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
+                continue
+            if prog.family == "8k-react":
+                _marks_1530(ctx, [str(table[r["cik"]]["symbol"]) for r in rows if table.get(r.get("cik"))], day)
+            cands = P.select(prog, rows, eligible=lambda c, table=table: table.get(c), verdict=read, reaction=reaction)
+            out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+    for prog, rows, table in [] if ask_only else later:   # (what each kept program leaves out, once this run's asks are in)
+        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c, table=table: table.get(c),
                                              reaction=lambda r, u: reaction(r, u, fetch=False))
-    out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v)}
+    out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v),
+                     **four["counts"]}
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
     return out
 
 
-__all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run"]
+__all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run",
+           "waits_on_open"]

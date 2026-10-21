@@ -35,7 +35,8 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   day's real `fills` (buys, sells, fees) and THE FILL GAP: the signed mean per side over the last 20 priced fills
   against the shadow's own auction prints (positive when real money did worse; league/ops/evl_health.py `fill_gaps`,
   the goal's Done item "fills within 15 bp of replay").
-- `programs`: each program that may trade real money (version 2 of the nine, PREREG-EVL-3), in the tables' order: its
+- `programs`: each program that may trade real money (`programs.SEATING`: version 2 of the nine, PREREG-EVL-3, then
+  version 1 of PREREG-EVL-4's three from release 1019d), in the tables' order: its
   band, settled n (shadow TRADABLE, and real), account-shown and Net by band (metered compute shared over the settled
   real events, so the programs' Nets add up to the lane's), its next look and the TRADABLE events to go, the
   market-direction share and the benchmark's mean (shadow, PREREG-EVL-1 section 7's "beside every look"), and its

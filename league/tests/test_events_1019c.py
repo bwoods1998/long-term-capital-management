@@ -607,8 +607,14 @@ class TheEventKindsOwnDayCount(EventTest):
         self.assertEqual(CONSTITUTION["equity_money"]["order_path"]["max_orders_day"], 60, "the old lanes keep 60")
         live = sum(event["max_open"][band] for band in EB.LIVE_BANDS)
         self.assertEqual(event["max_orders_day"], max(2 * live, 150), "2 x the max_open of the live bands, at least 150")
-        self.assertGreaterEqual(event["max_orders_day"], 2 * len(EB.seatable()) * event["max_open"]["learning"],
-                                "every program's full learning room bought and sold in one day")
+        # A78 (release 1019d, the reading that trades less): with PREREG-EVL-4's three, the twelve seatable programs' full
+        # learning rooms bought and sold in one day (2 x 12 x 8 = 192) are above the line, and the line STAYS 150 (the
+        # House-wide line leaves it at most 190: the bound below); on a day that would need more, entries stop in ROOM's
+        # order, so PREREG-EVL-4's rows are refused first, and exits never (`test_twelve_programs_on_a_heavy_day_...`).
+        self.assertEqual(len(EB.seatable()), 12)
+        self.assertLess(event["max_orders_day"], 2 * len(EB.seatable()) * event["max_open"]["learning"],
+                        "A78: twelve programs' full learning rooms are above the line; it is not raised for them")
+        self.assertEqual(2 * 9 * event["max_open"]["learning"], 144, "the nine's fit under it, as release 1019c read it")
         self.assertLessEqual(event["max_orders_day"], CONSTITUTION["options_money"]["gateway"]["max_day_orders"])
         self.assertEqual(EQUITY_MONEY_BOUNDS["event.max_orders_day"], ("0", "300"))
         self.assertEqual((EB.settings().max_orders_day, EB.FALLBACK.max_orders_day), (150, 0))
@@ -701,6 +707,96 @@ class TheEventKindsOwnDayCount(EventTest):
 
         self.assertEqual((L.event_orders_today(h.state.rows, day), L.orders_today(h.state.rows, day)), (81, 81),
                          "every order of the day is the event kind's: 81 of its 150, none of the old lanes' 60")
+
+    def test_twelve_programs_on_a_heavy_day_refuse_preregevl4s_rows_first_and_never_an_exit(self):
+        """A78 (the reading that trades less): the event kind's line stays 150 with twelve seatable programs, so on a day
+        that needs more, ENTRIES stop in ROOM's order (Sized, Probe, learning; within a band PREREG-EVL-1's rows, then
+        PREREG-EVL-2's, then PREREG-EVL-4's), PREREG-EVL-4's refused first, and an EXIT is never stopped by it. The day:
+        the five open-entry programs' forty learning lots (bought at the open, sold at the close), the day's other event
+        orders (67: the morning's sales of the overnight lots and the rest of a heavy day), then the close's sales (all
+        forty go, past the line's entries) and its buys: EVL-ERN-REACT-C1 (PREREG-EVL-1) and EVL-NEWS-READ-ON
+        (PREREG-EVL-2) take the last two orders the line allows (147 + 1 + its own exit, then 148 + 1 + 1), and
+        EVL-8K-REACT-ON and EVL-8K-READ-ON (PREREG-EVL-4) are refused by the event kind's day order count."""
+        from league.equity import live as L
+
+        h = self.harness()
+        n = 0
+
+        def name(prefix: str, i: int) -> tuple[str, str]:
+            nonlocal n
+            n += 1
+            sym = f"{prefix}{i:03d}"
+            h.symbol(sym, last=1.0)
+            h.venue.prints[(sym, DAY.isoformat(), "open")] = D("1.00")
+            h.venue.prints[(sym, DAY.isoformat(), "close")] = D("1.01")
+            return f"{n + 100:010d}", sym
+
+        for i in range(16):        # the open: READ-O1 takes eight, GUIDE-O1 the eight READ-O1 has no room for
+            cik, sym = name("E", i)
+            h.lane.filing(f"e-{i}", cik, accepted=iso(PRIOR, 16, 30), received=iso(PRIOR, 16, 31))
+            h.lane.verdict(f"e-{i}", 3, answered=iso(PRIOR, 16, 35), guidance="raised")
+            h.lane.universe(DAY, sym, cik, 1.0)
+        for i in range(8):         # 8K-READ-O1
+            cik, sym = name("K", i)
+            h.lane.filing(f"k-{i}", cik, accepted=iso(PRIOR, 17, 0), received=iso(PRIOR, 17, 1), items=("8.01",))
+            h.lane.verdict(f"k-{i}", 3, answered=iso(PRIOR, 17, 5))
+            h.lane.universe(DAY, sym, cik, 1.0)
+        for i in range(8):         # NEWS-READ-O1
+            cik, sym = name("N", i)
+            h.lane.article(f"n-{i}", sym, knowable=iso(DAY, 7, 30))
+            h.lane.verdict(f"n-{i}", 3, answered=iso(DAY, 7, 35), news=True)
+            h.lane.universe(DAY, sym, cik, 1.0)
+        for i in range(8):         # INS-BUY-O1
+            cik, sym = name("I", i)
+            h.lane.insider_buy(f"f-{i}", cik, accepted=iso(PRIOR, 17, 0), usd=60000)
+            h.lane.st.db.execute("UPDATE filings SET received_at=? WHERE accession=?", (iso(PRIOR, 17, 1), f"f-{i}"))
+            h.lane.universe(DAY, sym, cik, 1.0)
+        c1 = c1_event(h, 0)        # the close: EVL-ERN-REACT-C1's (PREREG-EVL-1) mid-session earnings 8-K, +5%
+        cik, news = name("D", 0)   # EVL-NEWS-READ-ON's (PREREG-EVL-2) day article, score 3
+        h.lane.article("d-0", news, knowable=iso(DAY, 10, 30))
+        h.lane.verdict("d-0", 3, answered=iso(DAY, 10, 35), news=True)
+        h.lane.universe(DAY, news, cik, 1.0)
+        # PREREG-EVL-4's two 8-K rows: two material 8.01 8-Ks knowable after PRIOR's close decision and before 09:00 ET
+        # of DAY (F8K(DAY); no next-open guard), with no verdict by DAY's open (EVL-8K-READ-O1 buys neither there)
+        cik, react = name("R", 0)  # EVL-8K-REACT-ON: its T29 minute at 1.05 x PRIOR's close
+        h.lane.filing("r4-0", cik, accepted=iso(PRIOR, 17, 30), received=iso(PRIOR, 17, 31), items=("8.01",))
+        h.lane.universe(DAY, react, cik, 1.0)
+        h.lane.st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES(?, ?, 'raw', 1, 1, 1, "
+                             "1.0, 1e6, 'x')", (react, PRIOR.isoformat()))
+        h.lane.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, '1530', 1.05, "
+                             "'x', 'sip-1min', 'x')", (react, DAY.isoformat()))
+        cik, read = name("Q", 0)   # EVL-8K-READ-ON: its PROMPT-DOC score 2, answered at 10:00 ET of DAY
+        h.lane.filing("q4-0", cik, accepted=iso(PRIOR, 18, 0), received=iso(PRIOR, 18, 1), items=("8.01",))
+        h.lane.verdict("q4-0", 2, answered=iso(DAY, 10, 0))
+        h.lane.universe(DAY, read, cik, 1.0)
+        self.ready(h)
+        day = DAY.isoformat()
+        for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33)):
+            h.tick(hh, mm)
+        self.assertEqual(sum(1 for b in h.bodies() if b["side"] == "buy" and b["time_in_force"] == "opg"), 40)
+        self.assertEqual(L.event_orders_today(h.state.rows, day), 40)
+        [inst] = [r["id"] for r in h.state.rows("SELECT id FROM eq_instances WHERE lane=? AND family='EVL-INS-BUY-O1'",
+                                                (L.EVENT_LANE,))]
+        with h.state.transaction():  # the day's 67 other event orders (expired: no lot, no working order)
+            for i in range(67):
+                h.state.execute("INSERT INTO eq_orders(eid, client_id, instance, family, side, symbol, class, at, qty, "
+                                "limit_px, collar_bp, status, placed_at, day, updated_at) VALUES(?, ?, ?, 'f', 'sell', "
+                                "'ZZZ', 'stock', 'open', '1', '1', 0, 'expired', 0, ?, 0)",
+                                (900000 + i, f"heavy-{i}", inst, day))
+        self.assertEqual(L.event_orders_today(h.state.rows, day), 107)
+        for hh, mm in ((15, 46), (15, 47), (15, 48), (16, 1), (16, 3)):
+            h.tick(hh, mm)
+        sells = [b for b in h.bodies() if b["side"] == "sell"]
+        closes = {b["symbol"] for b in h.bodies() if b["side"] == "buy" and b["time_in_force"] == "cls"}
+        self.assertEqual(len(sells), 40, "every exit of the day goes: none is stopped by the line")
+        self.assertEqual(closes, {c1, news}, "PREREG-EVL-1's and PREREG-EVL-2's close entries take the line's last room")
+        refused = {r["program"]: r["why"] for r in h.event_intents("buy") if r["day"] == day and r["at"] == "close"
+                   and r["symbol"] in (react, read)}
+        self.assertEqual(sorted(refused), ["EVL-8K-REACT-ON", "EVL-8K-READ-ON"], "PREREG-EVL-4's rows planned their buys")
+        for program, why in refused.items():
+            self.assertIn("the event kind's day order count: 149 of 150 sent", why or "", program)
+        self.assertEqual(L.event_orders_today(h.state.rows, day), 149, "40 + 40 + 67 + 2, under the line")
+        self.assertIsNone(h.book._count_refusal(day, exit_=True), "an exit still goes at the line")
 
     def test_each_lane_meets_its_own_line_and_both_the_house_wide_one(self):
         h = self.harness()

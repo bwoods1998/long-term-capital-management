@@ -38,7 +38,155 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
-### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; joins release 1019e; A82)
+### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
+
+- **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
+  `b35c018f`, where `feat/evl-4` was merged, and then `f85cc152`, merged in after: main's two desk scoreboard pages, the
+  band review test's write time (`bb3a1ee9`) and the daily-index backfill filing by filing, A82, its entry below) and
+  `feat/evl-4` `699c5e69` (#579, re-reviewed "ship"; A71, A75; its entry below, as its branch wrote it):
+  PREREG-EVL-4's five rows (EVL-8K-REACT-ON, EVL-8K-READ-ON and EVL-NEWSPM-READ-ON seatable at learning from birth,
+  after the nine in ROOM's order; the controls EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON), the named receipts
+  (league/events/screen.py `names`, `program_key`: a receipt that does not name a PREREG-EVL-4 program is "made without
+  its rows" for it), their own decision `decide-close-evl4` (league/events/run.py `decide_close` with `evl4_only`) and
+  the House's backfill of the new rows (league/events/house.py `_refill_redecide`) for every close since
+  REGISTERED_AT_4 = 2026-10-19T16:01:05Z that a release without them decided, the book's `sale_to_later` and the
+  report's `late_rows`. `docs/prereg/PREREG-EVL-4.md` is byte for byte the tag `prereg-evl-4`'s (SHA-256 `33ca39ca`),
+  behind the wall with the other three.
+- **The merge, every side's behaviour kept** (conflicts in this file, `docs/operations.md`, and
+  league/events/house.py, report.py, run.py and screen.py; the rest merged by itself):
+  - THE JUDGE (screen.py `final_until`): release 1019c's A66 rules, then A69's fast path (`_fast_until`), each session's
+    decision read through release 1019c's `_waits_on`; for a program of PREREG-EVL-4 (`NAMED_FROM`) a receipt finished
+    `ok` or `pending` that does not name it is first read as feat/evl-4 reads it ("made without its rows", unless a
+    later `decide-close-evl4` receipt names it: then that receipt is its decision). The unmade close stops A66's rules
+    and the fast path alike, so the judge's reason now ends with the fast path's stop ("...; the fast path (A69) stops
+    at <X>: ..."; four of feat/evl-4's assertions read the merged reason).
+  - THE ONE READING THE MERGE ADDS (screen.py `names`): a receipt NAMES a program it KEPT (`kept`: a written look of its
+    group froze it, A74 (5)), as release 1019c's `_waits_on` reads a kept program's session made. Without it a close a
+    freeze kept would be "made without its rows" for good (`decide-close-evl4` keeps it again), and the program's next
+    look would never be computed. It only reads as made what release 1019c reads as made; no look, alpha, seed or band
+    moves.
+  - THE LANE (run.py `decide_close`): the earlier rows first, exactly as before, then PREREG-EVL-4's (feat/evl-4's order),
+    every program through release 1019c's `_scope`: a program a written look of its group freezes is kept in either part,
+    `evl4_only` included: asked nothing, fetched nothing (no T29 batch read), written nothing (no intent, and no
+    `skipped:excluded` move: `_skip_excluded` passes it over), its left-out events named (`_left_out`, with its own
+    eligibility table and the stored prices only). PREREG-EVL-4's groups are release 1019c's rule over their `CONTROLS`
+    rows: EVL-8K-READ-ON with EVL-CTRL-8K-ON, EVL-NEWSPM-READ-ON with EVL-CTRL-NEWSPM-ON, EVL-8K-REACT-ON alone. THE
+    VERDICT TALLY (release 1019c, the stall job's `evl_verdicts`) counts PREREG-EVL-4's rows' verdicts too (`pending4`),
+    so their wait reaches the stall job as their `pending` did before the tally.
+  - THE HOUSE (house.py `_verdicts`): release 1019c's line in the warning, feat/evl-4's no `universe` receipt for
+    `decide-close-evl4`.
+  - THE REPORT (report.py): release 1019c's `kept_out` (which reads `decide-close-evl4`'s receipts too) and feat/evl-4's
+    `late_rows`, both in each program's status and its line.
+- **The event kind's day order count with twelve programs (A78, the reading that trades less)**: the line stays 150
+  (2 x 12 x 8 = 192 would exceed it; the House-wide line leaves it at most 190); on a day that would need more, ENTRIES
+  stop in ROOM's order, so PREREG-EVL-4's rows are refused first; exits never. Release 1019c's assertion that the line
+  covers every seatable program's full learning room is now A78's (the nine's 144 fit; the twelve's 192 do not, and the
+  line is not raised for them), and `test_twelve_programs_on_a_heavy_day_refuse_preregevl4s_rows_first_and_never_an_exit`
+  holds it through the real book: forty open-entry lots and 67 other orders of a heavy day, then the close's forty
+  sales all go, PREREG-EVL-1's and -2's close entries take the line's last two orders, and EVL-8K-REACT-ON and
+  EVL-8K-READ-ON are refused by "the event kind's day order count" (it fails with ROOM's order reversed). No money row
+  moves.
+- **Tests**: league/tests/test_events_1019d.py (a look of a PREREG-EVL-4 group freezes it in a whole re-decision and in
+  `decide-close-evl4`, its receipt makes the close for it, the tally counts the new rows, the report reads their own
+  decision's `kept`; each fails with its part of the merge undone); feat/evl-4's `TheProof` on the merged tree.
+- **The runs** on `67bac4cc` (the code head; the commit after it adds only this record): the full league suite on 3.14
+  by `python -m unittest discover -s league/tests -t .`, 12,642 OK (33 skipped, 1,413 s); on 3.11 the 104 modules of
+  the events, equity, live, ci, constitution, publish, ops and budget suites (with `test_cost_day`,
+  `test_daily_report`, `test_evl_health`, `test_evl_migrate`, `test_swarm_guard`), 2,734 OK (1 skipped); the gateway
+  495/495 (no gateway file differs from release 1019c's); `python -m league.ci --base origin/main --branch rel/1019d
+  --no-tests` passed; the identities above on both Pythons. THE PROOF: feat/evl-4's `TheProof` passes on the merged
+  tree, and the synthetic week (`league/tests/evl4_world.py`) decided by release 1019c's own code (`f85cc152` on
+  PYTHONPATH) and by this tree gives every earlier program the same 59 intents and the nine the same 18 real-money
+  picks, on 3.14 and 3.11 (this tree adds PREREG-EVL-4's 16).
+- **Deploy** (docs/operations.md, **Release 1019d**): the House alone, by the captain's ship script from the exact head
+  (`ship_house.sh <head> <PR> r1019d 055e5313 a8d4cbd9`), once release 1019c is live and main is its head; no gateway
+  step (no gateway file differs from release 1019c's). Verify as PREREG-EVL-4's entry says (After the deploy).
+- **Rollback**: the House back to release 1019c (`floor_box.py rollback` and repoint release 1019c's deployed head,
+  `f85cc152` unless it deployed from another); the money and
+  constitution digests are the same, so the grant stands. The instant stop of event buys is release 1019b's
+  (`STOCK_EVENT_BUYS` off at the gateway, or `equity_money.event.enabled` False: money `1b7a5c22`, constitution
+  `50e951c9`). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release 1019c
+  seats none of them, and a later redeploy decides the closes it decided again for the new rows the same way.
+
+### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; ships in release 1019d (A78), merged onto release 1019c at `b35c018f`; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's (release 1019b's; in release 1019d, release 1019c's `055e5313` / `a8d4cbd9`), read with the tree's own functions; no setting, no money row, no gateway change)
+
+- **Why.** The owner's goal V2 (item 2: "Births come from your architect agents and from you ... rationed by an
+  expected-false-pass budget you state") and the frozen [PREREG-EVL-4](docs/prereg/PREREG-EVL-4.md) (registered
+  2026-10-19T16:01:05Z, tag `prereg-evl-4`, commit `cef9810a`, SHA-256 `33ca39ca`; amendment A71), copied into the tree
+  byte for byte behind the wall with the other three (`docs/prereg/`).
+- **The programs** (league/events/programs.py, appended after PREREG-EVL-3's version 2 copies, `prereg=4`,
+  `REGISTERED_AT_4`): EVL-8K-REACT-ON (F8K(D), the reaction >= 1.04), EVL-8K-READ-ON (F8K(D), the stored PROMPT-DOC
+  score >= 2), EVL-NEWSPM-READ-ON (PM(D) of issuers with no F8K(D) filing, the stored PROMPT-NEWS score >= 2; it asks no
+  verdict of its own), and the controls EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON; each enters at D's close and exits at
+  the next open (limit at entry 1.25 x); EXCLUDED (ERN(D) or DAY(D)) and the F8K(D) skip read with NO registration
+  floor (`filings_window`, `news_rows`, `close_rows_4`). `Program.registered_at` reads each file's own time (a file it
+  does not know raises); `Program.can_seat` is version 2 of the nine and version 1 of the three (`SEATING_PREREGS`).
+- **The lane** (league/events/run.py `decide_close`): the earlier close rows are decided first, exactly as before;
+  then this file's rows read their own (`_rows_4`), their PROMPT-DOC verdicts asked as EVL-8K-READ-O1's (one verdict an
+  event; a filing knowable during D is asked during D's session), PROMPT-NEWS read only; a re-decision marks an
+  unsettled intent `skipped:excluded` when a row stored later excludes its issuer (`_skip_excluded`, the adversarial
+  check's build note (ii)); EVL-8K-REACT-ON's T29 minutes are read in batches (`_marks_1530`). The House's lane asks
+  the session's OPEN decision's verdicts when a close decision waits on PM verdicts (`run.waits_on_open`) and backs a
+  wait off when no call of a pass could answer it (`_look`).
+- **The judge** (league/events/screen.py): `SEATABLE`, `RECORDS`, `CONTROLS`, `HOLDS` gain the five rows; their
+  version 1 runs PREREG-EVL-3's event-counted looks (`_seating`: alpha 0.018, seeds `{id}|v1|look{k}`, the controls read
+  at version 1, retirement, Probe, Sized and demotion by league/events/bands.py, unchanged); expected false passes 1.2
+  (12 seatable versions) of the stated lifetime budget 3.0 (`LANE_BUDGET`; the report prints both).
+- **Real money** (league/events/book.py): `seatable()` and `program_of()` read `can_seat` alone (`REAL_VERSION` is no
+  longer a gate), so the three seat at learning after the nine in ROOM's order; their rows are those stored before the
+  decision time (a filing when its documents were fetched: round 4's `_stored_before`), EXCLUDED read from them
+  (`rows_4`); section 1.3's guard (`next_open_event`, `NEXT_OPEN_GUARD`): the two
+  8-K rows never buy for a filing knowable at or after 09:00 ET of D whose verdict is `ok` with score >= 2, or not yet
+  answered, at the decision time. league/equity/live.py counts an earlier row's buy lost to a later row's sale at the
+  same auction (`sale_to_later` in the decision's summary and record); the lane's report counts the shadow's
+  difference from real money by storage time (`report.late_rows`).
+- **Readings taken** (the frozen text's section 7: the reading that trades less, to record in an amendment before the
+  first settled event): a filing whose TEXT gets no verdict is "not yet answered" for the guard (no buy); the guard bars
+  the issuer's one event and no later filing of the issuer stands in for it; only a not-yet-settled intent is ever
+  marked `skipped:excluded`; DAY(D) compares the article's one symbol with the issuer's eligible ticker as stored; the
+  new rows' issuers are judged eligible once per (entry session, CIK) by the decision's rule, as every result, and an
+  earlier row's later backfill re-decision of the same session reads that result (PREREG-EVL-1 section 2, A70 (8): one
+  universe a session; it can differ from a backfill-rule judgment only when the live and backfill rules disagree on a
+  late-stored event's issuer, and never for real money, which reads live results alone).
+- **No earlier program changes**: league/tests/test_events_evl4.py `TheProof` decides a synthetic week
+  (league/tests/evl4_world.py: every family of files 1, 2 and 4, verdicts asked ahead as the House does, a late-stored
+  8-K, the re-decisions) with and without the rows and compares every PREREG-EVL-1/2/3 program's intents and the nine's
+  real-money picks; the same week decided by `rel/1019b`'s own code `8458ab42` (`python league/tests/evl4_world.py
+  OUT.json` with that tree on PYTHONPATH) gives the same 59 intents and picks. The prompts' SHA-256 are unchanged.
+- **The deploy gap** (the review's major: league/events/screen.py `made_without`, `names`, `final_until`;
+  run.py `decide_close` with `evl4_only`; house.py `_refill_redecide`; `python -m league.events catchup`): release
+  1019b's receipts of the closes from 16:01:05Z Oct 19 to this release's deploy name none of the new rows, and the
+  hourly re-decision reaches only the last three sessions, so a close older than that would never have been decided for
+  them while the judge read it as final. Now a decision receipt NAMES the programs it decided (or left pending); for a
+  program of PREREG-EVL-4 a close whose latest receipt does not name it is NOT MADE for it (its looks wait) until a
+  later `decide-close-evl4:<day>` receipt does: PREREG-EVL-4's rows decided BY THEMSELVES, once, as a backfill, by the
+  House's lane (after the record pass, oldest first, every close since the registration back to its 45-day look-back
+  that the hourly re-decision no longer reaches; one it still reaches is decided again whole by it, as before) and by
+  the CLI's `catchup` (also `decide-close --day D --evl4-only`). Only those rows are decided: the earlier rows of such a
+  close are never decided again (their receipts, finality and intents stay release 1019b's: an event of theirs stored
+  after the close left the reach is still not decided, where a whole re-decision would decide it).
+  league/tests/test_events_evl4.py `TheDeployGap` (the CLI, after a synthetic week decided by the code without the
+  rows), `TheHouse` (the House started on a Thursday after release 1019b decided Monday) and `TheJudge` (the receipts).
+- **An issuer's 20 sessions' bars, all of them** (league/events/run.py `eligibility`, found by `TheDeployGap`; it
+  predates this file): the bars were fetched only when the LAST of the entry session's 20 sessions had none, so an
+  issuer judged first for a later session (CCC's 8-K of a Tuesday is EVL-8K-READ-O1's at Wednesday's open) read as
+  ineligible when judged afterwards for the earlier one (the deploy gap's backfill; a re-decision of an older session).
+  Now the bars are fetched when any of the 20 is missing. A live decision is never judged after a later session, so
+  real money reads as before; the synthetic week decides the same intents for every earlier program.
+- **After the deploy** (the deploy step): the House decides every close from 16:01:05Z Oct 19 on, the new rows in
+  shadow at once; within its first turns (after the record pass) it runs `decide-close-evl4` for each close release
+  1019b decided that its re-decision no longer reaches. VERIFY (read-only, on the box, an hour after the start):
+  `sqlite3 -readonly /workspace/state/events/events.sqlite "SELECT job, status FROM receipts WHERE job LIKE
+  'decide-close-evl4:%' ORDER BY id"` lists each such close `ok` (`pending` waits on verdicts and is decided again by
+  itself), and from the release's tree `python3 -c "import datetime as d; from league.events import book as EB, screen
+  as SN; print(SN.made_without(EB.Lane('/workspace/state/events/events.sqlite'), d.date.today()))"` (the store opened
+  `mode=ro`) prints `{}` (the hourly re-decision names the last three sessions' closes). Real money at the first
+  decision after the release is live and the auction paper proof's BUY stage has passed (PREREG-EVL-3 section 2).
+  ROLLBACK: the previous release; the new rows' intents and lots stay in the stores, their lots exit by their own
+  plans, and the old code seats none of them; on a later redeploy the closes the old code decided are decided again
+  for the new rows the same way.
+
+### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; in release 1019c's head `f85cc152`, so in release 1019d too; A82)
 
 - **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,
   an 8-K under each co-registrant. The House's backfill (`EventLane._backfill`) marked a day done only when the
@@ -76,7 +224,7 @@ programs trades real money at learning size.
   `verdicts: {needed, answered}`; a kept program is asked no verdict, so its events are not in the tally and
   `evl_verdicts` never waits on them (league/events/__init__.py's receipts contract names `kept` now). The two
   release entries here and in docs/operations.md stand side by side, with this release's deploy above them.
-- **Known issue, fixed in release 1019d** (A76): budget rule 3 at the UTC day boundary when the cap FALLS (until the
+- **Known issue, still open** (A76; release 1019d does not carry its fix, A78 having made 1019d PREREG-EVL-4's release; the fix is owed in a later release, before the first day the cap falls): budget rule 3 at the UTC day boundary when the cap FALLS (until the
   budget job's first run of a UTC day the guard holds the previous day's research lines against counters reset at
   00:00 UTC, and `metered.observe` credits a cap to the day it was read as well as computed, keeping the higher). The
   cap moves only with realized profit; at no realized profit it is a constant $5, so it cannot bite before the lane's

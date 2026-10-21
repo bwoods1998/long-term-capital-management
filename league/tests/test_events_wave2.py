@@ -74,8 +74,8 @@ class Wave2Test(unittest.TestCase):
                          {"EVL-ERN-REACT-ON", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON", "EVL-CTRL-NEWS-DAY-ON"})
         self.assertTrue(all(p.prereg == 1 and p.exit_at == "close" and p.rule in ("min2", "none") or not p.reads
                             for p in P.PROGRAMS[:9]))
-        self.assertEqual(set(SC.SEATABLE[4:]), set(WAVE2[:5]))
-        self.assertEqual(set(SC.RECORDS[5:]), set(WAVE2[5:]))
+        self.assertEqual(set(SC.SEATABLE[4:9]), set(WAVE2[:5]))
+        self.assertEqual(set(SC.RECORDS[5:9]), set(WAVE2[5:]))
         self.assertEqual(SC.CONTROLS["EVL-ERN-GUIDE-O1"], "EVL-CTRL-ERN-ALL-O1")
         self.assertEqual(SC.CONTROLS["EVL-NEWS-READ-ON"], "EVL-CTRL-NEWS-DAY-ON")
         self.assertTrue(all(SC.HOLDS[p] == 1 for p in WAVE2 if p != "EVL-INS-BUY-O5"))
