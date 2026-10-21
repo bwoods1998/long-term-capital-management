@@ -38,7 +38,7 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
-### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; league/events/done.py and the hook in house.py ship as House files (house.py, outside the wall); the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
+### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py with the rule file is not yet behind it; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
 
 - **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
   `league/events/done.py` `RULE_SHA256` and a test (`2f92a153` at this entry).
