@@ -49,7 +49,11 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
   most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
   (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
-  book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
+  book calls it; nothing here re-implements it). THE WALLS' EQUITY (release 1019f, the reading that trades less): the
+  10% a name (the decision's skip and the send's caps) and the 100% book are judged on the LOWER of E and the
+  account's current equity as the House last read it, since the gateway judges the current equity (a buy sized on a
+  higher E met its final refusal there); the target and the one-share rule stay on E at the previous close. At most
+  `max_open` positions a program (learning 8, Probe 6, Sized 8).
 - THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
   the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
   every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the
@@ -72,6 +76,13 @@ EVENT INTENT of the book (`eq_intents.iid`): which program and event, its band, 
 order type, the symbol and issuer, the rank, the previous close and the limit, sigma and the weight, the exit plan of a
 buy, the ladder's rung of a sale, the lot it opened or sells; `eq_event_decisions`, one row a session and auction the
 book decided (what it read and planned, counts only).
+
+THE PROBE SIZE'S RECORD (release 1019f, the audit's capacity and probe lenses): a buy's side row keeps `target_usd`,
+the dollars its band's target asked (`position_share` x E at the previous close, as `size_entry` was asked them), and
+`binding`, which constraint cut it below that (`BINDINGS`: cash, budget, invested, name_wall, whole_shares; gateway
+when the gateway's final refusal ended it; NULL when none did), written at each sizing of its send; the buy's row in
+the lane's `real_fills` carries both (with venue when the venue filled less than the order asked), so the band label
+"probe" is no longer the only record of a Probe event's size. Nothing here reads them; the band rules count as before.
 
 Standard library only.
 """
@@ -183,12 +194,35 @@ CREATE TABLE IF NOT EXISTS eq_event_intents (
     rank_key REAL, adv20 REAL, prev_close TEXT, limit_px TEXT, sigma REAL, hold INTEGER, weight TEXT NOT NULL,
     exit_day TEXT, exit_at TEXT,        -- a buy's exit plan
     lid INTEGER, rung INTEGER NOT NULL DEFAULT 0,                              -- a sale's lot and its ladder rung
-    decided_at TEXT NOT NULL, why TEXT, created_at REAL NOT NULL);
+    decided_at TEXT NOT NULL, why TEXT, created_at REAL NOT NULL,
+    target_usd TEXT, binding TEXT);     -- a buy's band target (Decimal dollars) and what cut it (release 1019f)
 CREATE INDEX IF NOT EXISTS eq_event_intents_lid ON eq_event_intents(lid);
 CREATE TABLE IF NOT EXISTS eq_event_decisions (
     day TEXT NOT NULL, at TEXT NOT NULL, decided_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
     created_at REAL NOT NULL, PRIMARY KEY (day, at));
 """
+#: THE COLUMNS ADDED TO THE BOOK'S TABLES AFTER THEIR FIRST RELEASE, each by its own statement, run by
+#: league/equity/live.py `EquityBook._adapter` after `SCHEMA` where the table lacks the column (PRAGMA table_info, read
+#: afresh; another process's first open adding it between the look and the ALTER is read as done), so a state from
+#: before them gains them in place and every older row reads NULL. Release 1019f: an event buy's band target in Decimal
+#: dollars (`target_usd`) and the constraint that cut it below that (`binding`, `BINDINGS`), written at its sizing and,
+#: for the gateway's final refusal, at its end (the module docstring, "THE PROBE SIZE'S RECORD").
+SCHEMA_COLUMNS = {"eq_event_intents": {"target_usd": "ALTER TABLE eq_event_intents ADD COLUMN target_usd TEXT",
+                                       "binding": "ALTER TABLE eq_event_intents ADD COLUMN binding TEXT"}}
+#: What may cut a real event buy below its band's target (league/events/bands.py `BINDINGS`, the lane's own list).
+BINDINGS = BA.BINDINGS
+#: `league.equity.sizing.size_entry`'s binding rule (`Sized.binding`) as the record names it (`binding_of`): the
+#: name's book-wide 10% (`instrument`) and the program's own share of it (`sleeve_cap`) are the NAME WALL; the program's
+#: free cash (`sleeve_cash`, the House-wide figure for an event program) and the House-wide cash, or cash below zero, are
+#: CASH; the 100% book is INVESTED; the loss budget at the lot's weight is BUDGET.
+SIZING_BINDINGS = {"instrument": "name_wall", "sleeve_cap": "name_wall", "sleeve_cash": "cash", "cash": "cash",
+                   "cash_negative": "cash", "invested": "invested", "budget": "budget"}
+
+
+def binding_of(sized: str | None) -> str | None:
+    """The record's name (`BINDINGS`) for `size_entry`'s binding rule `sized`; None for one that is no cap of the
+    list (`intent`: no cap cut the dollars; `short_held`, `min_order`: refusals the intent's why names)."""
+    return SIZING_BINDINGS.get(str(sized or ""))
 
 
 # ----------------------------------------------------------------------------------------------------------- settings
@@ -418,8 +452,9 @@ def sessions_back(day: dt.date, n: int) -> dt.date:
 class FillWriter:
     """The lane's store opened for the book's one write, `real_fills`, in the shape league/events/bands.py
     `record_fill` takes a store (`.db`, `.tx()`): an EXISTING file only (never created here, nor any table: the lane's
-    store is made by the lane or its migration), with a short busy timeout (the House's minute never waits long on the
-    lane's own writer)."""
+    store is made by the lane or its migration; `write_fills` runs the lane's own `store.migrate_fills` on it, which
+    only adds release 1019f's nullable columns to an existing table), with a short busy timeout (the House's minute
+    never waits long on the lane's own writer)."""
 
     def __init__(self, path: str | Path, *, timeout: float = 5.0):
         self.path = Path(path)
@@ -444,11 +479,14 @@ class FillWriter:
 
 def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> int | None:
     """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized and demotion from them): each of
-    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}) written into the lane's `real_fills` by
-    the lane's own league/events/bands.py `record_fill`: ONE ROW PER (program, version, event, side), idempotent; a
-    write again changes only its fee (the broker's posted fee). Returns how many rows were new or changed; None when
-    there is no lane store or it holds no `real_fills` table yet (nothing written: the book writes them once it does).
-    Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
+    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}, and release 1019f's `target_usd` and
+    `binding` for a buy) written into the lane's `real_fills` by the lane's own league/events/bands.py `record_fill`:
+    ONE ROW PER (program, version, event, side), idempotent; a write again changes only its fee (the broker's posted
+    fee). A store whose `real_fills` predates release 1019f's two columns gains them first (league/events/store.py
+    `migrate_fills`, the lane's own additive migration), so no buy row is written without its target. Returns how many
+    rows were new or changed; None when there is no lane store or it holds no `real_fills` table yet (nothing written:
+    the book writes them once it does). Raises `sqlite3.Error` when the store cannot be written (asked again next
+    minute)."""
     if root is None:
         return None
     path = lane_path(root)
@@ -462,12 +500,17 @@ def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> i
         missing = [c for c in FILL_COLUMNS if c not in columns]
         if missing:
             raise sqlite3.OperationalError(f"{FILLS_TABLE} lacks {', '.join(missing)}")
+        if any(c not in columns for c in S.FILL_COLUMNS_DDL):
+            S.migrate_fills(store.db)
         changed = 0
         for row in rows:
+            target = row.get("target_usd")
             changed += bool(BA.record_fill(store, program=str(row["program"]), version=int(row["version"]),
                                            event=str(row["event"]), side=str(row["side"]), qty=float(row["qty"]),
                                            price=float(row["price"]), fee=float(row["fee"] or 0),
-                                           filled_at=str(row["filled_at"]), band=str(row["band"])))
+                                           filled_at=str(row["filled_at"]), band=str(row["band"]),
+                                           target_usd=None if target is None else float(target),
+                                           binding=row.get("binding")))
         return changed
     finally:
         store.close()
@@ -889,3 +932,5 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish"]
+#: (release 1019f: the probe size's record)
+__all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]

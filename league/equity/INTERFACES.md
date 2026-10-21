@@ -1491,7 +1491,9 @@ path.
   ("limit"; "market" for an event sale), migrated in place; `book.SCHEMA` adds `eq_event_programs` (one row a version 2
   program: its band as last read from the lane, since, why), `eq_event_intents` (one row an event intent, keyed by
   `eq_intents.iid`: program, version, event, side, band, tif, otype, symbol, cik, day, at, rank_key, adv20, prev_close,
-  limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at) and `eq_event_decisions` (one row a session
+  limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at; release 1019f's nullable `target_usd`, a
+  buy's band target in Decimal dollars, and `binding`, the constraint that cut it, `book.BINDINGS`, added in place to a
+  state from before them by `book.SCHEMA_COLUMNS` through `EquityBook._add_columns`) and `eq_event_decisions` (one row a session
   and auction: counts only; `sale_to_later` {skipped program: {selling program: n}} when the sale gate skipped an
   earlier row's pick because a later row's lot sells the name at that auction: PREREG-EVL-4 section 1.3's count,
   `_event_sale_takers`, also in the decision's `equity.event_decide` record). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
@@ -1510,13 +1512,18 @@ path.
   (`_event_open_block`) and its band (`_event_seat_block`) in place of `equity_money.enabled` and the SPY day-order
   proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session; `_event_send` orders the buys by
   ROOM (`book.room_key`). `_size_event` calls `size_entry` with `usd` = the band's `position_share` x E (E the
-  `last_equity` of the account, never above the sizing equity), `position_share` = `per_name_share` (the name's
+  `last_equity` of the account, never above the sizing equity), `E` and `sleeve_equity` = `wall_equity(E, account)`
+  (release 1019f: the lower of E and the account's current `equity`, the gateway's figure, so the instrument, sleeve
+  and invested caps trade less; `_event_gate`'s name wall reads it too), `position_share` = `per_name_share` (the name's
   book-wide value as `account_symbol_value`), `weight` = the lot's own; whole shares; one share by `size_entry` at
-  `usd` = the limit, at learning only when the limit is at most `one_share_max.learning` x E. `probe_figures` weighs an
+  `usd` = the limit, at learning only when the limit is at most `one_share_max.learning` x E. Release 1019f: each
+  answer writes the buy's `target_usd` and `binding` on its side row (`_event_sized`, `_event_cut`), the gateway's
+  final refusal `binding` "gateway" (`_event_refused_at_gateway`). `probe_figures` weighs an
   open event lot by `event_lot_weight` (its `info.evl.weight`; 0.40 from the ladder's first rung or when unreadable; 1
   once at 0) and a working event buy by its side row's weight, and counts every closed event lot in `closes` whatever
   its band. `_event_fills` writes each event lot's buy (once its buy ended) and sale (once closed; again when its fees
-  move) into the lane's `real_fills` through `book.write_fills`.
+  move) into the lane's `real_fills` through `book.write_fills` (release 1019f: a buy's row with its side row's
+  `target_usd` and `binding`, "venue" when no cap cut it and the cross filled short, `_event_size_record`).
 - **The adapter** (league/events/book.py; standard library only; plumbing, in no identity): `settings`, `seatable()`,
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
   `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
@@ -1535,7 +1542,9 @@ path.
   changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
   and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `BANDS`,
   `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5,
-  `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`. THE LANE'S OWN MODULES IT USES (release 1019b; no stand-in in
+  `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`; release 1019f's `SCHEMA_COLUMNS` ({table: {column: ALTER}}),
+  `BINDINGS` (bands.py's), `SIZING_BINDINGS` and `binding_of(sized) -> str | None` (`size_entry`'s cap as the record
+  names it). THE LANE'S OWN MODULES IT USES (release 1019b; no stand-in in
   the book or its tests): league/events/programs.py `SEATING`, `BY_KEY` and `Program.can_seat` (`seatable()` is
   `SEATING`, every version that can seat: version 2 of the nine, version 1 of PREREG-EVL-4's three, in the tables'
   order; `program_of` reads `BY_KEY` and `can_seat`); league/events/bands.py `bands(store)` (the band reader:
@@ -1543,7 +1552,9 @@ path.
   beside) and `record_fill(store, ...)` (the fill write-back, one row a (program, version, event, side), a write again
   changing only its fee), on a `FillWriter` (the existing store file only, a 5 s busy timeout); the store's tables
   `bands(program, version, band, since, why)` and `real_fills(program, version, event, side, qty, price, fee,
-  filled_at, band)` as league/events/store.py's schema makes them. league/tests/test_events_book.py `TheRealLane` runs
+  filled_at, band, target_usd, binding)` as league/events/store.py's schema makes them (release 1019f's two nullable
+  columns added to an older store by `store.migrate_fills`, at every open and by `write_fills`; `record_fill` takes
+  them as keywords, a buy's only, written once). league/tests/test_events_book.py `TheRealLane` runs
   the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
