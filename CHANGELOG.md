@@ -80,6 +80,25 @@ programs trades real money at learning size.
   no birth is registered and nothing else changes. Rollback: the release before it (the births tables are additive and
   ignored by it; a registered birth then stops deciding and trading, its open lots exit by their own plans).
 
+### WP4: the public site follows the event lane, on `feat/site-events` (unreleased; with personal-site branch `capital/event-lane`, either repository may deploy first; no identity, digest or money row moves)
+
+- **Why.** The owner's goal of Oct 19, 2026: "Website and repo docs stay current with every change: evolve the design,
+  no redesign". The capital page keeps its five sections; its Agents board and Positions follow the lane.
+- **What the House publishes.** One new VERSIONED key, `lane_v1` (`league/site_lane.py` reads it read-only;
+  `league/publish.py` `site_lane` allowlists it): each program (version 2 of the nine seatable ones, the records and
+  controls as "shadow") with a plain name, its band, its settled events real and shadow and its next look's events to go;
+  the funnel of the lane's steps; the goal's checkpoint (settled real-money events at Probe size or above, next reading
+  every 100: 0 until a program is at Probe); the verdicts' spend; and the equity book's lots (the event lane's and the
+  older index-fund lane's) as positions: each lot's trades, at the book's own value while open, adding up with the
+  options rows, Other and Unreconciled to the account's Profit to the cent (their fees and dividends are already in
+  Other). `compute.claude_usd` now holds the lane's verdicts (null while the lane's store cannot be read). Every older
+  block is byte for byte what it was; a site that refuses the key gets the checkpoint without it and is offered it
+  again half an hour later. Contract: `league/tests/fixtures/site_contract.md`; fixture `site_checkpoint_lane.json`;
+  tests `league/tests/test_site_lane.py` (17, both Pythons); `site_schema.js` refreshed from the site's branch.
+- **What the page draws** (the site's PR): the Agents board as Shadow, Learning, Probe and Sized with the gold "Real
+  money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
+  `...&window=1&lane=1`; every older read unchanged.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head

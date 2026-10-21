@@ -342,6 +342,18 @@ market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a u
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
+## On the public site (WP4, Oct 19, 2026; branch `feat/site-events`, not yet deployed)
+
+The House publishes the lane under one versioned key, `lane_v1` (`league/site_lane.py` reads it read-only;
+`league/publish.py` `site_lane` allowlists it; the contract is `league/tests/fixtures/site_contract.md`): each program
+(version 2 of the nine seatable ones, and the records and controls as "shadow"), with a short plain name, its band, its
+settled events real and shadow and its next look's events to go; the funnel of the lane's steps; the goal's checkpoint
+(settled real-money events at Probe size or above, read every 100); the verdicts' spend, which also joins Claude's part
+of the costs; and the equity book's lots as positions, which add up with the options rows and the account's other
+activity to the account's Profit to the cent. The page (personal-site branch `capital/event-lane`) draws the Agents board
+as Shadow, Learning, Probe and Sized with the gold line under Learning, lists the lots among the positions and counts the
+checkpoint in events beside the Agents heading; an older page and an older site see nothing new.
+
 ## Real money (release R2, shipped switched on in release 1019b; deployed 21:00Z Oct 19, 2026)
 
 [PREREG-EVL-3](prereg/PREREG-EVL-3.md) (the owner's goal as re-set at 05:15Z Oct 19, 2026): VERSION 2 of each of the

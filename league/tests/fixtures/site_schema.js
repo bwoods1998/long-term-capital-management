@@ -1,12 +1,12 @@
-// Shared browser/server boundary for /capital/: AI agents trading options on the Brokerage Account.
+// Shared browser/server boundary for /capital/: AI agents reading company news and trading stocks on the Brokerage Account.
 // Every published event and checkpoint passes these checks on the server before it is stored, and
 // again in the browser before it is rendered. This file stays free of Node and DOM APIs so the
 // Worker, the test runner and the page import the same rules.
 //
 // Schema 2 (Sept 26, 2026, the options swarm). The page starts over: one Brokerage Account, a swarm
 // of agents in five bands, the Gym's pace, open structures, the ledger of real positions (Sept 28), the
-// practice league (Sept 29), every input cost by part and the incubator route (Sept 30), and the tape of
-// the agents' decisions.
+// practice league (Sept 29), every input cost by part and the incubator route (Sept 30), the event lane's view under
+// the versioned key `lane_v1` (Oct 19), and the tape of the agents' decisions.
 // Every block is an allowlist: exact keys, typed values, nothing else. The data licenses behind the
 // swarm (the option quote feeds) forbid publishing quotes, bids, asks, spreads, implied vols, greeks,
 // surfaces or fitted parameters, so no block has a field for any of them, and every sentence an agent
@@ -698,6 +698,95 @@ export function validRationale(value, checkpoint, at, { publicRead: _publicRead 
   return trades.every(trade => rows.has(trade?.id) && validRationaleTrade(trade, rows.get(trade.id)));
 }
 
+// ------------------------------------------------------------------------ the event lane (Oct 19, 2026)
+// The owner's goal of Oct 19, 2026: one lane of pre-registered rules that read company news (SEC filings, insider buys,
+// headlines) and trade stocks, every rule with real money at learning size from its first event beside a full-size
+// shadow, promoted to Probe and Sized by tests counted in settled events. The House adds its view under a VERSIONED key
+// (`lane_v1`): every block before it stays as it was, the Worker serves it only to the page that asks for it
+// (`LANE_READ`), and a change an older page could not read is a new key (`lane_v2`) beside this one. Built key by key on the
+// House (league/publish.py `site_lane`) from what league/site_lane.py reads, and checked again here:
+// - `programs`: one row per registered program, {id, name, band, real, shadow, look}: a short plain name, its band (one of
+//   `LANE_BANDS`: "shadow" for a program that never trades real money), its settled events with real money and in shadow,
+//   and its next look ({need, to_go}: the look's threshold of settled events and how many it still lacks) or null;
+// - `funnel`: how many programs ever stood on each step since the lane's registration, each chain only narrowing;
+// - `checkpoint`: {events, next}, the settled real-money events at Probe size or above that the goal's Done counts, and the
+//   next reading (every `CHECKPOINT_EVERY`);
+// - `verdict_usd`: the lane's Claude verdicts (inside `compute.claude_usd` too);
+// - `lots`: the equity book's lots {as_of, rows, earlier, pnl_usd}: each row what it held (a symbol and shares, never a
+//   price), whose (`owner`: an event program the view lists, or an older lane's agent), the band it was bought at, when (to the
+//   minute) and its dollars (its trades, and at the House's own value while open), the rows and `earlier` adding up to
+//   `pnl_usd` exactly. The broker's fees and the dividends stay in the positions table's other activity, so with the
+//   positions ledger the lots add up to the account's Profit less only what the marks of open positions differ by.
+export const LANE_KEY = 'lane_v1';
+export const LANE_BANDS = ['shadow', 'learning', 'probe', 'sized', 'retired'];
+export const LANE_ROUTES = ['learning', 'probe', 'sized'];
+export const LOT_SOURCES = ['program', 'agent'];
+export const LANE_FUNNEL_KEYS = ['since', 'shadow', 'learning', 'probe', 'sized', 'retired'];
+export const LANE_FUNNEL_CHAINS = [['sized', 'probe', 'learning', 'shadow'], ['retired', 'learning']];
+export const MAX_PROGRAMS = 64;
+export const MAX_LOTS = 300;
+export const CHECKPOINT_EVERY = 100;
+export const PROGRAM_FIELDS = ['id', 'name', 'band', 'real', 'shadow', 'look'];
+export const LOT_FIELDS = ['id', 'source', 'owner', 'symbol', 'route', 'shares', 'open_shares', 'status', 'opened_at', 'closed_at', 'pnl_usd'];
+export const LOTS_FIELDS = ['as_of', 'rows', 'earlier', 'pnl_usd'];
+export const LANE_FIELDS = ['as_of', 'programs', 'funnel', 'checkpoint', 'verdict_usd', 'lots'];
+// A program's plain name (the House's fixed table): letters, digits, spaces, commas and hyphens, at most 40.
+export const programName = value => typeof value === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9 ,-]{0,38}[A-Za-z0-9])?$/.test(value) && words(value, 40);
+// A share quantity: plain digits, at most six decimals.
+export const sharesAmount = value => typeof value === 'string' && /^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,6})?$/.test(value);
+export const lotId = value => typeof value === 'string' && /^lot:\d{1,12}$/.test(value);
+export function validProgram(value) {
+  if (!exact(value, PROGRAM_FIELDS) || !agentId(value.id) || !programName(value.name) || !LANE_BANDS.includes(value.band)
+    || !counter(value.real) || !counter(value.shadow)) return false;
+  const look = value.look;
+  if (look !== null && !(exact(look, ['need', 'to_go']) && integer(look.need, 1, 1000000000) && integer(look.to_go, 0, look.need))) return false;
+  // A program in shadow never holds real money and has no look; a retired one has no look.
+  if (value.band === 'shadow' && (value.real !== 0 || look !== null)) return false;
+  return value.band !== 'retired' || look === null;
+}
+export function validLaneFunnel(value) {
+  if (!exact(value, LANE_FUNNEL_KEYS) || !instant(value.since) || !LANE_FUNNEL_KEYS.slice(1).every(key => nullable(value[key], counter))) return false;
+  return LANE_FUNNEL_CHAINS.every(chain => {
+    const known = chain.map(key => value[key]).filter(count => count !== null);
+    return known.every((count, index) => index === 0 || known[index - 1] <= count);
+  });
+}
+export function validLot(value, programs, publishedAt) {
+  if (!exact(value, LOT_FIELDS) || !lotId(value.id) || !LOT_SOURCES.includes(value.source)) return false;
+  // Whose: an event program the view lists (`source` "program"), or an older lane's agent by its id ("agent").
+  if (value.source === 'program' ? !programs.has(value.owner) : !agentId(value.owner)) return false;
+  if (!underlying(value.symbol) || !nullable(value.route, route => LANE_ROUTES.includes(route)) || !sharesAmount(value.shares)
+    || !sharesAmount(value.open_shares) || scaledAmount(value.shares) <= 0n || scaledAmount(value.open_shares) > scaledAmount(value.shares)
+    || !POSITION_STATUSES.includes(value.status) || !notAfter(value.opened_at, publishedAt) || !minuteInstant(value.opened_at)
+    || !nullable(value.pnl_usd, centsAmount)) return false;
+  // Open holds shares and has not closed; closed holds none and closed after it opened.
+  return value.status === 'open' ? scaledAmount(value.open_shares) > 0n && value.closed_at === null
+    : scaledAmount(value.open_shares) === 0n && notAfter(value.closed_at, publishedAt) && minuteInstant(value.closed_at)
+      && Date.parse(value.closed_at) >= Date.parse(value.opened_at);
+}
+export function validLots(value, programs, publishedAt) {
+  if (!exact(value, LOTS_FIELDS) || !notAfter(value.as_of, publishedAt)) return false;
+  const { rows } = value;
+  if (!Array.isArray(rows) || rows.length > MAX_LOTS || new Set(rows.map(row => row?.id)).size !== rows.length
+    || !rows.every(row => validLot(row, programs, publishedAt))) return false;
+  if (!nullable(value.earlier, validEarlier) || !nullable(value.pnl_usd, centsAmount)) return false;
+  if (value.pnl_usd === null) return true;
+  const amounts = [...rows.map(row => row.pnl_usd), value.earlier ? value.earlier.pnl_usd : '0'];
+  return !amounts.some(amount => amount === null)
+    && amounts.reduce((sum, amount) => sum + scaledAmount(amount), 0n) === scaledAmount(value.pnl_usd);
+}
+export function validLane(value, publishedAt) {
+  if (!exact(value, LANE_FIELDS) || !notAfter(value.as_of, publishedAt)) return false;
+  const { programs, checkpoint } = value;
+  if (!Array.isArray(programs) || programs.length > MAX_PROGRAMS || new Set(programs.map(row => row?.id)).size !== programs.length
+    || !programs.every(validProgram)) return false;
+  if (!nullable(value.funnel, validLaneFunnel)) return false;
+  if (!nullable(checkpoint, point => exact(point, ['events', 'next']) && counter(point.events)
+    && point.next === (Math.floor(point.events / CHECKPOINT_EVERY) + 1) * CHECKPOINT_EVERY)) return false;
+  if (!nullable(value.verdict_usd, amount => money(amount) && centsAmount(amount))) return false;
+  return nullable(value.lots, lots => validLots(lots, new Set(programs.map(row => row.id)), publishedAt));
+}
+
 // Performance over time: one point of the Worker's score archive from a checkpoint, measured against its own
 // `published_at` only. Profit as published while fresh; the itemized bill's total while fresh; and Net by the page's own
 // rule (`netNumber` in capital.js): Profit without open gains or an unreconciled gain, less the bill. Each null when
@@ -742,8 +831,8 @@ export const MAX_NAMED_ROWS = MAX_AGENTS + MAX_POSITIONS + MAX_PRACTICE_ROWS;
 export const MAX_NAME_BYTES = ',"display_name":""'.length + 40;
 export const MAX_PUBLIC_CHECKPOINT_BYTES = MAX_CHECKPOINT_BYTES + MAX_NAMED_ROWS * MAX_NAME_BYTES;
 // Blocks a newer House adds, each optional so an older House's checkpoint still validates: Profit (`trading`), the
-// positions ledger beside it, the practice league, and the swarm window's levels and rationale.
-export const OPTIONAL_CHECKPOINT_FIELDS = ['trading', 'positions', 'practice', 'levels', 'rationale'];
+// positions ledger beside it, the practice league, the swarm window's levels and rationale, and the event lane's view.
+export const OPTIONAL_CHECKPOINT_FIELDS = ['trading', 'positions', 'practice', 'levels', 'rationale', LANE_KEY];
 export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
   try {
     if (!plainObject(checkpoint) || !CHECKPOINT_FIELDS.every(field => Object.hasOwn(checkpoint, field))
@@ -769,6 +858,7 @@ export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
     // The swarm window reads the roster and the ledger, so it is checked after them.
     if (Object.hasOwn(checkpoint, 'levels') && !nullable(checkpoint.levels, value => validLevels(value, checkpoint, at))) return false;
     if (Object.hasOwn(checkpoint, 'rationale') && !nullable(checkpoint.rationale, value => validRationale(value, checkpoint, at, { publicRead }))) return false;
+    if (Object.hasOwn(checkpoint, LANE_KEY) && !nullable(checkpoint[LANE_KEY], value => validLane(value, at))) return false;
     return byteLength(checkpoint) <= (publicRead ? MAX_PUBLIC_CHECKPOINT_BYTES : MAX_CHECKPOINT_BYTES);
   } catch { return false; }
 }

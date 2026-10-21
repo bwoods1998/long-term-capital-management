@@ -937,8 +937,8 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 ## What is public
 
 The House publishes to [blakewoods.us/capital](https://blakewoods.us/capital/), which says "AI
-agents trading options." and calls the account the "Brokerage Account": no venue is named anywhere a
-visitor reads. It shows the account's balance from its equity at the reset (Sept 26, 06:25:30Z,
+agents reading company news and trading stocks." (since Oct 19, 2026; "AI agents trading options." before) and calls the
+account the "Brokerage Account": no venue is named anywhere a visitor reads. It shows the account's balance from its equity at the reset (Sept 26, 06:25:30Z,
 $481.65), total profit since the reset net of deposits and withdrawals, the running timer, each agent's family,
 mechanism, band and record, the Gym's pace, open structures with their maximum loss and P&L, and the agents'
 decisions in their own words. With Release A and the site's update of Sept 30 (personal-site PR #17) it also shows:
@@ -968,6 +968,14 @@ has climbed, with no prose on the page:
 - **Pinning:** every agent a real position names stays on the public roster, retired or not.
 
 It is an opt-in read (`...&practice=1&window=1`), and a site that predates it gets the checkpoint without it.
+
+**The event lane's view** (Oct 19, 2026; `league/site_lane.py`, the versioned key `lane_v1`): the page's Agents board is
+the lane's four steps (Shadow, Learning, Probe, Sized; the gold "Real money" line under Learning, since a program trades
+real money from its first event), a dot for each program with a ring toward its next look; the Positions list the
+equity book's lots ("F shares", the program's plain name, the band it was bought at, its shares and dollars) among the
+options rows, still adding up to Profit to the cent; and beside the Agents heading the goal's checkpoint, counted in
+settled real-money events at Probe size or above ("0 / 100 events"). The verdicts' Claude spend is in the costs. Every
+older block and read is unchanged; the contract is `league/tests/fixtures/site_contract.md`.
 
 **The desk's daily page** (V3-A part 1, from its deploy): the House commits one page a day to
 [runs/desk/](runs/desk/README.md) through the gateway: the release, self-deploys and rollbacks, realized P&L, costs by

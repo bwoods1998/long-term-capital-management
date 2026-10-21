@@ -627,8 +627,9 @@ iterating, skip it by running the modules you touched.
 (the fittings, the seat guard, the desk-fair drain, the invariants, "no such order" on two looks and
 the revival, the venue's reason, slices held for the open); each failed before its fix.
 
-`league/tests/fixtures/site_contract.md` is what the site accepts, with the two JSON fixtures the
-site's own validators are tested against.
+`league/tests/fixtures/site_contract.md` is what the site accepts, with the JSON fixtures the
+site's own validators are tested against (`site_checkpoint_lane.json`, Oct 19, 2026: the event lane's view under the
+versioned key `lane_v1`, `test_site_lane.py`).
 
 ## The replay regression
 
