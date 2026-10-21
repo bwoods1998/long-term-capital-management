@@ -40,6 +40,9 @@ programs trades real money at learning size.
 
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
+- **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET
+  the night the release deploys (a night of births is a session of each birth's 8-block clock); `events.births` false
+  stays the stop.
 - **The captain's round on the House re-review's major (A89).** The review round's new `ins` branch in
   `league/events/book.py` `rows_for` let real money read a Form 4 CLUSTER judged over every Form 4 of the issuer in its
   window, including filings stored after the decision (A72's look-ahead). An `ins` (Form 4 cluster) birth is now a

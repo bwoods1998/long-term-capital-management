@@ -42,12 +42,13 @@ green on the exact head; release 1019d live first, and main at its head):
    desk's six commits a New York day shared); no order path, cap or `wrangler.jsonc` change. The running House sends
    no births append, so nothing changes until step 3.
 2. THE HOUSE from the same head, by the captain's ship script: `ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`
-   (`events.births` is false as shipped). Verify (read-only): promoted, `real_money` true, failures []; the ids
+   (`events.births` is TRUE as shipped: the captain's A90, so tonight's births job runs; it was false until
+   `99d8bddb`). Verify (read-only): promoted, `real_money` true, failures []; the ids
    `b60410ad` / `78022ca6` / `055e5313` / `a8d4cbd9` and the grant on `055e5313`; `release.live.equity.events.enabled`
    true; the next `decide-close:<day>` receipt `ok` with no `evl4_error`; `eq_event_programs` still twelve rows; the
    daily report's "Expected false passes: 1.2 ... of the lane's stated 3.0".
-3. BIRTHS ON: `league/config.json` `events.births` true (a one-line commit on main, deployed by the same ship script
-   before 21:15 ET of a session night). Verify after 21:15 ET: the lane's `births` receipt `ok`, its `budget` reading
+3. BIRTHS ON: shipped on in this head (A90: the births review said ship and a night of births is a session of every
+   birth's 8-block clock; the job's failure is a warning and costs at most $0.25). Verify after 21:15 ET: the lane's `births` receipt `ok`, its `budget` reading
    `used` 1.2 and `limit` 3.0 before any birth; at most three seatable births a night; each registered line in
    `docs/births/<night>.jsonl` on main and its row in the store's `births`; the next turn's decisions name each birth;
    ROOM puts every birth after the twelve PREREG seating versions; `lane.json` `verdict_usd_today` holds the births
