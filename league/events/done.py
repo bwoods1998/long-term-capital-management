@@ -481,8 +481,9 @@ def _attestations(path: Path) -> dict[str, Any]:
 
 def attested(cp: Mapping[str, Any], attestations: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
     """Rule item 4.8's attestation of checkpoint `cp`, or None: every attestation of its c names exactly its item-4.8
-    span (`from`, `to`), `steps` 0 (an integer), the sha256 of the record it was read from and a time `at` after the
-    span; one that says otherwise, or a different span, is no attestation (the reading less likely to pass)."""
+    span (`from`, `to`), `steps` 0 and the calls it read (`execs`, both integers), the sha256 of the record it was read
+    from and a time `at` at or after the span's end; one that says otherwise, or a different span, is no attestation
+    (the reading less likely to pass)."""
     q = (cp.get("items") or {}).get("no_captain") or {}
     if q.get("status") != UNVERIFIABLE or not q.get("from") or not q.get("to"):
         return None
@@ -491,11 +492,13 @@ def attested(cp: Mapping[str, Any], attestations: Sequence[Mapping[str, Any]]) -
     if not mine:
         return None
     to = _parse(q["to"])
+    def whole(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
     for a in mine:
         steps, at = a.get("steps"), _parse(a.get("at"))
-        if (a.get("from"), a.get("to")) != (q["from"], q["to"]) or not isinstance(steps, int) or isinstance(steps, bool) \
-                or steps != 0 or not isinstance(a.get("sha256"), str) or not a["sha256"] or at is None or to is None \
-                or at < to:
+        if (a.get("from"), a.get("to")) != (q["from"], q["to"]) or not whole(steps) or steps != 0 \
+                or not whole(a.get("execs")) or not isinstance(a.get("sha256"), str) or not a["sha256"] or at is None \
+                or to is None or at < to:
             return None
     return dict(mine[0])
 

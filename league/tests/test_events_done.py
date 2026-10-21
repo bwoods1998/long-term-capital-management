@@ -391,7 +391,7 @@ class TheItems(DoneCase):
         doc = self.read()
         good = attestation(doc, 300)
         for bad in ({"steps": 1}, {"steps": True}, {"steps": None}, {"from": "2026-11-01T00:00:00Z"}, {"sha256": ""},
-                    {"at": good["from"]}, {"c": 200}):
+                    {"at": good["from"]}, {"c": 200}, {"execs": None}, {"execs": -1}):
             got = self.read(history=doc["checkpoints"], attestations=[{**good, **bad}])
             self.assertFalse(got["done"]["holds"], bad)
         got = self.read(history=doc["checkpoints"], attestations=[good, {**good, "steps": 2}])
