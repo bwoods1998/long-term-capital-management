@@ -44,6 +44,29 @@ class Render(unittest.TestCase):
         self.assertEqual(comparable(summary), load("expected-summary.json"))
         self.assertEqual(summary["net"]["net_usd"], "-165.66")
 
+    def test_the_rules_are_the_reporters(self):
+        self.assertEqual((E.T0, E.FS), (PE.T0, PE.FINANCIAL_START))
+
+    def test_without_the_owners_typesafe_figure_the_bound_is_the_whole_meter(self):
+        summary = E.render(load("house.json"), load("library.json"), load("sail.json"), None, lib_meta={})
+        typesafe = [c for c in summary["costs"] if c["service"].startswith("TypeSafe")][0]
+        self.assertEqual(typesafe["usd"], "5.00")
+        self.assertFalse(summary["net"]["criterion_5_met"])
+
+    def test_p30_sums_the_trailing_thirty_new_york_days_of_realized_pnl(self):
+        summary = {"cutoff": "2026-11-05T21:00:00Z", "realized": {"by_close_day": [
+            {"day": "2026-10-06", "closed_positions": 1, "total_usd": "50.00"},
+            {"day": "2026-10-07", "closed_positions": 2, "total_usd": "-3.25"},
+            {"day": "2026-11-05", "closed_positions": 1, "total_usd": "1.10"}]}}
+        got = E.p30(summary)
+        self.assertEqual((got["usd"], got["from_day"], got["to_day"], got["closed_positions"]), ("-2.15", "2026-10-07", "2026-11-05", 3))
+
+    def test_the_cutoff_is_the_sessions_own_close(self):
+        self.assertEqual(E.zulu(E.cutoff_of(at("2026-10-05T20:10:00Z"))), "2026-10-05T20:00:00Z")
+        self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-27T18:10:00Z"))), "2026-11-27T18:00:00Z")  # an early close
+        self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-02T21:10:00Z"))), "2026-11-02T21:00:00Z")  # winter
+        self.assertEqual(E.zulu(E.cutoff_of(at("2026-10-10T12:00:00Z"))), "2026-10-09T20:00:00Z")  # a Saturday: Friday's
+
     def test_sails_one_cost_field_is_the_box_billing(self):
         """Sail's spend response since Oct 2026 (invented figures) carries one `cost_usd_nanos` a window where the split
         was: each window reads the same dollars as the split it replaces (was $0), and a window that carries no cost
@@ -69,29 +92,6 @@ class Render(unittest.TestCase):
         checks = [c for c in render(gone)["checks"] if "no cost field" in c]
         self.assertEqual(len(checks), 1, "one window without a cost: one check")
         self.assertIn("last24h", checks[0])
-
-    def test_the_rules_are_the_reporters(self):
-        self.assertEqual((E.T0, E.FS), (PE.T0, PE.FINANCIAL_START))
-
-    def test_without_the_owners_typesafe_figure_the_bound_is_the_whole_meter(self):
-        summary = E.render(load("house.json"), load("library.json"), load("sail.json"), None, lib_meta={})
-        typesafe = [c for c in summary["costs"] if c["service"].startswith("TypeSafe")][0]
-        self.assertEqual(typesafe["usd"], "5.00")
-        self.assertFalse(summary["net"]["criterion_5_met"])
-
-    def test_p30_sums_the_trailing_thirty_new_york_days_of_realized_pnl(self):
-        summary = {"cutoff": "2026-11-05T21:00:00Z", "realized": {"by_close_day": [
-            {"day": "2026-10-06", "closed_positions": 1, "total_usd": "50.00"},
-            {"day": "2026-10-07", "closed_positions": 2, "total_usd": "-3.25"},
-            {"day": "2026-11-05", "closed_positions": 1, "total_usd": "1.10"}]}}
-        got = E.p30(summary)
-        self.assertEqual((got["usd"], got["from_day"], got["to_day"], got["closed_positions"]), ("-2.15", "2026-10-07", "2026-11-05", 3))
-
-    def test_the_cutoff_is_the_sessions_own_close(self):
-        self.assertEqual(E.zulu(E.cutoff_of(at("2026-10-05T20:10:00Z"))), "2026-10-05T20:00:00Z")
-        self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-27T18:10:00Z"))), "2026-11-27T18:00:00Z")  # an early close
-        self.assertEqual(E.zulu(E.cutoff_of(at("2026-11-02T21:10:00Z"))), "2026-11-02T21:00:00Z")  # winter
-        self.assertEqual(E.zulu(E.cutoff_of(at("2026-10-10T12:00:00Z"))), "2026-10-09T20:00:00Z")  # a Saturday: Friday's
 
     def test_the_markdown_carries_the_net_and_p30(self):
         summary = E.render(load("house.json"), load("library.json"), load("sail.json"), load("external.json"),
