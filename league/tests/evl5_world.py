@@ -76,6 +76,7 @@ class Gateway(W4.Gateway):
         self.no_open = {"AAB"}
         self.default_open = DEFAULT_OPEN
         self.refuse: set[str] = set()
+        self.inactive: set[str] = set()       # (symbols Alpaca lists as inactive: never eligible)
 
     def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
         from league.events import store as S
@@ -83,8 +84,8 @@ class Gateway(W4.Gateway):
         params = dict(params or {})
         if path.endswith("/v2/assets"):
             self.gets.append((path, params))
-            return [{"symbol": t, "status": "active", "tradable": True, "class": "us_equity", "exchange": "NASDAQ"}
-                    for t in TICKERS]
+            return [{"symbol": t, "status": "inactive" if t in self.inactive else "active", "tradable": True,
+                     "class": "us_equity", "exchange": "NASDAQ"} for t in TICKERS]
         if path.endswith("/v2/stocks/bars"):
             symbols = [x for x in str(params["symbols"]).split(",") if x]
             end = S.parse_iso(params["end"])

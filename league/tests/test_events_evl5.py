@@ -314,8 +314,9 @@ class TheJudge(unittest.TestCase):
                               "PREREG-EVL-4's rows read the backfill from P alone")
 
     def test_an_8k_feed_gap_after_p_primes_close_decision_holds_their_looks_alone(self):
-        """The record passes: one that failed its 8-K read at Friday 17:00 ET (inside this file's span, before Monday's
-        09:00 ET) breaks EVL-NEWS-NIGHT2-ON's fast path for Tuesday's close; PREREG-EVL-4's span starts after it."""
+        """The record passes: no clean 8-K read from Friday 17:00 to 17:30 ET (inside this file's span, before Monday's
+        09:00 ET: a gap of more than 15 minutes in that feed's clean reads, whether A69 (i) is read pass by pass or, A84,
+        feed by feed) breaks EVL-NEWS-NIGHT2-ON's fast path for Tuesday's close; PREREG-EVL-4's span starts after it."""
         x = C.session(self.st, D)
         after = C.nth(self.st, D, 2)
         rid = self.st.start_receipt(f"decide-open:{after.day}", now=after.open_decide)
@@ -326,7 +327,7 @@ class TheJudge(unittest.TestCase):
         t = C.session(self.st, FRI).close_decide - dt.timedelta(minutes=10)
         while t <= after.open_decide + dt.timedelta(minutes=5):
             body = {"8-K": {"error": "timeout"}, "4": {"new": 0}, "news": {"stored": 0}} \
-                if et(FRI, 17, 0) <= t < et(FRI, 17, 0) + dt.timedelta(minutes=10) else whole
+                if et(FRI, 17, 0) <= t < et(FRI, 17, 30) else whole
             rid = self.st.start_receipt("record", now=t)
             self.st.finish_receipt(rid, "ok", body, now=t)
             t += dt.timedelta(minutes=5)
@@ -576,6 +577,31 @@ class TheSecondNight(WorldCase):
         marks = {r[0]: r[1] for r in self.st.db.execute("SELECT symbol, px FROM marks WHERE label='0930'")}
         self.assertEqual(marks["OOO"], None, "a minute with no trade is stored as such")
         self.assertEqual(marks["KKK"], 20.4)
+
+    def test_only_an_eligible_issuers_events_and_its_eligible_ticker(self):
+        """An issuer is ELIGIBLE when PREREG-EVL-1 section 2 makes its stock eligible for D; an article's one symbol
+        must be that eligible ticker. An issuer Alpaca lists as inactive is no event of any of the three."""
+        g, w = self.w.gw, self.w
+        g.inactive = {"LLL", "MMM"}
+        g.minute.update({"LLL": 19.0, "KKK": 19.0})
+        w.article("n-kkk", "KKK", knowable=et(PRIOR, 10, 0))
+        w.article("n-lll", "LLL", knowable=et(PRIOR, 10, 0))
+        w.filing("0000000012-26-000901", "LLL", accepted=et(PRIOR, 17, 30), items=("2.02",))
+        w.filing("0000000011-26-000901", "KKK", accepted=et(PRIOR, 17, 0), items=("2.02",))
+        self.close()
+        self.assertEqual(self.taken("EVL-ERN-DROP-ON", D), ["KKK"])
+        self.assertEqual(self.taken("EVL-NEWS-NIGHT2-ON", D), [], "KKK's own release is (ii): an 8-K in D's window")
+        self.assertIsNone(R.eligibility(w.ctx, D, [CIK["LLL"]], live=True, kind="close")[CIK["LLL"]])
+
+    def test_no_new_information_i_reads_every_ticker_secs_copy_maps_to_the_issuer(self):
+        """(i) reads a ticker that SEC's company_tickers.json (the copy D's decision reads) maps to the issuer's CIK:
+        every ticker of a CIK with two, upper case, from an article with any number of symbols."""
+        tickers = {"0000000001": [("AAA", "A Inc."), ("AAA.B", "A Inc.")], "0000000002": [("BBB", "B Inc.")]}
+        ciks_of = P.ciks_by_ticker(tickers)
+        self.assertEqual(ciks_of["AAA.B"], {"0000000001"})
+        named = P.named_ciks([{"named": ["aaa.b", "ZZZ"]}, {"named": []}], ciks_of)
+        self.assertEqual(named, {"0000000001"})
+        self.assertEqual(P.news_named(self.st, et(D, 9, 0), et(D, 10, 0)), [])
 
     def test_the_three_share_no_issuer_day_and_none_shares_an_auction_pair_with_the_twelve(self):
         """Section 1.2: the three programs share no (issuer, D) with one another and no (issuer, entry auction, exit

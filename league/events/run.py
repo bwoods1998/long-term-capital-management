@@ -1409,6 +1409,7 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         f = _rows_5(sub, day, by_ticker, {**elig, **elig4}, live=live, ask_only=ask_only,
                     earnings=earnings or not ask_only, night2=night2 or not ask_only, fetch_earnings=earnings,
                     fetch_night2=night2, needed=needed, unanswered=unanswered, check=check)
+        check("its intents")        # (reads that ended past the bound expire the part; its writes are never cut)
         if pre:
             out["evl5_pre"] = {"status": "stored", "cut": S.iso(cut), "survivors": len(f["survivors"]),
                                "eligible": f["counts"].get("survivors_eligible", 0),
@@ -1451,7 +1452,6 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 continue
             if ask_only:
                 continue
-            check(f"{prog.id}'s intents")
             cands = P.select(prog, rows, eligible=lambda c: table.get(c), verdict=read5, reaction=react5,
                              guidance=guidance5, gap=gap5)
             out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
