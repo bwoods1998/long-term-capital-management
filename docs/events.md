@@ -296,6 +296,21 @@ Probe stay; one position per issuer for real money (a lot open or closed within 
 sent, or an earlier decision's shadow intent of the issuer); the limit rounded down to the cent. The shadow keeps every
 event real money skips.
 
+A BUY THE VENUE CANCELLED AT ONCE GOES AGAIN ONCE (the captain's amendment A80 of Oct 21, 2026; on
+`fix/venue-cancel-retry`, not yet deployed). About a quarter of the lane's limit-on-open entries of Oct 20-21 ended
+"canceled", and a few limit-on-close ones: the venue accepted each and cancelled it 5-6 ms later, with no reason and
+nothing filled (not the price, the buying power, the size, the account or the gateway; the cause is the venue's and
+unknown). Each was an event real money missed (the shadow kept it), so real settled events came about 25% slower. Now an
+event ENTRY whose last order the venue cancelled within 60 s of that order's own submission (the venue's own
+`submitted_at` and `canceled_at`), nothing filled, is sent again ONCE: the same name, side, size rule, limit, time in
+force and type under a new client id, through every gate, the sizing, the day's order count (the re-send is one more
+order) and the window's cut-off again (the open's sends end at 09:27 ET, the close's at 15:49 on a full day), and the
+gateway judges every cap again (league/equity/live.py `_event_last`, `venue_cancel_ms`). A second cancel at once, or a
+cancel later than 60 s (the venue ends every unfilled auction order at its cross, minutes after it was sent), leaves the
+buy missed at the auction's end as before, its why naming the cancels; a sale is never re-sent so (its ladder carries
+it). The re-sent order's why says it is A80's one re-send and how many ms the venue took; the House says the session's
+count once, as an info alert after the close.
+
 STOPPING IT: `<state>/events/STOP` idles the LANE only (no record pass, decision or verdict ask); the House's event book
 still decides each auction on the store as it stands, so buys from events and verdicts already stored can still go.
 The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False

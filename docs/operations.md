@@ -3882,7 +3882,7 @@ session):
 | 09:16-09:27 ET | the `opg` sends (`_event_send`), each minute in this order: the exits due planned, the SALES sent, the decision (while not made), then the BUYS in ROOM's order (release 1019b's third review: a decision never holds a sale) |
 | close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; its T29 reads are bounded by the window: a failed request is sent again once, never after a timeout, and none starts in the window's last minute; a REACT row of a name not read is not taken and every other pick goes) |
 | close - 13 to - 11 min (15:47-15:49) | the `cls` sends, the sales before the decision and the buys after it |
-| auction + 2 min | the auction's end (`_event_finish`): a buy done or missed; a sale not filled climbs the ladder |
+| auction + 2 min | the auction's end (`_event_finish`): a buy done or missed (one the venue cancelled at once names the cancels: A80, below); a sale not filled climbs the ladder; after the close's, A80's one info alert of the session when the venue cancelled a buy at once |
 | every minute | the real fills of event lots written back to the lane (`_event_fills`) |
 
 - **The bands are the lane's** (PREREG-EVL-3 section 2; league/events/book.py `bands`, read at each session's first
@@ -3930,6 +3930,25 @@ session):
   make (`asset`, `bars`, `stock_eligible`, the rate) goes again next minute until the cut-off; any other refusal ends
   the buy at once in the gateway's words; `stock_event_buys` (the switch off) is also an error alert once a session,
   naming the owner's step.
+- **A buy the venue cancelled at once goes again ONCE** (the captain's A80, Oct 21, 2026; on `fix/venue-cancel-retry`,
+  not yet deployed; league/equity/live.py `_event_last`, `venue_cancel_ms`). The venue accepted about a quarter of the
+  lane's auction buys and cancelled them 5-6 ms later, no reason, nothing filled. A buy whose last order the venue
+  cancelled within `VENUE_CANCEL_RETRY_S` (60 s) of that order's own `submitted_at` (its `canceled_at` less it, the
+  venue's stamps), nothing filled and no cancel of the House's own sent, is sent again once at the next minute that
+  reads the cancel: the same body (symbol, side, size rule, limit price, `opg` or `cls`, type `limit`) under a new
+  client id, `replaces` the cancelled order, through every gate above, `_size_event` and `_send`'s wall-clock cut-off
+  again (09:27 ET at the open, 15:49 at a full day's close); the re-send is one more order of the day's count, and the
+  gateway judges every cap again (a cap ends it refused at once; a reading it could not make sends it again the next
+  minute, still the one re-send). A second cancel at once, or a cancel later than 60 s (the venue ends every unfilled
+  auction order at its cross, minutes after it was sent: the auction's own cancel), leaves the buy missed at the
+  auction's end, its why naming both cancels or why the re-send did not go (a gate's reason after "A80's one re-send
+  held: ", or the window's cut-off). Reading it: the re-sent order's `why` opens "A80's one re-send (the venue cancelled
+  the first buy N ms after its submission, nothing filled)"; the minute's summary (`equity.venue_cancel_resends`) counts
+  the re-sends it wrote; one info alert a session after the close's end ("equity: A80: the venue cancelled n event
+  buy(s) of <day> at once ...; r went again once (f filled), ...") with an `equity.alert` record of the counts (kv
+  `eq_venue_cancel_said`). A sale the venue cancelled is never re-sent so: its ladder carries it. Stopping it: the
+  previous House release, or `equity_money.event.enabled` False (every event buy). The cause is the venue's and unknown:
+  the owner may ask the venue's support with the order ids in the captain's record.
 - **A sale** of an event lot is a MARKET order in its auction, `{"symbol", "qty": "<the lot's shares>", "side": "sell",
   "type": "market", "time_in_force": "cls" | "opg", "client_order_id"}`, no limit price: the shadow sells at the
   auction's print, and a limit could only leave the lot held through it. Exits wait on the kill switch alone (the
