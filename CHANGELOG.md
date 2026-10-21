@@ -38,6 +38,24 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; joins release 1019e; A82)
+
+- **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,
+  an 8-K under each co-registrant. The House's backfill (`EventLane._backfill`) marked a day done only when the
+  accessions it had seen numbered the index's ROWS, so no day with a multi-filer filing ever completed: Oct 19, 2026's
+  index (1,189 rows, 665 filings; 991 duplicate Form 4 rows and 13 duplicate 8-K rows) answered `partial` every two
+  minutes from Oct 20 09:01Z, and the days after it were never reached (the job takes the oldest day first). The
+  screen waits on `evl:backfill:<day>` (A66's reach, A69's condition (iii)), so every look would have waited the full
+  reach and the fast path would never have run. A co-registered 8-K whose first row named an unlisted filer was also
+  skipped as unlisted.
+- **The fix.** The index's rows are grouped by accession; the pass goes filing by filing and the day is complete when
+  every filing is seen; an 8-K is a listed filer's, under that filer's CIK, when any of its rows names one (a Form 4's
+  issuer is read from its document, as before). Summaries carry `filings` beside `rows`. No judge moves: the screen
+  reads the same meta.
+- **Tests.** `test_events_house.TheBackfill`: a filing listed once per filer is one filing and the day completes (a
+  Form 4-like owner row and an 8-K whose unlisted co-registrant comes first); a day cut by its deadline completes on
+  the next pass.
+
 ### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (unreleased; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **What it carries** (main `3230a884` and two merges, in this order, each `--no-ff`): `r3/lane-1019c` `6f53eeca`

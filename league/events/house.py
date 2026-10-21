@@ -1180,9 +1180,18 @@ class EventLane:
         rows = self._index_rows[day]
         seen = self._backfill_seen.setdefault(day, set())
         listed = set(ctx.tickers)
-        counts = {"rows": len(rows), "known": 0, "fetched": 0, "failed": 0, "unlisted": 0}
-        entered: set[tuple[str, dt.date]] = set()
+        # ONE FILING, ONE ROW EACH FILER (A82): EDGAR's daily index lists a filing once per filer, so a Form 4 stands
+        # under its issuer and its reporting owner and an 8-K under each co-registrant (Oct 19, 2026: 1,189 rows, 665
+        # filings). The backfill goes filing by filing and is complete when every filing is seen; an 8-K is a listed
+        # filer's when any of its filers is listed, under that filer's CIK (a Form 4's issuer is read from its document).
+        filings: dict[str, dict[str, Any]] = {}
         for row in rows:
+            first = filings.setdefault(row["accession"], row)
+            if row["form"] == "8-K" and first["cik"] not in listed and row["cik"] in listed:
+                filings[row["accession"]] = row
+        counts = {"rows": len(rows), "filings": len(filings), "known": 0, "fetched": 0, "failed": 0, "unlisted": 0}
+        entered: set[tuple[str, dt.date]] = set()
+        for row in filings.values():
             if row["accession"] in seen:
                 continue
             if self.late(deadline):
@@ -1202,7 +1211,7 @@ class EventLane:
                 entered |= self._entry_sessions(st, row["accession"])
             elif status.startswith("failed"):
                 counts["failed"] += 1
-        complete = len(seen) >= len(rows)
+        complete = len(seen) >= len(filings)
         today = ctx.now().astimezone(C.NY).date()
         self._redecide |= {(kind, session_day) for kind, session_day in entered if session_day <= today}
         if complete:
