@@ -82,6 +82,12 @@ programs trades real money at learning size.
   constitution row.
 - **Deploy** (docs/operations.md, **Release 1019e**): the gateway from this head, then the House by the captain's ship
   script (`ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`), then `events.births` true.
+- **Tests, on `fa023e8a`** (the code, its tests and docs): the full league suite on 3.14, by the exact `python -m
+  unittest discover -s league/tests -t .`, 12,710 OK (33 skipped, 1,399 s); on 3.11 the events, equity, live, ci,
+  constitution, publish, ops and budget modules with test_events_births, test_events_1019e, test_site_lane,
+  test_e3_identities and test_project_economics, 105 modules, 2,738 OK (1 skipped); the gateway 503/503 with `npm run
+  check`; `python -m league.ci --base origin/main --branch rel/1019e --no-tests` passed; the identities, computed with
+  the tree's own functions on both Pythons, as in the heading.
 - **Rollback**: `events.births` false stops new births (registered births keep trading at their bands); the House to
   release 1019d's deployed head by `floor_box.py rollback` (the births tables are additive and ignored by it; a birth's
   open lots exit by their own stored plans, `live._event_exits`); the gateway last, by `wrangler rollback` to the version
