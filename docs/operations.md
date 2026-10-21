@@ -8,6 +8,57 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## A84: the fast path reads each feed by its own clean reads, and `evl_final` (Oct 21, 2026): `fix/a84-fast-path-per-feed`, joins release 1019f, not deployed
+
+Cut from `rel/1019d` `5a17bd25`; the captain integrates it into release 1019f on top of release 1019e. **Why** (the
+audit of the live House, two lenses independently; the captain's A84, 19:58Z Oct 21, recorded before any look): A69's
+fast path (league/events/screen.py `final_until`, `_fast_passes`) gave up on a close if ANY record pass of its ~48-hour
+span had a feed error. SEC's getcurrent feed times out about four times a night (9 errored passes in 61 hours, 45-second
+timeouts between 22:25 and 00:50 ET, each followed by a clean pass within 2-4 minutes), so no span was ever whole and
+every look waited A66's three sessions: the first looks would be written Mon Nov 2 / Tue Nov 3 instead of Thu Oct 29 /
+Fri Oct 30.
+
+- **The judge, as A84 reads A69 (i)** (screen.py `_fast_passes`, `_feed_problems`, `RECORD_FEEDS`; behind league/ci.py's
+  wall, the one judge change, exactly the captain's reading): a record pass whose read of a feed errored, was cut, or
+  had no tickers copy is a MISSING read of THAT feed, not a broken span; the span is whole when, for each of 8-K, Form
+  4 and news separately, clean reads of that feed are at most `FAST_RECORD_GAP` (15 minutes) apart from before the
+  span's start through its end. A clean read: the pass finished `ok`, the feed's block present with no `error` (the 8-K
+  read also needs the tickers copy; the news read must not be `cut`); a pass that raised (`failed`) or never finished
+  reads no feed. (ii) and (iii) are unchanged: a filing still listed or failed holds the close, and so does a weekday
+  whose daily-index backfill (A82's, filing by filing) has not run. The why names the feed, the gap and the first pass
+  in it that missed the feed ("no clean read of the 8-K feed from ... to ..., more than 15 minutes: the record pass of
+  ... had a 8-K feed error (...) (9 passes missed it)"); a gap with no pass at all still reads "no record pass ran
+  from ... to ...". At the House's 2-minute cadence one missing read leaves a 4-minute gap.
+- **`evl_final`, an INFO stall cause** (league/ops/evl_health.py `final_lags`, `_final`; league/ops/stall.py `CAUSES`
+  after `evl_fills`; the gateway's words in gateway/lib/email.mjs `STALL_CAUSES`): it stands when a seatable program's
+  final record (`screen.final_until` at the job's time, read from the lane's store read-only through
+  league/ops/daily_report.py `ReadOnlyStore`, which gains `get_document` for the tickers copy A69 (ii) reads) is more
+  than `FINAL_LAG_SESSIONS` (1) session behind what A69 allows (the session before the latest whose open decision has
+  passed), naming the program lagging most (the first in SEATING's order among equals), its horizon, A69's and the
+  judge's own why; its numbers `programs`, `lagging`, `program`, `version`, `final_through`, `a69_allows`,
+  `lag_sessions`, `max_lag_sessions`; since when: the open decision that made the lag two. A retired program, one with
+  every look written and one not yet registered are not judged. Quiet under `events/STOP` like the other five; judged
+  through a `PAUSE` (the why then names the decision waiting on a verdict). Its reader is its own: a failure there is
+  an entry of the job's `errors` and leaves the other five judged. A House deploy that stops record passes for more
+  than 15 minutes leaves a gap in every feed: the closes whose spans hold it wait A66's sessions, and `evl_final`
+  stands until they pass.
+- **No identity moves**: money `055e5313`, constitution `a8d4cbd9`, options execution fingerprint `b60410ad`, equity
+  identity `78022ca6`, xs identity `2f0083bc`, gate contract `397b22b7` (the tree's own functions, 3.14 and 3.11). No
+  setting, no money row.
+
+**Deploy, in order** (with release 1019f; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an
+order in flight; CI green on the exact head; before Oct 26 13:00Z, when the first looks' spans begin):
+1. THE GATEWAY FIRST: `gateway/lib/email.mjs` words `evl_final` (a stall notice naming a cause the gateway does not
+   know is a 400 and nothing is mailed). Verify: `/v1/health` ok, the version this deploy made.
+2. THE HOUSE (screen.py is behind the wall, league/ops/ is protected: an owner deploy, by the ship script). Verify: the
+   next stall run's `checks.evl_final` is judged (its numbers above: `lag_sessions` at most 1 once a night's passes
+   are whole); read-only on the box, `screen.final_until` of each seatable program reads "the fast path (A69) reaches
+   <day>" or names a feed's gap of more than 15 minutes, never a single pass's error.
+
+**Rollback**: the House first, to the release this one replaced (`floor_box.py rollback`): the screen then reads A69's
+first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
+`evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
@@ -6456,16 +6507,17 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `evl_verdicts` (release 1019c) | verdicts a decision of the last 24 h needs still unanswered 15 minutes past it (past the later of the decision's time, the start of its run of receipts that lacked one, and the end of a PAUSE or STOP): the decision's latest receipt's tally (`verdicts: {needed, answered}`, open and close decisions alike; a receipt from release 1019b, its `pending` counts). The numbers say the day's verdict dollars and the lane's line (`at_line` when the budget's allowance is reached: READ events then wait for the next day's line) | none (INFO): a Claude meter run dry is `runway_claude`'s step, the kill switch `kill_on`'s |
 | `evl_score` (release 1019c) | intents due by the latest session whose 23:00 ET has passed still `planned` or `entered`: the night's score passes left them open (a pass that settled nothing counts nothing, whatever its status). An intent whose exit print the tape showed absent (a `marks` row with no price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) waits by design and is counted apart (`waiting_on_tape`) | none (INFO): the next night's passes try again what this one left |
 | `evl_fills` (release 1019c) | the goal's "fill gaps": the lane's real fills set beside the shadow's own auction prints (the House's event twins, league/ops/twins.py `event_twin`, in the swarm store's kv `equity_twins`: `entry_gap_bp`, `exit_gap_bp`, positive when real money did worse): the signed mean of a side over its last 20 priced twins more than 15 bp from the prints EITHER WAY (the goal's Done item: fills within 15 bp of replay; PREREG-EVL-3 section 5's signed mean per side; A50's size of the gap), with at least 5 of them; the text and the numbers (`off`, `worse`, `better`) say which way, and "within 15 bp" only of a side that is. Not judged before the first real fill is priced | none (INFO): PREREG-EVL-1 section 5 raises the cost allowance to a worse measured gap (never lowers it); a gap either way says the fills or the shadow's prices are mis-measured |
+| `evl_final` (A84, release 1019f) | the event lane on the House: a seatable program's FINAL RECORD (league/events/screen.py `final_until` at the run's time, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named with its horizon, A69's and the judge's own why (`program`, `version`, `final_through`, `a69_allows`, `lag_sessions`, `lagging`); a retired program, one with every look written and one not yet registered are not judged; read-only (league/ops/daily_report.py `ReadOnlyStore`), the judge read and never run for a look; judged through a `PAUSE` | none (INFO): the record passes, their retries and the daily-index backfill fill most gaps by themselves; one that stays is the House's to fix (a release or the captain) |
 | `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the running release started; fewer in the 6 h: the last 6 scored; before the sixth: 4 that could not be judged) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child), in at least two families; once it stood under a release, until versions scored after are judged by the bar in two families or the release changes | "the equity generators misread the program contract, mostly <the class> (<what it most often is>): fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
 | `elane_births` (release E2.4) | the last 3 equity passes that asked a model (in the last 12 h, since the running release started) bore no family | none for 6 h (each pass tells the next its refusals); then, when a setting clears the main way they bore nothing: widening `elane.universe` or `elane.structures` (your decision), `elane.e2.births_max_output_tokens` or `elane.e2.max_per_pass` for answers cut short, a release for a pass that raises; at once for a setting every route refuses the request for; none for the rest |
 | `elane_idle` (release E2.4) | a BROKEN lane only. Whatever E2's lines hold: more than half of the program questions the Train rounds asked in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 asked; before the eighth: 5 lost) were lost to a fault (the answer held no program, or no route answered for 3 h while the lanes kept asking), idle or not; or families in Train research or births wanted, no equity version scored for 3 h (the swarm's running time, kept per release), and the lane's own record shows two rounds that raised, two Train steps failed on the House's side or two step errors; and once either stood under a release, until a version is scored after it, the release changes or no work is owed. Else, idle so, only when no hold of E2's was seen in those 3 h. NEVER for a lane held by its own pace, its day's dollars or the House's Sail day: that reads judged clear and says the steps it cost | "the equity lanes pay for answers that hold no program (<the routes>): raise elane.e2.train_max_output_tokens if they are cut short, or take a route out of elane.e2.routes ...", "no model route answers the equity lanes' program questions (<the routes>): check the routes at the model provider, or name routes that answer in elane.e2.routes ...", "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for lost answers too few to be most, programs refused before a run or barren passes |
 | `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 written; before the eighth: 5 refused by one rule) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more. Since the source gap (Oct 14): the controller has retried the same day 6 h or more (`nightly.json` `retrying`, or the stall's own first sight of the error for that same day when that is older: `stall.json` `nightly_error` keeps its day, and a record naming another day starts the count again), named with its short roots and their coverage ("SLV: SIP 389/390, minute 826 (13:46 ET) missing"); or the day the nightly owes has been due 36 h or more (from 02:00 ET the morning after it) with no day completed in as long | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; for a day owed 36 h: "the nightly owes DAY and has completed no day in N h: read data/nightly.json (error, retrying) and data/images.json forward_days. The House hands off only a small SIP source gap by itself, so this needs a fix it cannot make (ROOTS)" (a gap wider than 5 minutes or 2 roots, or empty or invalid bars, schedules no hand-off and reaches it), held back while the nightly has a hand-off scheduled (`retrying.handoff_at`) until an hour past it, or while the record has an error and no `retrying` (the release before wrote it: a deploy's window before the first new try), and never once the day has been owed 72 h; never while a nightly stop stands (the stop is the step); none for the rest |
 
-**The event lane's own causes** (release 1019c, the owner's goal of Oct 19, 2026, item 5; the five `evl_` rows;
-`league/ops/evl_health.py`, which the stall job calls once). Judged only while the lane runs on the House
+**The event lane's own causes** (release 1019c, the owner's goal of Oct 19, 2026, item 5; the six `evl_` rows, the sixth
+`evl_final` from A84, release 1019f; `league/ops/evl_health.py`, which the stall job calls once). Judged only while the lane runs on the House
 (`league/config.json` `events.enabled` true) and `<state>/ops.json` `stall.evl` is not false (`{"stall": {"evl": false}}`
-switches the five off and leaves the rest of the alarm as it is); never while the lane's `<state>/events/STOP` stands nor
+switches the six off and leaves the rest of the alarm as it is); never while the lane's `<state>/events/STOP` stands nor
 for 30 minutes after it goes (a decision whose window fell inside it is excused for good), and `evl_verdicts` never
 while the House's `<state>/PAUSE` stands (no verdict is asked then); `stall.json` `evl_idle` keeps the windows the job
 saw. Each reads the lane's own store read-only (every open `mode=ro` inside `guard.readonly()`), on the House's NYSE

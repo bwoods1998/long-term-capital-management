@@ -206,6 +206,10 @@ export const STALL_CAUSES = {
   // The goal's "fill gaps": the lane's real fills off the shadow's own auction prints by more than 15 bp either way (the
   // signed mean of a side over the last 20 priced fills: the House's event twins; worse or better, the House says).
   evl_fills: 'event-lane fills strayed from the auction prices',
+  // A84 (release 1019f): a seatable program's final record (league/events/screen.py `final_until`, what every look waits
+  // for) more than one session behind what A69's fast path allows; the House names the program and the judge's why.
+  // Deploy the gateway first, as above.
+  evl_final: 'event-lane looks wait longer than the fast path allows',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

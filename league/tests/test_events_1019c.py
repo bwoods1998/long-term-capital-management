@@ -41,10 +41,12 @@ def et(day: dt.date, hh: int, mm: int = 0) -> dt.datetime:
 
 # ======================================================================================== A69: the fast path
 class TheFastPath(unittest.TestCase):
-    """A69: a close X is final once the session after X has had its open decision when (i) every record pass from the
-    start of X's earliest window through that decision read its feeds whole, (ii) no filing of those windows the lane
-    would fetch is still listed or failed, (iii) the daily-index backfills of the days of X's windows have run and
-    (iv) every decision of the program's entry kind through X is made; otherwise A66's three sessions."""
+    """A69: a close X is final once the session after X has had its open decision when (i) each feed was read whole
+    from the start of X's earliest window through that decision (A84: clean reads of each of 8-K, Form 4 and news at
+    most 15 minutes apart; a pass that missed a feed is a missing read of it, so a single bad pass among clean ones
+    breaks nothing, a run of them 15 minutes long does), (ii) no filing of those windows the lane would fetch is still
+    listed or failed, (iii) the daily-index backfills of the days of X's windows have run and (iv) every decision of
+    the program's entry kind through X is made; otherwise A66's three sessions."""
 
     setUp, tearDown, settle = LooksOnAFinalRecord.setUp, LooksOnAFinalRecord.tearDown, LooksOnAFinalRecord.settle
     P = "EVL-INS-BUY-O1"
@@ -63,6 +65,12 @@ class TheFastPath(unittest.TestCase):
         body = copy.deepcopy(CLEAN) | parts
         self.st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, ?, ?)",
                            (S.iso(at), S.iso(at + dt.timedelta(seconds=40)), status, json.dumps(body)))
+
+    def spoil(self, start: dt.datetime, end: dt.datetime, *, status: str = "ok", **parts) -> None:
+        """A84: every record pass from `start` through `end` misses what `parts` (or `status`) say, so the feed has no
+        clean read from the pass before `start` to the one after `end`."""
+        self.st.db.execute("UPDATE receipts SET status=?, summary=? WHERE job='record' AND started_at>=? AND started_at<=?",
+                           (status, json.dumps(copy.deepcopy(CLEAN) | parts), S.iso(start), S.iso(end)))
 
     def due(self) -> dt.datetime:
         """Look 1 of INS-BUY-O1 v2 due at days[7] (80 events, 8 blocks); the House's record final through days[8]
@@ -104,29 +112,43 @@ class TheFastPath(unittest.TestCase):
         self.assertEqual(SC.look_rows(self.st, self.P, 2)[0]["at"][:10], self.days[7].isoformat())
 
     def test_a_record_pass_with_a_news_error_keeps_a66(self):
+        """A84: one pass with a news error, the next clean 9 minutes later, is whole; news errors from 12:10 to 12:30
+        (no clean news read from 12:00 to 12:40) keep A66."""
         now = self.due()
         self.passes(et(self.days[0], 8), et(self.days[8], 12))
         self.one_pass(et(self.days[6], 12, 1), news={"error": "OSError: invented"})
-        self.keeps_a66(now, f"stops at {self.days[6].isoformat()}: the record pass of")
+        self.assertEqual(SC.final_until(self.st, self.P, 2, self.days[8], now)[0], self.days[7], "A84: a missing read")
+        self.spoil(et(self.days[6], 12, 10), et(self.days[6], 12, 30), news={"error": "OSError: invented"})
+        self.keeps_a66(now, f"stops at {self.days[6].isoformat()}: no clean read of the news feed from")
         why = SC.final_until(self.st, self.P, 2, self.days[8], now)[1]
+        self.assertIn("the record pass of", why)
         self.assertIn("had a news error (OSError: invented)", why)
 
-    def bad_pass(self, needle: str, *, status: str = "ok", **parts) -> None:
+    def bad_pass(self, needle: str, feed: str = "8-K", *, status: str = "ok", **parts) -> None:
+        """A84: one bad pass at 11:01 among clean ones every 10 minutes is a missing read (whole); the passes from 11:10
+        to 11:30 bad too leave `feed` no clean read from 11:00 to 11:40, and days[7] waits."""
         now = self.due()
         self.passes(et(self.days[0], 8), et(self.days[8], 12))
         self.one_pass(et(self.days[7], 11, 1), status=status, **parts)
+        self.assertEqual(SC.final_until(self.st, self.P, 2, self.days[8], now)[0], self.days[7],
+                         "A84: the clean passes 9 minutes later recover what the bad one missed")
+        self.spoil(et(self.days[7], 11, 10), et(self.days[7], 11, 30), status=status, **parts)
         horizon, why = SC.final_until(self.st, self.P, 2, self.days[8], now)
-        self.assertEqual(horizon, self.days[6], "days[6]'s windows end before the bad pass; days[7]'s do not")
+        self.assertEqual(horizon, self.days[6], "days[6]'s windows end before the bad passes; days[7]'s do not")
+        self.assertIn(f"no clean read of the {feed} feed from {S.iso(et(self.days[7], 11))} to "
+                      f"{S.iso(et(self.days[7], 11, 40))}, more than 15 minutes: the record pass of "
+                      f"{S.iso(et(self.days[7], 11, 1))}", why)
         self.assertIn(needle, why)
+        self.assertIn("(4 passes missed it)", why)
 
     def test_a_cut_news_read_keeps_a66(self):
-        self.bad_pass("cut its news read short", news={"cut": True})
+        self.bad_pass("cut its news read short", "news", news={"cut": True})
 
     def test_an_8k_feed_error_keeps_a66(self):
         self.bad_pass("had a 8-K feed error (GatewayError: 503)", **{"8-K": {"error": "GatewayError: 503"}})
 
     def test_a_form_4_feed_error_keeps_a66(self):
-        self.bad_pass("had a 4 feed error", **{"4": {"error": "GatewayError: 503", "fetched": 2}})
+        self.bad_pass("had a 4 feed error", "Form 4", **{"4": {"error": "GatewayError: 503", "fetched": 2}})
 
     def test_an_unread_tickers_copy_keeps_a66(self):
         self.bad_pass("could not read the tickers copy", tickers={"error": "KeyError: x"})
@@ -163,11 +185,11 @@ class TheFastPath(unittest.TestCase):
         self.assertIn("no record pass ran from", why)
 
     def test_finality_stays_contiguous(self):
-        """A news error in days[6]'s windows only (days[5] 12:00): days[7]'s own passes are clean, but days[6] is not
-        final, so neither is days[7]."""
+        """News errors in days[6]'s windows only (days[5] 12:00 to 12:30, no clean news read for 40 minutes): days[7]'s
+        own passes are clean, but days[6] is not final, so neither is days[7]."""
         now = self.due()
         self.passes(et(self.days[0], 8), et(self.days[8], 12))
-        self.one_pass(et(self.days[5], 12, 1), news={"error": "OSError: invented"})
+        self.spoil(et(self.days[5], 12, 10), et(self.days[5], 12, 30), news={"error": "OSError: invented"})
         horizon, why = SC.final_until(self.st, self.P, 2, self.days[8], now)
         self.assertEqual(horizon, self.days[5])
         self.assertIn(f"stops at {self.days[6].isoformat()}", why)
