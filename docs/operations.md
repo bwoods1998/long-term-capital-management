@@ -6838,7 +6838,8 @@ earned   = 0.5 × max(0, week_net) / 7     HALF the week's profit, spread over t
                                           runs: seven days at the cap spend at most 7 × $5 plus half the week's profit;
                                           a losing week lifts nothing and takes nothing from the $5
 cap      = min($25, $5 + earned)          every metered dollar: Sail models and boxes, Claude, OpenAI, data, Cloudflare
-fixed    = Sail's House and data boxes (billing a day over 7 days, never under guard.house_burn_usd_day)
+fixed    = Sail's billing of the House's app, every box but the Gym pool's (the House, the data box and any other box
+           the swarm books nowhere; a day over 7 days, never under guard.house_burn_usd_day)
            + Cloudflare $0.1644 ($5 a month) + market data $0 (ThetaData and Algo Trader Plus cancelled Oct 18, 2026)
 room     = max(0, cap − fixed)
 lane     = min(room, max($3, 1.5 × the lane's heaviest UTC day of verdicts over the trailing 7 days))
@@ -6884,6 +6885,25 @@ research_m = min(line_m, runway_m)        Claude: the lane first, min(lane, runw
 - **Unknown is never money:** an unreadable balance, fixed cost or reserve gives its meter no research (and the Claude
   meter's lane no verdicts); an unreadable `week_net` earns nothing (the cap is the $5); an unreadable lane store sizes
   the lane's part at $3; a rule that cannot run at all is no research on either meter.
+- **Sail's fixed line is the app's non-research boxes** (`_sail_fixed`, on `fix/sail-spend-fields`, not deployed; the
+  audit of the live House, Oct 21, 2026). Sail's spend response (`GET /sailboxes/spend`) no longer carries the legacy
+  `finalized_cost_usd_nanos` / `estimated_active_cost_usd_nanos` / `estimated_total_cost_usd_nanos`: the response and
+  each of its `sailboxes` rows carry one `cost_usd_nanos` (and `running_seconds` where `duration_seconds` was). The
+  reading took its total from `estimated_total_cost_usd_nanos` alone, so the House box and the data box each read $0 and
+  the line sat at `guard.house_burn_usd_day` ($1.00), under what the boxes bill, which left the rule more room than the
+  cap holds. Now one reader, league/sailbox.py `cost_nanos`, takes the total from the legacy total, else
+  `cost_usd_nanos`, else the legacy split summed, and None (unknown, never $0) when there is no cost field. The line
+  reads the House box's app once (`spend(app=...)`, one row a box) and sums every box but the Gym pool's (the swarm
+  store's `boxes` table, any state: research, booked as `gym_box`), so an image build, an old box left asleep or the
+  updater's canaries are fixed cost too; a named box (the House, the data box) the rows leave out is read by itself.
+  When the app or the pool cannot be read it reads the House box and the data box alone (the reading before, now of
+  either shape) and the House warning says so; when that fails too, `guard.house_burn_usd_day` with its warning, as
+  before. `budget.json` `inputs.meters.sail.fixed_source` names the reading. The more the boxes bill, the less room:
+  at the $5 cap with no profit a fixed line above $1.84 a day leaves the lane's part under $3 (room = $5 - the line -
+  Cloudflare's $0.16) and the old research roles nothing. The close economics read the same field
+  (`ops/economics.box_totals`: one `cost_usd_nanos` a window is billed, none active; a window with no cost field is a
+  check of the summary, never a silent $0) and so does the reporter (`project_economics.box_cost`: a row of the new shape
+  is its bill, no active estimate; a legacy row is still held to its own total).
 - **The wait for the guard's next reading** (L4, on `fix/budget-guard-wait`, not deployed). A `budget` run that finds
   no fresh Sail guard reading waits for the guard's next one. It looks at the guard's record every 20 s, for at most
   270 s from its start, inside the job's 600 s wall. When a reading comes, the run takes a new time after it and reads

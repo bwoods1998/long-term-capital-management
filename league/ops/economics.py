@@ -637,7 +637,15 @@ def library(house: Mapping[str, Any], boxes: Mapping[str, Any], app: str, extern
 
 # ------------------------------------------------------------------------------------------------ the report
 def box_totals(row: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
-    return D(row.get("finalized_cost_usd_nanos")) / Decimal(10 ** 9), D(row.get("estimated_active_cost_usd_nanos")) / Decimal(10 ** 9)
+    """One window of Sail's app-scoped box billing as (billed, active) dollars: the legacy split when the response
+    carries it; else Sail's one `cost_usd_nanos` (its response since Oct 2026, league/sailbox.py `cost_nanos`), all
+    billed, none active. A window with no cost field reads (0, 0) here and is a check of its own (`render`)."""
+    if any(row.get(key) not in (None, "") for key in ("finalized_cost_usd_nanos", "estimated_active_cost_usd_nanos")):
+        return D(row.get("finalized_cost_usd_nanos")) / Decimal(10 ** 9), D(row.get("estimated_active_cost_usd_nanos")) / Decimal(10 ** 9)
+    from ..sailbox import cost_nanos
+
+    found = cost_nanos(row)
+    return (ZERO if found is None else found[0] / Decimal(10 ** 9)), ZERO
 
 
 def unposted_regulatory(reg: Mapping[str, Any], cutoff_day: str) -> tuple[Decimal, list]:
@@ -786,6 +794,11 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
         checks.append("the book changed after the cutoff: the account read (equity, positions) is later than the cutoff state")
 
     # ---------------------------------------------------------------- costs
+    from ..sailbox import cost_nanos
+
+    for window in SAIL_WINDOWS:
+        if window in sail and cost_nanos(sail[window]) is None:
+            checks.append(f"Sail's box billing for the {window} window carries no cost field it can read: read as 0")
     inp = L["inputs"]
     g = H["costs"]["gateway_health"]
     after = {r["kind"]: D(r["usd"]) for r in H["costs"]["swarm_spend_after_cutoff"]}
@@ -817,7 +830,7 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
             declared_rows.append({k: item.get(k) for k in ("name", "usd", "basis")})
     costs = [
         {"service": "Sail (models + boxes)", "usd": usd(sail_used), "settled_usd": usd(sail_receipts),
-         "basis": (f"billed: settled Sail model requests {usd(sail_models)} + app-scoped finalized box billing {usd(box_fin)} (+{usd(box_active)} active) "
+         "basis": (f"billed: settled Sail model requests {usd(sail_models)} + app-scoped box billing {usd(box_fin)} (+{usd(box_active)} active) "
                    f"= {usd(sail_receipts)}; metered: the Sail balance meter since the burst start + the pre-meter window, less Sail spend after the cutoff = "
                    f"{usd(sail_meter)}; the larger is used. Comparison only, never added: the Gym's booked box estimate "
                    f"{usd((L.get('comparison_only') or {}).get('booked_gym_box_estimate_usd'))} and the swarm's model booking {usd(inp['sail_model'].get('booked_usd'))}")},

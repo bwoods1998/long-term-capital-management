@@ -1428,16 +1428,127 @@ class Edge(unittest.TestCase):
 
 
 class FakeSail:
-    def __init__(self, per_day=None, fail=False):
+    """Sail as the budget reads it (invented figures, dollars a day over the 7-day window): the House box's row names its
+    app (`get`), and the app's spend (`spend(app=...)`) has one row a box of `per_day`, less `outside`, plus `foreign`
+    rows of another app; `spend(sailbox=...)` is one box's own. `shape` is the spend response's: "cost", Sail's since
+    Oct 2026 (one `cost_usd_nanos`); "legacy", the split and its `estimated_total_cost_usd_nanos`; "none", no cost field."""
+
+    def __init__(self, per_day=None, fail=False, *, shape="cost", outside=(), foreign=None, no_app=False):
         self.per_day = per_day or {"sb_house": 1.2, "sb_data": 0.3}
-        self.fail = fail
+        self.fail, self.shape, self.outside, self.foreign, self.no_app = fail, shape, set(outside), foreign or {}, no_app
         self.calls = []
 
-    def spend(self, *, sailbox=None, since=None, until=None, app=None):
-        self.calls.append((sailbox, since, until))
+    def cost(self, usd_day):
+        nanos = int(round(usd_day * 7 * 1e9))
+        if self.shape == "legacy":
+            active = nanos // 10
+            return {"finalized_cost_usd_nanos": str(nanos - active), "estimated_active_cost_usd_nanos": str(active),
+                    "estimated_total_cost_usd_nanos": str(nanos)}
+        return {} if self.shape == "none" else {"cost_usd_nanos": nanos, "running_seconds": 7 * 86400.0}
+
+    def get(self, sailbox):
+        self.calls.append(("get", sailbox, None, None))
         if self.fail:
             raise OSError("sail is down")
-        return {"estimated_total_cost_usd_nanos": int(self.per_day[sailbox] * 7 * 1e9)}
+        return {"sailbox_id": sailbox, "status": "running", **({} if self.no_app else {"app_id": "app_test"})}
+
+    def spend(self, *, sailbox=None, since=None, until=None, app=None):
+        self.calls.append(("app" if app else "box", app or sailbox, since, until))
+        if self.fail:
+            raise OSError("sail is down")
+        if app is None:
+            return {"start_at": since, "end_at": until, **self.cost(self.per_day[sailbox])}
+        mine = {box: usd for box, usd in self.per_day.items() if box not in self.outside}
+        rows = [{"sailbox_id": box, "app_id": app, **self.cost(usd)} for box, usd in mine.items()]
+        rows += [{"sailbox_id": box, "app_id": "app_other", **self.cost(usd)} for box, usd in self.foreign.items()]
+        return {"start_at": since, "end_at": until, "pricing_configured": True, **self.cost(sum(mine.values())),
+                "sailboxes": rows}
+
+
+class SailFixed(unittest.TestCase):
+    """THE FIXED LINE IS THE APP'S NON-RESEARCH BOXES (Oct 21, 2026; the audit of the live House, its cost lens). Sail's
+    spend response stopped carrying `estimated_total_cost_usd_nanos` (its one figure is `cost_usd_nanos` now), so the
+    House box and the data box each read $0 and the line fell to `guard.house_burn_usd_day`; and it read those two boxes
+    alone, never another box of the app the swarm does not book (an image build, the old floor). Invented figures."""
+
+    #: Dollars a day: the House, the data box, two of the Gym pool's boxes (research), an image build and an old box.
+    PER_DAY = {"sb_house": 1.2, "sb_data": 0.3, "sb_gym1": 3.0, "sb_gate1": 0.1, "sb_image": 0.05, "sb_floor": 0.2}
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+        store = SwarmStore(self.root, clock=Clock(NOW))
+        store.upsert_box("sb_gym1", kind="gym", version="sbcp_image", state="ready")
+        store.upsert_box("sb_gate1", kind="gate", version="sbcp_image", state="terminated")  # any state: the pool's
+        store.close()
+
+    def fixed(self, sail, burn=1.0, boxes=("sb_house", "sb_data")):
+        errors: list[str] = []
+        value, source = B._sail_fixed(sail, list(boxes), NOW, burn, errors, B._pool_boxes(self.root))
+        return round(value, 6), source, errors
+
+    def test_both_shapes_read_the_apps_non_research_boxes(self):
+        for shape in ("cost", "legacy"):
+            sail = FakeSail(dict(self.PER_DAY), shape=shape, foreign={"sb_foreign": 9.0})
+            value, source, errors = self.fixed(sail)
+            self.assertEqual((value, errors), (1.75, []), f"{shape}: 1.2 + 0.3 + 0.05 + 0.2; the pool's and another app's apart")
+            self.assertIn("the app's 4 non-research boxes over 7 days", source)
+            self.assertIn("2 of the Gym pool's apart", source)
+            self.assertEqual([c[:2] for c in sail.calls], [("get", "sb_house"), ("app", "app_test")], "one app read")
+            self.assertEqual(sail.calls[1][2:], (B._iso(NOW - 7 * DAY), B._iso(NOW)))
+
+    def test_a_named_box_the_apps_rows_leave_out_is_read_by_itself(self):
+        sail = FakeSail(dict(self.PER_DAY), outside={"sb_data"})
+        value, source, errors = self.fixed(sail)
+        self.assertEqual((value, errors), (1.75, []))
+        self.assertEqual([c[:2] for c in sail.calls], [("get", "sb_house"), ("app", "app_test"), ("box", "sb_data")])
+
+    def test_without_the_app_the_named_boxes_are_read_by_themselves(self):
+        """The reading before (the House box's and the data box's own billing), now of either shape, says so in an
+        error: it leaves out every other box of the app."""
+        for shape in ("cost", "legacy"):
+            value, source, errors = self.fixed(FakeSail(dict(self.PER_DAY), shape=shape, no_app=True))
+            self.assertEqual(value, 1.5, f"{shape}: 1.2 + 0.3, was 0 + 0 and so the configured 1.0 on the new shape")
+            self.assertIn("measured: the House and data boxes alone (2 boxes over 7 days)", source)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("Sail's app billing could not be read", errors[0])
+
+    def test_an_unreadable_pool_never_counts_research_as_fixed(self):
+        (self.root / "swarm.sqlite").unlink()
+        self.assertIsNone(B._pool_boxes(self.root), "no store: the pool's boxes are unknown")
+        import sqlite3
+
+        sqlite3.connect(self.root / "swarm.sqlite").close()  # a store with no `boxes` table
+        self.assertIsNone(B._pool_boxes(self.root))
+        sail = FakeSail(dict(self.PER_DAY))
+        value, source, errors = self.fixed(sail)
+        self.assertEqual(value, 1.5, "the named boxes alone, never the app's every box")
+        self.assertIn("the Gym pool's boxes could not be read", errors[0])
+        self.assertNotIn(("app", "app_test"), [c[:2] for c in sail.calls])
+
+    def test_a_box_with_no_cost_field_is_unknown_never_zero(self):
+        value, source, errors = self.fixed(FakeSail(dict(self.PER_DAY), shape="none"))
+        self.assertEqual(value, 1.0)
+        self.assertEqual(source, "guard.house_burn_usd_day (the box spend could not be read)")
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("no cost field", errors[0])
+        self.assertIn("Sail's box spend could not be read", errors[1])
+
+    def test_a_measured_line_under_the_configured_burn_is_the_burn(self):
+        value, source, errors = self.fixed(FakeSail(dict(self.PER_DAY)), burn=2.0)
+        self.assertEqual((value, source, errors), (2.0, "guard.house_burn_usd_day (over the measured 1.7500 a day)", []))
+
+    def test_the_sail_read_drills_call_reads_the_named_boxes(self):
+        """league/ops/drills.py `drill_sail_read` calls with no pool: unknown, so the named boxes alone."""
+        errors: list[str] = []
+        value, source = B._sail_fixed(FakeSail(dict(self.PER_DAY)), ["sb_house", "sb_data"], NOW, 1.0, errors)
+        self.assertEqual((round(value, 6), len(errors)), (1.5, 1))
+        self.assertIn("the Gym pool's boxes could not be read", errors[0])
+
+    def test_no_client_or_no_house_box_is_the_configured_burn(self):
+        self.assertEqual(self.fixed(None)[:2], (1.0, "guard.house_burn_usd_day (no Sail client or no House box id)"))
+        self.assertEqual(self.fixed(FakeSail(), boxes=())[0], 1.0)
 
 
 class Job(Rule2Shares):
@@ -1514,7 +1625,9 @@ class Job(Rule2Shares):
         self.assertIn("the Sail guard's release line", sail["reserve_source"])
         # 400 - 185: the gateway's spent_usd already holds the 10 in flight, so it is not subtracted twice.
         self.assertEqual((claude["balance_usd"], claude["need_usd"]), (215.0, 7.0), "cap - spent: the holds are in spent")
-        self.assertEqual(sorted(c[0] for c in self.sail.calls), ["sb_data", "sb_house"])
+        self.assertEqual([c[:2] for c in self.sail.calls], [("get", "sb_house"), ("app", "app_test")],
+                         "the fixed line is the app's billing: one read, its rows the House's and the data box's")
+        self.assertIn("the app's 2 non-research boxes", sail["fixed_source"])
         self.assertEqual(doc["meters"]["sail"]["need_share"], 0.75)
         self.assertEqual(receipt["errors"], [])
         self.assertEqual(self.alerts, [], "a clean day raises nothing")
@@ -1772,6 +1885,7 @@ class Job(Rule2Shares):
         the same cap for the day, on each meter."""
         day = at(2026, 10, 21)
         fixed = 1.2  # the House box's own billing a day (the fake's): Sail's fixed cost
+        self.sail = FakeSail({"sb_house": fixed})  # the app's one box (these roots have no data box)
         figures = {}
         for name, first_run in (("early", day + 1800), ("late", day + 20 * 3600 + 600)):
             root, store, clock, check = self.account(name, start=day)

@@ -38,6 +38,37 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Sail's spend response changed fields: the budget's fixed line and the close economics read the boxes' bill again, on `fix/sail-spend-fields` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, on top of release 1019e; owner files `league/ops/budget.py`, `league/ops/economics.py`, `league/project_economics.py`, and `league/sailbox.py`; an owner deploy of the House alone, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no setting, no money row, no gateway change)
+
+- **Why.** The audit of the live House (Oct 21, 2026, its cost lens): Sail's `GET /sailboxes/spend` no longer carries
+  `estimated_total_cost_usd_nanos` (nor the legacy split, `finalized_cost_usd_nanos` and
+  `estimated_active_cost_usd_nanos`); the response and each of its `sailboxes` rows carry one `cost_usd_nanos`. Every
+  reader of the old fields read every box as $0: budget rule 3's Sail fixed line (`_sail_fixed`, through
+  league/sailbox.py `usd`) fell to `guard.house_burn_usd_day` ($1.00), under what the boxes bill (the House box alone
+  about $1.2 a day), so the cost rule had more room than the owner's cap holds; and the close economics' box billing
+  (`ops/economics.box_totals`) read $0 in every window. The fixed line also read the House box and the data box alone,
+  never another box of the app that the swarm books nowhere.
+- **What.** league/sailbox.py `cost_nanos`: one reader of both shapes (the legacy total, else `cost_usd_nanos`, else
+  the legacy split summed; None, never $0, when there is no cost field); `usd` takes `total_usd` from it, names the
+  field (`total_field`) and reads `running_seconds` where `duration_seconds` was. Budget `_sail_fixed`: the House box's
+  app's billing (one `spend(app=...)` read), every box but the Gym pool's (`_pool_boxes`: the swarm store's `boxes`
+  table, any state: research, booked as `gym_box`), and a named box the rows leave out by its own billing; when the
+  app or the pool cannot be read, the House box and the data box alone with a House warning; then the configured burn,
+  as before. A box with no cost field is unknown and falls back. `ops/economics.box_totals` reads one `cost_usd_nanos` a
+  window as billed, none active, and a window with no cost field is a check of the summary; the Sail cost's basis no
+  longer says "finalized". `project_economics.box_cost` reads a new-shape row as its bill (no active estimate), and a
+  legacy row is still held to its own total. Docs: operations "The budget rule (D4)", design's cost rule.
+- **What it changes.** Sail's fixed line rises from the configured $1.00 to the app's measured non-research billing.
+  At the $5 cap with no profit, a line above $1.84 a day leaves the lane's part under $3 (room = $5 - the line -
+  Cloudflare's $0.16) and the old research roles nothing; `budget.json` `inputs.meters.sail.fixed_source` names the
+  reading. No judge, look, band, seat or money wall moves; the floor's `FLOOR_SAIL_FIXED_USD_DAY` ($1.50) is unchanged.
+- **Tests.** `ltcm/tests/test_sailbox.py` (`test_the_new_shape_carries_its_total_in_cost_usd_nanos`,
+  `test_cost_nanos_reads_both_shapes_and_never_reads_unknown_as_zero`), `test_ops_budget.SailFixed` (eight: both
+  shapes, a named box outside the rows, no app, an unreadable pool, no cost field, under the burn, the drill's call,
+  no client), the budget job's fake answers in Sail's new shape, `test_ops_economics.test_sails_one_cost_field_is_the_box_billing`,
+  `test_project_economics.test_sails_one_cost_field_is_the_app_scoped_bill`; the modules and their 53 neighbours (1,957
+  tests) on 3.14 and 3.11.
+
 ### The daily-index backfill's failed fetches and SEC holidays, on `fix/backfill-robust` (unreleased; `league/events/house.py`, behind the wall; cut from `rel/1019d` `5a17bd25`, joins release 1019f on top of release 1019e; the captain records its amendment; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no judge, setting, money row or gateway file changes)
 
 - **The defects** (a read-only audit of the live House, after A82). (a) `EventLane._backfill` marked a filing seen

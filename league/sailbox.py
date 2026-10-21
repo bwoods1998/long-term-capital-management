@@ -41,6 +41,7 @@ import ssl
 import stat
 import time
 import uuid
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -973,8 +974,50 @@ def _decode(value: Any) -> str:
         return ""
 
 
+#: SAIL'S SPEND RESPONSE CHANGED SHAPE (seen in the audit of the live House, Oct 21, 2026). `GET /sailboxes/spend` and
+#: each of its `sailboxes` rows carried the legacy split, `finalized_cost_usd_nanos` + `estimated_active_cost_usd_nanos`,
+#: and their sum `estimated_total_cost_usd_nanos`; they carry one `cost_usd_nanos` now (and `running_seconds` where
+#: `duration_seconds` was), so every reader of the old total read every box as $0. `cost_nanos` reads both shapes, in
+#: this order: the legacy total, the new one, then the legacy split summed.
+TOTAL_COST_FIELDS = ("estimated_total_cost_usd_nanos", "cost_usd_nanos")
+SPLIT_COST_FIELDS = ("finalized_cost_usd_nanos", "estimated_active_cost_usd_nanos")
+
+
+def cost_nanos(spend: Any) -> tuple[Decimal, str] | None:
+    """A spend response's whole cost, or one of its `sailboxes` rows' (billionths of a dollar), and the field it was read
+    from: the first of `TOTAL_COST_FIELDS` present, else the legacy split summed (`finalized_cost_usd_nanos` alone is
+    the total when it is all there is). None when the response carries no cost field, or the one it is read from is not
+    a non-negative number: unknown, never $0. A field that is None or "" is absent."""
+    if not isinstance(spend, Mapping):
+        return None
+
+    def nanos(key: str) -> Decimal | None:
+        value = spend.get(key)
+        if isinstance(value, bool):
+            return None
+        try:
+            out = Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            return None
+        return out if out.is_finite() and out >= 0 else None
+
+    for key in TOTAL_COST_FIELDS:
+        if spend.get(key) not in (None, ""):
+            found = nanos(key)
+            return None if found is None else (found, key)
+    present = [key for key in SPLIT_COST_FIELDS if spend.get(key) not in (None, "")]
+    if not present:
+        return None
+    parts = [nanos(key) for key in present]
+    if any(part is None for part in parts):
+        return None
+    return sum(parts, Decimal(0)), "+".join(present)
+
+
 def usd(spend: Mapping[str, Any]) -> dict[str, Any]:
-    """The spend response reduced to dollars. Sail counts in billionths."""
+    """The spend response reduced to dollars. Sail counts in billionths. `total_usd` is `cost_nanos`'s whole cost, of
+    either shape (0.0 when the response carries none: `total_field` None says so); `finalized_usd` and `active_usd`
+    are the legacy split's, 0.0 on the shape that has none."""
 
     rates = spend.get("rates") if isinstance(spend.get("rates"), Mapping) else {}
 
@@ -991,13 +1034,15 @@ def usd(spend: Mapping[str, Any]) -> dict[str, Any]:
             return 0.0
         return round(value * (3600 if per_hour else 1) / 1e9, 6)
 
+    total = cost_nanos(spend)
     return {
         "from": spend.get("start_at"),
         "to": spend.get("end_at"),
         "finalized_usd": dollars("finalized_cost_usd_nanos"),
         "active_usd": dollars("estimated_active_cost_usd_nanos"),
-        "total_usd": dollars("estimated_total_cost_usd_nanos"),
-        "running_seconds": spend.get("duration_seconds"),
+        "total_usd": 0.0 if total is None else round(float(total[0]) / 1_000_000_000, 6),
+        "total_field": None if total is None else total[1],
+        "running_seconds": spend.get("duration_seconds", spend.get("running_seconds")),
         "vcpu_seconds": spend.get("vcpu_seconds"),
         "rates_usd_per_hour": {
             "vcpu": rate("vcpu_second_usd_nanos"),
