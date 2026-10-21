@@ -609,6 +609,8 @@ def lane_tickers(lane: Lane, day: dt.date) -> dict[str, list[tuple[str, str]]]:
     key = f"tickers:{sha}"
     if key not in lane.cache:
         data = lane.get_document(sha)
+        for old in [k for k in lane.cache if k.startswith("tickers:")]:
+            lane.cache.pop(old)     # (one parsed copy kept: the House's book holds its lane open for days)
         lane.cache[key] = U.sec_tickers(lambda url: data)
     return lane.cache[key]
 
