@@ -349,7 +349,8 @@ position (one share at most 5%), Probe 5%, Sized 10%, at most 8 open a learning 
 book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at 1.25 x the previous SIP close, exits
 market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1 section 5's fallback ladder, open risk
 value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in any 20 sessions, $800 net in total),
-ROOM in the order Sized, Probe, learning, then the tables' order. The real-money decision reads the lane's store, and
+ROOM in the order Sized, Probe, learning, then the tables' order (round-robin inside Sized and inside Probe, and a
+learning buy leaves the next auction's Probe and Sized programs their cash: the captain's A85, below). The real-money decision reads the lane's store, and
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
 `equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
 proof on the practice account has passed its BUY stage (filled, or accepted and ended unfilled at the open: the
@@ -374,7 +375,22 @@ How the book gives out the room (release 1019b's second review). ROOM IN ITS ORD
 Sized, then Probe, then learning, then the tables' order; each takes ITS OWN ranked picks whose name no earlier program
 was given at that auction, until its room (its open positions left) is full, and only a name given to a program is
 taken (`book.allocate`): REACT-ON takes the C1 events C1 has no room for, GUIDE-O1 the READ-O1 events READ-O1 has no
-room for. SIZE BEFORE SLOTS: before a pick takes a slot, the book skips (the shadow keeps the event) one that no whole
+room for. ROUND-ROBIN INSIDE SIZED AND INSIDE PROBE (the captain's A85, Oct 21, 2026, recorded before the first Probe
+auction): inside each of those two bands the picks are given one a program a pass (the tables' order inside a pass)
+until every program is full or out of picks, and the auction's buys are SENT in the same passes (`book.send_key`: every
+Probe program's first buy before any Probe program's second), so when the cash runs short inside one auction the last
+Probe row in the tables is not left only what the earlier rows did not take; learning keeps the tables' order. THE NEXT
+AUCTION'S RESERVATION (A85): the book is 1x cash, every buy holds its limit, and a lot sold in an auction still holds
+its cash in that auction, so a learning lot bought at one auction (the overnight rows' close buys) holds cash at the
+next one; ROOM's order alone held only inside one auction (A83 (2)(b)). A LEARNING buy is therefore sized on the cash,
+the invested room and the loss budget less R: for each live Probe or Sized program whose entry is the OTHER auction,
+min(its room there, max_open less what it holds and has on order, its lots sold at this auction not counted; the median
+of its real-money picks at its last 5 decisions of that auction, its whole room with none yet) x its band's share x E,
+and that x the median open-risk weight of its buys there (0.40 with none) for the budget; less what this auction's
+event sales give back by then (each lot sold here: its value, and its value x its weight), never below 0
+(league/equity/live.py `_event_reserve`, `book.reservation`). A learning buy it cuts says so ("A85 holds $X ...") and
+the shadow keeps a skipped event. R is 0 while no program of the other auction is at Probe or Sized: learning sizes as
+it did. No wall moves and no money row changes: the reservation only makes a learning buy smaller. SIZE BEFORE SLOTS: before a pick takes a slot, the book skips (the shadow keeps the event) one that no whole
 share of fits by price, on the figures the send sizes on (E the equity at the previous close; the name's book-wide
 value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
 or, at learning, a 2% target that buys no whole share with one share above 5% of E; and one whose name an event lot

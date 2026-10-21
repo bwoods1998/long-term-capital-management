@@ -5093,7 +5093,8 @@ class EquityBook:
         planned first (`_event_exits`, whatever the switch says: an exit never waits on it), then, while the event kind
         is on, each live program of this auction's entries asked for its real-money picks (`book.picks`, ranked), and
         the auction's slots given out IN ROOM'S ORDER (`book.allocate`, release 1019b's second review: Sized, then
-        Probe, then learning, then the tables' order; each program takes its own ranked picks, passing over a name an
+        Probe, then learning, then the tables' order, round-robin inside Sized and inside Probe since the captain's A85;
+        each program takes its own ranked picks, passing over a name an
         earlier program was given and a pick `_event_gate` skips whatever the room (no whole share fits by price, or the
         name is sold at this auction), until its room, `max_open` less what it holds and has on order, is full), and
         recorded as buy intents with their side rows (the limit, sigma, the weight, the exit plan). It waits a few
@@ -5656,10 +5657,19 @@ class EquityBook:
                                "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.day=? AND e.at=? ORDER BY i.iid",
                                (day, at))
         sells = [r for r in rows if r["e_side"] == "sell"] if "sell" in sides else []
-        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within a band the
-        # tables' order; within a program its own ranking (the decision planned them in it).
-        buys = sorted((r for r in rows if r["e_side"] == "buy"),
-                      key=lambda r: (*adapter.room_key(r["family"], r["e_band"]), int(r["iid"]))) if "buy" in sides else []
+        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within Sized and
+        # within Probe ROUND-ROBIN (A85, `book.send_key`: every program's first buy, in the tables' order, before any
+        # program's second); learning in the tables' order; within a program its own ranking (the decision planned
+        # them in it, so its iids are in it).
+        buys = []
+        if "buy" in sides:
+            nth: dict[str, int] = {}
+            ranked = []
+            for r in sorted((r for r in rows if r["e_side"] == "buy"), key=lambda r: int(r["iid"])):
+                n = nth.get(str(r["family"]), 0)
+                nth[str(r["family"])] = n + 1
+                ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
+            buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
         until = em.open_until if at == "open" else em.close_until
         for r in sells + buys:
             try:
@@ -5795,8 +5805,11 @@ class EquityBook:
         wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the loss budget at
         the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one share passes
         every cap and, at learning, one share at the limit is at most `one_share_max.learning` x E; (0, why) otherwise
-        (skipped: the shadow keeps the event). None (the intent's why) when a figure cannot be read this minute (asked
-        again next minute until the cut-off)."""
+        (skipped: the shadow keeps the event). A LEARNING buy sizes on the cash, the invested room and the loss budget
+        less THE NEXT AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what the other auction's Probe and Sized
+        programs will need, less what this auction's event sales give back; no wall moves, the reservation only makes a
+        learning buy smaller); 0 while no program of the other auction is at Probe or Sized, so learning sizes as before.
+        None (the intent's why) when a figure cannot be read this minute (asked again next minute until the cut-off)."""
         et = self._et()
 
         def wait(why: str) -> None:
@@ -5822,6 +5835,11 @@ class EquityBook:
             available = M.available_cash(account, working_buys_worst=working_buys_worst(self.state.rows), reserved=reserved,
                                          reserve_usd=et.cash_reserve)
             budget_room = self._budget_room(day)
+            # (A85: a learning buy leaves the next auction's Probe and Sized programs their cash, invested room and loss
+            # budget; zero for a Probe or Sized buy, and while no program of the other auction is at either band.)
+            held_cash, held_risk, held_note = self._event_reserve(inst, day, str(side.get("at") or intent.at), s, E)
+            available -= held_cash
+            budget_room -= held_risk
         except Exception as exc:  # noqa: BLE001 - fail closed
             wait(f"a sizing figure could not be read ({type(exc).__name__}: {str(exc)[:120]})")
             return None
@@ -5844,14 +5862,14 @@ class EquityBook:
         x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=s.share(inst.band) * E, limit_price=limit,
                            E=E, sleeve_equity=E, sleeve_free_cash=max(ZERO, available), sleeve_symbol_value=own_symbol,
                            position_share=s.per_name, account_symbol_value=max(book_symbol, account_symbol) + all_buys_symbol,
-                           invested_now=invested(self.state.rows) + options_loss,
+                           invested_now=invested(self.state.rows) + options_loss + held_cash,
                            invested_share=Decimal(str(et.invested_share)), available_cash=available, cash=cash,
                            any_short=any_short, budget_room=budget_room, weight=weight,
                            min_order_usd=Decimal(str(et.min_order_usd)))
         sized = Z.size_entry(x)
         whole = sized.qty.to_integral_value(rounding=ROUND_DOWN)
         if whole >= 1:
-            return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}"
+            return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}{held_note}"
         cap = s.one_share_cap(inst.band)
         if cap is not None and limit > cap * E:
             return ZERO, (f"no whole share fits: the {inst.band} target rounds to none and one share at ${limit} is above "
@@ -5859,8 +5877,107 @@ class EquityBook:
         one = Z.size_entry(replace(x, usd=limit))
         if one.qty >= 1:
             return Decimal(1), (f"one share at {inst.band}: the target's whole shares round to none and one share fits "
-                                f"every wall ({one.reason})")
-        return ZERO, f"no whole share fits ({one.binding}): {one.reason}"
+                                f"every wall ({one.reason}){held_note}")
+        return ZERO, f"no whole share fits ({one.binding}): {one.reason}{held_note}"
+
+    def _event_reserve(self, inst: Instance, day: str, at: str, s: Any, E: Decimal) -> tuple[Decimal, Decimal, str]:
+        """THE NEXT AUCTION'S RESERVATION FOR A LEARNING BUY (the captain's A85, recorded before the first Probe auction;
+        PREREG-EVL-3 section 2's ROOM, which A83 (2)(b) read as holding inside one auction only): (cash, loss budget,
+        the note its sizing reason carries). The book is 1x cash and every buy holds its limit; a lot sold in an auction
+        still holds its cash in that auction; so a learning lot bought at this auction (`at` of `day`) holds cash at
+        the NEXT one, the other auction. For every live program at Probe or Sized whose entry is that other auction
+        (`book.reservation`): its room there, `max_open(band)` less what it holds and has on order, its lots whose sale
+        is planned or working at THIS auction not counted (they are sold before it; `_event_open_count` less
+        `_event_selling`); the counts of its real-money picks at its last `book.RESERVE_DECISIONS` decisions of that
+        auction (`eq_event_decisions` summaries, `picks`; a decision that did not read them, its room full, is passed
+        over) and the weights of its buys there. The reservation is n = min(room, median picks) x share(band) x E for
+        cash and invested room, and that x the median weight for the loss budget, LESS what this auction's event sales
+        give back by the next one (each lot sold here: its value, and its value x its own weight for the budget), never
+        below 0. (0, 0, "") for a Probe or Sized buy, a kind that is not the event kind, and while no program of the
+        other auction is at Probe or Sized: learning sizes exactly as it did."""
+        if inst.kind != EVENT_KIND or inst.band != "learning":
+            return ZERO, ZERO, ""
+        adapter = self._event_adapter()
+        if adapter is None:
+            raise RuntimeError("the event adapter (league/events/book.py) cannot be imported")
+        other = "close" if at == "open" else "open"
+        rows: list[dict[str, Any]] = []
+        names: list[str] = []
+        for o in self._instances(alive=True):
+            if o.kind != EVENT_KIND or not o.live or o.band not in adapter.PROBE_UP:
+                continue
+            program = adapter.program_of(o.family, o.version)
+            if program is None or program.entry_at != other:
+                continue
+            holds = self._event_open_count(o.id) - self._event_selling(o.id, day, at)
+            picks, weights = self._event_recent(o, other, adapter.RESERVE_DECISIONS)
+            rows.append({"program": o.family, "band": o.band, "room": s.max_open(o.band) - holds, "picks": picks,
+                         "weights": weights})
+            names.append(o.family)
+        if not rows:
+            return ZERO, ZERO, ""
+        cash, risk = adapter.reservation(rows, s, E)
+        back_cash, back_risk = self._event_given_back(day, at)
+        held_cash, held_risk = max(ZERO, cash - back_cash), max(ZERO, risk - back_risk)
+        if held_cash <= 0 and held_risk <= 0:
+            return ZERO, ZERO, ""
+        cent = Decimal("0.01")
+        note = (f"; A85 holds ${held_cash.quantize(cent)} of cash and invested room and ${held_risk.quantize(cent)} of "
+                f"the loss budget for the {other}'s Probe and Sized programs ({', '.join(names)[:160]}): their "
+                f"${cash.quantize(cent)} less ${back_cash.quantize(cent)} this auction's sales give back")
+        return held_cash, held_risk, note
+
+    def _event_selling(self, key: str, day: str, at: str) -> int:
+        """An event program's open lots whose sale is planned or working at this auction (`day`, `at`)."""
+        return int(self.state.rows(
+            "SELECT COUNT(DISTINCT l.lid) AS n FROM eq_lots l JOIN eq_event_intents e ON e.lid=l.lid JOIN eq_intents i ON "
+            "i.iid=e.iid WHERE l.instance=? AND l.status IN ('open', 'closing') AND e.side='sell' AND e.day=? AND e.at=? "
+            "AND i.status IN ('planned', 'sent')", (key, day, at))[0]["n"])
+
+    def _event_recent(self, inst: Instance, at: str, n: int) -> tuple[list[int], list[Decimal]]:
+        """(the counts of the program's real-money picks at its last `n` decisions of auction `at` that read them, the
+        latest first; the open-risk weights of its buys planned at those decisions), from `eq_event_decisions`' summaries
+        (`programs.<program>.picks`, written by `_event_decide`) and `eq_event_intents`."""
+        counts: list[int] = []
+        days: list[str] = []
+        for r in self.state.rows("SELECT day, summary FROM eq_event_decisions WHERE at=? AND status='done' ORDER BY day "
+                                 "DESC LIMIT 60", (at,)):
+            summary = loads(r["summary"], {})
+            programs = summary.get("programs") if isinstance(summary, Mapping) else None
+            mine = programs.get(inst.family) if isinstance(programs, Mapping) else None
+            got = mine.get("picks") if isinstance(mine, Mapping) else None
+            if isinstance(got, bool) or not isinstance(got, int):
+                continue
+            counts.append(int(got))
+            days.append(str(r["day"]))
+            if len(counts) >= n:
+                break
+        weights: list[Decimal] = []
+        if days:
+            marks = ", ".join("?" for _ in days)
+            for r in self.state.rows(f"SELECT weight FROM eq_event_intents WHERE program=? AND version=? AND side='buy' "
+                                     f"AND at=? AND day IN ({marks})", (inst.family, int(inst.version), at, *days)):
+                w = _event_weight_of(r["weight"])
+                if w > 0:
+                    weights.append(w)
+        return counts, weights
+
+    def _event_given_back(self, day: str, at: str) -> tuple[Decimal, Decimal]:
+        """What this auction's EVENT SALES give back by the next auction: (the value of every open event lot whose sale is
+        planned or working at `day`'s `at`, its open risk at its own weight), the cash and the loss budget the next
+        auction gets back from them (an auction-held lot holds its cash only until its own auction)."""
+        value = risk = ZERO
+        seen: set[int] = set()
+        for r in self.state.rows("SELECT DISTINCT e.lid FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE "
+                                 "e.side='sell' AND e.day=? AND e.at=? AND i.status IN ('planned', 'sent') AND e.lid IS NOT "
+                                 "NULL", (day, at)):
+            lot = self._lot(int(r["lid"]))
+            if lot is None or lot.lid in seen or lot.status == LOT_CLOSED or lot.lane != EVENT_LANE:
+                continue
+            seen.add(lot.lid)
+            value += lot.value
+            risk += lot.value * event_lot_weight(lot.row())
+        return value, risk
 
     # ---------------------------------------------------------------- the fills handed back to the lane
     def _event_fills(self, adapter: Any, out: dict) -> None:
