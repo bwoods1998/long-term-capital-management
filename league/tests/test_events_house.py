@@ -832,7 +832,11 @@ class Nightly(LaneCase):
                 rid = st.start_receipt(f"decide-{kind}:2026-10-20", now=et("2026-10-20", t))
                 st.finish_receipt(rid, "ok", {}, now=et("2026-10-20", t))
             st.set_meta(SC.equity_key(dt.date(2026, 10, 20)), repr(2000.0))
-            BA.set_band(st, "EVL-ERN-READ-O1", 2, "probe", since="2026-10-19T20:00:00Z", why="look 1 passed")
+            # The move is written at the look (Mon Oct 19, 20:30 ET), never at the wall clock: a Probe stay begins at
+            # the later of its `since` and its write (bands.probe_since), so a real-clock write after these invented
+            # fills (from Oct 20, 13:30Z on) left them outside the stay and the test failed by date alone.
+            BA.set_band(st, "EVL-ERN-READ-O1", 2, "probe", since="2026-10-19T20:00:00Z", why="look 1 passed",
+                        now=et("2026-10-19", "20:30"))
             for i in range(50):                       # $3.50 lost on each of the last 50: -$175, past -$150
                 for side, price, t in (("buy", 10.0, "13:30"), ("sell", 9.65, "20:00")):
                     BA.record_fill(st, program="EVL-ERN-READ-O1", version=2, event=f"8k:invented-{i}", side=side,
