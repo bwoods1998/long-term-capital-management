@@ -8,6 +8,84 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019f (Oct 21-22, 2026): the path-to-Done fixes (A84-A86), the alarms, the Done reader: `rel/1019f`, not deployed
+
+Nine merges on release 1019e's head `c485dcfe` (#583, **Release 1019e**, below), `--no-ff`, rerere off, in this order:
+`fix/a84-fast-path-per-feed` (`b0a62c6b`, #586: A84, the fast path reads each feed by its own clean reads, and
+`evl_final`), `fix/evl-alarms-entries-backfill` (`a0cb8617`, #592: `evl_entries`, `evl_backfill`, `evl_handback`,
+PREREG-EVL-4's own decisions in `evl_decide`, the notice pace), `fix/backfill-robust` (`00f66615`, #585: the daily
+index's retries and SEC holidays), `fix/sail-spend-fields` (`dfb0e197`, #587: Sail's new spend fields),
+`fix/screen-after-open` (`1544704d`, #591: the screen after the open, the close decision's band re-read, the night
+keyed on the session), `fix/probe-target-honesty` (`1e90e7ae`, #590: the Probe size's record, the walls' equity),
+`fix/a85-probe-cash-reservation` (`be1af972`, #589: A85), `fix/a86-probe-more-smaller` (`8b6840a0`, #588: A86, ONLY in
+A86 REVISED's form) and `feat/done-reader` (`dbb0f68d`, #584: the Done reader). Each branch was cut from release 1019d
+and never met release 1019e; every conflict was resolved keeping both sides, and each branch's independent check was
+fixed at the integration:
+- A84's `evl_final` and the alarms' three causes are NINE `evl_` causes, in this order in `evl_health.CAUSES`,
+  `stall.CAUSES` and the gateway's `STALL_CAUSES`: `evl_record`, `evl_decide`, `evl_verdicts`, `evl_score`, `evl_fills`,
+  `evl_final`, `evl_entries`, `evl_backfill`, `evl_handback`; `evl_final` judges a registered seatable birth too.
+- THE SEC HOLIDAY RULE fires on what SEC answers: a weekday in `SEC_HOLIDAYS` whose daily index read fails, WHATEVER
+  THE STATUS (SEC answers 403 or 503 for a missing index, never 404), is done "no index: SEC holiday"; any other
+  weekday's failed read waits. `evl_backfill` reads a done day's failures from its last receipt when the backfill
+  retries (receipts with `retrying`), and an earlier release's receipts summed as before.
+- THE SCREEN AFTER THE OPEN changes no state while planning: `_open_checked` is set only when the horizons are
+  unchanged and when the task runs (`EventLane.run` plans again after every task and drops that plan's task).
+- THE PROBE SIZE'S RECORD keeps `sized_usd` (the whole shares the send asked x the limit) beside `target_usd` and
+  `binding`, on `eq_event_intents` and on the lane's `real_fills` buy row (nullable, migrated in place).
+- A85 WITH R3'S BIRTHS: the round-robin and the send order are `room_key`'s tiers (round-robin only inside the PREREG
+  Sized and Probe tiers; a birth's tier after every PREREG program, whatever its band, as release 1019e gives it); the
+  next auction's reservation holds room only for PREREG Probe/Sized programs (`book.reserved_for`), and a birth's buy
+  at any band leaves it as a PREREG learning buy does (`book.leaves_room`); A80's one re-send is sized again, R
+  included.
+- A86 REVISED: `position_share.probe` 0.035 (bound [0, 0.05] kept), `one_share_max.probe` 0.05 with its own bounds row
+  [0, 0.05] held under the name's wall, `max_open.probe` STAYS 6 (bound [0, 6] kept); the branch's 8 and its bound
+  changes undone.
+- THE DONE READER's Probe size is the record's: a Probe+ buy counts when `sized_usd` >= 0.8 x `target_usd`
+  (DONE-RULE-EVL-2 item 1, amended before any promotion; `RULE_SHA256` `8eb743e5` -> `54241925`).
+- `evl_score` no longer stands on an intent a decision wrote after the night's last score pass started (a catch-up
+  decision, Oct 21's false alarm): the next pass settles it, counted apart (`after_last_pass`).
+
+THE SHADOW RECORD DOES NOT MOVE (proved on the merged tree): run.py, programs.py, verdicts.py, score.py, universe.py,
+edgar.py, news.py, calendar.py and births.py are byte for byte release 1019e's, and the House's lane driven through
+four sessions of invented 8-Ks and news (every due task run at each instant, each tree with its own code and fakes)
+writes the same 111 intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows and 468 decision receipts on
+release 1019e and on this head; with one record pass failing all of SEC's feeds at 23:00 ET (a getcurrent timeout),
+the shadow record is again the same on both, and only the judge's finality differs, as A84 states: release 1019e's
+final record of all twelve seatable programs stays at Oct 20 (A66's three sessions), this head's reaches Oct 22, as with
+no failure. Real-money sizing moves only as A85 (a learning buy, and a birth's, less the reservation), A86 REVISED
+(Probe 3.5%, one share at most 5%) and the walls' equity (the lower of E and the current equity) state.
+
+IDENTITIES (the tree's own functions, 3.14 and 3.11): THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the
+constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two rows; `equity_money_problems()` is `[]`); the rollback pair with
+`equity_money.event.enabled` False is `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity
+identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move. The standing grant pins
+the money digest: it re-ratifies at the House's start (league/ops/grant.py), and new real entries wait until it has.
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight;
+release 1019e live first; main moves at 23:30Z nightly: merge origin/main into `rel/1019f` first when it moved, and CI
+green on the exact head; A84 before Oct 26 13:00Z, A85 before the Oct 29 close):
+1. THE GATEWAY from this head (`gateway/lib/email.mjs`: the four new causes' words, the INFO notice's
+   `waiting_owner`, the report's real buys, break-even edge and Done line): `cd gateway && npm run check && npm test &&
+   npx --no-install wrangler@4.129.1 deploy`; record the version it replaces (release 1019e's). An older gateway answers
+   400 to a stall notice that names a new cause, and that notice is not mailed: the gateway goes first.
+2. THE HOUSE from the same head, by the captain's ship script with the new pair: `ship_house.sh <head> <PR> r1019f
+   c2f0a478 24f73f18`. Verify (read-only): promoted, `real_money` true, failures []; the ids `b60410ad` / `78022ca6` /
+   `c2f0a478` / `24f73f18` and the grant re-ratified on `c2f0a478`; `release.live.equity.events.shares.probe` "0.035";
+   `eq_event_intents` and the lane's `real_fills` hold `target_usd`, `binding` and `sized_usd`; the next stall run judges
+   the nine `evl_` causes (`evl_entries` is expected to stand at once on A80's venue cancels: INFO, mailed
+   `stall:info:evl_entries`); budget.json's fixed line reads every box of the House's app but the Gym pool's
+   (`fixed_source`; above the configured burn it read before, so at no profit the lane's verdict line and research
+   shrink by the difference: the owner's $5 cap read honestly); after 09:40 ET a `screen-open` receipt when a
+   horizon moved; after the night's screen `<state>/events/done.json` with rule `54241925` and a `done` receipt.
+
+**Rollback**: the House first, by `floor_box.py rollback` and repoint release 1019e's deployed head (`c485dcfe`): it
+names its own columns (the new ones stay NULL), ignores done.json, `stall.json` `evl_kept` and `screen-open` receipts,
+and sizes Probe at 5% with one share up to the wall again (money `055e5313`); a look written by the screen after the
+open stands (looks are never rewritten). The gateway after it, by `wrangler rollback` to the version step 1 replaced, or
+never (its extra words are only words). Constitution-only: `equity_money.event.enabled` False (money `fd9e90c0`,
+constitution `005745e9`) stops every event buy; `position_share.probe` 0.05 with `one_share_max.probe` removed is
+release 1019e's pair (`055e5313` / `a8d4cbd9`), rows inside the bounds.
+
 ## A86 REVISED, Probe smaller inside the trade-less envelope (Oct 21, 2026): the Probe band at 3.5% of E, 6 open: `fix/a86-probe-more-smaller` as release 1019f integrates it, not deployed
 
 The captain's amendment A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event; the
@@ -6754,9 +6832,9 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `evl_record` (release 1019c) | the event lane on the House (`config.json` `events.enabled`): no CLEAN record pass in the last 30 minutes, round the clock: a `record` receipt finished `ok` whose 8-K, Form 4 and news reads all ran without error (each block present, no `error`, not every fetch of the pass failed, a tickers copy to fetch 8-Ks by); a pass that said `ok` and read nothing is no progress. The numbers name the failing feeds (`8k`, `form4`, `news`) | none (INFO): the House's to fix; the shadow record decides every event by its knowable time whenever it was stored |
 | `evl_decide` (release 1019c) | a session's open (09:15 ET) or close (the close - 14 minutes) decision of the last 24 h not MADE IN ITS WINDOW: no `decide-<open\|close>:<day>` receipt finished `ok` or `pending` within 10 minutes of its time (the lane's LIVE_WITHIN: what the real-money auction waits for): missing, failed, cut by the lane's bound, unfinished or finished late. One decided later stands all the same (its auction was missed), named so. The kinds come from the programs' own rows | none (INFO): the lane decides a missed one later from what was knowable at its time (the shadow record only) |
 | `evl_verdicts` (release 1019c) | verdicts a decision of the last 24 h needs still unanswered 15 minutes past it (past the later of the decision's time, the start of its run of receipts that lacked one, and the end of a PAUSE or STOP): the decision's latest receipt's tally (`verdicts: {needed, answered}`, open and close decisions alike; a receipt from release 1019b, its `pending` counts). The numbers say the day's verdict dollars and the lane's line (`at_line` when the budget's allowance is reached: READ events then wait for the next day's line) | none (INFO): a Claude meter run dry is `runway_claude`'s step, the kill switch `kill_on`'s |
-| `evl_score` (release 1019c) | intents due by the latest session whose 23:00 ET has passed still `planned` or `entered`: the night's score passes left them open (a pass that settled nothing counts nothing, whatever its status). An intent whose exit print the tape showed absent (a `marks` row with no price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) waits by design and is counted apart (`waiting_on_tape`) | none (INFO): the next night's passes try again what this one left |
+| `evl_score` (release 1019c) | intents due by the latest session whose 23:00 ET has passed still `planned` or `entered`: the night's score passes left them open (a pass that settled nothing counts nothing, whatever its status). An intent whose exit print the tape showed absent (a `marks` row with no price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) waits by design and is counted apart (`waiting_on_tape`); so, from release 1019f, does an intent a decision WROTE AFTER the night's last score pass started (a catch-up decision of an older session, PREREG-EVL-4's rows decided by themselves as on Oct 21, 2026: `evl_health.written_after`, from the decision receipts' own counts), which the next pass settles (`after_last_pass`); with no pass after the close nothing is excused | none (INFO): the next night's passes try again what this one left |
 | `evl_fills` (release 1019c) | the goal's "fill gaps": the lane's real fills set beside the shadow's own auction prints (the House's event twins, league/ops/twins.py `event_twin`, in the swarm store's kv `equity_twins`: `entry_gap_bp`, `exit_gap_bp`, positive when real money did worse): the signed mean of a side over its last 20 priced twins more than 15 bp from the prints EITHER WAY (the goal's Done item: fills within 15 bp of replay; PREREG-EVL-3 section 5's signed mean per side; A50's size of the gap), with at least 5 of them; the text and the numbers (`off`, `worse`, `better`) say which way, and "within 15 bp" only of a side that is. Not judged before the first real fill is priced | none (INFO): PREREG-EVL-1 section 5 raises the cost allowance to a worse measured gap (never lowers it); a gap either way says the fills or the shadow's prices are mis-measured |
-| `evl_final` (A84, release 1019f) | the event lane on the House: a seatable program's FINAL RECORD (league/events/screen.py `final_until` at the run's time, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named with its horizon, A69's and the judge's own why (`program`, `version`, `final_through`, `a69_allows`, `lag_sessions`, `lagging`); a retired program, one with every look written and one not yet registered are not judged; read-only (league/ops/daily_report.py `ReadOnlyStore`), the judge read and never run for a look; judged through a `PAUSE` | none (INFO): the record passes, their retries and the daily-index backfill fill most gaps by themselves; one that stays is the House's to fix (a release or the captain) |
+| `evl_final` (A84, release 1019f) | the event lane on the House: a seatable program's FINAL RECORD (league/events/screen.py `final_until` at the run's time, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named with its horizon, A69's and the judge's own why (`program`, `version`, `final_through`, `a69_allows`, `lag_sessions`, `lagging`); a retired program, one with every look written and one not yet registered are not judged; a registered seatable birth (R3) is judged like any seating program (the stall job loads the births from the same read-only store and leaves its table as it was); read-only (league/ops/daily_report.py `ReadOnlyStore`), the judge read and never run for a look; judged through a `PAUSE` | none (INFO): the record passes, their retries and the daily-index backfill fill most gaps by themselves; one that stays is the House's to fix (a release or the captain) |
 | `evl_entries` (release 1019f) | the real buys of an auction of the last 24 h (judged 15 minutes after its cross) fell short: under 90% of its planned buys filled, or one was NEVER SENT to the venue. Read-only from the book's own rows in `live.sqlite`: `eq_event_intents` buys joined with `eq_intents` (status, the book's own why) and their `eq_orders` (status, `filled_qty`, the venue's stamps in `answer`), and the auction's `eq_event_decisions` summary (picks, room, planned, skipped). The numbers: `planned`, `filled`, `fill_pct`, `venue_cancels` (the captain's A80: an auction buy the venue ended `canceled` within 60 s of its own `submitted_at`, nothing filled, no cancel of the House's own sent; `evl_health.venue_cancel_ms`, the rule release 1019e's re-send reads), `resent` and `resent_filled` (an order of the buy that reached the venue after its venue cancel: A80's one re-send from release 1019e), `never_sent` and `never_<reason>` (`evl_health.unsent_reason`, from the gateway's cap on a refused order or the book's own words: `order_line` the day order count, `cash`, `budget` the loss budget, `name_wall` the 10% a name, `invested`, `room` the program's open positions, `price` one share above the band's one-share cap, `min_order`, `gateway`, `sale` a sale of the name at the same cross, `busy` a working order of the name, `blocked` a gate of real opens, `unreadable`, `other`), `unfilled` (sent and not filled at the cross), `short_first` and `bound` (the constraint that stopped or cut the most buys of that auction: cash, budget, room with the decision's picks cut for room, order line, name wall with the decision's name-wall skips, invested; `none`). Not judged with no `live.sqlite` or no event table in it; one that cannot be read leaves only this cause and `evl_handback` unjudged (an entry of the receipt's `errors`) | none (INFO): each missed buy's full-size shadow keeps the event; the House moves no wall to fill more |
 | `evl_backfill` (release 1019f) | the daily-index backfill (league/events/house.py `_backfill`; A82) behind: a weekday of its reach (`BACKFILL_WEEKDAYS` weekdays before today, none before the lane's registration) whose meta `evl:backfill:<day>` is not `done` by 12:00 ET of the next weekday (`late`); a run of that day's `backfill` receipts with no `ok` (`waiting`, `partial`, any other) lasting over 6 h (`streak`); or a done day whose passes failed to fetch a filing (release 1019f's backfill tries a failed fetch again, six tries, and its receipts carry `retrying`: the day's own `failed` in its last receipt, the filings past their last try named in its `unfetched`; an earlier release's receipts: `failed` > 0 summed over them, as that backfill did not try a filing it had seen again). The numbers name the day (`first_day`, `state`, `hours`, `passes`, `last_status`) and its counts (`filings`, `known`, `fetched`, `failed`, `unlisted`). A federal holiday in `SEC_HOLIDAYS` is done at its first failed index read (`no index: SEC holiday`); a closure not in the table (an executive order) is never `done`, so it stands here until it leaves the reach, as the screen's looks wait on it (A66) | none (INFO): the lane reads the index hourly until the day is complete; the screen's looks wait for every weekday of the reach |
 | `evl_handback` (release 1019f) | a real event fill the book made and owes the lane's `real_fills` (league/equity/live.py `_event_fills`, every minute until the store takes it) for over 1 h and not there: every `eq_orders` row of a real event lot (`eq_lots.lane` "event", instance `:r`) with `filled_qty` > 0, keyed (program, version, event, side) by its lot's `info.evl`; a buy is owed once its intent has ended or its lot is no longer open (from the later of its last fill, `eq_fills.at`, and that end), a sale once its lot is closed (from `closed_at`). The numbers: `fills_due`, `handed`, `missing`, `missing_late`, `missing_buys`, `missing_sales`, `table` (the lane's store holds `real_fills`), `oldest_hours`, `oldest_program`, `oldest_side` | none (INFO): the lane computes Sized, demotion and retirement from those rows (PREREG-EVL-3), so a gap is evidence its judge never sees |

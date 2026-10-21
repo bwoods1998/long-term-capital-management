@@ -38,6 +38,49 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (unreleased; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
+
+- **What it carries** (each branch's own entry below, as its branch wrote it; docs/operations.md **Release 1019f** for
+  the deploy): `fix/a84-fast-path-per-feed` `b0a62c6b` (#586), `fix/evl-alarms-entries-backfill` `a0cb8617` (#592),
+  `fix/backfill-robust` `00f66615` (#585), `fix/sail-spend-fields` `dfb0e197` (#587), `fix/screen-after-open`
+  `1544704d` (#591), `fix/probe-target-honesty` `1e90e7ae` (#590), `fix/a85-probe-cash-reservation` `be1af972` (#589),
+  `fix/a86-probe-more-smaller` `8b6840a0` (#588, ONLY in A86 REVISED's form) and `feat/done-reader` `dbb0f68d` (#584),
+  merged `--no-ff` in that order, rerere off. Every branch was cut from release 1019d; each conflict keeps both sides.
+- **Fixed at the integration** (each branch's independent check, and the integration's own findings; each with a test
+  that fails without it):
+  - the nine `evl_` causes in one order everywhere (`evl_final` after `evl_fills`, then `evl_entries`, `evl_backfill`,
+    `evl_handback`); `evl_final` judges a registered seatable birth too (the stall job loads the births read-only and
+    leaves its table as it was);
+  - the SEC holiday rule: a weekday in `SEC_HOLIDAYS` whose daily index read fails, whatever the status, is done "no
+    index: SEC holiday" (SEC answers 403 or 503 for a missing index, never 404); `evl_backfill` reads a retrying
+    backfill's done day by its last receipt; an 8-K whose filer is unlisted since its failed fetch leaves the failed set;
+  - the screen after the open changes no state while planning (a screen due in the plan `run` drops is run at the next
+    turn);
+  - `sized_usd` (the whole shares the send asked x the limit) beside `target_usd` and `binding`, on `eq_event_intents`
+    and the lane's `real_fills` buy row;
+  - A85 with R3's births: `room_key`'s tiers for the round-robin and the send order, the reservation held for PREREG
+    Probe/Sized programs only, a birth's buy at any band sizing less it (league/tests/test_events_1019f_births_a85.py);
+  - A86 REVISED: `max_open.probe` stays 6 and its bound [0, 6], `position_share.probe`'s bound stays [0, 0.05], the one
+    new row `one_share_max.probe` [0, 0.05] held under the name's wall;
+  - the Done reader's Probe size: `sized_usd` >= 0.8 x `target_usd` (`done.at_size`, `PROBE_SIZE_SHARE`;
+    DONE-RULE-EVL-2 item 1 amended in place before any promotion);
+  - `evl_score` waits for the next pass on an intent a decision wrote after the night's last score pass started (Oct
+    21's false alarm: PREREG-EVL-4's rows decided by themselves for an older close);
+  - the budget's arithmetic docstring names the fixed line as the House app's boxes but the Gym pool's.
+- **The shadow record does not move.** The lane's decision, verdict and score code (run.py, programs.py, verdicts.py,
+  score.py, universe.py, edgar.py, news.py, calendar.py, births.py) is byte for byte release 1019e's. The House's lane
+  driven through four sessions of invented 8-Ks and news on each tree writes the same 111 intents, 16 outcomes, 18
+  verdicts, 9 filings, 12 eligibility rows and 468 decision receipts; with one record pass failing all of SEC's feeds,
+  the shadow record is the same again and only the finality differs, as A84 states (Oct 20 on release 1019e, Oct 22
+  here). Real-money sizing moves only as A85, A86 REVISED and the walls' equity state.
+- **Owner files** (behind league/ci.py's wall): CHANGELOG.md, docs/goals/DONE-RULE-EVL-2.md, gateway/lib/email.mjs and
+  its two tests, league/ci.py, league/constitution.py, league/equity/INTERFACES.md, league/equity/live.py,
+  league/events/bands.py, book.py, done.py, house.py, screen.py, store.py, league/ops/budget.py, daily_report.py,
+  economics.py, evl_health.py, stall.py, league/project_economics.py.
+- **Rollback**: the House first, to release 1019e's head `c485dcfe` (the new columns stay NULL to it; done.json and the
+  new receipts are inert); the gateway after it or never. Constitution-only: `equity_money.event.enabled` False
+  (`fd9e90c0` / `005745e9`), or the Probe rows back (`055e5313` / `a8d4cbd9`).
+
 ### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py joins the wall on this branch (`PENDING_GATEWAY`), beside its rule file under docs/goals/, which was behind it already; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
 
 - **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
