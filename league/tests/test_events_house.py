@@ -144,9 +144,12 @@ class FakeSEC:
                 from league.events.gw import GatewayError
                 raise GatewayError(404, "SEC")
             lines = []
-            for acc in self.daily[key]:
+            for entry in self.daily[key]:
+                # An accession, or (accession, filer cik, filer name): the index lists a filing once per filer.
+                acc, cik, company = (entry, None, None) if isinstance(entry, str) else entry
                 f = self.filings[acc]
-                lines.append(f"{f['form']:<12}{f['company']:<40}{int(f['cik']):<12}{key}    edgar/data/{int(f['cik'])}/"
+                cik, company = cik or f["cik"], company or f["company"]
+                lines.append(f"{f['form']:<12}{company:<40}{int(cik):<12}{key}    edgar/data/{int(cik)}/"
                              f"{acc}.txt")
             return ("\n".join(lines) + "\n").encode()
         if url.endswith("-index.htm"):
@@ -915,6 +918,47 @@ class TheBackfill(LaneCase):
             self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
         self.assertIn(("open", dt.date(2026, 10, 20)), self.lane._redecide)   # its entry session, decided again
         self.assertEqual(self.turn()["task"], "decide-open")
+
+    def test_a_filing_listed_once_per_filer_is_one_filing_and_the_day_completes(self):
+        # A82: EDGAR's daily index lists a filing once per filer (a Form 4 under its issuer and its owner, an 8-K under
+        # each co-registrant). Oct 19, 2026's index had 1,189 rows and 665 filings, and the House's backfill, counting
+        # rows, never finished a day. A co-registered 8-K whose first row is an unlisted filer is a listed filer's.
+        self.sec.add("0000000002-26-000401", "0000000002", "2026-10-19 16:30:00", current=False)
+        self.sec.add("0000000003-26-000402", "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [
+            "0000000002-26-000401", ("0000000002-26-000401", "0000000777", "Beta Holdings Owner"),
+            ("0000000003-26-000402", "0000000888", "Gamma Subsidiary LLC"), "0000000003-26-000402"]
+        self.at(et("2026-10-20", "11:00"))
+        self.mark_recorded()
+        with self.store() as st:
+            ctx = H.LaneContext(self.lane, st, H.LaneGateway(self.gw, self.lane, None, cut=False), self.sec, self.lane.now)
+            out = self.lane._backfill(ctx, dt.date(2026, 10, 19), self.mono() + 90)
+            self.assertTrue(out["complete"], out)
+            self.assertEqual((out["rows"], out["filings"], out["fetched"], out["unlisted"]), (4, 2, 2, 0))
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+            got = dict(st.db.execute("SELECT accession, cik FROM filings WHERE accession IN "
+                                     "('0000000002-26-000401', '0000000003-26-000402')").fetchall())
+            self.assertEqual(got, {"0000000002-26-000401": "0000000002", "0000000003-26-000402": "0000000003"})
+
+    def test_a_day_cut_by_its_deadline_completes_on_the_next_pass(self):
+        # The pass resumes filing by filing (seen kept between passes): a cut day is partial, the next pass ends it.
+        for n in range(3):
+            acc = f"0000000002-26-00050{n}"
+            self.sec.add(acc, "0000000002", "2026-10-19 16:30:00", current=False)
+            self.sec.daily.setdefault("20261019", []).extend([acc, (acc, "0000000777", "Owner")])
+        self.sec.slow = 50.0
+        self.at(et("2026-10-20", "11:00"))
+        with self.store() as st:
+            ctx = H.LaneContext(self.lane, st, H.LaneGateway(self.gw, self.lane, None, cut=False), self.sec, self.lane.now)
+            first = self.lane._backfill(ctx, dt.date(2026, 10, 19), self.mono() + 90)
+            self.assertFalse(first["complete"], first)
+            self.assertIsNone(st.meta("evl:backfill:2026-10-19"))
+            self.sec.slow = 0.0
+            second = self.lane._backfill(ctx, dt.date(2026, 10, 19), self.mono() + 90)
+            self.assertTrue(second["complete"], second)
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+            self.assertEqual(st.db.execute("SELECT count(*) FROM filings WHERE status='fetched' AND accession LIKE "
+                                           "'0000000002-26-00050%'").fetchone()[0], 3)
 
     def test_an_unpublished_index_waits_an_hour(self):
         self.at(et("2026-10-20", "11:00"))
