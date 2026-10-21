@@ -964,6 +964,18 @@ def _lane_iso(t: float) -> str:
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def wall_equity(E: Decimal, account: Mapping[str, Any] | None) -> Decimal:
+    """RELEASE 1019f, THE WALLS' EQUITY (the audit's capacity lens; the reading that trades less): the lower of `E`, the
+    event kind's sizing equity (the House's sizing equity, never above the account's `last_equity`), and the account's
+    CURRENT equity as the House last read it (`equity`, the minute's reading), the figure the gateway judges an event
+    buy's 10% a name and the whole book against: a buy sized near 10% of the previous close's equity on a day the
+    account is down otherwise meets the gateway's final refusal (`stock_position`). An `equity` that is absent or cannot
+    be read leaves `E` as it is (as an unreadable `last_equity` does: the gateway, which reads the account itself,
+    refuses a buy it cannot judge); one at or below zero is read as it is (no buy fits)."""
+    now = A.dec((account or {}).get("equity"))
+    return E if now is None else min(E, now)
+
+
 class _NoYield(Exception):
     """Raised inside `EquityBook._yield`'s transaction to roll it back: the swarm's store did not take the band."""
 
@@ -3880,11 +3892,30 @@ class EquityBook:
                         for statement in _SQL_COMMENT.sub("", adapter.SCHEMA).split(";"):
                             if statement.strip():
                                 self.state.execute(statement)
+                        self._add_columns(getattr(adapter, "SCHEMA_COLUMNS", None) or {})
             except Exception as exc:  # noqa: BLE001 - that kind stays off; the book itself goes on
                 adapter = None
                 self._error(f"adapter {kind}", exc, {})
             self._adapters[kind] = adapter
         return self._adapters[kind]
+
+    def _add_columns(self, columns: Mapping[str, Mapping[str, str]]) -> None:
+        """RELEASE 1019f: an adapter's columns added to its tables after their first release (`adapter.SCHEMA_COLUMNS`:
+        {table: {column: its ALTER statement}}; league/events/book.py's `eq_event_intents.target_usd` and `binding`), each
+        where the table lacks it (PRAGMA table_info, read afresh), as `eq_orders.tif` is: a state from before them gains
+        them in place, every older row reading NULL; another process's first open adding one between the look and the
+        ALTER is read as done. Anything else is raised (the adapter is then off, `_adapter`)."""
+        for table, wanted in columns.items():
+            for column, ddl in wanted.items():
+                have = {str(r["name"]) for r in self.state.rows(f"PRAGMA table_info({table})")}
+                if column in have:
+                    continue
+                try:
+                    self.state.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    have = {str(r["name"]) for r in self.state.rows(f"PRAGMA table_info({table})")}
+                    if "duplicate column name" not in str(exc).lower() or column not in have:
+                        raise
 
     def _rebalances(self, instance: str) -> list[dict]:
         return self.state.rows("SELECT * FROM eq_rebalances WHERE instance=? ORDER BY decided_day, rid", (instance,))
@@ -5399,7 +5430,10 @@ class EquityBook:
           decision before its picks): no buy of the name goes in it (`_event_sales_at`; an exit never waits on an
           entry, the reading that trades less).
         The walls that depend on the whole book (the 100% book, the cash, the loss budget) are `_size_event`'s at the
-        send, as before. Returns (skip(band, pick) -> one of those keys or None, "") or (None, why E cannot be read)."""
+        send, as before. RELEASE 1019f: the 10% a name is judged on `wall_equity` (the lower of E and the account's
+        current equity, the gateway's figure: the reading that trades less), as `_size_event`'s caps are; the band's
+        target and its one-share rule stay on E. Returns (skip(band, pick) -> one of those keys or None, "") or (None,
+        why E cannot be read)."""
         E = self.sizing_equity()
         if E is None or E <= 0:
             return None, "no sizing equity (the grant or the account)"
@@ -5409,6 +5443,7 @@ class EquityBook:
         last = A.dec(account.get("last_equity"))
         if last is not None and last > 0:
             E = min(E, last)     # (the equity at the previous close, as `_size_event` reads it)
+        walls = wall_equity(E, account)     # (release 1019f: the name wall's equity, as the gateway judges it)
         held: dict[str, tuple[Decimal | None, Decimal]] = {}
         for r in self._read_positions() or []:
             if str(r.get("asset_class") or "") == "us_equity":
@@ -5418,7 +5453,7 @@ class EquityBook:
             if o.side == "buy":
                 buying[o.symbol] = buying.get(o.symbol, ZERO) + o.remaining * o.limit_px
         selling = self._event_sales_at(day, at)
-        wall = s.per_name * E
+        wall = s.per_name * walls
 
         def skip(band: str, pick: Any) -> str | None:
             symbol = str(pick.symbol).upper()
@@ -5954,6 +5989,7 @@ class EquityBook:
             return False
         if not (current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)):
             return False
+        self._event_refused_at_gateway(intent, current)     # (release 1019f: the record's binding "gateway")
         cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
         note = venue_cancel_note(self._intent_orders(intent.iid))
         self._finish(intent, "refused" if current.status == "refused" else "missed",
@@ -5966,6 +6002,18 @@ class EquityBook:
                                 "gateway, or set equity_money.event.enabled False to stop the House asking")
         return True
 
+    def _event_refused_at_gateway(self, intent: Intent, current: Order) -> None:
+        """RELEASE 1019f, THE PROBE SIZE'S RECORD: an event buy whose last order the GATEWAY refused with its final answer
+        (a cap that is no reading it could not make: nothing reached the venue) is recorded as cut by it, `binding`
+        "gateway" on its side row, whatever its sizing named; its `target_usd` stays the sizing's. The House's own
+        refusals (nothing sent) and the venue's rejections are not the gateway's."""
+        if current.status != "refused" or current.again or not current.answer.get("gateway"):
+            return
+        side = self._event_row(intent.iid)
+        if side is None or "binding" not in side or side.get("binding") == "gateway":
+            return
+        self.state.execute("UPDATE eq_event_intents SET binding='gateway' WHERE iid=?", (int(intent.iid),))
+
     def _size_event(self, intent: Intent, inst: Instance, side: Mapping[str, Any], limit: Decimal, day: str,
                     s: Any) -> tuple[Decimal, str] | None:
         """THE EVENT ENTRY'S SIZE (PREREG-EVL-3 section 2, PREREG-EVL-1 section 8), by `sizing.size_entry` (the one
@@ -5975,7 +6023,10 @@ class EquityBook:
         the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one share passes
         every cap and, at learning, one share at the limit is at most `one_share_max.learning` x E; (0, why) otherwise
         (skipped: the shadow keeps the event). None (the intent's why) when a figure cannot be read this minute (asked
-        again next minute until the cut-off)."""
+        again next minute until the cut-off). RELEASE 1019f: the name's 10% (`instrument`), the program's own share of
+        it (`sleeve_cap`) and the 100% book are judged on `wall_equity` (the lower of E and the account's current equity,
+        the gateway's figure: the reading that trades less); the target and the one-share rule stay on E. Every answer
+        is RECORDED on the buy's side row (`_event_sized`): the target's dollars and the constraint that cut it."""
         et = self._et()
 
         def wait(why: str) -> None:
@@ -5994,6 +6045,7 @@ class EquityBook:
         last = A.dec(account.get("last_equity"))
         if last is not None and last > 0:
             E = min(E, last)      # the equity at the previous close (PREREG-EVL-3 section 2); never above the House's
+        walls = wall_equity(E, account)     # (release 1019f: the walls' equity, the gateway's current one when lower)
         try:
             cash = D(account.get("cash"))
             options_loss = self._options_open_loss(day)
@@ -6020,8 +6072,10 @@ class EquityBook:
         all_buys_symbol = sum((o.remaining * o.limit_px for o in buys if o.symbol == symbol), ZERO)
         own_symbol = sum((lot.value for lot in self._lots(instance=inst.id, symbol=symbol)), ZERO)
         weight = _event_weight_of(side.get("weight"))
-        x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=s.share(inst.band) * E, limit_price=limit,
-                           E=E, sleeve_equity=E, sleeve_free_cash=max(ZERO, available), sleeve_symbol_value=own_symbol,
+        target = s.share(inst.band) * E
+        x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=target, limit_price=limit,
+                           E=walls, sleeve_equity=walls, sleeve_free_cash=max(ZERO, available),
+                           sleeve_symbol_value=own_symbol,
                            position_share=s.per_name, account_symbol_value=max(book_symbol, account_symbol) + all_buys_symbol,
                            invested_now=invested(self.state.rows) + options_loss,
                            invested_share=Decimal(str(et.invested_share)), available_cash=available, cash=cash,
@@ -6030,23 +6084,89 @@ class EquityBook:
         sized = Z.size_entry(x)
         whole = sized.qty.to_integral_value(rounding=ROUND_DOWN)
         if whole >= 1:
+            self._event_sized(intent, side, target, self._event_cut(x, sized, whole * limit < target), whole * limit)
             return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}"
         cap = s.one_share_cap(inst.band)
         if cap is not None and limit > cap * E:
+            self._event_sized(intent, side, target, None, ZERO)
             return ZERO, (f"no whole share fits: the {inst.band} target rounds to none and one share at ${limit} is above "
                           f"{cap} x E (${(cap * E).quantize(Decimal('0.01'))})")
         one = Z.size_entry(replace(x, usd=limit))
         if one.qty >= 1:
+            self._event_sized(intent, side, target, None, limit)
             return Decimal(1), (f"one share at {inst.band}: the target's whole shares round to none and one share fits "
                                 f"every wall ({one.reason})")
+        self._event_sized(intent, side, target, self._event_cut(replace(x, usd=limit), one, False), ZERO)
         return ZERO, f"no whole share fits ({one.binding}): {one.reason}"
 
+    def _event_cut(self, x: Any, sized: Any, short: bool) -> str | None:
+        """RELEASE 1019f: the constraint that cut an event buy below its target, in the record's words
+        (league/events/book.py `binding_of`, `BINDINGS`), from `size_entry`'s answer `sized` for the facts `x`: its cap;
+        for a size under the minimum order (`min_order`), the cap `size_entry` finds with no minimum (the same function
+        asked again: what cut the dollars under it); "whole_shares" when no cap cut the dollars and `short` (the floor
+        to whole shares took the buy under its target); None otherwise."""
+        adapter = self._event_adapter()
+        found = sized.binding
+        if found == "min_order":
+            found = Z.size_entry(replace(x, min_order_usd=ZERO)).binding
+        named = adapter.binding_of(found)
+        if named is None and found == "intent" and short:
+            return "whole_shares"
+        return named
+
+    def _event_sized(self, intent: Intent, side: Mapping[str, Any], target: Decimal, binding: str | None,
+                     sized: Decimal) -> None:
+        """RELEASE 1019f, THE PROBE SIZE'S RECORD: an event buy's band target (`target_usd`, Decimal dollars: the band's
+        `position_share` x E at the previous close, as `size_entry` was asked it), the constraint that cut it
+        (`binding`, league/events/book.py `BINDINGS`; None when none did) and THE DOLLARS IT SENDS (`sized_usd`, Decimal:
+        the whole shares this sizing sends x the limit, 0 when it sends none; release 1019f's integration, the honesty
+        check: the Done reader's Probe size compares it with the target, never the fill's cost, which the open's gap
+        moves) on its side row in `eq_event_intents`, written at each sizing of its send when they changed (the last
+        sizing before the send is the one that sent; A80's one re-send is sized again, so its own). A state with no such
+        columns (an adapter that did not migrate) is left as it is; one with the first two only gets those."""
+        if "target_usd" not in side:
+            return
+        value, sent = text(target), text(sized)
+        has_sized = "sized_usd" in side
+        if side.get("target_usd") == value and side.get("binding") == binding and \
+                (not has_sized or side.get("sized_usd") == sent):
+            return
+        if has_sized:
+            self.state.execute("UPDATE eq_event_intents SET target_usd=?, binding=?, sized_usd=? WHERE iid=?",
+                               (value, binding, sent, int(intent.iid)))
+        else:
+            self.state.execute("UPDATE eq_event_intents SET target_usd=?, binding=? WHERE iid=?",
+                               (value, binding, int(intent.iid)))
+
     # ---------------------------------------------------------------- the fills handed back to the lane
+    def _event_size_record(self, lot: Lot) -> dict[str, Any]:
+        """RELEASE 1019f: {target_usd, binding, sized_usd} of an event lot's buy for the lane's `real_fills`, from its
+        side row (`_event_sized`): the band target in dollars (a float, as the lane's columns hold money), the
+        constraint that cut it, "venue" when none did, or only the whole shares did, and the venue filled less than one
+        of its orders asked (`_event_short_fill`), and the dollars its send asked (the shares sent x the limit); all
+        None when the side row holds no target (sized before the release), `sized_usd` None when it holds none."""
+        side = self._event_row(lot.iid) if lot.iid is not None else None
+        target = A.dec((side or {}).get("target_usd"))
+        if target is None:
+            return {"target_usd": None, "binding": None, "sized_usd": None}
+        binding = side.get("binding") if side.get("binding") in self._event_adapter().BINDINGS else None
+        if binding in (None, "whole_shares") and self._event_short_fill(lot):
+            binding = "venue"
+        sent = A.dec(side.get("sized_usd"))
+        return {"target_usd": float(target), "binding": binding, "sized_usd": None if sent is None else float(sent)}
+
+    def _event_short_fill(self, lot: Lot) -> bool:
+        """Whether an order of the lot's buy that filled at all filled less than it asked (a partial auction fill)."""
+        return lot.iid is not None and any(ZERO < o.filled_qty < o.qty for o in self._intent_orders(lot.iid))
+
     def _event_fills(self, adapter: Any, out: dict) -> None:
         """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized, demotion and retirement from
         them; league/events/book.py `write_fills`): each real event lot's buy, once its buy has ended, and its sale, once
         the lot is closed (again when the broker's posted fees change it), one row a (program, version, event, side),
-        written every minute until the lane's store takes them (a lot's `info.evl_fills` keeps what was written)."""
+        written every minute until the lane's store takes them (a lot's `info.evl_fills` keeps what was written).
+        RELEASE 1019f: a buy's row carries its side row's `target_usd` and `binding` (the probe size's record,
+        `_event_sized`), "venue" for the binding when no cap cut it and the venue filled less than an order asked
+        (`_event_short_fill`); NULL in both for a lot whose buy was sized before the release."""
         rows: list[dict[str, Any]] = []
         marks: list[tuple[Lot, dict[str, Any]]] = []
         for r in self.state.rows("SELECT * FROM eq_lots WHERE lane=? AND substr(instance, -2)=? ORDER BY lid",
@@ -6062,7 +6182,7 @@ class EquityBook:
             buy = self._intent(lot.iid) if lot.iid is not None else None
             if not written.get("buy") and (lot.status != LOT_OPEN or buy is None or buy.status not in INTENT_LIVE):
                 rows.append({**base, "side": "buy", "qty": float(lot.opened_qty), "price": float(lot.entry_px), "fee": 0.0,
-                             "filled_at": _lane_iso(lot.opened_at)})
+                             "filled_at": _lane_iso(lot.opened_at), **self._event_size_record(lot)})
                 want["buy"] = True
             if lot.status == LOT_CLOSED and lot.exit_px is not None and written.get("sell") != text(lot.fees):
                 sold = D(lot.info.get("exit_qty"), lot.opened_qty)

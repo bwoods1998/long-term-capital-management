@@ -21,6 +21,13 @@ The lane writes `bands` and `band_history`; the House's event book (league/event
 writes `real_fills` through `record_fill` (one row a fill, idempotent per (program, version, event, side); a posted fee
 updates its row). The House's lane (league/events/house.py) runs `review` after each night's screen. Nothing here reads
 a price after an event other than the real fills the House reports and the screen's own looks.
+
+THE PROBE SIZE'S RECORD (release 1019f; a record only, no rule here reads it): a buy's row also keeps `target_usd`, the
+dollars its band's target asked (the band's `position_share` x E at the previous close), `binding`, which constraint
+cut it below that (`BINDINGS`; None when none did), and `sized_usd`, the dollars its send asked (the shares sent x the
+limit), written with the row and never changed after. The band rules above count a fill by its `band` label, as
+PREREG-EVL-3 section 2 has it; the Done reader (league/events/done.py) reads "Probe size or above" as `sized_usd` >=
+0.8 x `target_usd` (the send's dollars at the limit, never the fill's cost, which the open's gap moves).
 """
 
 from __future__ import annotations
@@ -39,6 +46,12 @@ DEMOTE_NET_USD = -150.0
 DEMOTE_MEAN_LAST = 100
 SIZED_MIN = 150
 RETIRE_P = 0.05
+#: RELEASE 1019f: what may cut a real buy below its band's target, as `real_fills.binding` (and the House's
+#: `eq_event_intents.binding`) records it: the House-wide CASH; the loss BUDGET at the lot's weight; the book's 100%
+#: INVESTED; the NAME_WALL (the book-wide 10% a name, or the program's own share of it); the GATEWAY's final refusal (a
+#: buy that never filled); the WHOLE_SHARES (no cap cut the dollars, the floor to whole shares did); the VENUE (it
+#: filled less than the order asked). NULL: none did (the buy is at its target, or one share above it).
+BINDINGS = ("cash", "budget", "invested", "name_wall", "gateway", "whole_shares", "venue")
 
 
 def seating() -> dict[tuple[str, int], P.Program]:
@@ -197,17 +210,29 @@ def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
 
 
 def record_fill(store: S.Store, *, program: str, version: int, event: str, side: str, qty: float, price: float,
-                fee: float, filled_at: str, band: str) -> bool:
+                fee: float, filled_at: str, band: str, target_usd: float | None = None,
+                binding: str | None = None, sized_usd: float | None = None) -> bool:
     """The House's write of one real fill (league/events/book.py `write_fills`), idempotent per (program, version,
     event, side): the first write sets the row; a later write of the same key changes ONLY its fee (the broker posts a
-    sale's regulatory fees after the fill, and demotion's net reads the posted fee), never its quantity, price, time or
-    band. Returns whether the row is new or its fee changed."""
+    sale's regulatory fees after the fill, and demotion's net reads the posted fee), never its quantity, price, time,
+    band, target, binding or sent dollars. `target_usd`, `binding` and `sized_usd` (release 1019f): a buy's band target
+    in dollars, the constraint that cut it (`BINDINGS`, None for none) and the dollars its send asked (the shares sent x
+    the limit), None on a sale. Returns whether the row is new or its fee changed."""
     if side not in ("buy", "sell") or band not in BANDS[:3]:
         raise ValueError("side buy|sell, band learning|probe|sized")
+    if binding is not None and binding not in BINDINGS:
+        raise ValueError(f"binding {binding!r} is not one of {BINDINGS}")
+    for name, amount in (("target_usd", target_usd), ("sized_usd", sized_usd)):
+        if amount is not None and not (math.isfinite(float(amount)) and float(amount) >= 0):
+            raise ValueError(f"{name} {amount!r} is not a finite amount >= 0")
+    if side == "sell" and (target_usd is not None or binding is not None or sized_usd is not None):
+        raise ValueError("a sale has no target, no binding and no sent dollars")
     with store.tx() as db:
-        cur = db.execute("INSERT OR IGNORE INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) "
-                         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (program, int(version), event, side, float(qty), float(price), float(fee), filled_at, band))
+        cur = db.execute("INSERT OR IGNORE INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band, "
+                         "target_usd, binding, sized_usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (program, int(version), event, side, float(qty), float(price), float(fee), filled_at, band,
+                          None if target_usd is None else float(target_usd), binding,
+                          None if sized_usd is None else float(sized_usd)))
         if cur.rowcount == 1:
             return True
         cur = db.execute("UPDATE real_fills SET fee=? WHERE program=? AND version=? AND event=? AND side=? AND fee IS NOT ?",
@@ -215,5 +240,5 @@ def record_fill(store: S.Store, *, program: str, version: int, event: str, side:
         return cur.rowcount == 1
 
 
-__all__ = ["BANDS", "bands", "set_band", "on_look", "retire_test", "real_events", "probe_since", "review", "record_fill",
+__all__ = ["BANDS", "BINDINGS", "bands", "set_band", "on_look", "retire_test", "real_events", "probe_since", "review", "record_fill",
            "seating"]

@@ -4175,7 +4175,8 @@ session):
   lane's LIVE-RULE eligible rows are read (`book.LIVE_ROWS`: a row the backfill rule alone made never trades). THE
   SLOTS (release 1019b's second review, `book.allocate`): the programs in ROOM's order, each taking its own ranked
   picks, passing over a name an earlier program was given at this auction and a pick `_event_gate` skips (no whole
-  share fits by price on E at the previous close: one share at the limit above the book-wide 10% a name, or at learning
+  share fits by price on E at the previous close: one share at the limit above the book-wide 10% a name (from release
+  1019f on the lower of E and the account's current equity, `wall_equity`, the gateway's figure), or at learning
   a 2% target of no whole share with one share above 5% of E; or its name is sold at this auction), until its room
   (`max_open` less what it holds and has on order: learning 8, Probe 6, Sized 8) is full; only a name given is taken.
   Each pick given a slot is a buy intent with its side row in `eq_event_intents`: its band, the limit (`limit_ratio` x
@@ -4196,8 +4197,9 @@ session):
   Its size is `size_entry`'s, the one sizing function: a target of the band's
   `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at the previous close
   (`last_equity`, never above the House's sizing equity), at the limit, capped by the name's BOOK-WIDE 10%
-  (`per_name_share`: every lot, working buy and account position of the name), the 100% book, the House-wide cash and
-  THE LOSS BUDGET at the lot's own weight; floored to WHOLE shares; when that rounds to none, one share when one share
+  (`per_name_share`: every lot, working buy and account position of the name), the 100% book (these two, and the
+  program's own share of the name, on `wall_equity` from release 1019f: the lower of E and the account's current
+  equity, the figure the gateway judges), the House-wide cash and THE LOSS BUDGET at the lot's own weight; floored to WHOLE shares; when that rounds to none, one share when one share
   passes every cap and, at learning, one share at the limit is at most 5% of E (`one_share_max.learning`); else
   refused ("no whole share fits": the shadow keeps the event). The body: `{"symbol", "qty": "<whole>", "side": "buy",
   "type": "limit", "limit_price": "<limit>", "time_in_force": "opg" | "cls", "client_order_id"}`. An auction order is
@@ -4237,6 +4239,27 @@ session):
   league/events/bands.py `record_fill` (idempotent; a write again changes only the fee), every minute until the store
   takes them. A store with no `real_fills` table yet keeps them waiting. The lane's nightly screen task reviews them
   (`bands.review`: demotion to learning, Sized).
+- **THE PROBE SIZE'S RECORD** (release 1019f, on `fix/probe-target-honesty`, not yet deployed; the audit's capacity and
+  probe lenses). Each sizing of an event buy's send writes on its side row in `eq_event_intents` `target_usd` (Decimal
+  dollars: the band's `position_share` x E at the previous close) and `binding` (league/events/bands.py `BINDINGS`:
+  `cash`, `budget`, `invested`, `name_wall` or `whole_shares`, from `size_entry`'s binding cap, `book.binding_of`; for
+  a size under the minimum order the cap `size_entry` finds with no minimum; NULL when none cut it, or one share above
+  the target), when they changed (`_event_sized`); the gateway's final refusal of its last order writes `gateway`
+  (`_event_refused_at_gateway`; a refusal of a reading it could not make writes nothing, and the House's own refusals
+  and the venue's rejections are not the gateway's). The buy's row in the lane's `real_fills` carries both (a float
+  `target_usd`; `venue` for the binding when no cap cut it and the cross filled less than an order asked), written once
+  with the row and never changed (`record_fill`; only the fee moves). MIGRATIONS: `book.SCHEMA_COLUMNS` adds the
+  columns to a House state from before them at the book's start (`EquityBook._add_columns`, PRAGMA-guarded, another
+  process's add read as done); league/events/store.py `migrate_fills` adds them to a lane store at every `Store` open
+  and `write_fills` runs it on a store the lane has not opened since (so no buy row goes without its target). Every
+  older row, every sale and every buy sized before the release read NULL. Reading it: `SELECT band, qty, price,
+  target_usd, binding FROM real_fills WHERE side='buy'` on `<state>/events/events.sqlite` (read-only); the size is set
+  at the limit (1.25 x the previous close), so a full Probe buy's cost at a print near the previous close is about 0.8 x
+  its target, so both rows also keep `sized_usd` (release 1019f's integration): the dollars the send asked, the whole
+  shares sent x the limit (0 when none), which the Done reader compares with 0.8 x `target_usd` (`SELECT band, qty,
+  target_usd, sized_usd, binding FROM real_fills WHERE side='buy'`). Nothing reads it to trade: the band rules are as
+  before. Rollback: the previous House release reads both
+  tables unchanged (it names its columns; the new ones stay NULL from then on).
 - **EXITS**: every lot at its program's scheduled auction (`book.exit_plan`): the CLOSE of its last session for
   PREREG-EVL-1's rows and EVL-ERN-GUIDE-O1 / EVL-INS-BUY-O1; the NEXT SESSION'S OPEN for EVL-ERN-REACT-ON,
   EVL-NEWS-READ-ON and EVL-NEWS-REACT-ON. **How an open exit is sent**: the close buy's side row carries `exit_at`

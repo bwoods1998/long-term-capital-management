@@ -77,8 +77,9 @@ Probe, then learning (how the book gives it out: "Real money" below). The lane w
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
 with the same module's `bands(store)` at each session's first decision, and again at the close decision when the
 lane's `band_history` moved since (release 1019f, below: "The screen after the open"), and writes every real fill to
-`real_fills` with its `record_fill` (a posted fee updates its row); on the House the lane reviews the real fills after
-each night's screen (`bands.review`: demotion and Sized), whatever the screen did.
+`real_fills` with its `record_fill` (a posted fee updates its row; from release 1019f a buy's row also keeps its band
+target and what cut it, below: "THE PROBE SIZE'S RECORD"); on the House the lane reviews the real fills after each
+night's screen (`bands.review`: demotion and Sized), whatever the screen did.
 
 A LOOK READS A FINAL RECORD (release 1019b's review; `screen.final_until`, version 1 and version 2 alike): a look as of
 a close is computed once nothing more can be added to the sessions it covers: the hourly re-decision of the last three
@@ -473,8 +474,8 @@ Sized, then Probe, then learning, then the tables' order; each takes ITS OWN ran
 was given at that auction, until its room (its open positions left) is full, and only a name given to a program is
 taken (`book.allocate`): REACT-ON takes the C1 events C1 has no room for, GUIDE-O1 the READ-O1 events READ-O1 has no
 room for. SIZE BEFORE SLOTS: before a pick takes a slot, the book skips (the shadow keeps the event) one that no whole
-share of fits by price, on the figures the send sizes on (E the equity at the previous close; the name's book-wide
-value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
+share of fits by price, on the figures the send sizes on (E the equity at the previous close, the 10% a name on the
+lower of E and the account's current equity from release 1019f; the name's book-wide value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
 or, at learning, a 2% target that buys no whole share with one share above 5% of E; and one whose name an event lot
 sells at that same auction. AN EXIT NEVER WAITS ON AN ENTRY: no buy of a name goes in the cross that sells it (a sale
 the gateway refused for a reading, a 424 or 409, goes again the next minute, never held by a buy sent in between). THE
@@ -516,6 +517,31 @@ STOPPING IT: `<state>/events/STOP` idles the LANE only (no record pass, decision
 still decides each auction on the store as it stands, so buys from events and verdicts already stored can still go.
 The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False
 ([operations.md](operations.md), **Release 1019b**, Rollback).
+
+THE PROBE SIZE'S RECORD (release 1019f, on `fix/probe-target-honesty`, not yet deployed; the read-only audit of the live
+House, its capacity and probe lenses). A Probe or Sized buy that cash, the loss budget or a wall cut below its band's
+target was still labelled `probe` in `real_fills`, with no record of the target, so a reader of "Probe size or above"
+could not tell a full Probe event from a cut one. Now every event buy's side row in the House's `eq_event_intents` and
+its row in the lane's `real_fills` keep `target_usd`, the dollars its band's target asked (`position_share` x E at the
+previous close, as the sizing was asked them), and `binding`, which constraint cut it below that: `cash` (the House-wide
+cash), `budget` (the loss budget at the lot's weight), `invested` (the 100% book), `name_wall` (the book-wide 10% a
+name), `whole_shares` (no cap cut the dollars; the floor to whole shares did), `gateway` (the gateway's final refusal:
+no fill) or `venue` (the cross filled less than the order asked); NULL when none did, the buy at its target or one share
+above it. Both are nullable columns, added in place to a state or store from before them (idempotent); a sale's row and
+every older row read NULL. A record only: the band rules count a fill by its band label as PREREG-EVL-3 section 2 has
+it, and the Done reader reads the record. Reading it: the size is set AT THE LIMIT (1.25 x the previous close), so a
+full Probe buy's cost at a print near the previous close is about 0.8 x `target_usd`; so (release 1019f's integration,
+the branch's independent check) both rows also keep `sized_usd`, THE DOLLARS THE SEND ASKED: the whole shares sent x
+the limit (0 when it sent none; A80's one re-send is sized again and writes its own), and the Done reader counts a
+Probe+ event only when `sized_usd` >= 0.8 x `target_usd` (DONE-RULE-EVL-2 item 1: a full, uncut buy counts whatever the
+open's gap; a buy cut by a wall, the cash, the budget or the floor to whole shares below 0.8 does not).
+
+THE WALLS' EQUITY (release 1019f, the same audit; the reading that trades less). The House sized the 10% a name on E
+(`last_equity`, never above its sizing equity) while the gateway judges the account's CURRENT equity, so a one-share
+buy near 10% on a day the account was down met the gateway's final refusal (`stock_position`). The decision's name-wall
+skip and the send's caps of the name (book-wide and the program's own) and of the 100% book now read the lower of E and
+the account's current equity as the House last read it (league/equity/live.py `wall_equity`); the band's target and its
+one-share rule stay on E at the previous close. A current equity above E moves nothing; one that cannot be read leaves E.
 
 THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c, not yet deployed): the kind's auction orders of a day count against
 their own line, `equity_money.event.max_orders_day` (150: 2 x the open positions of the live bands, at least 150; nine

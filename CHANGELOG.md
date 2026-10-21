@@ -38,6 +38,41 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### The probe size's record and the walls' equity, on `fix/probe-target-honesty` (unreleased; cut from `rel/1019d` `5a17bd25` (#581); joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy of the House alone: `league/equity/` is protected and league/events/bands.py, book.py and store.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019d's, read with the tree's own functions on 3.14 and 3.11; no constitution row, no setting, no gateway change; the audit's capacity and probe lenses)
+
+- **The defects.** (a) A Probe or Sized buy that cash, the loss budget or a wall cut below its band's target was still
+  labelled `probe` in the lane's `real_fills`, and nothing kept the target, so a reader of "Probe size or above" (the
+  goal's Done) could not tell a full Probe event from a cut one. (b) The House sized the 10% a name on E (`last_equity`,
+  never above its sizing equity) while the gateway judges the account's CURRENT equity: on a day the account is down, a
+  one-share buy near 10% passed the House and met the gateway's final refusal (`stock_position`), an event lost.
+- **The fix, (a), a record only.** `eq_event_intents` (live.sqlite) and `real_fills` (the lane's store) gain two
+  nullable columns: `target_usd`, the dollars the band's target asked (`position_share` x E at the previous close, as
+  `size_entry` was asked them), and `binding`, which constraint cut the buy below it (league/events/bands.py `BINDINGS`:
+  `cash`, `budget`, `invested`, `name_wall`, `whole_shares`, `gateway` for the gateway's final refusal, `venue` for a
+  cross that filled short; NULL when none did). The House writes them at each sizing of an event buy's send
+  (`_event_sized`, from `size_entry`'s binding cap by `book.binding_of`), `gateway` at its final refusal, and hands both
+  to the lane with the buy's fill (`_event_fills`, `write_fills`, `record_fill`: written once, only the fee moves).
+  Additive and idempotent migrations: `book.SCHEMA_COLUMNS` through `EquityBook._add_columns` at the book's start;
+  `store.migrate_fills` at every lane `Store` open and from `write_fills` on a store the lane has not opened since. A
+  sale and every older row read NULL; the band rules count by the band label as before; the Done reader (another
+  branch) reads the record. The size is set at the limit (1.25 x the previous close): a full Probe buy's cost at a print
+  near the previous close is about 0.8 x its target, and the size the sizing gave is the fill's quantity x the limit.
+- **The fix, (b), the reading that trades less.** `wall_equity`: the lower of E and the account's current `equity` as
+  the House last read it. `_event_gate`'s name-wall skip reads it, and `_size_event` passes it to `size_entry` as `E`
+  and `sleeve_equity`, so the name's book-wide 10%, the program's own share of the name and the 100% book are judged on
+  it; the band's target and the one-share rule stay on E at the previous close. A current equity above E moves nothing;
+  one that cannot be read leaves E (the gateway, which reads the account itself, refuses what it cannot judge).
+- **Tests.** league/tests/test_events_probe_honesty.py (17, the real book, `size_entry`, money table and lane store on
+  invented figures): a Probe buy at its target (NULL binding on both rows, a sale NULL); each cut named beside its
+  target (cash, budget, invested, whole shares; the gateway's final refusal; a partial cross the venue's; a sizing
+  refusal's cap); a learning buy's target and one share above it; both tables migrated in place from release 1019d's
+  frozen schemas, again nothing, another process's add read as done, an older release's write still going; the
+  write-back migrating a store the lane had not opened; `record_fill` writing the target once and refusing what is not
+  a binding; the decision's name wall and the send's caps on the current equity (a one-share buy over 10% of the
+  current equity never sent; a Sized buy cut from 10 to 7 shares with its target still on the previous close); a
+  current equity above E moving nothing. Each fix disabled in turn fails its tests. The 63 test modules that import
+  the touched modules pass on 3.14 and 3.11 (1,864 tests each).
+
 ### The screen after the open, the House's close re-read of the bands, the night by session, on `fix/screen-after-open` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, which the captain integrates on top of release 1019e; an owner deploy of the House alone: league/events/house.py and book.py are behind league/ci.py's wall, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO RULE AND NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the gate contract `397b22b7`, the same on 3.14 and 3.11)
 
 - **Why.** The read-only audit of the live House (lenses looks and probe), "BANDS MOVE A SESSION LATE": the judge
