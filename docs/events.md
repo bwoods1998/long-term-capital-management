@@ -287,9 +287,25 @@ filings), so a day is complete when every filing is seen, and an 8-K is a listed
 listed. Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
 never ran.
 
+A FAILED FETCH HOLDS ITS DAY, ONE DEAD DOCUMENT NEVER HOLDS IT FOR GOOD (`fix/backfill-robust`, release 1019f): a
+daily-index filing whose fetch fails is not seen. It is tried again at the first backfill pass 2, 4, 8, 16 and 32
+minutes after its first failure, six tries in all, as the record pass tries a live one (its own count), and the day
+is complete only when every filing is fetched, known or unlisted, or past its last try. Meanwhile the receipt is
+`partial` with `failed`, `retrying` and `next_try`, and a later day is backfilled while the day waits. A filing past
+its last try is named in the day's last receipt (`unfetched`: accession, form, tries, error), whose status is
+`done-failed`; the day is done with `failed` above 0. That filing stays `failed:` in the store, so A69's condition (ii)
+still waits on it for the closes whose windows hold it, and A66's reach does not. Before this fix a failed fetch
+counted as seen and the day was done at once: one transient SEC error lost the filing. SEC HOLIDAYS: EDGAR is closed on
+a federal holiday and publishes no daily index for it (Wed Nov 11, 2026, Veterans Day, is a trading day), so its index
+URL answers 404 for good. A weekday in `house.py` `SEC_HOLIDAYS` (OPM's 2026 and 2027 federal holidays, and Fri Dec 31,
+2027, New Year's Day 2028 observed) whose index answers 404 is done as `no index: SEC holiday` (receipt `ok`, `why`,
+`holiday`). A 404 on any other weekday, or a holiday's index that answers another error, waits an hour as before, and
+a holiday's index that exists is read as any day's. A closure by executive order is not in the table: add its day
+before it falls.
+
 A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
 first record pass 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, then left to the daily-index
-backfill (an SEC outage of half an hour, or SEC's 10-minute rate-limit block, no longer spends every try); a record
+backfill, which tries it again by the same steps from release 1019f (an SEC outage of half an hour, or SEC's 10-minute rate-limit block, no longer spends every try); a record
 pass whose feed failed counts its retried rows beside the feed's error; a decision that raised is closed `failed` and
 run again a minute later while it is live, then every 10 minutes (a cut one goes on at the next turn; one cut and then
 failing waits as a failed one). Verdicts are asked from

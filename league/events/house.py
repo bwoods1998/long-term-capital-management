@@ -33,7 +33,9 @@ once an hour per task, so the House's repeat rule never turns it into an error),
 5. the TICKER snapshot at 07:00 ET;
 6. EARLY VERDICTS from 07:30 ET (the session's universe is fixed then: its tickers copy is the latest before 07:30 ET),
    for its open decision and then its close decision;
-7. the daily-index BACKFILL of the last weekdays, for anything the live pass missed or failed.
+7. the daily-index BACKFILL of the last weekdays, for anything the live pass missed or failed (a filing whose fetch fails
+   in it is tried again on the record pass's backoff, its day done after its last try with the filing named; a federal
+   holiday's missing index is done: `SEC_HOLIDAYS`).
 A backlog (missed decisions, a long verdict queue) never holds the record pass past a second cadence: then only a live
 decision goes before it. A task ends early when a decision falls due; a decision's and a verdict task's network reads
 stop at their bound and the next turn goes on from what was stored (universe rows, cik_info, bars and verdicts are kept
@@ -133,6 +135,29 @@ EQUITY_RETRY = dt.timedelta(minutes=10)
 BACKFILL_WEEKDAYS = SN.FINAL_BACKFILL_WEEKDAYS
 BACKFILL_AT = dt.time(5, 0)                   # a weekday's daily index is read from 05:00 ET the next day
 BACKFILL_RETRY = dt.timedelta(hours=1)
+#: SEC HOLIDAYS (release 1019f): EDGAR accepts no filings on a US federal holiday and publishes no daily index for it,
+#: so such a weekday's index URL answers 404 for good, and its backfill waited every hour while the day was in reach
+#: (every look across Wed Nov 11, 2026, Veterans Day, on which NYSE trades). A weekday in this table whose index answers
+#: 404 is done, "no index: SEC holiday"; a 404 on any other weekday, or a holiday's index that answers anything else,
+#: waits as an unpublished index does, and a holiday's index that exists is read as any day's. The federal holidays of
+#: 2026 and 2027 as OPM lists them (https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/, read Oct 21,
+#: 2026), and Fri Dec 31, 2027: New Year's Day 2028 falls on a Saturday, so the Friday before is its holiday (5 U.S.C.
+#: 6103(b)(1)). A closure by executive order (a Christmas Eve) is not in it: add the day before it falls; 2028's before
+#: Jan 2028.
+SEC_HOLIDAYS: dict[dt.date, str] = {
+    dt.date(2026, 1, 1): "New Year's Day", dt.date(2026, 1, 19): "Birthday of Martin Luther King, Jr.",
+    dt.date(2026, 2, 16): "Washington's Birthday", dt.date(2026, 5, 25): "Memorial Day",
+    dt.date(2026, 6, 19): "Juneteenth National Independence Day", dt.date(2026, 7, 3): "Independence Day",
+    dt.date(2026, 9, 7): "Labor Day", dt.date(2026, 10, 12): "Columbus Day", dt.date(2026, 11, 11): "Veterans Day",
+    dt.date(2026, 11, 26): "Thanksgiving Day", dt.date(2026, 12, 25): "Christmas Day",
+    dt.date(2027, 1, 1): "New Year's Day", dt.date(2027, 1, 18): "Birthday of Martin Luther King, Jr.",
+    dt.date(2027, 2, 15): "Washington's Birthday", dt.date(2027, 5, 31): "Memorial Day",
+    dt.date(2027, 6, 18): "Juneteenth National Independence Day", dt.date(2027, 7, 5): "Independence Day",
+    dt.date(2027, 9, 6): "Labor Day", dt.date(2027, 10, 11): "Columbus Day", dt.date(2027, 11, 11): "Veterans Day",
+    dt.date(2027, 11, 25): "Thanksgiving Day", dt.date(2027, 12, 24): "Christmas Day",
+    dt.date(2027, 12, 31): "New Year's Day",
+}
+SEC_HOLIDAY_WHY = "no index: SEC holiday"
 CALENDAR_EVERY = dt.timedelta(hours=20)
 CALENDAR_RETRY = dt.timedelta(minutes=10)
 CALENDAR_BACK = dt.timedelta(days=60)
@@ -144,7 +169,8 @@ FETCH_WINDOW = dt.timedelta(days=2)           # listed filings the record pass s
 FETCH_TRIES = 6                               # ... and a failed fetch is tried this many times in all,
 #: ... again at the first record pass this long after its FIRST failure (release 1019b's second review: tried at every
 #: pass, an SEC outage of about 12 minutes, or SEC's 10-minute rate-limit block, spent every try): 2, 4, 8, 16 and 32
-#: minutes, then left to the daily-index backfill.
+#: minutes, then left to the daily-index backfill. The backfill tries a daily-index filing by the same two (release
+#: 1019f: `_backfill`), with its own count.
 FETCH_BACKOFF = tuple(dt.timedelta(minutes=2 ** k) for k in range(1, FETCH_TRIES))
 
 WARN_EVERY = 3600.0
@@ -290,6 +316,10 @@ class EventLane:
         self._attempts: dict[str, dt.datetime] = {}
         self._score_seen: dict[dt.date, set[tuple[str, int, str]]] = {}
         self._backfill_seen: dict[dt.date, set[str]] = {}
+        # day -> accession -> (the backfill's fetches tried, when the first failed, form, the last error): a failed
+        # daily-index filing, this process's (`_backfill`); and day -> when its next retry is due (`_backfill_due`)
+        self._backfill_failed: dict[dt.date, dict[str, tuple[int, dt.datetime, str, str]]] = {}
+        self._backfill_wait: dict[dt.date, dt.datetime] = {}
         self._index_rows: dict[dt.date, list[dict[str, Any]]] = {}
         self._usd = {"day": None, "usd": 0.0}
         self._paused = False
@@ -1218,6 +1248,10 @@ class EventLane:
             if now < at:
                 soon.append(at)
                 continue
+            wait = self._backfill_wait.get(day)
+            if wait is not None and now < wait:   # only failed filings left, their next try not due: a later day goes on
+                soon.append(wait)
+                continue
             if self._retry_ok(f"backfill:{day.isoformat()}", now, BACKFILL_RETRY, soon):
                 return day
         return None
@@ -1229,12 +1263,21 @@ class EventLane:
         if day not in self._index_rows:
             try:
                 self._index_rows[day] = E.parse_daily_index(ctx.sec(E.daily_index_url(day)), E.FORMS)
-            except G.GatewayError as exc:   # not published yet: tried again within the hour, said in the receipt
+            except G.GatewayError as exc:
+                holiday = SEC_HOLIDAYS.get(day)
+                if getattr(exc, "status", None) == 404 and holiday is not None:   # EDGAR was closed: no index, ever
+                    st.set_meta(f"evl:backfill:{day.isoformat()}", "done")
+                    summary = {"day": day.isoformat(), "complete": True, "why": SEC_HOLIDAY_WHY, "holiday": holiday}
+                    self._receipted(st, "backfill", "ok", summary)
+                    return summary | {"_status": "ok"}
+                # not published yet: tried again within the hour, said in the receipt
                 self._attempts[f"backfill:{day.isoformat()}"] = ctx.now()
                 self._receipted(st, "backfill", "waiting", {"day": day.isoformat(), "why": str(exc)[:120]})
                 return {"day": day.isoformat(), "waiting": str(exc)[:120], "_status": "waiting"}
         rows = self._index_rows[day]
         seen = self._backfill_seen.setdefault(day, set())
+        failed = self._backfill_failed.setdefault(day, {})
+        now = ctx.now()
         listed = set(ctx.tickers)
         # ONE FILING, ONE ROW EACH FILER (A82): EDGAR's daily index lists a filing once per filer, so a Form 4 stands
         # under its issuer and its reporting owner and an 8-K under each co-registrant (Oct 19, 2026: 1,189 rows, 665
@@ -1245,38 +1288,79 @@ class EventLane:
             first = filings.setdefault(row["accession"], row)
             if row["form"] == "8-K" and first["cik"] not in listed and row["cik"] in listed:
                 filings[row["accession"]] = row
-        counts = {"rows": len(rows), "filings": len(filings), "known": 0, "fetched": 0, "failed": 0, "unlisted": 0}
+        # A FAILED FETCH IS NOT SEEN (release 1019f): a filing whose fetch failed is tried again FETCH_BACKOFF after its
+        # first failure, FETCH_TRIES tries in all, across passes, as the record pass tries a live one (its own count:
+        # `_backfill_failed`, kept by this process); the day is done only when every filing is fetched, known or
+        # unlisted, or past its last try: those are named in the receipt (`unfetched`: accession, form, tries, error)
+        # and the day is done with `failed` > 0, so one dead document never holds a look for good.
+        counts = {"rows": len(rows), "filings": len(filings), "known": 0, "fetched": 0, "unlisted": 0, "retried": 0}
         entered: set[tuple[str, dt.date]] = set()
+        cut = False
         for row in filings.values():
-            if row["accession"] in seen:
+            accession = str(row["accession"])
+            if accession in seen:
                 continue
             if self.late(deadline):
+                cut = True
                 break
-            seen.add(row["accession"])
             if row["form"] == "8-K" and row["cik"] not in listed:
+                seen.add(accession)
                 counts["unlisted"] += 1
                 continue
-            have = st.db.execute("SELECT status FROM filings WHERE accession=?", (row["accession"],)).fetchone()
-            if have is not None and have["status"] == "fetched":
+            have = st.db.execute("SELECT status FROM filings WHERE accession=?", (accession,)).fetchone()
+            if have is not None and have["status"] == "fetched":   # (the record pass may have fetched a failed one)
+                seen.add(accession)
+                failed.pop(accession, None)
                 counts["known"] += 1
                 continue
+            tried = failed.get(accession)
+            if tried is not None and now < tried[1] + FETCH_BACKOFF[tried[0] - 1]:
+                continue    # (its next try is not due yet: the tries-th after the first failure)
             status = E.record_filing(st, ctx.sec, row | {"accepted_at": None, "index_url": None, "items": []},
                                      source="daily-index", now=ctx.now(), fetch=True)
+            if tried is not None:
+                counts["retried"] += 1
+            if status.startswith("failed"):
+                tries = (tried[0] if tried is not None else 0) + 1
+                failed[accession] = (tries, tried[1] if tried is not None else now, str(row["form"]), status)
+                if tries >= FETCH_TRIES:
+                    seen.add(accession)    # (past its last try: named below, the day goes on without it)
+                continue
+            seen.add(accession)
+            failed.pop(accession, None)
             if status == "fetched":
                 counts["fetched"] += 1
-                entered |= self._entry_sessions(st, row["accession"])
-            elif status.startswith("failed"):
-                counts["failed"] += 1
+                entered |= self._entry_sessions(st, accession)
+        retrying = {acc: f for acc, f in failed.items() if acc not in seen}
         complete = len(seen) >= len(filings)
+        if complete:   # (a filing past its last try that the record pass has fetched since is not named)
+            for acc in list(failed):
+                have = st.db.execute("SELECT status FROM filings WHERE accession=?", (acc,)).fetchone()
+                if have is not None and have["status"] == "fetched":
+                    failed.pop(acc)
         today = ctx.now().astimezone(C.NY).date()
         self._redecide |= {(kind, session_day) for kind, session_day in entered if session_day <= today}
+        summary = {"day": day.isoformat(), "complete": complete, **counts, "failed": len(failed),
+                   "retrying": len(retrying), "redecide": len(entered)}
+        next_try = min((f[1] + FETCH_BACKOFF[f[0] - 1] for f in retrying.values()), default=None)
+        if next_try is not None:
+            summary["next_try"] = S.iso(next_try)
+        if complete and failed:
+            summary["unfetched"] = [{"accession": acc, "form": f[2], "tries": f[0], "error": f[3][:120]}
+                                    for acc, f in sorted(failed.items())]
         if complete:
             st.set_meta(f"evl:backfill:{day.isoformat()}", "done")
             self._index_rows.pop(day, None)
             self._backfill_seen.pop(day, None)
-        summary = {"day": day.isoformat(), "complete": complete, **counts, "redecide": len(entered)}
-        self._receipted(st, "backfill", "ok" if complete else "partial", summary)
-        return summary
+            self._backfill_failed.pop(day, None)
+            self._backfill_wait.pop(day, None)
+        elif next_try is not None and not cut:   # nothing left but failed filings: the day waits for the next try
+            self._backfill_wait[day] = next_try
+        else:                          # cut by its bound: the next turn goes on from what was seen
+            self._backfill_wait.pop(day, None)
+        status = ("done-failed" if failed else "ok") if complete else "partial"
+        self._receipted(st, "backfill", status, summary)
+        return summary | {"_status": status}
 
     @staticmethod
     def _entry_sessions(st: S.Store, accession: str) -> set[tuple[str, dt.date]]:
