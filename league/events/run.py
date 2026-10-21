@@ -399,6 +399,24 @@ def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
             "unjudged": sorted(e for e in maybe - taken if not held(e))}
 
 
+#: R3: the decision summary's map of the registered births whose own part of a decision raised ({key: why}).
+BIRTHS_FAILED = "births_failed"
+
+
+def _decide_one(prog: P.Program, one: Callable[[P.Program], None], out: dict[str, Any]) -> None:
+    """One program's part of a decision. A PREREG program's failure fails the decision, as before; a registered
+    birth's (R3, league/events/births.py) is its own: kept in the summary's `births_failed` (league/events/screen.py
+    `final_until` then holds that birth's looks until a later pass decides it), never the PREREG programs' decision,
+    whose receipt and finality stay as they were. The hourly re-decision tries it again."""
+    if prog.spec is None:
+        one(prog)
+        return
+    try:
+        one(prog)
+    except Exception as exc:  # noqa: BLE001 - a birth's failure is its own
+        out.setdefault(BIRTHS_FAILED, {})[_key(prog)] = f"{type(exc).__name__}: {str(exc)[:160]}"
+
+
 # ---------------------------------------------------------------------------------------------------- verdicts
 def doc_verdict(ctx: Context, row: Mapping[str, Any], uni: Mapping[str, Any]) -> int | None:
     st = ctx.store
@@ -494,28 +512,34 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     why = "backfill" if backfill_run else None
     kept = _scope(st, "open", day, ctx.now())
     later: list[tuple[P.Program, list[Mapping[str, Any]]]] = []
-    for prog in P.PROGRAMS:
-        if prog.entry_at != "open":
-            continue
+
+    def one(prog: P.Program) -> None:
         rows = {"ern": e8k, "8k": e8k, "ins": ins, "ins-buy": buys, "news": articles}.get(prog.family, [])
         rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
         frozen = kept(prog)
         if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
             out.setdefault("kept", {})[_key(prog)] = frozen
             later.append((prog, rows))
-            continue
+            return
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
                 out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
-            continue
+            return
         if waiting:
             out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
-            continue
+            return
         cands = P.select(prog, rows, eligible=lambda c: elig.get(c), verdict=verdict, guidance=guidance)
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
+
+    for prog in P.PROGRAMS:
+        if prog.entry_at != "open":
+            continue
+        _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
-        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c), guidance=guidance)
+        def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows) -> None:
+            out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: elig.get(c), guidance=guidance)
+        _decide_one(prog, left, out)
     out["events"] = {"8-K": len(e8k), "f4_triggers": len(ins), "f4_buys": len(buys), "news": len(articles),
                      "eligible": sum(1 for v in elig.values() if v)}
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
@@ -822,10 +846,39 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     why = "backfill" if backfill_run else None
     kept = _scope(st, "close", day, ctx.now())
     later: list[tuple[P.Program, list[Mapping[str, Any]], Mapping[str, Mapping[str, Any] | None]]] = []
+
+    def one(prog: P.Program, mine: bool) -> None:
+        """One program's part of the close decision (a registered birth's failure is its own: `_decide_one`)."""
+        if mine:
+            rows, table, wait = four["rows"][prog.family], elig4, pending4
+            read = stored_news if prog.family == "news-pm" else verdict4
+        else:
+            rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
+            table, wait, read = elig, pending, verdict
+        rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+        frozen = kept(prog)
+        if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
+            out.setdefault("kept", {})[_key(prog)] = frozen
+            later.append((prog, rows, table))
+            return
+        waiting = wait(prog, rows)
+        if ask_only:
+            if waiting:
+                out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
+            return
+        if waiting:
+            out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
+            return
+        if prog.family == "8k-react":
+            _marks_1530(ctx, [str(table[r["cik"]]["symbol"]) for r in rows if table.get(r.get("cik"))], day)
+        cands = P.select(prog, rows, eligible=lambda c, table=table: table.get(c), verdict=read, reaction=reaction)
+        out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+
     # THE EARLIER ROWS FIRST, exactly as before PREREG-EVL-4 (their reads, verdicts and intents), then PREREG-EVL-4's,
     # whose own reads come after them: a failure or a time bound in those never holds an earlier row's decision. A
     # program a written look of its group freezes (`_scope`, A74 (5)) is kept in either part: asked nothing, fetched
-    # nothing, written nothing (no intent, no `skipped:excluded` move: `_skip_excluded` passes it over).
+    # nothing, written nothing (no intent, no `skipped:excluded` move: `_skip_excluded` passes it over). R3's registered
+    # births (close entry: ern-react, news-day, news-react) are decided in the earlier part, after every PREREG row.
     for mine in (False, True):
         if evl4_only and not mine:
             continue        # (PREREG-EVL-4's rows by themselves: no earlier row is decided again)
@@ -840,33 +893,13 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         for prog in P.PROGRAMS:
             if prog.entry_at != "close" or (prog.family in P.CLOSE_FAMILIES_4) != mine:
                 continue
-            if mine:
-                rows, table, wait = four["rows"][prog.family], elig4, pending4
-                read = stored_news if prog.family == "news-pm" else verdict4
-            else:
-                rows = {"ern-react": e8k, "news-day": articles, "news-react": articles}.get(prog.family, [])
-                table, wait, read = elig, pending, verdict
-            rows = [r for r in rows if S.parse_iso(r["knowable_at"]) > prog.registered_at]
-            frozen = kept(prog)
-            if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
-                out.setdefault("kept", {})[_key(prog)] = frozen
-                later.append((prog, rows, table))
-                continue
-            waiting = wait(prog, rows)
-            if ask_only:
-                if waiting:
-                    out["pending"][_key(prog)] = waiting   # version 1 and version 2 of one id count apart
-                continue
-            if waiting:
-                out["pending"][_key(prog)] = waiting   # decided by a later pass, once every verdict is stored
-                continue
-            if prog.family == "8k-react":
-                _marks_1530(ctx, [str(table[r["cik"]]["symbol"]) for r in rows if table.get(r.get("cik"))], day)
-            cands = P.select(prog, rows, eligible=lambda c, table=table: table.get(c), verdict=read, reaction=reaction)
-            out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+            _decide_one(prog, lambda prog, mine=mine: one(prog, mine), out)
     for prog, rows, table in [] if ask_only else later:   # (what each kept program leaves out, once this run's asks are in)
-        out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c, table=table: table.get(c),
-                                             reaction=lambda r, u: reaction(r, u, fetch=False))
+        def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows,
+                 table: Mapping[str, Mapping[str, Any] | None] = table) -> None:
+            out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: table.get(c),
+                                                 reaction=lambda r, u: reaction(r, u, fetch=False))
+        _decide_one(prog, left, out)
     out["events"] = {"8-K": len(e8k), "day_news": len(articles), "eligible": sum(1 for v in elig.values() if v),
                      **four["counts"]}
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
