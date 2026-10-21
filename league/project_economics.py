@@ -18,7 +18,7 @@ import tempfile
 import time
 from typing import Any, Mapping
 
-from .publish import MONTH_SECONDS, SUBSCRIPTIONS_MONTHLY_USD
+from .publish import MONTH_SECONDS, SUBSCRIPTIONS_ENDED_AT, SUBSCRIPTIONS_MONTHLY_USD
 from .trading_profit import cents, complete as complete_trading, row_value
 
 T0 = "2026-09-26T06:23:14Z"
@@ -296,6 +296,17 @@ def box_cost(receipt: Mapping[str, Any] | None, app_id: str) -> dict:
     return out
 
 
+
+def subscription_months(key: str, at: float) -> tuple[Decimal, str | None]:
+    """(months prorated, end): a subscription accrues from FINANCIAL_START to the cutoff `at`, or to its end in
+    `publish.SUBSCRIPTIONS_ENDED_AT` when that is earlier (ThetaData and Alpaca Algo Trader Plus, cancelled by the owner
+    Oct 18, 2026, end 2026-10-19T00:00:00Z: what accrued before stays, nothing accrues after; the site's own figure,
+    `publish.Publisher._compute`, has stopped there since release 1019a)."""
+    ended = SUBSCRIPTIONS_ENDED_AT.get(key)
+    stop = at if not ended else min(at, epoch(ended))
+    return Decimal(str(max(stop - epoch(FINANCIAL_START), 0.0))) / MONTH_SECONDS, (ended if ended and epoch(ended) <= at else None)
+
+
 def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_id: str,
            external: Mapping[str, Any] | None = None, subscription_rates: Mapping[str, Any] | None = None) -> dict:
     """A deterministic snapshot. Missing evidence stays null; a known subtotal is never labelled complete Net."""
@@ -375,11 +386,13 @@ def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_
     if estimate:
         unresolved.append("active box usage is estimated, not finalized provider billing")
     rates = {**SUBSCRIPTIONS_MONTHLY_USD, **dict(subscription_rates or {})}
-    months = Decimal(str(at - epoch(FINANCIAL_START))) / MONTH_SECONDS
     for key in SUBSCRIPTIONS_MONTHLY_USD:
         rate = decimal(rates.get(key))
+        months, ended = subscription_months(key, at)
         inputs[key] = {"usd": money(rate * months) if rate is not None and rate >= 0 else None, "monthly_usd": money(rate),
-                       "as_of": as_of, "basis": "existing 365.25-day-year proration from financial/subscription start"}
+                       "as_of": as_of, "ended_at": ended,
+                       "basis": "existing 365.25-day-year proration from financial/subscription start"
+                                + (f", to the subscription's end {ended} (the owner cancelled it)" if ended else "")}
     valid_external = bool(external and external.get("complete") is True and external.get("incremental_only") is True
                           and epoch(external.get("start_at")) == epoch(T0) and epoch(external.get("end_at")) == at
                           and external.get("source") and decimal(external.get("usd")) is not None and decimal(external["usd"]) >= 0)

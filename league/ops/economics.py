@@ -829,9 +829,11 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
                    f"unresolved holds (may yet bill) = {usd(openai_booked)}; the gateway's month: spent {fr.get('spent_usd')} (settled {usd(fr.get('settled_usd'))}, "
                    f"in flight {usd(fr.get('inflight_usd'))}), swarm agents {usd(swarm_frontier)}; month {fr.get('month')}; no role uses OpenAI")},
         {"service": "ThetaData", "usd": usd(theta), "settled_usd": usd(theta),
-         "basis": f"pro-rata of ${usd(inp['thetadata_usd']['monthly_usd'])}/month (Options Standard list) from {FS} (365.25-day year); invoice not seen"},
+         "basis": f"pro-rata of ${usd(inp['thetadata_usd']['monthly_usd'])}/month (Options Standard list) from {FS} (365.25-day year)"
+                  f"{' to ' + inp['thetadata_usd']['ended_at'] + ' (cancelled)' if inp['thetadata_usd'].get('ended_at') else ''}; invoice not seen"},
         {"service": "Alpaca market data (Algo Trader Plus)", "usd": usd(mdata), "settled_usd": usd(mdata),
-         "basis": f"pro-rata of ${usd(inp['market_data_usd']['monthly_usd'])}/month from {FS}; invoice not seen"},
+         "basis": f"pro-rata of ${usd(inp['market_data_usd']['monthly_usd'])}/month from {FS}"
+                  f"{' to ' + inp['market_data_usd']['ended_at'] + ' (cancelled)' if inp['market_data_usd'].get('ended_at') else ''}; invoice not seen"},
         {"service": "TypeSafe/Jev (gateway meter)", "usd": usd(typesafe_bound), "settled_usd": usd(ZERO),
          "basis": (f"upper bound: the gateway's lifetime meter {usd(typesafe_now)} less the {usd(typesafe_before)} it read before T0 "
                    "(the owner's figure in ops.json); the options swarm has no TypeSafe caller")},
@@ -847,8 +849,9 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
     s4 = {r["kind"]: D(r["usd"]) for r in H["costs"]["swarm_spend_4h"]}
     b24f, b24a = box_totals(sail["last24h"])
     b4f, b4a = box_totals(sail["last4h"])
-    per_day_theta = D(inp["thetadata_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
-    per_day_mdata = D(inp["market_data_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
+    # A subscription the owner cancelled (`inputs[...]["ended_at"]`, `project_economics.subscription_months`) burns nothing.
+    per_day_theta = ZERO if inp["thetadata_usd"].get("ended_at") else D(inp["thetadata_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
+    per_day_mdata = ZERO if inp["market_data_usd"].get("ended_at") else D(inp["market_data_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
     burn = [
         {"service": "Claude", "last24h": s24.get("claude", ZERO), "last4h_per_day": s4.get("claude", ZERO) * 6},
         {"service": "Sail models", "last24h": D(H["costs"]["sail_requests_24h"]["usd"]), "last4h_per_day": D(H["costs"]["sail_requests_4h"]["usd"]) * 6},
@@ -869,7 +872,8 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
     unknowns += [
         f"OpenAI: the {openai_hold_count} unresolved holds ({usd(openai_holds)}) await the provider's invoice; they are counted in Net",
         "Anthropic: the console invoice is not reconciled to the gateway meter",
-        "ThetaData and Alpaca market data: actual invoices, billing cycles and plan dates not seen (pro-rata of list rates used)",
+        "ThetaData and Alpaca market data: actual invoices, billing cycles and plan dates not seen (pro-rata of list rates used, "
+        "to Oct 19, 2026 00:00Z, when the owner's cancellation ended both)",
         f"Sail: the provider invoice itself is not seen; receipts {usd(sail_receipts)} vs balance meter {usd(sail_meter)}",
         "Later-posted broker fees can revise the realized figure by cents (the unposted-fee estimate is included)",
     ]

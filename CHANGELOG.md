@@ -99,6 +99,20 @@ programs trades real money at learning size.
 - **Rollback.** The previous House release (a re-sent buy that filled is an ordinary event lot to it); or
   `equity_money.event.enabled` False, which stops every event buy, re-sends included.
 
+### The close economics stop charging the cancelled subscriptions, on `fix/subs-end-economics` (unreleased; owner files `league/project_economics.py`, `league/ops/economics.py`; joins a release after 1019d)
+
+- **Why.** The owner cancelled ThetaData and Alpaca Algo Trader Plus on Oct 18, 2026. The site's cost figure stopped
+  accruing them at 2026-10-19T00:00:00Z in release 1019a (`publish.SUBSCRIPTIONS_ENDED_AT`), but the House's close
+  economics, and so the desk scoreboard's "Input costs since T0" and its daily burn, kept prorating both from the
+  financial start with no end: about $5.40 a day of costs that were not being paid (Oct 20's scoreboard: ThetaData
+  $64.57, Algo Trader Plus $67.26, each still growing).
+- **What.** `project_economics.subscription_months` prorates each subscription to the earlier of the cutoff and its
+  end in `SUBSCRIPTIONS_ENDED_AT` (one table for the site and the House) and marks the input `ended_at`; what accrued
+  before the end stays. `ops/economics.render` reads `ended_at`: a cancelled subscription's 24-hour burn rows are 0,
+  and the cost's basis names its end. No money or constitution row moves; no judge.
+- **Tests.** `test_project_economics.test_cancelled_subscriptions_stop_accruing_at_their_end`,
+  `test_ops_economics.test_a_cancelled_subscription_burns_nothing` (37 tests in the two modules, 3.14 and 3.11).
+
 ### R3: births, the event lane's generator, on `feat/evl-births` (unreleased; built on `rel/1019b` `5cad27f2`; an owner deploy: THE GATEWAY FIRST, then the House with `events.births` switched on)
 
 - **Why.** The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts,
