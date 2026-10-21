@@ -38,6 +38,41 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Cash at the auction binds Probe: the next auction's reservation and round-robin inside Probe and Sized (A85), on `fix/a85-probe-cash-reservation` (unreleased; joins release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy: league/equity/ is protected and league/events/book.py is behind league/ci.py's wall; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are release 1019d's, read with the tree's own functions on 3.14 and 3.11; no money row, no wall, no judge, no setting, no gateway file changes)
+
+- **The defect** (a read-only audit of the live House, two lenses): the book is 1x cash and every buy holds its limit
+  (1.25 x the previous close); a lot sold in an auction still holds its cash in that same auction; so learning lots
+  bought at one auction (the overnight rows' close buys) take the NEXT auction's cash from the Probe and Sized
+  programs, and ROOM's order (Sized > Probe > learning) held only inside one auction (A83 (2)(b)). Inside one auction
+  the buys went in the tables' order, so the last Probe row in the tables got the cash the earlier rows left: with
+  three open-entry programs at Probe, about 11 Probe buys a session would go instead of 17.
+- **The fix, the captain's A85** (recorded before the first Probe auction; the reading that gives evidence its room,
+  no wall moves). (1) THE NEXT AUCTION'S RESERVATION (league/equity/live.py `_event_reserve` beside `_size_event`,
+  league/events/book.py `reservation`): a LEARNING buy sizes on the cash, the invested room and the loss budget less
+  R, the sum over the live Probe and Sized programs whose entry is the other auction of min(room, median picks) x
+  share(band) x E, and that x the median open-risk weight of their buys (0.40 with none) for the budget: room is
+  `max_open` less what the program holds and has on order, its lots sold at this auction not counted; median picks is
+  the median of its real-money picks at its last 5 decisions of that auction (the `picks` of `eq_event_decisions`
+  summaries; its whole room with none yet); LESS WHAT THIS AUCTION'S EVENT SALES GIVE BACK by the next one (each lot
+  sold here: its value, and its value x its own weight), never below 0, so the open's Probe lots sold at the close do
+  not hold the overnight rows' cash twice. A buy it cut or skipped says "A85 holds $X ..." in its reason. R is 0 for a
+  Probe or Sized buy and while the other auction has no Probe or Sized program: learning sizes exactly as before.
+  (2) ROUND-ROBIN INSIDE SIZED AND INSIDE PROBE: `book.allocate` gives one pick a program a pass (the tables' order
+  inside a pass) and `_event_send` sends the auction's buys in the same passes (`book.send_key`); learning keeps the
+  tables' order.
+- **Tests.** `league/tests/test_events_a85.py`, through the real book and `size_entry` on invented rows: the two-auction
+  case (eight learning close buys of $40 leave NEXT's open Probe program its three whole $100 buys: five go, three are
+  cut; with the reservation switched off all eight go and the Probe program gets one whole buy and a cut one), R 0 and
+  today's sizes with no program at Probe (and a retired one), a Probe program of the same auction reserves nothing, a
+  Probe buy is never held, the median of five decisions with an unread one passed over, the room cap and the buys'
+  weights, the cash this auction's sales give back, the loss budget held by R x the weight, and round-robin at the
+  decision and at the send (two Probe programs with cash for two buys: one each). `test_events_1019c`'s forty
+  learning open buys beside a Probe close entry seed C1's last five close decisions at one pick each (with none on
+  record A85 holds its whole room, six $100 buys, and 34 of the forty go: the House has every program's decisions from
+  release 1019b on, so a Probe program always has them). Docs: docs/events.md,
+  docs/operations.md ("The event lane's real money on the House": the day's sends, the slots, ROOM, the reservation, the size),
+  league/equity/INTERFACES.md section 20.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head

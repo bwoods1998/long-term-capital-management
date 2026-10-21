@@ -41,9 +41,18 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   INS-BUY), higher first, then ADV.
 - ROOM (PREREG-EVL-3 section 2): Sized programs first, then Probe, then learning; within a band the tables' order;
   within a program its own ranking. One name at one auction goes to the first program in that order that is GIVEN it:
-  each program takes its own ranked picks whose name no earlier program was given, until its room is full
+  each program takes its own ranked picks whose name no earlier-given program was given, until its room is full
   (`allocate`, release 1019b's second review), passing over a pick the book's rules skip whatever the room (no whole
-  share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`).
+  share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`). INSIDE SIZED AND
+  INSIDE PROBE ROUND-ROBIN (the captain's A85, Oct 21, 2026): one pick given a program a pass, the tables' order inside
+  a pass, at the decision (`allocate`) and at the send (`send_key`); learning keeps the tables' order.
+- THE NEXT AUCTION'S RESERVATION (A85, recorded before the first Probe auction): ROOM's order holds inside one auction
+  (A83 (2)(b)) and a lot sold in an auction still holds its cash there, so a LEARNING buy sizes on the cash, the
+  invested room and the loss budget less what the other auction's live Probe and Sized programs will need,
+  `reservation`: min(their room, the median of their real-money picks at their last `RESERVE_DECISIONS` decisions) x
+  share(band) x E, and that x the median open-risk weight of their buys for the budget, less what this auction's event
+  sales give back by then (league/equity/live.py `_event_reserve`). 0 while the other auction has no Probe or Sized
+  program. No wall moves.
 - SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
   the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
   when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
@@ -121,6 +130,13 @@ LIVE_BANDS = ("learning", "probe", "sized")
 DEFAULT_BAND = "learning"
 #: ROOM: Sized programs first, then Probe, then learning.
 PRIORITY = {"sized": 0, "probe": 1, "learning": 2}
+#: THE BANDS AHEAD OF LEARNING (the captain's A85, Oct 21, 2026): inside each of them the auction's picks and its sends
+#: go ROUND-ROBIN (one a program a pass, the tables' order inside a pass: `allocate`, `send_key`), and a learning buy
+#: leaves the NEXT auction's programs of these bands their cash, invested room and loss budget (`reservation`).
+PROBE_UP = ("sized", "probe")
+#: A85: the decisions of its own entry auction whose real-money picks a Probe or Sized program's reservation reads (the
+#: median of their counts), the latest first.
+RESERVE_DECISIONS = 5
 #: The weight of a lot whose sigma cannot be read, or held past its exit: the House's stock floor before this release.
 STRICT_WEIGHT = Decimal("0.40")
 #: THE FALLBACK LADDER (PREREG-EVL-1 section 5): a sale the scheduled auction did not fill goes at the closing cross of
@@ -167,6 +183,16 @@ def order_of(program: str) -> int:
 def room_key(program: str, band: str | None) -> tuple[int, int]:
     """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order."""
     return (PRIORITY.get(str(band), 9), order_of(program))
+
+
+def send_key(program: str, band: str | None, n: int) -> tuple[int, int, int]:
+    """THE ORDER OF AN AUCTION'S BUYS AT THEIR SEND (league/equity/live.py `_event_send`), `n` the buy's place among its
+    program's buys of the auction (0 its first): ROOM's bands (Sized, then Probe, then learning); inside Sized and
+    inside Probe ROUND-ROBIN, every program's first buy before any program's second, the tables' order inside a pass
+    (A85: the cash an auction's sends take goes one buy a program a pass, so the last Probe row in the tables is not
+    left the cash the earlier rows did not take); learning in the tables' order, each program's buys in its ranking."""
+    band = str(band)
+    return (PRIORITY.get(band, 9), max(0, int(n)) if band in PROBE_UP else 0, order_of(program))
 
 
 SCHEMA = """
@@ -683,32 +709,59 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
              band_of: Mapping[str, str] | None = None, skip: Callable[[str, Pick], str | None] | None = None
              ) -> tuple[dict[str, list[Pick]], dict[str, dict[str, int]]]:
     """ROOM AT ONE AUCTION (PREREG-EVL-3 section 2) WITH ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8, PREREG-EVL-2
-    section 3), release 1019b's second review: the programs in ROOM's order (Sized, then Probe, then learning, `band_of`
-    {program: band}; within a band the tables' order), and each takes ITS OWN ranked picks, in its order, until its room
-    (`rooms` {program: open positions it may still take}) is full, passing over a name an EARLIER program was given at
-    this auction and a pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever
-    the room: `EquityBook._event_gate`). Only a name GIVEN to a program is taken: a name a program wanted but had no room
-    for (or skipped) goes on to the next program that wants it, which then moves on to its next picks. Returns
-    ({program: the picks given, in its order}, {program: {why passed over: how many}}), both in ROOM's order."""
+    section 3), release 1019b's second review: the bands in ROOM's order (Sized, then Probe, then learning, `band_of`
+    {program: band}), and each program takes ITS OWN ranked picks, in its order, until its room (`rooms` {program: open
+    positions it may still take}) is full, passing over a name an EARLIER-GIVEN program was given at this auction and a
+    pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever the room:
+    `EquityBook._event_gate`). Inside a band the programs go in the tables' order; inside Sized and inside Probe
+    (`PROBE_UP`) ROUND-ROBIN (the captain's A85): one pick GIVEN a program a pass, the tables' order inside a pass, pass
+    after pass until every one of them is full or out of picks, so no Probe row is given a second name before every
+    later Probe row has had its first; learning as before, each program in turn to its room. Only a name GIVEN to a
+    program is taken: a name a program wanted but had no room for (or skipped) goes on to the next program that wants
+    it, which then moves on to its next picks. Returns ({program: the picks given, in its order}, {program: {why passed
+    over: how many}}), both in ROOM's order."""
     bands_ = dict(band_of or {})
     taken: set[str] = set()
-    given: dict[str, list[Pick]] = {}
-    passed: dict[str, dict[str, int]] = {}
-    for program in sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND))):
-        room = max(0, int(rooms.get(program, 0)))
-        mine: list[Pick] = []
-        why: dict[str, int] = {}
-        for pick in picks_by_program[program]:
-            if len(mine) >= room:
-                break
+    order = sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND)))
+    given: dict[str, list[Pick]] = {program: [] for program in order}
+    passed: dict[str, dict[str, int]] = {program: {} for program in order}
+    cursor = {program: 0 for program in order}
+    room = {program: max(0, int(rooms.get(program, 0))) for program in order}
+
+    def open_(program: str) -> bool:
+        return len(given[program]) < room[program] and cursor[program] < len(picks_by_program[program])
+
+    def give_one(program: str) -> None:
+        """The program's next pick GIVEN (its passed-over picks counted on the way), or its list run out."""
+        picks_, why = picks_by_program[program], passed[program]
+        while cursor[program] < len(picks_):
+            pick = picks_[cursor[program]]
+            cursor[program] += 1
             reason = "name_given" if pick.symbol in taken else (skip(program, pick) if skip is not None else None)
             if reason:
                 why[reason] = why.get(reason, 0) + 1
                 continue
-            mine.append(pick)
+            given[program].append(pick)
             taken.add(pick.symbol)
-        given[program] = mine
-        passed[program] = why
+            return
+
+    i = 0
+    while i < len(order):
+        rank = PRIORITY.get(str(bands_.get(order[i], DEFAULT_BAND)), 9)
+        group = []
+        while i < len(order) and PRIORITY.get(str(bands_.get(order[i], DEFAULT_BAND)), 9) == rank:
+            group.append(order[i])
+            i += 1
+        if str(bands_.get(group[0], DEFAULT_BAND)) in PROBE_UP:
+            live = [program for program in group if open_(program)]
+            while live:                     # (one pass: each program in the tables' order is given at most one pick)
+                for program in live:
+                    give_one(program)
+                live = [program for program in live if open_(program)]
+        else:
+            for program in group:
+                while open_(program):
+                    give_one(program)
     return given, passed
 
 
@@ -720,6 +773,33 @@ def one_name_an_auction(picks_by_program: Mapping[str, Sequence[Pick]],
     skipped (one order a symbol). `allocate` with every program's room its whole list."""
     rooms = {program: len(picks) for program, picks in picks_by_program.items()}
     return allocate(picks_by_program, rooms, band_of)[0]
+
+
+def reservation(programs: Iterable[Mapping[str, Any]], s: Settings, E: Decimal) -> tuple[Decimal, Decimal]:
+    """THE NEXT AUCTION'S RESERVATION (the captain's A85, recorded before the first Probe auction): what a LEARNING buy
+    leaves for the Probe and Sized programs whose entry is the OTHER auction (league/equity/live.py `_event_reserve`
+    reads them from the House's rows). The book is 1x cash and a lot sold in an auction still holds its cash in that
+    auction, so learning lots bought at one auction (the overnight rows' close buys) would take the next auction's cash
+    from those programs, and ROOM's order holds only inside one auction (A83 (2)(b)). `programs`: one row each, {band,
+    room: max_open(band) less what it holds and has on order at that next auction, picks: the counts of its real-money
+    picks at its last `RESERVE_DECISIONS` decisions (the latest first), weights: the open-risk weights of its buys at
+    those decisions}. Each reserves n = min(room, the median of `picks`) buys (its whole room when it has no decision
+    yet) of share(band) x E at the limit, and that times the median of `weights` (`STRICT_WEIGHT` when it has none) of
+    the loss budget. Returns (dollars of cash and of invested room, dollars of loss budget), never below 0."""
+    cash = risk = ZERO
+    for row in programs:
+        band = str(row.get("band"))
+        if band not in PROBE_UP:
+            continue
+        room = Decimal(max(0, int(row.get("room") or 0)))
+        counts = [int(n) for n in list(row.get("picks") or ())[:RESERVE_DECISIONS]]
+        n = min(room, Decimal(str(statistics.median(counts)))) if counts else room
+        usd = n * s.share(band) * Decimal(E)
+        weights = [Decimal(str(w)) for w in row.get("weights") or ()]
+        weight = Decimal(statistics.median(weights)) if weights else STRICT_WEIGHT
+        cash += max(ZERO, usd)
+        risk += max(ZERO, usd * weight)
+    return cash, risk
 
 
 # ----------------------------------------------------------------------------------------------------------- reaction

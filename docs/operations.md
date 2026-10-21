@@ -3959,7 +3959,7 @@ session):
 | moment (full day) | what the book does |
 |---|---|
 | 09:15 ET | THE OPEN DECISION (`_event_decide`), once (`eq_event_decisions` status `done`; one that cannot read E is `failed` and made again the next minute): it waits up to 4 minutes for the lane's own `decide-open:<day>` receipt, then decides on the store as it stands. First the exits due at this open (below), then the band sync (once a session), then each live program whose entries are at the open |
-| 09:16-09:27 ET | the `opg` sends (`_event_send`), each minute in this order: the exits due planned, the SALES sent, the decision (while not made), then the BUYS in ROOM's order (release 1019b's third review: a decision never holds a sale) |
+| 09:16-09:27 ET | the `opg` sends (`_event_send`), each minute in this order: the exits due planned, the SALES sent, the decision (while not made), then the BUYS in ROOM's order, round-robin inside Sized and inside Probe (A85, `book.send_key`) (release 1019b's third review: a decision never holds a sale) |
 | close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; its T29 reads are bounded by the window: a failed request is sent again once, never after a timeout, and none starts in the window's last minute; a REACT row of a name not read is not taken and every other pick goes) |
 | close - 13 to - 11 min (15:47-15:49) | the `cls` sends, the sales before the decision and the buys after it |
 | auction + 2 min | the auction's end (`_event_finish`): a buy done or missed; a sale not filled climbs the ladder |
@@ -3978,8 +3978,9 @@ session):
   lane's own decision of the same auction, which the book waits for, is never a holding), skipped; ranked by the
   program's own rank (verdict score; the reaction for REACT rows; the purchase value for INS-BUY), then ADV. Only the
   lane's LIVE-RULE eligible rows are read (`book.LIVE_ROWS`: a row the backfill rule alone made never trades). THE
-  SLOTS (release 1019b's second review, `book.allocate`): the programs in ROOM's order, each taking its own ranked
-  picks, passing over a name an earlier program was given at this auction and a pick `_event_gate` skips (no whole
+  SLOTS (release 1019b's second review, `book.allocate`): the programs in ROOM's order (inside Sized and inside Probe
+  ROUND-ROBIN, the captain's A85: one pick given a program a pass, the tables' order inside a pass), each taking its own ranked
+  picks, passing over a name an earlier-given program was given at this auction and a pick `_event_gate` skips (no whole
   share fits by price on E at the previous close: one share at the limit above the book-wide 10% a name, or at learning
   a 2% target of no whole share with one share above 5% of E; or its name is sold at this auction), until its room
   (`max_open` less what it holds and has on order: learning 8, Probe 6, Sized 8) is full; only a name given is taken.
@@ -3987,9 +3988,24 @@ session):
   the universe row's previous SIP close, rounded down to the cent), sigma (60 sessions of adjusted SIP daily closes
   before the entry session), its open-risk weight and its exit plan. One `eq_event_decisions` row a session and auction
   (its summary: each program's picks, room, planned and skipped by why).
-- **ROOM** (PREREG-EVL-3 section 2): Sized programs' buys go first, then Probe's, then learning's; within a band the
-  tables' order (PREREG-EVL-1's rows, then PREREG-EVL-2's); within a program its ranking. The walls that run short
-  (the book at most 100% invested, the loss budget, the name's 10%) are spent in that order.
+- **ROOM** (PREREG-EVL-3 section 2): Sized programs' buys go first, then Probe's, then learning's; inside Sized and
+  inside Probe ROUND-ROBIN (A85, `book.send_key`: every program's first buy, in the tables' order, before any program's
+  second), at learning the tables' order (PREREG-EVL-1's rows, then PREREG-EVL-2's, then PREREG-EVL-4's); within a
+  program its ranking. The walls that run short (the book at most 100% invested, the loss budget, the name's 10%) are
+  spent in that order.
+- **THE NEXT AUCTION'S RESERVATION** (the captain's A85, Oct 21, 2026, recorded before the first Probe auction;
+  league/equity/live.py `_event_reserve`, league/events/book.py `reservation`): ROOM's order holds inside one auction
+  (A83 (2)(b)), and a lot sold in an auction still holds its cash there, so learning lots bought at one auction would
+  take the next auction's cash from its Probe and Sized programs. A LEARNING buy is sized on the cash, the invested
+  room and the loss budget less R = the sum over the live Probe and Sized programs whose entry is the OTHER auction of
+  min(room, median picks) x share(band) x E (x the median open-risk weight of their buys for the budget, 0.40 with
+  none): room = `max_open` less what the program holds and has on order, its lots sold at this auction not counted;
+  median picks = the median of its real-money picks at its last 5 decisions of that auction (`eq_event_decisions`
+  summaries, `picks`; its whole room with none yet); less what this auction's event sales give back by then (each lot
+  sold here: its value, and its value x its own weight for the budget), never below 0. A learning buy it cut or skipped
+  says so in its reason ("A85 holds $X of cash and invested room and $Y of the loss budget for the open's Probe and
+  Sized programs (...)"). R is 0 while no program of the other auction is at Probe or Sized: learning sizes exactly as
+  before. No wall and no money row moves (the digests are release 1019d's).
 - **A buy** goes through every gate of a real equity open (`_open_block`: the House's real-money block, the kill
   switch, the event kind's switch, the auction proof's BUY stage and no failed SELL stage, the freezes, the program's
   band), then the day's ELIGIBLE LIST at the gateway (`POST /v1/stock/eligible`, sent when a buy is planned and again
@@ -4002,7 +4018,8 @@ session):
   `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at the previous close
   (`last_equity`, never above the House's sizing equity), at the limit, capped by the name's BOOK-WIDE 10%
   (`per_name_share`: every lot, working buy and account position of the name), the 100% book, the House-wide cash and
-  THE LOSS BUDGET at the lot's own weight; floored to WHOLE shares; when that rounds to none, one share when one share
+  THE LOSS BUDGET at the lot's own weight (a learning buy's cash, invested room and budget less A85's reservation,
+  above); floored to WHOLE shares; when that rounds to none, one share when one share
   passes every cap and, at learning, one share at the limit is at most 5% of E (`one_share_max.learning`); else
   refused ("no whole share fits": the shadow keeps the event). The body: `{"symbol", "qty": "<whole>", "side": "buy",
   "type": "limit", "limit_price": "<limit>", "time_in_force": "opg" | "cls", "client_order_id"}`. An auction order is
