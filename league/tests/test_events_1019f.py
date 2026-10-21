@@ -408,8 +408,9 @@ class TheCloseDecisionReadsTheBandsAgain(EventTest):
                                          "band": "probe"}])
         buy, body, decision = self.close_buy()
         self.assertEqual((buy["program"], buy["band"], buy["tif"]), (self.REACT, "probe", "cls"))
-        self.assertEqual((body["symbol"], body["qty"], body["time_in_force"]), ("ACME", "5", "cls"),
-                         "Probe's 5% of E at the close of the day its look was written")
+        whole = (EB.settings().share("probe") * D("2000") / D("20.00")).to_integral_value(rounding="ROUND_DOWN")
+        self.assertEqual((body["symbol"], body["qty"], body["time_in_force"]), ("ACME", str(whole), "cls"),
+                         "Probe's share of E (3.5%: A86 REVISED) at the close of the day its look was written")
         self.assertEqual(decision["band_sync"], "moved")
         self.assertEqual(h.state.rows("SELECT band FROM eq_event_programs WHERE program=? AND version=2",
                                       (self.REACT,))[0]["band"], "probe")

@@ -106,7 +106,16 @@ def next_open_filings(h: TB.Harness, n: int, *, day: dt.date = NEXT, after: dt.d
     return names
 
 
-class TheRoundRobin(EventTest):
+class AtPreregProbeShare(EventTest):
+    """Release 1019f's integration: these figures were worked at PREREG-EVL-1's 5% Probe share (`TB.at_prereg_probe_share`);
+    the table in force (A86 REVISED's 3.5%) is held by `TheReservationInForce` below."""
+
+    def setUp(self):
+        super().setUp()
+        TB.at_prereg_probe_share(self)
+
+
+class TheRoundRobin(AtPreregProbeShare):
     def test_inside_probe_one_pick_a_program_a_pass_and_learning_keeps_the_tables_order(self):
         a, b = "EVL-ERN-READ-O1", "EVL-8K-READ-O1"                 # the tables' order: a before b
         l1, l2 = "EVL-NEWS-READ-O1", "EVL-INS-BUY-O1"
@@ -167,7 +176,7 @@ class TheRoundRobin(EventTest):
         self.assertEqual(refused, {"BETA": "refused", "OTHS": "refused"}, "no cash left for either second pick")
 
 
-class TheReservation(EventTest):
+class TheReservation(AtPreregProbeShare):
     def overnight(self, *, band: str | None, cash: str = "550", n_on: int = 8, history=(3, 3, 3, 3, 3)):
         """THE TWO-AUCTION CASE: EVL-NEWS-READ-ON at learning buys at DAY's close (n_on picks, $40 each at their limit);
         EVL-8K-READ-O1 at `band` (None: learning) has `history` picks at its last open decisions and three events at
@@ -343,3 +352,29 @@ if __name__ == "__main__":
     import unittest
 
     unittest.main()
+
+
+class TheReservationInForce(EventTest):
+    """A85 ON THE TABLE IN FORCE (release 1019f's integration: the captain's A86 REVISED, Probe 3.5% of E with at most 6
+    open): the same two auctions as `TheReservation.overnight`, every figure read from `book.settings()`."""
+
+    overnight = TheReservation.overnight
+
+    def test_learning_close_buys_leave_the_next_opens_probe_its_room_at_its_share_in_force(self):
+        s = EB.settings()
+        self.assertEqual((s.share("probe"), s.max_open("probe")), (D("0.035"), 6), "A86 REVISED")
+        h, names, probe = self.overnight(band="probe")
+        held = min(s.max_open("probe"), 3) * s.share("probe") * D(2000)          # min(6, median 3) x 3.5% x E = $210
+        learning = 2 * D("20.00")                                                 # two shares at the $20.00 limit
+        on = [r for r in h.event_intents("buy") if r["program"] == LEARN_ON]
+        filled = [r for r in on if r["status"] == "done"]
+        self.assertEqual(len(filled), int((D(500) - held) // learning), "$500 available less R, $40 a learning buy")
+        cut = [r for r in on if r["status"] == "refused"]
+        self.assertEqual(len(cut), len(on) - len(filled))
+        self.assertIn(f"A85 holds ${held.quantize(D('0.01'))} of cash and invested room", cut[0]["why"])
+        self.ready(h, NEXT)
+        for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33)):
+            h.tick(hh, mm, day=NEXT)
+        whole = (s.share("probe") * D(2000) / D("20.00")).to_integral_value(rounding="ROUND_DOWN")
+        bought = sorted((b["symbol"], b["qty"]) for b in h.bodies() if b["side"] == "buy" and b["symbol"] in probe)
+        self.assertEqual(bought, [(symbol, str(whole)) for symbol in probe], "NEXT's open: each Probe buy whole")

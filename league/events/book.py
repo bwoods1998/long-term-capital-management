@@ -55,16 +55,17 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   share(band) x E, and that x the median open-risk weight of their buys for the budget, less what this auction's event
   sales give back by then (league/equity/live.py `_event_reserve`). 0 while the other auction has no Probe or Sized
   program. No wall moves.
-- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
-  the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
-  when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
-  most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
-  (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
-  book calls it; nothing here re-implements it). THE WALLS' EQUITY (release 1019f, the reading that trades less): the
-  10% a name (the decision's skip and the send's caps) and the 100% book are judged on the LOWER of E and the
-  account's current equity as the House last read it, since the gateway judges the current equity (a buy sized on a
-  higher E met its final refusal there); the target and the one-share rule stay on E at the previous close. At most
-  `max_open` positions a program (learning 8, Probe 6, Sized 8).
+- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.035, Sized 0.10; Probe by the captain's
+  A86 REVISED, PREREG-EVL-1 section 8's 0.05 before it, inside its bound 0-0.05), E the account equity at the previous
+  close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares; when that
+  rounds to none, one share when one share fits every wall (and, at learning and at Probe, one share at the limit is at
+  most the band's `one_share_max`, 5%, of E; A86 REVISED added Probe's, which went up to the name's wall before); else
+  skipped (the shadow keeps the event). The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the
+  loss budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
+  WALLS' EQUITY (release 1019f, the reading that trades less): the 10% a name (the decision's skip and the send's caps)
+  and the 100% book are judged on the LOWER of E and the account's current equity as the House last read it, since the
+  gateway judges the current equity (a buy sized on a higher E met its final refusal there); the target and the
+  one-share rule stay on E at the previous close. At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
 - THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
   the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
   every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the

@@ -2536,8 +2536,8 @@ class EquityBook:
         if inst.kind == PANEL_KIND:
             return Decimal(str(B.panel_settings().sleeve_share))
         if inst.kind == EVENT_KIND:
-            # (release R2: an event position's own target share of E, Probe 0.05, Sized 0.10; the event kind sizes
-            # one position at a time, `_size_event`, and holds no sleeve of its own)
+            # (release R2: an event position's own target share of E, Probe 0.035 (A86), Sized 0.10; the event kind
+            # sizes one position at a time, `_size_event`, and holds no sleeve of its own)
             return self._event_settings().share(inst.band)
         probe = Decimal(str(et.probe_sleeve_share))
         if inst.band != "sized":
@@ -5426,7 +5426,7 @@ class EquityBook:
         - "name_wall": one share at the limit does not fit under the book-wide 10% a name (`per_name_share` x E less the
           name's book-wide value), so above 10% of E for a name held nowhere (not TRADABLE, PREREG-EVL-1 section 5);
         - "one_share": the band's target (`position_share` x E) buys no whole share at the limit and its one-share rule
-          refuses one (learning: one share at the limit above `one_share_max.learning` x E, 5%);
+          refuses one (learning and Probe: one share at the limit above the band's `one_share_max` x E, 5%);
         - "sale": a sale of the name is planned or working at this same auction (an event lot's exit, planned by this
           decision before its picks): no buy of the name goes in it (`_event_sales_at`; an exit never waits on an
           entry, the reading that trades less).
@@ -6027,22 +6027,23 @@ class EquityBook:
     def _size_event(self, intent: Intent, inst: Instance, side: Mapping[str, Any], limit: Decimal, day: str,
                     s: Any) -> tuple[Decimal, str] | None:
         """THE EVENT ENTRY'S SIZE (PREREG-EVL-3 section 2, PREREG-EVL-1 section 8), by `sizing.size_entry` (the one
-        sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.05, Sized
-        0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing equity), every
-        wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the loss budget at
-        the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one share passes
-        every cap and, at learning, one share at the limit is at most `one_share_max.learning` x E; (0, why) otherwise
-        (skipped: the shadow keeps the event). A LEARNING buy, and any buy of a lower ROOM tier (a birth's, R3: after
-        every PREREG program whatever its band), sizes on the cash, the invested room and the loss budget less THE NEXT
-        AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what the other auction's PREREG Probe and Sized
-        programs will need, less what this auction's event sales give back; no wall moves, the reservation only makes
-        such a buy smaller); 0 while no PREREG program of the other auction is at Probe or Sized, so learning sizes as
-        before. None (the intent's why) when a figure cannot be read this minute (asked again next minute until the
-        cut-off). RELEASE 1019f: the name's 10% (`instrument`), the program's own share of it (`sleeve_cap`) and the 100%
-        book are judged on `wall_equity` (the lower of E and the account's current equity, the gateway's figure: the
-        reading that trades less); the target and the one-share rule stay on E. Every answer is RECORDED on the buy's
-        side row (`_event_sized`): the target's dollars, the constraint that cut it (a cut by A85's reservation reads as
-        the cap it lowered: cash, invested or budget) and the dollars the send asks."""
+        sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.035 (A86
+        REVISED), Sized 0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing
+        equity), every wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the
+        loss budget at the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one
+        share passes every cap and, at learning and at Probe, one share at the limit is at most the band's
+        `one_share_max` x E (5%); (0, why) otherwise (skipped: the shadow keeps the event). A LEARNING buy, and any buy
+        of a lower ROOM tier (a birth's, R3: after every PREREG program whatever its band), sizes on the cash, the
+        invested room and the loss budget less THE NEXT AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what
+        the other auction's PREREG Probe and Sized programs will need, less what this auction's event sales give back;
+        no wall moves, the reservation only makes such a buy smaller); 0 while no PREREG program of the other auction is
+        at Probe or Sized, so learning sizes as before. None (the intent's why) when a figure cannot be read this minute
+        (asked again next minute until the cut-off). RELEASE 1019f: the name's 10% (`instrument`), the program's own
+        share of it (`sleeve_cap`) and the 100% book are judged on `wall_equity` (the lower of E and the account's
+        current equity, the gateway's figure: the reading that trades less); the target and the one-share rule stay on
+        E. Every answer is RECORDED on the buy's side row (`_event_sized`): the target's dollars, the constraint that
+        cut it (a cut by A85's reservation reads as the cap it lowered: cash, invested or budget) and the dollars the
+        send asks."""
         et = self._et()
 
         def wait(why: str) -> None:

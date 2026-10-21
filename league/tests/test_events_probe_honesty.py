@@ -108,6 +108,13 @@ class Base(TB.EventTest):
 
 # ------------------------------------------------------------------------------------------------------- (a) the record
 class TheProbeSizeRecord(Base):
+    """Release 1019f's integration: worked at PREREG-EVL-1's 5% Probe share (`TB.at_prereg_probe_share`: a $100 target at
+    a $20.00 limit); `TheSentDollars` reads the table in force."""
+
+    def setUp(self):
+        super().setUp()
+        TB.at_prereg_probe_share(self)
+
     def test_a_probe_buy_at_its_target_keeps_the_target_and_no_binding_on_both_rows(self):
         h = self.harness()
         self.probe_buy(h)                                    # limit $20.00: 5% of E=$2,000 is five whole shares
@@ -229,12 +236,15 @@ class TheSentDollars(Base):
         whole = (self.target() / self.LIMIT).to_integral_value(rounding="ROUND_DOWN")
         self.assertEqual(h.bodies()[0]["qty"], str(whole))
         side = self.buy_row(h)
+        floored = "whole_shares" if whole * self.LIMIT < self.target() else None   # (at 3.5%: $70 asks 3 shares, $60)
         self.assertEqual((D(side["target_usd"]), D(side["sized_usd"]), side["binding"]),
-                         (self.target(), whole * self.LIMIT, None))
+                         (self.target(), whole * self.LIMIT, floored))
         buy = self.fill(h)
-        self.assertEqual((buy["target_usd"], buy["sized_usd"]), (float(self.target()), float(whole * self.LIMIT)))
+        self.assertEqual((buy["target_usd"], buy["sized_usd"], buy["binding"]),
+                         (float(self.target()), float(whole * self.LIMIT), floored))
         self.assertLess(buy["qty"] * buy["price"], 0.9 * buy["target_usd"], "its fill at $17.00 costs well under target")
-        self.assertGreaterEqual(buy["sized_usd"], 0.8 * buy["target_usd"], "and it is a full Probe buy all the same")
+        self.assertGreaterEqual(buy["sized_usd"], 0.8 * buy["target_usd"],
+                                "and it is a Probe-size buy all the same (the floor to whole shares left it over 0.8)")
         h.venue.prints[("OTHR", DAY.isoformat(), "close")] = D("17.50")
         for hh, mm in ((15, 46), (15, 47), (16, 1), (16, 3)):
             h.tick(hh, mm)
@@ -421,7 +431,8 @@ class TheWallsEquity(Base):
                 self.addCleanup(self.tmp.cleanup)
                 self.root = Path(self.tmp.name)
                 h = self.harness()
-                self.probe_buy(h, prev_close=150.0)          # one share at the $187.50 limit: under 10% of $2,000
+                # one share at the $187.50 limit: under 10% of $2,000 (at Sized: A86 REVISED caps one share at Probe at 5%)
+                self.probe_buy(h, prev_close=150.0, band="sized")
                 self.current_equity(h, equity)
                 h.tick(9, 15)
                 h.tick(9, 16)

@@ -61,9 +61,25 @@ earlier files' programs, every record and every control never seat.
 | band | size | how a program gets there |
 |---|---|---|
 | learning | 2% of equity a position (whole shares; one share up to 5%), at most 8 open | from its first event |
-| probe | 5%, at most 6 open | the first decision after a passed look |
+| probe | 3.5% (whole shares; one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before) | the first decision after a passed look |
 | sized | 10%, at most 8 open | >= 150 settled real-money events at Probe size or above, 80% session-block lower bound > 0 |
 | retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
+
+THE PROBE BAND'S SIZE (the captain's A86 REVISED, 20:30Z Oct 21, 2026, replacing A86's proposal, decided before any
+Probe event; branch `fix/a86-probe-more-smaller`, integrated in release 1019f ONLY in this form): cash at the auction
+binds first at Probe, so PREREG-EVL-3's 5% with at most 6 open fitted about 9-11 Probe buys an auction; at 3.5%, still
+at most 6 open, smaller Probe lots fit the same cash, and Done counts Probe events. `position_share.probe` 0.035 sits
+inside its bound [0, 0.05] (the pre-registered value is the loose end: a change may only trade less); `max_open.probe`
+stays 6, its bound [0, 6] (A86's proposed 8 lay outside it and would have failed the event kind closed; a slot rise
+needs a reviewed bounds change and a new version, not taken). One share at Probe (the 3.5% target buys no whole share)
+goes only when it is at most 5% of equity, as at learning (`one_share_max.probe` 0.05, its own bounds row [0, 0.05],
+held under the name's wall): a Probe program's dollars are at most 6 x 3.5% = 21% of equity at target (30% before) and
+6 x 5% = 30% in the worst case (6 lots up to the 10% wall, 60%, before). ITS COSTS, stated: Probe events carry 30%
+fewer dollars each; total Probe dollars are unchanged while cash binds; Done's "Probe size" is 3.5% from here; a name
+whose one share at the limit is above 5% of equity is skipped at Probe, where PREREG-EVL-1 bought one share (the shadow
+keeps it). It is money management inside the frozen envelope, not a new version: no program's rule, judge, look,
+alpha, false-positive rate or Done rule moves (looks count shadow events, which do not depend on size), and the
+screen's cost allowance keeps its 5% notional.
 
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
 negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
@@ -444,7 +460,8 @@ at version 1 the same way, after the nine in ROOM's order (above: "PREREG-EVL-4"
 Probe after a passed look, Sized, retired), counted in settled events from its looks and the real fills the House writes
 back (`real_fills`). The House trades them through its EquityBook (its event kind: league/equity/live.py `_event_step`,
 the rules in `book.py`), on the money rows `equity_money.event` of league/constitution.py: learning 2% of equity a
-position (one share at most 5%), Probe 5%, Sized 10%, at most 8 open a learning program (Probe 6, Sized 8), the
+position (one share at most 5%), Probe 3.5% (A86 REVISED; one share at most 5%), Sized 10%, at most 8 open a program
+(6 at Probe), the
 book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at 1.25 x the previous SIP close, exits
 market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1 section 5's fallback ladder, open risk
 value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in any 20 sessions, $800 net in total),

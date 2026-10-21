@@ -38,6 +38,46 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### A86 REVISED, Probe smaller inside the trade-less envelope: the Probe band at 3.5% of equity with at most 6 open, on `fix/a86-probe-more-smaller` as release 1019f integrates it (unreleased; cut from `rel/1019d` `5a17bd25`; integrated ONLY in A86 REVISED's form; an owner deploy of the House: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (the Probe band's two rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no setting)
+
+- **Why.** The captain's A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event;
+  the audit's capacity lens and its two verifiers): cash at the auction binds first at Probe, so PREREG-EVL-3's Probe
+  band (PREREG-EVL-1 section 8: 5% of E, at most 6 open a program, one share up to the name's 10% wall) fits about 9-11
+  Probe buys an auction; smaller Probe lots raise the Probe events a session (the count Done needs: 300 from >= 3
+  programs with >= 50 each) at the same dollars while cash binds (the verifiers' rerun: Done at about session 18
+  instead of 22-23).
+- **The rows** (league/constitution.py `equity_money.event`, the one source the book reads): `position_share.probe`
+  0.05 -> 0.035 and a new `one_share_max.probe` 0.05 (when the 3.5% target buys no whole share, one share goes only
+  when one share at the limit is at most 5% of E, as at learning). `max_open.probe` STAYS 6. THE BOUNDS: only the new
+  row `event.one_share_max.probe` [0, 0.05], held under `per_name_share` by `equity_money_problems`;
+  `event.position_share.probe` stays [0, 0.05] (the pre-registered value is the loose end: 0.035 trades less inside
+  it) and `event.max_open.probe` stays [0, 6]. The branch as built set `max_open.probe` 8 and raised its bound to
+  [0, 8] and narrowed the share's bound to [0, 0.035]: both undone at integration (its independent check, a blocker and
+  a major; 8 outside [0, 6] would have made `equity_money_problems` non-empty and `book.settings()` FALLBACK, every
+  event buy stopped). A Probe program holds 6 x 0.035 = 0.21 x E at target (0.30 before), 6 x 0.05 = 0.30 x E of
+  one-share lots at worst (0.60 before). Learning (2%, 8, one share at most 5%) and Sized (10%, 8) do not move; no
+  program rule, judge, look, alpha, Done rule or wall moves; the screen's cost allowance keeps its frozen 5% notional
+  (league/events/score.py), so it understates the fixed CAT/TAF fees of a 3.5% Probe lot.
+- **Its costs, stated.** Probe events carry 30% fewer dollars each; total Probe dollars are unchanged while cash binds;
+  Done's "Probe size" is 3.5% from here; a name whose one share at the limit is above 5% of E (and inside the wall) is
+  skipped at Probe, where PREREG-EVL-1 bought one share (the shadow keeps the event).
+- **Tests.** league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped, over the wall
+  skipped; at most six open at Probe; learning and Sized as before; the rows, their bounds (8 open and a share of 0.051
+  refused, a Probe one-share cap above the name's wall refused), the dollars' ceiling, the digests);
+  league/tests/equity_design.py `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86`);
+  test_events_book.py and test_events_1019c.py read the new Probe sizes; the design blocks' digest line rewritten.
+- **Identities** (the tree's own functions, 3.14 and 3.11): money `c2f0a478`, constitution `24f73f18`
+  (`PINNED_DIGEST`), options execution `b60410ad`, equity `78022ca6`, xs `2f0083bc`, gate `397b22b7`;
+  `equity_money_problems()` is `[]`; with `equity_money.event.enabled` False `fd9e90c0` / `005745e9` (release 1019e's
+  `1b7a5c22` / `50e951c9` with A86's rows set back).
+- **Deploy.** With release 1019f, by the captain's ship script with the new pair; verify the ids, the grant on
+  `c2f0a478` and the event line's Probe share "0.035". A program already at Probe keeps its open lots; its next buys
+  size at 3.5%.
+- **Rollback.** `equity_money.event.enabled` False (a constitution-only owner deploy: money `fd9e90c0`, constitution
+  `005745e9`), `position_share.probe` 0.05 with `one_share_max.probe` removed (rows inside the bounds: release 1019e's
+  pair), or the House release before it.
+
 ### Cash at the auction binds Probe: the next auction's reservation and round-robin inside Probe and Sized (A85), on `fix/a85-probe-cash-reservation` (unreleased; joins release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy: league/equity/ is protected and league/events/book.py is behind league/ci.py's wall; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are release 1019d's, read with the tree's own functions on 3.14 and 3.11; no money row, no wall, no judge, no setting, no gateway file changes)
 
 - **The defect** (a read-only audit of the live House, two lenses): the book is 1x cash and every buy holds its limit
@@ -2988,7 +3028,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `c2f0a478`, full digest `24f73f18` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7709cadb` / `5e450ade`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

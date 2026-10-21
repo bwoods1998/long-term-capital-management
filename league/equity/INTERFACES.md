@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `c2f0a478`, full digest `24f73f18` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7709cadb` / `5e450ade`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1724,3 +1724,35 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   at Probe's 5 shares, `band_sync` "moved", where without the move the earlier row EVL-ERN-REACT-C1 takes it at
   learning's 2 and the bands are read once; an unreadable mark reads them again; the next session's open is its first)
   and `TheBandMark`.
+
+## 24. The Probe band's size (the captain's A86 REVISED, 20:30Z Oct 21, 2026; money, as built; after section 23)
+
+- **The rows** (money; league/constitution.py `equity_money.event`, the one source: league/events/book.py `settings`
+  reads them, `_event_gate` and `_size_event` apply them): `position_share.probe` "0.05" -> "0.035" and a new
+  `one_share_max.probe` "0.05" (`one_share_max` {learning "0.05", probe "0.05"}); `max_open.probe` STAYS 6 (A86's
+  proposal of 8 lay outside its bound [0, 6]: `equity_money_problems` would have failed the whole event kind closed).
+  Learning ("0.02", 8, one share at most "0.05") and Sized ("0.10", 8, no one-share row) do not move.
+- **The bounds** (`EQUITY_MONEY_BOUNDS`): `event.position_share.probe` STAYS [0, 0.05] (the pre-registered value is the
+  loose end; 0.035 trades less inside it), `event.max_open.probe` STAYS [0, 6], and the one new row
+  `event.one_share_max.probe` [0, 0.05], which `equity_money_problems` holds under `per_name_share` as it holds
+  learning's. A Probe program holds at most 6 x 0.035 = 0.21 x E at target (6 x 0.05 = 0.30 before), 6 x 0.05 = 0.30
+  x E of one-share lots in the worst case (6 up to the 10% wall, 0.60, before). A table missing the new row is outside
+  its bounds and opens nothing (`FALLBACK`).
+- **What it changes**: a Probe buy targets 0.035 x E in whole shares; when that rounds to none, one share only when one
+  share at the limit is at most 0.05 x E (`_event_gate` skips the pick "one_share" before it takes a slot,
+  `_size_event` refuses it at the send), where PREREG-EVL-1 bought one share up to the name's wall. ROOM, the walls,
+  the loss budget, the open-risk weight, the day order line (150; 2 x the live bands' `max_open` is 44, at least 150)
+  and the gateway do not move. Done's "Probe size" is 3.5% from here (league/events/done.py: `sized_usd` >= 0.8 x
+  `target_usd`).
+- **Identities**: money `055e5313` -> `c2f0a478`, constitution `a8d4cbd9` -> `24f73f18`; the options execution
+  fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`
+  do not move.
+- **Rollback**: `event.enabled` False (money `fd9e90c0`, constitution `005745e9`), `position_share.probe` "0.05" with
+  `one_share_max.probe` removed (a constitution-row change back to release 1019e's pair, `055e5313` / `a8d4cbd9`), or
+  the House release before it.
+- **Tests**: league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped "one_share", over the
+  wall "name_wall"; at most six open at Probe; learning at 2% and Sized at 10% as before; the rows, their bounds, the
+  one-share row held under the name's wall, the dollars' ceiling and the digests); league/tests/equity_design.py
+  `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86` sets the two rows back; `before_1019c`
+  does too); test_events_book.py and test_events_1019c.py read the new Probe sizes.
