@@ -78,20 +78,42 @@ programs trades real money at learning size.
 - **The proof that no PREREG program moves**: test_events_births's invented week now carries PREREG-EVL-4's rows and
   compares, with and without five registered births, every PREREG program's intents and the real-money picks
   (`book.picks`) of all twelve seating versions at every auction.
+- **The review round** (`c7e8a1c5`, the adversarial reviews of `4ab66a39`; league/tests/test_events_1019e_review.py,
+  each test failing without its fix, and test_site_lane's `test_the_bill_holds_the_births_calls_too`):
+  (i) THE BIRTHS CALL IS INSIDE THE LANE'S LINE: house.py `_spend_today` counts `birth_calls` by answer time on the UTC
+  day, so the next verdict is refused once births and verdicts reach the line, and the call is made only when its worst
+  case fits under `line_left` (births.py `propose`); budget.py `lane_spend` (window, peak, today) and site_lane.py
+  `verdict_usd` (the bill) count it too; (ii) THE BOOK READS THE `ins` FAMILY (book.py `rows_for`: a seatable birth of
+  Form 4 cluster triggers was charged, decided and screened and never traded; a family the book reads no rows for now
+  raises, recorded by the live book for that program alone); a seatable birth of each of the eight families trades
+  exactly its shadow's planned intents at every auction of the invented week; (iii) A DECISION MADE WITHOUT A BIRTH IS
+  NOT MADE FOR IT (screen.py `final_until` reads the birth's group, the birth and its derived control, like PREREG-EVL-4's
+  named receipts; the births' own decision `decide-open-births` / `decide-close-births`, run.py `births_only`, a
+  backfill of the births alone, is run by the House's lane for every older such decision, `births_made_without`, and by
+  the CLI's catchup); (iv) a birth's look waits on its control's failed or pending part; (v) score.py applies the limit
+  at entry to any program the process does not know (only a birth can be); (vi) programs.py `load_births` keeps the
+  births last read from the same store on a read error. The daily report's `verdicts_usd` is left as it is: a labelled
+  part inside the measured Claude figure, which already holds the births call.
 - **Settings**: `league/config.json` `events.births` ships false (the deploy's step 3 turns it on); no money row, no
   constitution row.
 - **Deploy** (docs/operations.md, **Release 1019e**): the gateway from this head, then the House by the captain's ship
   script (`ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`), then `events.births` true.
-- **Tests, on `fa023e8a`** (the code, its tests and docs): the full league suite on 3.14, by the exact `python -m
-  unittest discover -s league/tests -t .`, 12,710 OK (33 skipped, 1,399 s); on 3.11 the events, equity, live, ci,
-  constitution, publish, ops and budget modules with test_events_births, test_events_1019e, test_site_lane,
-  test_e3_identities and test_project_economics, 105 modules, 2,738 OK (1 skipped); the gateway 503/503 with `npm run
+- **Tests, on `c7e8a1c5`** (the code, its tests and docs; the review round): the full league suite on 3.14, by the exact
+  `python -m unittest discover -s league/tests -t .`, 12,722 OK (33 skipped, 1,441 s); on 3.11 the events, equity,
+  live, ci, constitution, publish, ops, budget, evl_health and evl_migrate modules with test_events_births,
+  test_events_1019e, test_events_1019e_review, test_site_lane, test_swarm_guard, test_e3_identities and
+  test_project_economics, 113 modules, 2,865 OK (1 skipped); the gateway (unchanged by the round) 503/503 with `npm run
   check`; `python -m league.ci --base origin/main --branch rel/1019e --no-tests` passed; the identities, computed with
-  the tree's own functions on both Pythons, as in the heading.
+  the tree's own functions on both Pythons, as in the heading. (Before the round, on `fa023e8a`: 12,710 OK on 3.14;
+  105 modules, 2,738 OK on 3.11.)
 - **Rollback**: `events.births` false stops new births (registered births keep trading at their bands); the House to
   release 1019d's deployed head by `floor_box.py rollback` (the births tables are additive and ignored by it; a birth's
   open lots exit by their own stored plans, `live._event_exits`); the gateway last, by `wrangler rollback` to the version
-  this deploy replaced (its docs route then refuses births appends, and nothing else changes).
+  this deploy replaced (its docs route then refuses births appends, and nothing else changes). Once births are
+  registered, a House rollback costs them (docs/operations.md, **Release 1019e**): release 1019d's decisions leave their
+  events out (release 1019e, deployed again, reads those decisions as not made and decides the births by themselves)
+  and its score settles their entries with no limit at entry (not undone); so prefer `events.births` false and the
+  event-buy stop over a House rollback.
 
 ### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (unreleased; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
 
