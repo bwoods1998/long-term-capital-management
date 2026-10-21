@@ -128,7 +128,10 @@ class TheRows(unittest.TestCase):
         self.assertEqual(P.REGISTERED_AT_4, "2026-10-19T16:01:05Z")
         rows = [p for p in P.PROGRAMS if p.prereg == 4]
         self.assertEqual(tuple(p.id for p in rows), FOUR, "section 1.2's order, then section 4's controls")
-        self.assertEqual(P.PROGRAMS[-5:], tuple(rows), "after every earlier row and PREREG-EVL-3's version 2 copies")
+        at = P.PROGRAMS.index(rows[0])
+        self.assertEqual(P.PROGRAMS[at:at + 5], tuple(rows), "after every earlier row and PREREG-EVL-3's version 2 copies")
+        self.assertTrue(all(p.prereg <= 3 for p in P.PROGRAMS[:at]) and all(p.prereg == 5 for p in P.PROGRAMS[at + 5:]),
+                        "then only PREREG-EVL-5's rows (release 1019g)")
         self.assertEqual({p.id: (p.version, p.seatable, p.family, p.entry_at, p.hold, p.reads, p.exit_at, p.rule)
                           for p in rows},
                          {"EVL-8K-REACT-ON": (1, True, "8k-react", "close", 1, False, "open", "none"),
@@ -142,7 +145,9 @@ class TheRows(unittest.TestCase):
             self.assertEqual(p.registered_at, REGISTERED_4, p.id)
             self.assertIs(P.BY_ID[p.id], p)
         self.assertEqual([(p.id, p.version) for p in P.SEATING],
-                         [(i, 2) for i in NINE] + [(i, 1) for i in NEW], "the nine version 2 rows, then the three")
+                         [(i, 2) for i in NINE] + [(i, 1) for i in NEW]
+                         + [(i, 1) for i in ("EVL-ERN-DROP-ON", "EVL-ERN-UNDER-ON", "EVL-NEWS-NIGHT2-ON")],
+                         "the nine version 2 rows, then the three, then PREREG-EVL-5's three (release 1019g)")
         self.assertFalse([p for p in P.PROGRAMS if p.prereg in (1, 2) and p.can_seat],
                          "version 1 of PREREG-EVL-1's and -2's programs never seats")
 
@@ -156,7 +161,7 @@ class TheRows(unittest.TestCase):
         with mock.patch.object(P, "REGISTERED_AT_4", None), self.assertRaises(RuntimeError):
             four.registered_at
         with self.assertRaises(ValueError):
-            dataclasses.replace(four, prereg=5).registered_at
+            dataclasses.replace(four, prereg=6).registered_at       # (prereg 5 is PREREG-EVL-5's since release 1019g)
         self.assertEqual(P.BY_KEY[("EVL-NEWS-READ-ON", 1)].registered_at, S.parse_iso(P.REGISTERED_AT_2))
         self.assertEqual(P.BY_KEY[("EVL-NEWS-READ-ON", 2)].registered_at, S.parse_iso(P.REGISTERED_AT_3))
         self.assertEqual(P.BY_KEY[("EVL-ERN-READ-O1", 1)].registered_at, P.registered())
@@ -191,13 +196,13 @@ class TheJudge(unittest.TestCase):
         self.days = [s.day for s in C.sessions(self.st, dt.date(2026, 10, 20), dt.date(2027, 3, 31))]
 
     def test_the_registries_and_the_expected_false_passes(self):
-        self.assertEqual(SC.SEATABLE[-3:], NEW)
-        self.assertEqual(SC.RECORDS[-2:], CONTROLS4)
+        self.assertEqual(SC.SEATABLE[-6:-3], NEW)      # (then PREREG-EVL-5's three and its control: release 1019g)
+        self.assertEqual(SC.RECORDS[-3:-1], CONTROLS4)
         self.assertEqual((SC.CONTROLS["EVL-8K-READ-ON"], SC.CONTROLS["EVL-NEWSPM-READ-ON"]), CONTROLS4)
         self.assertNotIn("EVL-8K-REACT-ON", SC.CONTROLS, "no control condition for the REACT row (section 4)")
         self.assertEqual({SC.HOLDS[p] for p in FOUR}, {1})
         self.assertEqual([SC._seating(p, 1) for p in FOUR], [True, True, True, False, False])
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 12, "expected": 1.2, "budget": 3.0, "left": 1.8})
+        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
 
     def _settle(self, program: str, per_day: int, days: list[dt.date], a: float, start: int = 0) -> int:
         """Synthetic settled close-to-next-open events of (program, version 1): `per_day` a session, each its own
@@ -527,8 +532,8 @@ class TheBook(WorldCase):
 
     def test_the_three_seat_at_learning_after_the_nine_and_the_controls_never(self):
         lane = self.lane()
-        self.assertEqual([p.id for p in EB.seatable()], list(NINE + NEW))
-        self.assertEqual([(b.program, b.version, b.band) for b in EB.bands(lane)][-3:], [(i, 1, "learning") for i in NEW])
+        self.assertEqual([p.id for p in EB.seatable()][:12], list(NINE + NEW), "(then PREREG-EVL-5's three: 1019g)")
+        self.assertEqual([(b.program, b.version, b.band) for b in EB.bands(lane)][9:12], [(i, 1, "learning") for i in NEW])
         for pid in CONTROLS4:
             self.assertIsNone(EB.program_of(pid, 1), pid)
         self.assertIsNone(EB.program_of("EVL-8K-REACT-ON", 2))
@@ -591,7 +596,8 @@ class TheBook(WorldCase):
         row = dict(lane.db.execute("SELECT * FROM filings").fetchone())
         self.assertTrue(EB.next_open_event(lane, row, session, et(D, 15, 46)))
         self.assertTrue(EB.next_open_event(lane, row, None, et(D, 15, 46)), "no session: fail closed")
-        self.assertEqual(EB.NEXT_OPEN_GUARD, ("EVL-8K-REACT-ON", "EVL-8K-READ-ON"))
+        self.assertEqual(EB.NEXT_OPEN_GUARD[:2], ("EVL-8K-REACT-ON", "EVL-8K-READ-ON"))
+        self.assertFalse(set(EB.NEXT_OPEN_GUARD[:2]) & set(EB.RAISED_GUARD), "PREREG-EVL-4's guard is unchanged")
         lane.close()
         self.st.db.execute("UPDATE verdicts SET answered_at=?, status='unparsed', score=NULL", (S.iso(et(D, 12, 0)),))
         lane = self.lane()

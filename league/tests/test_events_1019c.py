@@ -611,7 +611,8 @@ class TheEventKindsOwnDayCount(EventTest):
         # learning rooms bought and sold in one day (2 x 12 x 8 = 192) are above the line, and the line STAYS 150 (the
         # House-wide line leaves it at most 190: the bound below); on a day that would need more, entries stop in ROOM's
         # order, so PREREG-EVL-4's rows are refused first, and exits never (`test_twelve_programs_on_a_heavy_day_...`).
-        self.assertEqual(len(EB.seatable()), 12)
+        # (PREREG-EVL-5, release 1019g: fifteen seatable programs, 2 x 15 x 8 = 240, further above the line: it stays 150)
+        self.assertEqual(len(EB.seatable()), 15)
         self.assertLess(event["max_orders_day"], 2 * len(EB.seatable()) * event["max_open"]["learning"],
                         "A78: twelve programs' full learning rooms are above the line; it is not raised for them")
         self.assertEqual(2 * 9 * event["max_open"]["learning"], 144, "the nine's fit under it, as release 1019c read it")
