@@ -89,6 +89,15 @@ programs trades real money at learning size.
 - **Tests**: league/tests/test_events_1019d.py (a look of a PREREG-EVL-4 group freezes it in a whole re-decision and in
   `decide-close-evl4`, its receipt makes the close for it, the tally counts the new rows, the report reads their own
   decision's `kept`; each fails with its part of the merge undone); feat/evl-4's `TheProof` on the merged tree.
+- **The runs** on `67bac4cc` (the code head; the commit after it adds only this record): the full league suite on 3.14
+  by `python -m unittest discover -s league/tests -t .`, 12,642 OK (33 skipped, 1,413 s); on 3.11 the 104 modules of
+  the events, equity, live, ci, constitution, publish, ops and budget suites (with `test_cost_day`,
+  `test_daily_report`, `test_evl_health`, `test_evl_migrate`, `test_swarm_guard`), 2,734 OK (1 skipped); the gateway
+  495/495 (no gateway file differs from release 1019c's); `python -m league.ci --base origin/main --branch rel/1019d
+  --no-tests` passed; the identities above on both Pythons. THE PROOF: feat/evl-4's `TheProof` passes on the merged
+  tree, and the synthetic week (`league/tests/evl4_world.py`) decided by release 1019c's own code (`f85cc152` on
+  PYTHONPATH) and by this tree gives every earlier program the same 59 intents and the nine the same 18 real-money
+  picks, on 3.14 and 3.11 (this tree adds PREREG-EVL-4's 16).
 - **Deploy** (docs/operations.md, **Release 1019d**): the House alone, by the captain's ship script from the exact head
   (`ship_house.sh <head> <PR> r1019d 055e5313 a8d4cbd9`), once release 1019c is live and main is its head; no gateway
   step (no gateway file differs from release 1019c's). Verify as PREREG-EVL-4's entry says (After the deploy).
