@@ -832,7 +832,10 @@ class Nightly(LaneCase):
                 rid = st.start_receipt(f"decide-{kind}:2026-10-20", now=et("2026-10-20", t))
                 st.finish_receipt(rid, "ok", {}, now=et("2026-10-20", t))
             st.set_meta(SC.equity_key(dt.date(2026, 10, 20)), repr(2000.0))
-            BA.set_band(st, "EVL-ERN-READ-O1", 2, "probe", since="2026-10-19T20:00:00Z", why="look 1 passed")
+            # (written at its own time: demotion counts the real fills after the later of the move's `since` and its
+            # write time, A70 (11), so a write at the machine's clock after Oct 20 would leave every fill uncounted)
+            BA.set_band(st, "EVL-ERN-READ-O1", 2, "probe", since="2026-10-19T20:00:00Z", why="look 1 passed",
+                        now=dt.datetime(2026, 10, 19, 20, 0, tzinfo=UTC))
             for i in range(50):                       # $3.50 lost on each of the last 50: -$175, past -$150
                 for side, price, t in (("buy", 10.0, "13:30"), ("sell", 9.65, "20:00")):
                     BA.record_fill(st, program="EVL-ERN-READ-O1", version=2, event=f"8k:invented-{i}", side=side,
