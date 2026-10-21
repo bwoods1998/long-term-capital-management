@@ -238,7 +238,7 @@ order, so these rows are refused first; exits never.
 `edgar.py` and `news.py` (the recorders), `calendar.py` (sessions and decision moments), `universe.py` (eligibility),
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
-`screen.py` (the judge), `report.py` (the daily one-screen report), `done.py` (the Done reader of the goal V2, read-only),
+`screen.py` (the judge), `report.py` (the daily one-screen report), `done.py` (the Done reader of the goal V2, a judge),
 `house.py` (the lane on the House: its scheduler),
 `__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`, `equity`, `score`,
 `screen`, `report`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
@@ -341,28 +341,34 @@ or price leaves the House. How to read it: [operations](operations.md), **THE DA
 
 The owner's Done is read by `league/events/done.py` under the pinned rule
 [docs/goals/DONE-RULE-EVL-2.md](goals/DONE-RULE-EVL-2.md) (its sha256 is `done.RULE_SHA256`; a test fails while the two
-differ). What counts: a settled real-money round trip of a seating program (`real_fills`, a buy and a sale) whose buy's
-band is probe or sized and whose buy came after the program's latest move to probe (`bands.probe_since`); learning
-events and Probe+ buys of an earlier stay are reported beside, never counted. It is read at every 100th such event:
-checkpoint c (100, 200, 300, ...) reads exactly the first c events in sale order and is never rewritten.
+differ; amended by A84 before any promotion). What counts: a settled real-money round trip of a seating program
+(`real_fills`, a buy and a sale) whose buy's band is probe or sized and whose buy came after the program's PROMOTION,
+its EARLIEST move to probe (`done.promoted_at`): a demotion and a return to Probe drop nothing, since a demotion fires
+only on losses. Learning events are reported beside, never counted; a Probe+ buy with no promotion on record is a
+guard (`before_promotion`) that fails `after_promotion`. It is read at every 100th such event: checkpoint c (100, 200,
+300, ...) reads exactly the first c events in sale order and is never rewritten: it is appended to
+`<state>/events/done-history.jsonl` before `done.json` is written, and when a Done record exists that cannot be read
+(done.json at another schema or cut, a cut log line, a checkpoint a `done` receipt names that neither file holds) the
+reader writes nothing and the House warns (`done.Unreadable`).
 
 | item | passes when |
 |---|---|
 | `events` | c >= 300 |
 | `programs` | >= 3 programs with >= 50 of the c events each |
-| `after_promotion` | every counted event was bought after its program's promotion (by construction; the others are `before_promotion`) |
+| `after_promotion` | every Probe+ event of the span was bought after its program's promotion: no `before_promotion` event sold within it |
 | `pnl` | the c events' realized after-fee P&L > $0 |
 | `bound` | the 95% issuer-block bootstrap lower bound of r (10,000 resamples, seed `DONE-RULE-EVL-2\|done\|issuer`, `screen.bootstrap_bounds`) > 0 |
 | `profit_vs_compute` | the lane's realized profit (every band) since the first promotion >= the metered compute over the span (`metered.since` over `metered.json`; partly measured fails) |
 | `fills` | the signed mean gap per side against the shadow's auction prices in `outcomes` (made raw again) within 15 bp |
-| `no_captain` | the last 100 settled with no operator edit (before-copies of swarm/ops/budget.json, swarm.json's and ops.json's modification time), no owner step in a stall run, and a stall run every UTC day |
+| `no_captain` | NEVER from the House's records alone (A84): `fail` when they show a step in the last 100's span (any `.before` copy or swarm.json, ops.json, PAUSE, swarm.stop by stamp, mtime or ctime; a stall run's owner step, pause or kill switch; a UTC day with no stall run), else `unverifiable`, and Done at c waits on the captain's attestation of that exact span in `<state>/events/done-attest.jsonl` with `steps` 0 (a deploy's hand steps count; the ship script's own run does not) |
 
 Beside: the benchmark-net figure (a = r - the shadow's b, its mean and bound), learning events (count, P&L). THE PIVOT:
 from checkpoint 400, the one-sided 95% upper bound of r below zero says retire the lane and move its budget. THE $800
 STOP: the loss budget's total realized plus open risk (`fast_lane.probe_budget` on `live.sqlite`) at $800 says stop all
 spend and report. The reader decides nothing and moves nothing: it reports. The House runs it in the nightly screen
-task, after the band review: `<state>/events/done.json` (every figure, the current reading, the checkpoints
-append-only) and a `done` receipt; a failing reader is a warning and never fails the screen. The daily report carries
+task, after the band review: `<state>/events/done.json` (every figure, the current reading, the checkpoints), the
+append-only `done-history.jsonl` and a `done` receipt; a failing reader is a warning and never fails the screen. The
+reader is behind `league/ci.py`'s wall (`PENDING_GATEWAY`), so only an owner deploy changes how Done is read. The daily report carries
 its line (Probe+ events toward 300 by program, the next checkpoint, the bound and the benchmark-net bound). The old
 `dlane` Done meter (DONE-RULE-A50) keeps running beside and is never read for this Done.
 

@@ -242,6 +242,12 @@ PENDING_GATEWAY += ("league/events/universe.py", "league/events/calendar.py", "l
 #: joins the wall; its gateway client (gw.py) and its report stay outside. It waits here for the gateway's merge-list
 #: follow-up.
 PENDING_GATEWAY += ("league/events/house.py",)
+#: THE GOAL V2'S DONE JUDGE (the Done reader, Oct 2026; docs/goals/DONE-RULE-EVL-2.md, behind the wall with docs/goals/):
+#: league/events/done.py reads whether the owner's Done holds (what counts, the checkpoints, every item, the pivot and
+#: the $800 stop), so no main commit the in-box updater would ship can change how Done is read without the owner's
+#: deploy; its pin `RULE_SHA256` ties only the constant to the rule file, never the reading to it. It ships in the same
+#: owner deploy as its hook in house.py. It waits here for the gateway's merge-list follow-up.
+PENDING_GATEWAY += ("league/events/done.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

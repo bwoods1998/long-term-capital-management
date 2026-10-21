@@ -1,10 +1,13 @@
 """THE DONE READER OF THE GOAL V2 (league/events/done.py; docs/goals/DONE-RULE-EVL-2.md), on invented data only.
 
 - what counts: no Probe event counts nothing; learning events are beside, never counted; Probe+ buys before the
-  program's latest move to probe are beside, never counted;
+  program's promotion (its EARLIEST move to probe) are beside, never counted, and one inside a checkpoint's span fails
+  its item 4.3; a demotion and a return to Probe drop nothing (A84);
 - the checkpoints: the 100th counted event writes checkpoint 100, over exactly the first 100, and a written checkpoint
-  is never rewritten (the history append-only, through done.json);
-- each item's pass and fail: events, programs, P&L, the bound, profit against compute, the fills, no captain step;
+  is never rewritten (the history append-only, through done.json and done-history.jsonl; an unreadable record or a lost
+  one a receipt names writes nothing);
+- each item's pass and fail: events, programs, P&L, the bound, profit against compute, the fills, no captain step
+  (never a pass from the House's records alone: Done waits on the captain's attestation, A84);
 - the bootstrap is deterministic (10,000 resamples, the fixed seed string, issuers as blocks); the pivot at 400; the
   $800 stop; the rule file pinned by its sha256; the reader opens nothing for writing; the House's nightly screen runs
   it after the band review and keeps a `done` receipt.
@@ -15,6 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -110,6 +114,14 @@ def fills_days(lane: Lane, programs: list[tuple[str, int]], per_program: int, *,
     return day
 
 
+def attestation(doc, c: int, **kw) -> dict:
+    """The captain's attestation of checkpoint c's item-4.8 span (rule item 4.8), steps 0 unless `kw` says otherwise."""
+    q = next(h for h in doc["checkpoints"] if h["c"] == c)["items"]["no_captain"]
+    to = S.parse_iso(q["to"])
+    return {"c": c, "from": q["from"], "to": q["to"], "steps": 0, "execs": 12, "sha256": "ab" * 32,
+            "at": S.iso(to + dt.timedelta(hours=6)), **kw}
+
+
 class DoneCase(unittest.TestCase):
     #: Fewer resamples for speed where the test is not about the bootstrap (the rule's 10,000 is DN.DRAWS itself).
     draws = 400
@@ -122,11 +134,30 @@ class DoneCase(unittest.TestCase):
         patcher = mock.patch.object(DN, "DRAWS", self.draws)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A file's change times are its mtime and an invented ctime (`self.ctimes`, by name; else its mtime): a file
+        # this test makes has a real ctime of the wall clock, which the invented dates of Nov 2026 would meet.
+        self.ctimes: dict[str, dt.datetime] = {}
 
-    def read(self, *, measured=MEASURED, loss=None, history=(), root="state"):
+        def moments(path):
+            try:
+                mtime = dt.datetime.fromtimestamp(Path(path).stat().st_mtime, UTC)
+            except OSError:
+                return None
+            return [mtime, self.ctimes.get(Path(path).name, mtime)]
+        patcher = mock.patch.object(DN, "_moments", side_effect=moments)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def read(self, *, measured=MEASURED, loss=None, history=(), root="state", attestations=()):
         root = self.lane.state if root == "state" else root
         with mock.patch("league.ops.metered.since", return_value=dict(measured)):
-            return DN.read(self.lane.st, now=NOW, root=root, ledger={}, loss=loss, history=history)
+            return DN.read(self.lane.st, now=NOW, root=root, ledger={}, loss=loss, history=history,
+                           attestations=attestations)
+
+    def run_night(self, now=NOW, measured=MEASURED):
+        with mock.patch("league.ops.metered.since", return_value=dict(measured)), \
+                mock.patch("league.ops.metered.load", return_value={}):
+            return DN.run(self.lane.st, now=now)
 
 
 class WhatCounts(DoneCase):
@@ -168,7 +199,8 @@ class WhatCounts(DoneCase):
         doc = self.read()
         self.assertEqual((doc["counted"], doc["before_promotion"]["n"]), (0, 1))
 
-    def test_after_a_demotion_and_a_return_only_the_current_stay_counts(self):
+    def test_after_a_demotion_and_a_return_every_probe_stay_counts(self):
+        """A84: the promotion is the EARLIEST move to probe; the stay a demotion ended stays in the count."""
         program, version = SEATING[0]
         self.lane.promote(program, version)
         self.lane.event(program, version, FIRST_DAY)
@@ -177,8 +209,50 @@ class WhatCounts(DoneCase):
         self.lane.promote(program, version, since="2026-11-04T01:00:00Z")
         self.lane.event(program, version, dt.date(2026, 11, 4))
         doc = self.read()
-        self.assertEqual((doc["counted"], doc["before_promotion"]["n"]), (1, 1))
+        self.assertEqual((doc["counted"], doc["before_promotion"]["n"]), (2, 0))
         self.assertEqual(doc["first_promotion"], PROMOTED, "the first promotion is the earliest move to probe")
+        self.assertEqual(next(p for p in doc["programs"] if p["id"] == program)["promoted_at"], PROMOTED)
+        self.assertEqual(DN.promoted_at(self.lane.st, program, version), S.parse_iso(PROMOTED))
+        self.assertEqual(BA.probe_since(self.lane.st, program, version), S.parse_iso("2026-11-04T01:00:00Z"),
+                         "the band review's current stay is its own (bands.py), never the count's")
+
+    def test_a_demoted_stays_losers_stay_in_the_count_and_done_does_not_hold(self):
+        """The review's case: A's first Probe stay (50 losers at -5%) is demoted by the House's own review, a passed
+        look returns A to Probe, then A, B and C win 100 each. Checkpoint 300 reads the 50 losers first."""
+        lane = self.lane
+        a, b, c = SEATING[:3]
+        for prog in (a, b, c):
+            lane.promote(*prog)
+        for i in range(50):
+            lane.event(*a, FIRST_DAY + dt.timedelta(days=i // 10), r=-0.05)
+        moved = BA.review(lane.st, now=dt.datetime(2026, 11, 7, 1, tzinfo=UTC))
+        self.assertEqual([m["program"] for m in moved], [a[0]], "the House's own review demotes A")
+        lane.promote(*a, since="2026-11-08T01:00:00Z")
+        start, last = dt.date(2026, 11, 9), dt.date(2026, 11, 9)
+        for i in range(100):
+            last = start + dt.timedelta(days=i // 10)
+            for j, prog in enumerate((a, b, c)):
+                lane.event(*prog, last, r=0.012 + 0.004 * ((i * 7 + j * 3) % 5 - 2))
+        lane.stall_runs(FIRST_DAY - dt.timedelta(days=1), last + dt.timedelta(days=1))
+        doc = self.read()
+        self.assertEqual((doc["counted"], doc["before_promotion"]["n"]), (350, 0))
+        cp = next(h for h in doc["checkpoints"] if h["c"] == 300)
+        self.assertEqual(cp["figures"]["n"], 300)
+        self.assertEqual(sum(1 for r in DN.counted(lane.st)["counted"][:300] if r["r"] < 0), 50,
+                         "the demoted stay's 50 losers are the first 50 of the 300")
+        self.assertFalse(cp["items"]["bound"]["pass"], cp["items"]["bound"])
+        self.assertIsNone(cp["pending"], "an item but item 4.8 fails: no attestation can make it Done")
+        doc = self.read(attestations=[attestation(doc, 300)])
+        self.assertFalse(doc["done"]["holds"])
+
+    def test_a_probe_buy_with_no_promotion_on_record_inside_the_span_fails_after_promotion(self):
+        last = passing(self.lane)
+        stray = SEATING[3]     # never moved to probe, yet bought at a probe band (a hand write to the bands table)
+        self.lane.event(*stray, last - dt.timedelta(days=2))
+        cp = next(h for h in self.read()["checkpoints"] if h["c"] == 300)
+        self.assertFalse(cp["items"]["after_promotion"]["pass"])
+        self.assertEqual(cp["items"]["after_promotion"]["excluded"], 1)
+        self.assertIsNone(cp["pending"])
 
 
 class Checkpoints(DoneCase):
@@ -204,22 +278,68 @@ class Checkpoints(DoneCase):
         self.lane.promote(program, version)
         for i in range(100):
             self.lane.event(program, version, FIRST_DAY + dt.timedelta(days=i // 20))
-        with mock.patch("league.ops.metered.since", return_value=dict(MEASURED)), \
-                mock.patch("league.ops.metered.load", return_value={}):
-            first = DN.run(self.lane.st, now=NOW)
-            path = self.lane.root / DN.FILE
-            self.assertTrue(path.exists())
-            written = json.loads(path.read_text())["checkpoints"]
-            # The data move after the checkpoint (a posted fee): the checkpoint stays as written.
-            with self.lane.st.tx() as db:
-                db.execute("UPDATE real_fills SET fee=5.0 WHERE side='sell'")
-            again = DN.run(self.lane.st, now=NOW + dt.timedelta(days=1))
+        first = self.run_night()
+        path = self.lane.root / DN.FILE
+        self.assertTrue(path.exists())
+        written = json.loads(path.read_text())["checkpoints"]
+        log = (self.lane.root / DN.HISTORY).read_text().splitlines()
+        self.assertEqual([json.loads(line)["c"] for line in log], [100], "each new checkpoint is appended once")
+        # The data move after the checkpoint (a posted fee): the checkpoint stays as written.
+        with self.lane.st.tx() as db:
+            db.execute("UPDATE real_fills SET fee=5.0 WHERE side='sell'")
+        again = self.run_night(NOW + dt.timedelta(days=1))
         self.assertEqual(again["new_checkpoints"], [])
         self.assertEqual(json.loads(path.read_text())["checkpoints"], written)
+        self.assertEqual((self.lane.root / DN.HISTORY).read_text().splitlines(), log, "nothing appended again")
         self.assertEqual(first["checkpoints"][0]["figures"]["pnl_usd"], again["checkpoints"][0]["figures"]["pnl_usd"])
         self.assertLess(again["current"]["figures"]["pnl_usd"], first["current"]["figures"]["pnl_usd"],
                         "the current reading moves; the checkpoint does not")
         self.assertEqual(again["rule"]["sha256"], DN.RULE_SHA256)
+
+    def failed_300(self):
+        """Checkpoint 300 written failed (compute above profit that night): the record every test below protects."""
+        passing(self.lane)
+        first = self.run_night(measured={**MEASURED, "usd": 10_000.0})
+        self.assertEqual([h["c"] for h in first["checkpoints"]], [100, 200, 300])
+        self.assertFalse(next(h for h in first["checkpoints"] if h["c"] == 300)["items"]["profit_vs_compute"]["pass"])
+        return first
+
+    def test_an_unreadable_done_json_is_never_written_over(self):
+        """The review's case: done.json at another schema (a restore, a later release rolled back) read as no history
+        rewrote checkpoint 300 with the next night's figures. Now nothing is written and the file stays."""
+        self.failed_300()
+        path = self.lane.root / DN.FILE
+        for text in (json.dumps({**json.loads(path.read_text()), "schema": DN.SCHEMA + 1}), '{"schema": 1, "checkp'):
+            path.write_text(text)
+            with self.assertRaises(DN.Unreadable):
+                self.run_night(NOW + dt.timedelta(days=1))
+            self.assertEqual(path.read_text(), text, "left as it is")
+
+    def test_a_lost_done_json_is_rebuilt_from_the_append_only_history(self):
+        first = self.failed_300()
+        (self.lane.root / DN.FILE).unlink()
+        again = self.run_night(NOW + dt.timedelta(days=1))
+        self.assertEqual(again["new_checkpoints"], [], "no checkpoint written again")
+        self.assertEqual(again["checkpoints"], first["checkpoints"])
+        self.assertEqual(json.loads((self.lane.root / DN.FILE).read_text())["checkpoints"], first["checkpoints"])
+
+    def test_a_cut_history_line_or_a_checkpoint_a_receipt_names_in_no_history_writes_nothing(self):
+        self.failed_300()
+        log = self.lane.root / DN.HISTORY
+        good = log.read_text()
+        log.write_text(good + '{"c": 400, "fig')
+        with self.assertRaises(DN.Unreadable):
+            self.run_night(NOW + dt.timedelta(days=1))
+        log.write_text(good)
+        # Both files lost (a restore of the JSON alone), but the House's receipt says checkpoint 300 was written.
+        rid = self.lane.st.start_receipt(DN.JOB, now=NOW)
+        self.lane.st.finish_receipt(rid, "ok", {"new_checkpoints": [100, 200, 300]}, now=NOW)
+        log.unlink()
+        (self.lane.root / DN.FILE).unlink()
+        with self.assertRaises(DN.Unreadable) as raised:
+            self.run_night(NOW + dt.timedelta(days=1))
+        self.assertIn("[100, 200, 300]", str(raised.exception))
+        self.assertFalse((self.lane.root / DN.FILE).exists(), "nothing written")
 
 
 def passing(lane: Lane, programs=None, per_program=100, **kw) -> dt.date:
@@ -244,16 +364,46 @@ class TheItems(DoneCase):
     def at300(self, doc):
         return next(h for h in doc["checkpoints"] if h["c"] == 300)
 
-    def test_done_holds_at_300_when_every_item_passes(self):
+    def test_done_holds_at_300_when_every_item_passes_and_the_captain_attests_the_last_100(self):
+        """A84: item 4.8 is never a pass from the House's records alone; with every other item passing, checkpoint 300
+        waits on the captain's attestation of its span, and Done holds once one with no step is read."""
         passing(self.lane)
         doc = self.read()
         cp = self.at300(doc)
-        self.assertEqual({k: v["pass"] for k, v in cp["items"].items()}, {k: True for k in DN.ITEMS}, cp["items"])
-        self.assertTrue(cp["done"])
-        self.assertEqual(doc["done"], {"holds": True, "checkpoint": 300})
+        self.assertEqual({k: v["pass"] for k, v in cp["items"].items()},
+                         {k: k != "no_captain" for k in DN.ITEMS}, cp["items"])
+        self.assertEqual(cp["items"]["no_captain"]["status"], DN.UNVERIFIABLE)
+        self.assertIn("attestation", cp["items"]["no_captain"]["value"])
+        self.assertTrue(cp["items"]["no_captain"]["attestation"])
+        self.assertFalse(cp["done"])
+        self.assertEqual(cp["pending"], "attestation")
+        self.assertEqual((doc["done"]["holds"], doc["done"]["pending"]), (False, [300]))
         self.assertEqual([h["c"] for h in doc["checkpoints"]], [100, 200, 300])
-        self.assertFalse(doc["checkpoints"][1]["done"], "200 < 300")
+        self.assertIsNone(doc["checkpoints"][1]["pending"], "200 < 300")
         self.assertEqual(cp["items"]["programs"]["value"], 3)
+        attested = self.read(history=doc["checkpoints"], attestations=[attestation(doc, 300)])
+        self.assertEqual({k: attested["done"][k] for k in ("holds", "checkpoint", "by", "pending")},
+                         {"holds": True, "checkpoint": 300, "by": "attestation", "pending": []})
+        self.assertEqual(attested["new_checkpoints"], [], "the attestation rewrites no checkpoint")
+
+    def test_an_attestation_with_a_step_another_span_or_no_record_is_no_attestation(self):
+        passing(self.lane)
+        doc = self.read()
+        good = attestation(doc, 300)
+        for bad in ({"steps": 1}, {"steps": True}, {"steps": None}, {"from": "2026-11-01T00:00:00Z"}, {"sha256": ""},
+                    {"at": good["from"]}, {"c": 200}):
+            got = self.read(history=doc["checkpoints"], attestations=[{**good, **bad}])
+            self.assertFalse(got["done"]["holds"], bad)
+        got = self.read(history=doc["checkpoints"], attestations=[good, {**good, "steps": 2}])
+        self.assertFalse(got["done"]["holds"], "one attestation of the span with a step: no Done")
+        # The House's own file: a line that cannot be read gives no attestation at all.
+        path = self.lane.root / DN.ATTEST
+        path.write_text(json.dumps(good) + "\n{not json\n")
+        night = self.run_night()
+        self.assertFalse(night["done"]["holds"])
+        self.assertIn("cannot be read", night["attestations"]["why"])
+        path.write_text(json.dumps(good) + "\n")
+        self.assertTrue(self.run_night(NOW + dt.timedelta(days=1))["done"]["holds"])
 
     def test_fewer_than_three_programs_with_50_each_fails(self):
         passing(self.lane, programs=SEATING[:2], per_program=150)
@@ -327,8 +477,6 @@ class TheItems(DoneCase):
         path = self.lane.state / "swarm.json"
         path.write_text("{}")
         moment = dt.datetime.combine(last, dt.time(15), UTC).timestamp()
-        import os
-
         os.utime(path, (moment, moment))
         steps = DN.captain_steps(self.lane.state, dt.datetime.combine(last, dt.time(0), UTC),
                                  dt.datetime.combine(last, dt.time(23), UTC))
@@ -340,7 +488,9 @@ class TheItems(DoneCase):
         self.lane.stall_runs(last, last, owner_on=last)
         cp = self.at300(self.read())
         self.assertFalse(cp["items"]["no_captain"]["pass"])
-        self.assertIn("owner step", cp["items"]["no_captain"]["value"])
+        self.assertEqual(cp["items"]["no_captain"]["status"], DN.FAIL)
+        self.assertIn("captain step", cp["items"]["no_captain"]["value"])
+        self.assertIsNone(cp["pending"], "a step the House saw: no attestation can make it Done")
         steps = DN.captain_steps(self.lane.state, dt.datetime.combine(last, dt.time(0), UTC),
                                  dt.datetime.combine(last, dt.time(23), UTC))
         self.assertEqual(steps["owner"][0]["causes"], ["kill_on"], "the done cause is news, never a step")
@@ -357,13 +507,84 @@ class TheItems(DoneCase):
         self.assertEqual(steps["unlooked"], [(FIRST_DAY + dt.timedelta(days=2)).isoformat()])
         self.assertFalse(DN.captain_steps(None, NOW, NOW)["holds"], "records not read: not held")
 
+    def test_no_captain_is_never_a_pass_from_the_houses_records_alone(self):
+        """The review's case: an edit of swarm.json inside the span hidden by a later touch, and an unstamped
+        before-copy (`swarm.json.before-train2020` is on the House), read as no captain step. Now item 4.8 is never a
+        pass from the House's records; the later change is named; an unstamped copy made inside the span is an edit."""
+        last = passing(self.lane)
+        st = self.lane.state
+        (st / "swarm.json").write_text("{}")
+        (st / "swarm.json.before-train2020").write_text("{}")
+        after = dt.datetime.combine(last, dt.time(23, 0), UTC).timestamp()
+        os.utime(st / "swarm.json", (after, after))
+        q = self.at300(self.read())["items"]["no_captain"]
+        self.assertFalse(q["pass"])
+        self.assertEqual(q["status"], DN.UNVERIFIABLE)
+        self.assertIn("changed after the span", q["value"])
+        # The copy's own making (its ctime: a copy keeps the original's mtime) inside the span: an edit.
+        self.ctimes["swarm.json.before-train2020"] = dt.datetime.combine(last, dt.time(15), UTC)
+        q = self.at300(self.read())["items"]["no_captain"]
+        self.assertEqual(q["status"], DN.FAIL)
+        self.assertIn("swarm.json.before-train2020", q["value"])
+        steps = DN.captain_steps(st, dt.datetime.combine(last, dt.time(0), UTC), dt.datetime.combine(last, dt.time(22), UTC))
+        self.assertEqual([(e["file"], e["what"]) for e in steps["edits"]], [("swarm.json", "train2020")])
+
+    def test_a_pause_or_the_kill_switch_seen_at_a_stall_run_is_a_step(self):
+        last = passing(self.lane)
+        day = last - dt.timedelta(days=3)
+        span = (dt.datetime.combine(day, dt.time(0), UTC), dt.datetime.combine(day, dt.time(23), UTC))
+        self.assertEqual(DN.captain_steps(self.lane.state, *span)["status"], DN.UNVERIFIABLE)
+        for check, numbers in (("paused", {"maintenance_pause": True, "swarm_stopped": False}),
+                               ("kill_on", {"kill_switch": True})):
+            db = sqlite3.connect(self.lane.state / "ops.sqlite")
+            db.execute("DELETE FROM runs")
+            db.execute("INSERT INTO runs(job, due_at, status, summary_json) VALUES('stall', ?, 'ok', ?)",
+                       (at(day, "12:00"), json.dumps({"checks": {check: {"stalled": False, "owner_step": None,
+                                                                         "numbers": numbers}}})))
+            db.commit()
+            db.close()
+            steps = DN.captain_steps(self.lane.state, *span)
+            self.assertEqual((steps["status"], steps["owner"][0]["causes"]), (DN.FAIL, [check]), check)
+        (self.lane.state / "PAUSE").write_text("")
+        self.ctimes["PAUSE"] = dt.datetime.combine(day, dt.time(9), UTC)
+        self.assertEqual(DN.captain_steps(self.lane.state, *span)["edits"][0]["file"], "PAUSE")
+
+    def test_an_owner_deploy_in_the_span_is_listed_for_the_attestation(self):
+        last = passing(self.lane)
+        when = dt.datetime.combine(last - dt.timedelta(days=2), dt.time(21), UTC)
+        rows = [{"at": S.iso(when), "stage": "promote", "ok": True, "release": "r-owner", "current": "r-owner"},
+                {"at": S.iso(when), "stage": "promote", "ok": True, "release": "r-upd", "sha": "abc"},
+                {"at": "2020-01-01T00:00:00Z", "stage": "promote", "ok": True, "release": "r-old"}]
+        (self.lane.state.parent / DN.DEPLOYS).write_text("".join(json.dumps(r) + "\n" for r in rows))
+        q = self.at300(self.read())["items"]["no_captain"]
+        self.assertEqual(q["status"], DN.UNVERIFIABLE)
+        self.assertIn("1 owner deploy(s) in the span", q["value"])
+        self.assertIn("hand steps", q["value"])
+        steps = DN.captain_steps(self.lane.state, S.parse_iso(q["from"]), S.parse_iso(q["to"]))
+        self.assertEqual([d["release"] for d in steps["deploys"]], ["r-owner"], "the updater's own deploy is not one")
+
     def test_the_benchmark_net_figure_rides_beside_and_never_decides(self):
         passing(self.lane, b=0.01)       # the market explains the whole return: a is about zero
         cp = self.at300(self.read())
-        self.assertTrue(cp["done"], "the Done test is on r, the after-cost return, as the goal states")
+        self.assertEqual(cp["pending"], "attestation", "the Done test is on r, the after-cost return, as the goal states")
         a = cp["figures"]["a"]
         self.assertEqual(a["n"], 300)
         self.assertLess(a["bound"]["lower"], 0)
+
+
+class TheChangeTimes(unittest.TestCase):
+    def test_a_files_change_times_are_its_mtime_and_its_ctime(self):
+        """A copy that keeps the original's mtime (shutil.copy2), or a file touched back in time, still shows its
+        ctime: the moment it was made or touched, which no `touch` can move back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "swarm.json.before-train2020"
+            path.write_text("{}")
+            made = dt.datetime.now(UTC) - dt.timedelta(seconds=5)
+            os.utime(path, (1_600_000_000, 1_600_000_000))
+            moments = DN._moments(path)
+            self.assertEqual(moments[0], dt.datetime.fromtimestamp(1_600_000_000, UTC))
+            self.assertGreaterEqual(max(moments), made)
+            self.assertIsNone(DN._moments(Path(tmp) / "absent"))
 
 
 class TheBootstrap(unittest.TestCase):
@@ -472,6 +693,15 @@ class OnTheHouse(unittest.TestCase):
         self.assertEqual((summary["counted"], summary["next_checkpoint"], summary["done"]), (0, 100, False))
         self.assertEqual(json.loads(case.receipts("screen")[-1]["summary"])["review"], [])
         self.assertLess(case.receipts("screen")[-1]["id"], receipts[0]["id"], "after the screen and its band review")
+
+    def test_an_unreadable_done_json_warns_and_is_left_as_it_is(self):
+        case = self.night()
+        path = case.root / DN.FILE
+        path.write_text('{"schema": 99}')
+        self.assertEqual(case.turn()["task"], "screen")
+        self.assertEqual(path.read_text(), '{"schema": 99}')
+        self.assertEqual(case.receipts(DN.JOB), [])
+        self.assertIn("warning", case.house.levels())
 
     def test_a_reader_that_fails_never_fails_the_screen(self):
         case = self.night()

@@ -294,10 +294,11 @@ class TheEquityLane(unittest.TestCase):
                                               "league/events/proof.py", "league/events/universe.py",
                                               "league/events/calendar.py", "league/events/edgar.py",
                                               "league/events/news.py", "league/events/run.py",
-                                              "league/events/store.py", "league/events/house.py"),
+                                              "league/events/store.py", "league/events/house.py",
+                                              "league/events/done.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
                          "the release; E4's two, FWD1-R's seat path, R0's data plan, R1's event-lane judges, "
-                         "PREREG-EVL-3's band rules, R2's event kind, the lane's rule inputs and 1019c's verdict line "
+                         "PREREG-EVL-3's band rules, R2's event kind, the lane's rule inputs, 1019c's verdict line and the Done judge "
                          "wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
@@ -369,6 +370,10 @@ class TheEquityLane(unittest.TestCase):
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
         self.assertTrue(ci.guard(["league/events/house.py"], None), "release 1019c: it applies the budget's lane line")
+        # THE GOAL V2'S DONE JUDGE: the reader that says whether Done holds, behind the wall with its rule file.
+        for path in ("league/events/done.py", "League/Events/Done.py", "docs/goals/DONE-RULE-EVL-2.md"):
+            self.assertTrue(ci.guard([path], None), path)
+        self.assertIn("league/events/done.py", ci.PENDING_GATEWAY)
         for path in ("league/events/gw.py", "league/events/report.py", "league/service.py"):
             self.assertEqual(ci.guard([path], None), [], path)
         with tempfile.TemporaryDirectory() as tmp:
