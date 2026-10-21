@@ -317,14 +317,24 @@ mail at its pace:
 | cause | stands when |
 |---|---|
 | `evl_record` | no clean record pass in 30 minutes: one finished `ok` whose 8-K, Form 4 and news reads ran without error (the failing feeds are named) |
-| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed |
-| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
+| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed. Since release 1019f also PREREG-EVL-4's rows of a close still to decide by themselves (the judge's `screen.made_without`) 2 hours after the stall job first saw it and after its latest `decide-close` finished, while its latest `decide-close-evl4` is not `ok` (or is older than that close's latest decision) |
+| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included; since release 1019f the `decide-close-evl4` receipts' too) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
 | `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
 | `evl_fills` | the real fills off the shadow's own auction prints by more than 15 bp either way (worse or better, said), the signed mean of a side over the last 20 priced fills (the House's event twins) |
+| `evl_entries` (release 1019f) | an auction of the last 24 hours (judged 15 minutes after its cross) at which under 90% of the planned real buys filled, or one was never sent: from the book's own rows in `live.sqlite` (`eq_event_intents` buys, `eq_intents`, `eq_orders`). The numbers: planned, filled, the venue's cancels at once (A80: an auction buy ended `canceled` within 60 s of its own `submitted_at`, nothing filled), the re-sends after one and how many filled, the never-sent by reason (the day order count, cash, the loss budget, the 10% a name, the invested cap, the program's room, one share too dear, the gateway, ...), and the constraint that bound the auction most (cash, budget, room, order line, name wall, invested) |
+| `evl_backfill` (release 1019f) | a weekday of the daily-index backfill's reach not `done` by 12:00 ET of the next weekday, a run of its passes that are not `ok` (`waiting`, `partial`) lasting over 6 hours, or a done day whose passes failed to fetch a filing; the day and its counts named. The screen's looks wait for every weekday of the reach, so this says why one waits |
+| `evl_handback` (release 1019f) | a real event fill the book made (`eq_orders` of a real event lot with `filled_qty` > 0) owed to the lane's `real_fills` over an hour and not there (a buy once its intent ended, a sale once its lot closed: as the book hands them back): the lane computes Sized, demotion and retirement from those rows |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |
 
 None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while
-the House's `PAUSE` stands (no verdict is asked then).
+the House's `PAUSE` stands (no verdict is asked then), nor PREREG-EVL-4's part of `evl_decide`.
+
+Since release 1019f a told owner cause no longer holds these back: while an owner cause stands and was mailed inside its
+12 hours, a cause needing nothing that no notice told in the last 24 hours is mailed at once, as an INFO notice of those
+causes alone that names the owner causes still waiting. The daily report carries the day's real buys (planned and
+filled, the venue's cancels and A80's re-sends, the never-sent by reason, the room cut, and per auction the constraint
+that bound it: the captain's A80 (2)) and, once a Probe buy exists, THE BREAK-EVEN EDGE of Done's compute clause: the
+metered compute per session since the first Probe buy over the Probe dollars bought per session, in basis points.
 
 THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after the lane's own nightly report job
 (league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured

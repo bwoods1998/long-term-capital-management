@@ -3093,9 +3093,13 @@ class TheReplays(unittest.TestCase):
         self.assertEqual((dq["08:20"]["numbers"]["basis"], dq["08:20"]["numbers"]["scored"]), ("early", 4))
         self.assertEqual((dq["15:50"]["numbers"]["standing_since"], dq["15:50"]["numbers"]["bar_families_since"]),
                          ("2026-11-02T08:20:00Z", 1))
+        # (Release 1019f, the stall job's pace: barren passes standing as INFO from 10:20 are mailed at once, as the INFO
+        # notice they are, while the told owner cause stands; before it they waited for 13:20, when they became a step.)
         self.assertEqual([(iso(mail["at"])[11:16], mail["key"]) for mail in house.gateway.mails],
-                         [("08:20", "stall:owner:elane_dq"), ("13:20", "stall:owner:elane_births+elane_dq")])
-        self.assertEqual(house.gateway.mails[1]["causes"], ["elane_dq", "elane_births"])
+                         [("08:20", "stall:owner:elane_dq"), ("10:20", "stall:info:elane_births"),
+                          ("13:20", "stall:owner:elane_births+elane_dq")])
+        self.assertEqual((house.gateway.mails[1]["causes"], house.gateway.mails[1]["owner"]), (["elane_births"], []))
+        self.assertEqual(house.gateway.mails[2]["causes"], ["elane_dq", "elane_births"])
         self.assertEqual([row["errors"] for row in house.rows], [[]] * len(house.rows))
         for row in house.rows:
             self.assertNotIn(SECRET, json.dumps(row))
