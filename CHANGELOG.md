@@ -38,6 +38,233 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
+
+- **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET
+  the night the release deploys (a night of births is a session of each birth's 8-block clock); `events.births` false
+  stays the stop.
+- **The captain's round on the House re-review's major (A89).** The review round's new `ins` branch in
+  `league/events/book.py` `rows_for` let real money read a Form 4 CLUSTER judged over every Form 4 of the issuer in its
+  window, including filings stored after the decision (A72's look-ahead). An `ins` (Form 4 cluster) birth is now a
+  RECORD only: `league/events/births.py` `parse` refuses it seatable (free, shadow only), and the book reads no rows
+  for the family (a LookupError, never silence). This also answers the earlier finding that a seatable `ins` birth was
+  charged 0.10 of the budget for real money it could never take. Tests:
+  `test_events_1019e_review.test_a_seatable_ins_cluster_birth_is_refused_and_the_book_reads_no_cluster_rows`, the
+  every-family week without the `ins` family, and the grammar test's `ins` spec as a record; the lane, equity-book,
+  site, ci and identity modules pass on 3.14 and 3.11.
+
+- **What it carries**, merged `--no-ff` in this order (each entry below as its branch wrote it):
+  `feat/evl-births` `ad9c8513` (#577, R3: births; built on `rel/1019b` `5cad27f2`, never merged with 1019c or 1019d
+  before), `feat/site-events` `da0d0581` (#576, WP4: the public site follows the lane under `lane_v1`; built on
+  `5cad27f2`; the site's half is personal-site #25, `capital/event-lane` `86e82899`), `fix/venue-cancel-retry`
+  `960a4fa9` (#582, A80: one re-send of an event entry the venue cancelled at once; on `rel/1019c` `f85cc152`) and
+  `fix/subs-end-economics` `2d769db3` (the close economics stop charging the cancelled subscriptions; on `rel/1019c`
+  `b35c018f`); then three commits of this release: lane_v1 reads the merged lane, A81, and A83 (3).
+- **The births merge kept every side** (its commit message lists each file): release 1019c's A69 fast path, A74 (5)'s
+  group freeze, A66's rules and A79's withdrawal of A74 (6); release 1019d's PREREG-EVL-4 rows, named receipts,
+  `decide-close-evl4` and `_refill_redecide`; R3's births table, loader, `BIRTH_ROOM` after every PREREG program (all
+  twelve seating versions first), `births_failed` (a birth whose own part of a decision raised; the screen reads that
+  decision failed for that birth alone) and the screen's handling of births (a seatable birth judged by PREREG-EVL-3's
+  looks, its READ control by `control_of`, a record or control never). `programs.can_seat` stays release 1019d's
+  (`SEATING_PREREGS`; a birth is prereg 3), so the book seats PREREG-EVL-4's version 1 and a birth's version 1 alike;
+  `PREREG_PROGRAMS` is taken after PREREG-EVL-4's rows. A74 (5) for births: a READ birth's group is the birth and its
+  derived control (`run._group`); every PREREG group is its table's.
+- **A81, the births' budget** (the captain's, 16:25Z Oct 21): `births.BUDGET_TENTHS` is the screen's `LANE_BUDGET`,
+  3.0 (A71's stated budget, not R3's draft 2.0), counted from SEATING's own sum (`screen.expected_false_passes`: 1.2
+  with PREREG-EVL-4, never a written 0.9), 0.10 a seatable birth, at most 3 a night, so at most 18 seatable births; a
+  retired program stays counted. Pinned by `test_events_births`'s
+  `test_a81_the_budget_is_the_lanes_stated_three_counted_from_seatings_own_sum`.
+- **A83 (3), release 1019d's review minors** (league/tests/test_events_1019e.py; each test fails without its fix):
+  (i) PREREG-EVL-4's part of a close decision is isolated: an exception in it that is not the task's time bound
+  (`run.Deadline`, which the House's `LaneDeadline` now subclasses) finishes the receipt with the earlier rows'
+  results, records `evl4_error` (the House warns) and names none of its five programs, so the judge reads the close as
+  made without their rows and `decide-close-evl4` or the next whole re-decision decides them; `evl4_only`'s failure is
+  its own; (ii) the PM rows' stored-prompt PROMPT-NEWS verdicts are asked by the close decision when a written look of
+  EVL-NEWS-READ-O1's group freezes it over D (`run.PM_ASKER`; the same prompt sha, the open decision's rendering,
+  stored once; the frozen group asked and written nothing; with no freeze nothing moves).
+- **The site** (`league/site_lane.py`): `lane_v1` is unchanged as a key and an allowlist and lists the lane as merged:
+  PREREG-EVL-4's three seating versions at their band and its two controls as shadow (five new plain names), each
+  registered birth (its family's name, "birth" and its place in registration order; its control "... control"). The
+  lane fixture is regenerated; the site's own contract test (#25 at `86e82899`) passes on it, 13/13.
+- **Kept exactly**: A80's single re-send (league/equity/live.py, INTERFACES section 22, its tests: the same lines as on
+  its base); the cost fix (the same lines as on its base).
+- **The proof that no PREREG program moves**: test_events_births's invented week now carries PREREG-EVL-4's rows and
+  compares, with and without five registered births, every PREREG program's intents and the real-money picks
+  (`book.picks`) of all twelve seating versions at every auction.
+- **The review round** (`c7e8a1c5`, the adversarial reviews of `4ab66a39`; league/tests/test_events_1019e_review.py,
+  each test failing without its fix, and test_site_lane's `test_the_bill_holds_the_births_calls_too`):
+  (i) THE BIRTHS CALL IS INSIDE THE LANE'S LINE: house.py `_spend_today` counts `birth_calls` by answer time on the UTC
+  day, so the next verdict is refused once births and verdicts reach the line, and the call is made only when its worst
+  case fits under `line_left` (births.py `propose`); budget.py `lane_spend` (window, peak, today) and site_lane.py
+  `verdict_usd` (the bill) count it too; (ii) THE BOOK READS THE `ins` FAMILY (book.py `rows_for`: a seatable birth of
+  Form 4 cluster triggers was charged, decided and screened and never traded; a family the book reads no rows for now
+  raises, recorded by the live book for that program alone); a seatable birth of each of the eight families trades
+  exactly its shadow's planned intents at every auction of the invented week; (iii) A DECISION MADE WITHOUT A BIRTH IS
+  NOT MADE FOR IT (screen.py `final_until` reads the birth's group, the birth and its derived control, like PREREG-EVL-4's
+  named receipts; the births' own decision `decide-open-births` / `decide-close-births`, run.py `births_only`, a
+  backfill of the births alone, is run by the House's lane for every older such decision, `births_made_without`, and by
+  the CLI's catchup); (iv) a birth's look waits on its control's failed or pending part; (v) score.py applies the limit
+  at entry to any program the process does not know (only a birth can be); (vi) programs.py `load_births` keeps the
+  births last read from the same store on a read error. The daily report's `verdicts_usd` is left as it is: a labelled
+  part inside the measured Claude figure, which already holds the births call.
+- **Settings**: `league/config.json` `events.births` ships false (the deploy's step 3 turns it on); no money row, no
+  constitution row.
+- **Deploy** (docs/operations.md, **Release 1019e**): the gateway from this head, then the House by the captain's ship
+  script (`ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`), then `events.births` true.
+- **Tests, on `c7e8a1c5`** (the code, its tests and docs; the review round): the full league suite on 3.14, by the exact
+  `python -m unittest discover -s league/tests -t .`, 12,722 OK (33 skipped, 1,441 s); on 3.11 the events, equity,
+  live, ci, constitution, publish, ops, budget, evl_health and evl_migrate modules with test_events_births,
+  test_events_1019e, test_events_1019e_review, test_site_lane, test_swarm_guard, test_e3_identities and
+  test_project_economics, 113 modules, 2,865 OK (1 skipped); the gateway (unchanged by the round) 503/503 with `npm run
+  check`; `python -m league.ci --base origin/main --branch rel/1019e --no-tests` passed; the identities, computed with
+  the tree's own functions on both Pythons, as in the heading. (Before the round, on `fa023e8a`: 12,710 OK on 3.14;
+  105 modules, 2,738 OK on 3.11.)
+- **Rollback**: `events.births` false stops new births (registered births keep trading at their bands); the House to
+  release 1019d's deployed head by `floor_box.py rollback` (the births tables are additive and ignored by it; a birth's
+  open lots exit by their own stored plans, `live._event_exits`); the gateway last, by `wrangler rollback` to the version
+  this deploy replaced (its docs route then refuses births appends, and nothing else changes). Once births are
+  registered, a House rollback costs them (docs/operations.md, **Release 1019e**): release 1019d's decisions leave their
+  events out (release 1019e, deployed again, reads those decisions as not made and decides the births by themselves)
+  and its score settles their entries with no limit at entry (not undone); so prefer `events.births` false and the
+  event-buy stop over a House rollback.
+
+### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (unreleased; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
+
+- **Why.** The captain's A80 (16:10Z Oct 21, 2026; the goal's item 5, fill the gaps): the venue cancels about a quarter
+  of the event lane's auction buys (whole-share limit-on-open or limit-on-close orders) 5-6 ms after it accepted them,
+  with no reason and nothing filled, and the book finished each such intent missed at the auction's end ("not filled at
+  the open auction (canceled)"). Every one was an event real money missed while its shadow kept it, so real settled
+  events came about 25% slower. Not the price, the buying power, the size, the account or the gateway: the cause is the
+  venue's and unknown. No wall or judge moves.
+- **The change** (league/equity/live.py; plumbing, outside the equity identity): `VENUE_CANCEL_RETRY_S` 60;
+  `venue_cancel_ms(order)` reads the venue's own stamps on the order (`answer.submitted_at`, `answer.canceled_at`, RFC
+  3339, by `league.live.venue.parse_time`; `_absorb` keeps them) and is the milliseconds the venue took when the order
+  is an auction BUY it ended `canceled` within 60 s of its submission, nothing filled, no cancel of the House's own
+  sent. `_event_last(intent, entry=True)` (asked by `_event_work_entry` alone) lets such a last order go again when it
+  is the intent's only venue cancel at once: AT MOST ONE RE-SEND an intent for this cause, so at most two orders from
+  venue cancels. The re-send takes the normal path: every gate of a real open again (the House's block, the kill switch,
+  the kind's switch, the auction proof, the freezes, the band), the eligible list, no sale of the name at the auction,
+  one working order a symbol, the day's order count (the re-send is one more order, the cancelled one counts too), the
+  program's room, `_size_event` (the same size rule) and `_send` (nothing written or POSTed at or after the window's
+  cut-off on the wall clock: 09:27 ET at the open, 15:49 at a full day's close); the same symbol, side, limit, `tif` and
+  `otype` under a new client id, `replaces` the cancelled order; the gateway judges every cap again (a cap ends it
+  refused at once, as any refused buy; a reading it could not make sends it again the next minute, still the one
+  re-send). A second cancel at once ends it missed at the auction's end; a cancel later than 60 s (the venue ends every
+  unfilled auction order at its cross, minutes after it was sent) is never re-sent; exits (`_event_work_exit`) are
+  unchanged: a sale the venue cancelled climbs its ladder as before.
+- **What it records.** The re-sent order's `why` opens "A80's one re-send (the venue cancelled the first buy N ms after
+  its submission, nothing filled): event entry at the ..." (so its `equity.order` record says it too); the minute's
+  summary counts the re-sends it wrote (`equity.venue_cancel_resends`); a gate, a sizing wait or the cut-off that holds
+  it writes its reason on the intent after "A80's one re-send held: "; the intent's end names the cancels
+  (`venue_cancel_note`: "the venue cancelled the first buy 5 ms after its submission and A80's one re-send 6 ms after
+  its own, nothing filled", the one and why its re-send did not go, or the re-send beside its fill or refusal). ONE
+  INFO ALERT A SESSION, from the close's end (`_venue_cancel_said`): the day's event buys the venue cancelled at once,
+  how many went again and how many of those filled, with an `equity.alert` record of the counts; kv
+  `eq_venue_cancel_said` is written only on a day it said one (a book of share programs leaves no new key: the golden
+  ETF week is unchanged).
+- **Docs.** The module docstring of league/equity/live.py ("A missed entry is recorded, never chased" now states A80's
+  one exception, and a lost order is still never re-sent), league/equity/INTERFACES.md section 22, docs/events.md (the
+  real-money section) and docs/operations.md (**The event lane's real money on the House**: the day's table and a
+  bullet beside **A buy**).
+- **Tests.** league/tests/test_events_venue_cancel.py (9 tests; the rule's and (a), (b), (d), (e) and (f) fail on
+  `bb3a1ee9`, while (c), (g) and (h) hold what it already did, (c) naming the new kv): the rule's reading of the stamps
+  (5 ms; 60 s inside, 60.001 s and 180 s outside; a cancel inside its own millisecond is 0 ms; a sale, a day order, a
+  fill, a replaced order, the House's own cancel and a missing, unreadable or zoneless stamp are none); through the real
+  book and `size_entry`: (a) a buy cancelled 5 ms after its submission goes again once with the same body and a new
+  client id and fills: the intent done, one lot, its fill written back once, two orders, the minute's count 1 and the
+  session's one alert after the close; (b) a second cancel at once: missed at the auction's end naming both, no third
+  order; (c) the auction's own cancel 3 minutes after submission: no re-send, missed as before, nothing said; (d) the
+  window's cut-off passed when the cancel is read, by the minute or by the wall clock at the send: nothing written; (e)
+  the kill switch engaged: held, missed naming the hold; (f) the gateway refuses the re-send: a cap ends it refused at
+  once, a reading it could not make sends it again the next minute (two orders at the venue, done); (g) an exit
+  cancelled at once: unchanged, its ladder; (h) a buy that filled before the cancel: no re-send, done with what filled.
+  On `971db229` (the code, its tests and docs, with A82 merged in): the full league suite on 3.14, by the exact `python
+  -m unittest discover -s league/tests -t .`, 12,620 OK (33 skipped, 1,468 s); on 3.11 the event, equity and live
+  modules with test_ci, test_constitution, test_e3_identities, test_e4_e2e and the CHANGELOG readers, 91 modules, 2,397
+  OK; `python -m league.ci --base origin/main --branch fix/venue-cancel-retry --no-tests` passed; the identities,
+  computed with the tree's own functions on both Pythons, as in the heading (with `equity_money.event.enabled` False
+  `1b7a5c22` / `50e951c9`). No gateway file changes.
+- **Deploy.** The House from a head that contains the deployed House release's head (A80 names release 1019e); no
+  money digest move, so the grant needs no new ratification; verify it still reads `055e5313`.
+- **Rollback.** The previous House release (a re-sent buy that filled is an ordinary event lot to it); or
+  `equity_money.event.enabled` False, which stops every event buy, re-sends included.
+
+### The close economics stop charging the cancelled subscriptions, on `fix/subs-end-economics` (unreleased; owner files `league/project_economics.py`, `league/ops/economics.py`; joins a release after 1019d)
+
+- **Why.** The owner cancelled ThetaData and Alpaca Algo Trader Plus on Oct 18, 2026. The site's cost figure stopped
+  accruing them at 2026-10-19T00:00:00Z in release 1019a (`publish.SUBSCRIPTIONS_ENDED_AT`), but the House's close
+  economics, and so the desk scoreboard's "Input costs since T0" and its daily burn, kept prorating both from the
+  financial start with no end: about $5.40 a day of costs that were not being paid (Oct 20's scoreboard: ThetaData
+  $64.57, Algo Trader Plus $67.26, each still growing).
+- **What.** `project_economics.subscription_months` prorates each subscription to the earlier of the cutoff and its
+  end in `SUBSCRIPTIONS_ENDED_AT` (one table for the site and the House) and marks the input `ended_at`; what accrued
+  before the end stays. `ops/economics.render` reads `ended_at`: a cancelled subscription's 24-hour burn rows are 0,
+  and the cost's basis names its end. No money or constitution row moves; no judge.
+- **Tests.** `test_project_economics.test_cancelled_subscriptions_stop_accruing_at_their_end`,
+  `test_ops_economics.test_a_cancelled_subscription_burns_nothing` (37 tests in the two modules, 3.14 and 3.11).
+
+### R3: births, the event lane's generator, on `feat/evl-births` (unreleased; built on `rel/1019b` `5cad27f2`; an owner deploy: THE GATEWAY FIRST, then the House with `events.births` switched on)
+
+- **Why.** The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts,
+  rationed by an expected-false-pass budget you state" (goal-2026-10-19/R3-SPEC.md). PREREG-EVL-1/2/3 were hand births;
+  R3 makes births continuous and cheap, the judges untouched.
+- **What it carries.** `league/events/births.py` (new, behind `league/ci.py`'s wall in `PENDING_GATEWAY`): the GRAMMAR
+  (R3-SPEC section 1's fields only, every family the lane reads, verdict thresholds on stored PROMPT-DOC / PROMPT-NEWS
+  scores and guidance only; a READ birth carries its derived control), the canonical JSON and sha256, the OUTCOME-FREE
+  FACTS (a SQLite authorizer refuses bars, marks, outcomes, looks, bands, band_history, real_fills, universe and meta),
+  the VALIDATOR (>= 3 selected events a session over the last 20 sessions, Jaccard < 0.8 against every registered
+  program, the stated budget: 0.10 a seatable birth, at most 2.0 over every seatable version ever registered with
+  PREREG's 0.9 included, at most 3 seatable births a night, records free; in release 1019e A81's: the lane's stated
+  3.0, counted from SEATING's own sum, 1.2 with PREREG-EVL-4), the PROPOSER (one claude-haiku-4-5-20251001
+  call a night at temperature 0, its prompt sha and answer stored in `birth_calls`, at most 6 specs, $0.25 a night cap)
+  and the REGISTRATION (canonical lines appended to `docs/births/<night>.jsonl` through `POST /v1/github/docs`; the
+  later of GitHub's commit time and the House's receipt is the registration time, kept in the store's new `births`
+  table; an answer that never came is posted again the next night). `league/events/programs.py` `load_births` adds each
+  registered birth as a Program row (its own registration time, PREREG-EVL-3's learning band, screen, minimums and limit
+  at entry) AFTER every PREREG program; `select` hands a birth to its own rule; `league/events/run.py` keeps a birth
+  whose part of a decision raised in the summary's `births_failed` (never the PREREG programs' decision, whose receipt
+  and finality stay as they were; the screen holds that birth's looks). `league/events/screen.py` judges a
+  seatable birth by PREREG-EVL-3's looks (`control_of` finds a READ birth's control) and never a record or a control;
+  `expected_false_passes` counts each seatable birth. `league/events/book.py` seats a registered seatable birth at its
+  version 1 and puts every birth after every PREREG program in ROOM's order (`BIRTH_ROOM`); it loads the births when it
+  opens the lane and at each session's first decision. `league/events/house.py` loads them every turn and runs the
+  births job at 21:15 ET on a session night after the report when `events.births` is true (`league/config.json` ships it
+  false). The store gains `births`, `birth_calls` and `birth_candidates` (additive: schema 1). The CLI gains `births`
+  (`--specs FILE` for the captain's own specs, `--dry-run`) and `facts`; the daily report a births line.
+- **The gateway** (`gateway/lib/desk.mjs`, its router entry): the docs route admits `docs/births/<YYYY-MM-DD>.jsonl`
+  APPENDS of JSON lines (1 to 12 lines of one JSON object each, at most 8 KB a line, a 256 KB file, no credential, the
+  runtime token, the desk's six commits a New York day shared) and nothing else there; its answer carries GitHub's
+  `committed_at`; lines all standing already commit nothing and answer `unchanged` with the file's latest commit. The
+  desk pages' answers are unchanged. Tests: `gateway/test/births.test.mjs` (8); the suite 497.
+- **No PREREG program moves.** league/tests/test_events_births.py decides an invented week through the lane's own
+  `decide_open` / `decide_close` with and without five registered births: every PREREG program's intents are identical;
+  the births take only events knowable after their own registration. No identity moves (money, constitution, equity,
+  xs, gate contract, options execution fingerprint).
+- **Not built.** R3-SPEC's Sonnet fallback after two failing nights of Haiku proposals; ranking learning room by look
+  statistics (a later pre-registered version).
+- **Deploy.** The gateway (the births append) first, then the House release with `events.births` true; until both,
+  no birth is registered and nothing else changes. Rollback: the release before it (the births tables are additive and
+  ignored by it; a registered birth then stops deciding and trading, its open lots exit by their own plans).
+
+### WP4: the public site follows the event lane, on `feat/site-events` (unreleased; with personal-site branch `capital/event-lane`, either repository may deploy first; no identity, digest or money row moves)
+
+- **Why.** The owner's goal of Oct 19, 2026: "Website and repo docs stay current with every change: evolve the design,
+  no redesign". The capital page keeps its five sections; its Agents board and Positions follow the lane.
+- **What the House publishes.** One new VERSIONED key, `lane_v1` (`league/site_lane.py` reads it read-only;
+  `league/publish.py` `site_lane` allowlists it): each program (version 2 of the nine seatable ones, the records and
+  controls as "shadow") with a plain name, its band, its settled events real and shadow and its next look's events to go;
+  the funnel of the lane's steps; the goal's checkpoint (settled real-money events at Probe size or above, next reading
+  every 100: 0 until a program is at Probe); the verdicts' spend; and the equity book's lots (the event lane's and the
+  older index-fund lane's) as positions: each lot's trades, at the book's own value while open, adding up with the
+  options rows, Other and Unreconciled to the account's Profit to the cent (their fees and dividends are already in
+  Other). `compute.claude_usd` now holds the lane's verdicts (null while the lane's store cannot be read). Every older
+  block is byte for byte what it was; a site that refuses the key gets the checkpoint without it and is offered it
+  again half an hour later. Contract: `league/tests/fixtures/site_contract.md`; fixture `site_checkpoint_lane.json`;
+  tests `league/tests/test_site_lane.py` (17, both Pythons); `site_schema.js` refreshed from the site's branch.
+- **What the page draws** (the site's PR): the Agents board as Shadow, Learning, Probe and Sized with the gold "Real
+  money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
+  `...&window=1&lane=1`; every older read unchanged.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head

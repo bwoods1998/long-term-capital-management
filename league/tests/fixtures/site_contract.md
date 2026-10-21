@@ -1,5 +1,7 @@
 # What blakewoods.us/capital accepts from the House's publisher (schema 2)
 
+(Oct 19, 2026: the event lane's view rides the versioned key `lane_v1`; its section is at the end.)
+
 Source of truth: `personal-site/capital/schema.js` (the validators, run by the Worker before storing and
 by the page before drawing), `personal-site/lib/capital.mjs` (the Durable Object) and
 `personal-site/capital/capital.js` (the page), as of Sept 26, 2026 (the options swarm; personal-site
@@ -120,7 +122,7 @@ that the positions table below adds up to it to the cent (`league/trading_profit
 The owner's line of sight into what the agents trade: every real-options position on the Brokerage Account since
 `performance.start_at`, open and closed, with its dollar P&L after fees. `site_checkpoint_positions.json` beside this
 file is `site_checkpoint.json` plus `trading` and `positions` (`build_checkpoint`, pinned by `test_publish.py`).
-`site_schema.js` beside it is a copy of the site's `capital/schema.js` (personal-site commit b8cf77b, branch
+`site_schema.js` beside it is a copy of the site's `capital/schema.js` (refreshed Oct 19, 2026 from branch capital/event-lane; before it b8cf77b, branch
 capital/cost-net-practice: the itemized bill, the practice league and the incubator route of Sept 30, 2026): `test_positions_ledger.py` runs the site's own `validCheckpoint` over both fixtures and over the tables
 the House builds, in node (the review of #408 found the two sides' blocks disagreeing because each tested only its own
 fixture). Copy the site's file here whenever its schema changes.
@@ -335,6 +337,68 @@ roster, alive or retired, outside the 24 newest retired, and is the last to leav
 name, a mechanism and a record (an older site takes it, since only the 160 cap applies). A site that refuses a checkpoint
 carrying the window gets it again without it first (and when that is refused too, the older shapes' ladder goes on
 without it), and is offered it again half an hour later; the House warns once per distinct reply of the site.
+
+## The event lane's view (`lane_v1`, a versioned key; Oct 19, 2026)
+
+The owner's goal of Oct 19, 2026 funds one lane: pre-registered rules that read company news (SEC filings, insider buys,
+headlines) and trade stocks, every seatable rule with real money at learning size from its first event beside its
+full-size shadow (PREREG-EVL-3). The page's Agents board becomes the lane's steps and its Positions list the equity book's
+lots. Everything new rides ONE new top-level key, `lane_v1`, and nothing before it changes: `trading`, `positions`,
+`compute`'s shape, the window and every other block are byte for byte what they were (the lots are not in `positions`,
+and `trading.pnl_usd` stays the options book's). `league/site_lane.py` reads it, read-only (the lane's store
+`<state>/events/events.sqlite` and the equity book's tables in `<state>/live.sqlite`); `publish.site_lane` allowlists it
+key by key; `site_checkpoint_lane.json` beside this file is the House's own output (`lane_checkpoint` in
+`test_site_lane.py`, built through the reader over a lane store and an equity book it makes; `LTCM_WRITE_SITE_FIXTURES=1`
+rewrites it). The site validates it with `validLane` (personal-site branch `capital/event-lane`; `site_schema.js` here
+is that branch's `capital/schema.js`).
+
+```
+lane_v1: {
+  as_of: instant,                           // not after published_at (+60 s)
+  programs: [{                              // <= 64, ids unique; Sized, Probe, Learning, Shadow, Retired, then as registered
+    id: slug,                               // the program's id on the page: "EVL-8K-READ-O1" -> "8k-read-o1"
+    name: text,                             // a short plain name from the House's fixed table (`site_lane.NAMES`), <= 40,
+                                            // letters, digits, spaces, commas and hyphens, quote-free: "8-K read"
+    band: "shadow" | "learning" | "probe" | "sized" | "retired",   // "shadow": a record or a control, never real money
+    real: counter,                          // settled real-money events (both sides filled), any band; 0 for "shadow"
+    shadow: counter,                        // settled shadow events (the lane's settled outcomes)
+    look: {need, to_go} | null              // its next look: the look's threshold of settled TRADABLE events and how many
+                                            // it still lacks (to_go <= need); null for "shadow", "retired" or no look left
+  }],
+  funnel: {since, shadow, learning, probe, sized, retired} | null,  // programs ever on each step since PREREG-EVL-1's
+                                            // registration, counters or null; sized <= probe <= learning <= shadow, retired <= learning
+  checkpoint: {events, next} | null,        // the goal's Done reading: settled real-money events at Probe size or above
+                                            // (bought at probe or sized: after the program's promotion; 0 until one is at
+                                            // Probe), and next = (floor(events / 100) + 1) x 100
+  verdict_usd: cents | null,                // the lane's Claude verdicts so far; compute.claude_usd holds them too
+  lots: {as_of, rows, earlier, pnl_usd} | null   // the equity book's lots since performance.start_at (null: unreadable)
+}
+lot row: {id: "lot:<lid>", source: "program" | "agent", owner: slug,   // an event program the view lists, or an older
+          symbol, route: "learning" | "probe" | "sized" | null,        // equity lane's agent; the band it was bought at
+          shares: decimal (<= 6 places), open_shares: decimal (<= shares; > 0 open, 0 closed),
+          status: "open" | "closed", opened_at: minute, closed_at: minute | null (>= opened_at), pnl_usd: cents | null}
+```
+
+- **A lot's P&L is its trades**: its sale fills less its buy fills (`eq_fills`, exact), plus, while open, its shares at
+  the book's own mark (its entry price while never marked: the House's current value, as an open options row is). The
+  broker's fees on a sale (fee rows with no order) and a lot's dividends and corporate-action cash are the account's own
+  activity, already in `positions.other` (`league/account_activity.py` leaves out the equity book's FILLS, not its fee and
+  dividend rows), so nothing is counted twice: the options rows, `earlier`, `other`, `unreconciled_usd` and the lots add up
+  to the account's Profit less only what the open positions' marks differ from the broker's value by. The site checks
+  that the rows and `earlier` add up to `lots.pnl_usd` exactly (when it is known, every line is); the page shows the
+  account's Profit and lets the open rows carry the difference ("Valuation difference"), as before.
+- **Never** a price, a fill, a mark, a limit, a filing, a headline, a verdict, a CIK or a program's rule; a lot says what
+  it held, whose it was, when (to the minute) and its dollars. Names come from a fixed table, never from a program.
+- **Old readers.** The Worker serves `lane_v1` only to `LANE_READ` (`?progress=1&positions=1&practice=1&window=1&lane=1`,
+  the page of Oct 19, 2026); every other read is byte for byte what it was. An older Worker refuses a checkpoint carrying
+  it (an unknown key): the House sends the same checkpoint again without it (`laneless`, tried first on any refusal),
+  warns once per distinct reply, and offers it again half an hour later (`LANE_RETRY_SECONDS`, not read meanwhile). A
+  change an older page could not read is a new key (`lane_v2`) beside this one. Under the byte limit the lane's oldest
+  closed lots fold into its `earlier`, then the view leaves, right after the window.
+- **Costs.** `compute.claude_usd` now holds the lane's verdicts (`site_lane.read_verdict_usd`: their stated costs, a cent
+  for an answered one the gateway did not price), so the bill an older page reads grows by them too; with a lane store
+  that cannot be read the part is null (unknown), never understated.
+- **Pinning.** Every agent an older lane's lot names is pinned to the roster (`Publisher._pinned`), so the page names it.
 
 The account chart separately shows recorded Brokerage Account balances, which include funding flows.
 The chart has its own start: it may begin after an owner's deposit, so its first point need not be the

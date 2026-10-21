@@ -43,6 +43,23 @@ class Render(unittest.TestCase):
         self.assertEqual(comparable(summary), load("expected-summary.json"))
         self.assertEqual(summary["net"]["net_usd"], "-165.66")
 
+    def test_a_cancelled_subscription_burns_nothing(self):
+        # project_economics marks a subscription past its end (`ended_at`): its 24-hour burn rows read 0, its accrued
+        # cost stays in the costs (release 1019e; the owner cancelled ThetaData and Algo Trader Plus Oct 18, 2026).
+        library = load("library.json")
+        before = E.render(load("house.json"), library, load("sail.json"), load("external.json"),
+                          lib_meta={"snapshot": None, "idempotent": True}, typesafe_before_t0=TYPESAFE_BEFORE_T0)
+        for key in ("thetadata_usd", "market_data_usd"):
+            library["inputs"][key]["ended_at"] = "2026-10-19T00:00:00Z"
+        after = E.render(load("house.json"), library, load("sail.json"), load("external.json"),
+                         lib_meta={"snapshot": None, "idempotent": True}, typesafe_before_t0=TYPESAFE_BEFORE_T0)
+        burn = {row["service"]: row for row in after["burn_per_day"]["rows"]}
+        was = {row["service"]: row for row in before["burn_per_day"]["rows"]}
+        for service in ("ThetaData (pro-rata)", "Alpaca market data (pro-rata)"):
+            self.assertGreater(float(was[service]["last24h_usd"]), 0.0)
+            self.assertEqual(float(burn[service]["last24h_usd"]), 0.0)
+        self.assertEqual(after["net"]["net_usd"], before["net"]["net_usd"])
+
     def test_the_rules_are_the_reporters(self):
         self.assertEqual((E.T0, E.FS), (PE.T0, PE.FINANCIAL_START))
 

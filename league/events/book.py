@@ -144,28 +144,39 @@ CENT = Decimal("0.01")
 def seatable() -> tuple[P.Program, ...]:
     """The programs real money trades (PREREG-EVL-3 section 1, PREREG-EVL-4 section 2): the lane's `programs.SEATING`
     (the versions that may ever trade, `Program.can_seat`: version 2 of the nine, version 1 of PREREG-EVL-4's three), in
-    the tables' order. Read at each call."""
+    the tables' order; then (R3) the registered seatable births the lane's loader added after them, each at its own
+    version 1 (league/events/programs.py `load_births`), in registration order. Read at each call."""
     return tuple(p for p in P.SEATING if p.can_seat)
 
 
 def program_of(program: str, version: int) -> P.Program | None:
     """The seating version `version` of `program` (the lane's `programs.BY_KEY` row when it may seat,
     `Program.can_seat`); None for any version that cannot: version 1 of PREREG-EVL-1's and -2's programs, every record
-    and control."""
+    and control. A registered seatable birth (R3) seats at its version 1."""
     p = P.BY_KEY.get((str(program), int(version)))
     return p if p is not None and p.can_seat else None
 
 
 def order_of(program: str) -> int:
-    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's, then PREREG-EVL-4's)."""
+    """The tables' order of a seatable program (PREREG-EVL-1's rows, then PREREG-EVL-2's, then PREREG-EVL-4's; then
+    the births in registration order)."""
     for i, p in enumerate(seatable()):
         if p.id == program:
             return i
     return 10 ** 6
 
 
+#: R3-SPEC section 4: "when room is short, PREREG-EVL-3's order (Sized > Probe > learning; table order) holds for the
+#: PREREG programs; births come after them in registration order": a birth's ROOM tier, after every PREREG band's.
+BIRTH_ROOM = 10
+
+
 def room_key(program: str, band: str | None) -> tuple[int, int]:
-    """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order."""
+    """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order. A registered
+    birth (R3) comes after every PREREG program, whatever the bands, in registration order (R3-SPEC section 4)."""
+    found = next((p for p in seatable() if p.id == program), None)
+    if found is not None and found.spec is not None:
+        return (BIRTH_ROOM, order_of(program))
     return (PRIORITY.get(str(band), 9), order_of(program))
 
 
@@ -301,9 +312,10 @@ def open_lane(root: str | Path | None) -> Lane | None:
     try:
         lane = Lane(path)
         lane.db.execute("SELECT 1 FROM sessions LIMIT 1")
-        return lane
     except sqlite3.Error:
         return None
+    P.load_births(lane)     # (R3: the registered births, after every PREREG program; none when the store has none)
+    return lane
 
 
 def decided(lane: Lane, day: dt.date, at: str) -> bool:
@@ -388,6 +400,8 @@ def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
     """Every seating version's band at a decision, in the tables' order (`lane_bands`; a program with no row is at
     learning, `DEFAULT_BAND`; a band the rules do not name trades nothing, read as retired and said so). None when the
     lane's band table cannot be read."""
+    if lane is not None:
+        P.load_births(lane)     # (R3: a birth registered since the last decision seats from this one, at learning)
     table = lane_bands(lane)
     if table is None:
         return None
@@ -556,7 +570,10 @@ def rows_4(lane: Lane, day: dt.date, decided_at: dt.datetime) -> dict[str, list[
 def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime) -> list[Mapping[str, Any]]:
     """The events `program`'s decision of entry session `day` reads (league/events/run.py's windows), STORED before
     `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
-    (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`."""
+    (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`. Every family a seatable program can
+    have reads its rows here as the lane's decision reads them (release 1019e's review: R3's `ins` family, Form 4
+    cluster triggers, is a record only (A89): its cluster reads Form 4s that may be stored after the decision, so the
+    book reads no rows for it and a seatable `ins` birth is refused by the births' grammar)."""
     family = program.family
     if program.entry_at == "close" and family in P.CLOSE_FAMILIES_4:
         since = program.registered_at
@@ -569,15 +586,15 @@ def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.dateti
             rows = P.ins_buys(lane, lo, hi)
         elif family == "news":
             rows = P.news_in(lane, *P.news_window(lane, day))
-        else:
-            rows = []
+        else:       # (never silent: that program plans nothing this auction, and the book records why)
+            raise LookupError(f"the book reads no rows for the {family} family at the open")
     else:
         if family == "ern-react":
             rows = [r for r in P.filings_in(lane, "8-K", *P.close_window(lane, day)) if "2.02" in P.items_of(r)]
         elif family in ("news-day", "news-react"):
             rows = P.news_in(lane, *P.day_news_window(lane, day))
         else:
-            rows = []
+            raise LookupError(f"the book reads no rows for the {family} family at the close")
     if family in P.NEWS_FAMILIES:
         by_symbol = {str(r["symbol"]).upper(): str(r["cik"]) for r in universe_rows(lane, day).values()}
         rows = [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in rows]
@@ -883,7 +900,7 @@ def publish(client: Any, day: dt.date, symbols: Sequence[str], *, timeout: float
 
 __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS", "LIVE_BANDS", "DEFAULT_BAND",
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
-           "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "SCHEMA", "Settings", "FALLBACK",
+           "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "BIRTH_ROOM", "SCHEMA", "Settings", "FALLBACK",
            "settings", "Lane", "lane_path", "open_lane", "decided", "LIVE_ROWS", "eligible", "universe_rows", "Band",
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",

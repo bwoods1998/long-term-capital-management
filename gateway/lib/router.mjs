@@ -39,7 +39,9 @@
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
 //   GET             /v1/github/pr/<n>/files?head_sha=  the exact change at that head, file by file (lib/pulls.mjs; V3-A)
 //   POST            /v1/github/close         close one engineer pull request at its exact head (lib/pulls.mjs; V3-A)
-//   POST            /v1/github/docs          one desk page committed to main under docs/runs/desk/ (lib/desk.mjs; V3-A)
+//   POST            /v1/github/docs          one desk page committed to main under docs/runs/desk/ (lib/desk.mjs; V3-A),
+//                                            or R3's births appended as JSON lines to docs/births/<day>.jsonl, the
+//                                            answer carrying GitHub's commit time (lib/desk.mjs; Oct 19, 2026)
 //   POST            /v1/github/review        the automated reviewer's verdict on one engineer pull request's exact head
 //   POST            /v1/github/merge         squash-merge one engineer pull request inside lib/merge.mjs's walls (V3-A)
 //
@@ -66,7 +68,8 @@
 // (lib/protected.mjs) and nothing outside its lane (github.ENGINEER_LANES; WP8b) or outside what the
 // harness lanes declare (github.ENGINEER_SURFACE), at most two a New York day (lib/merge.mjs). Every
 // other branch is still merged by a repository workflow or by the owner. The desk's docs route
-// commits one page under docs/runs/desk/ and nothing else (lib/desk.mjs).
+// commits one page under docs/runs/desk/, or appends R3's births to one file under docs/births/, and
+// nothing else (lib/desk.mjs).
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -1266,6 +1269,9 @@ async function deskDocs(request, env, { gate, fetcher, now }) {
   if (!account) return fail('GitHub is not configured.', 503);
   const body = await jsonBody(request, desk.MAX_REQUEST_BYTES);
   if (body.response) return body.response;
+  if (body.parsed && typeof body.parsed === 'object' && desk.isBirthsPath(body.parsed.path)) {
+    return birthsDocs(body.parsed, env, account, { gate, fetcher, now });
+  }
   const doc = desk.admitDoc(body.parsed, env);
   if (doc.error) return refusedWith(doc);
   if (await gate.docsToday(now()) >= desk.DOCS_PER_DAY) {
@@ -1285,6 +1291,42 @@ async function deskDocs(request, env, { gate, fetcher, now }) {
   }
   if (result.committed !== true) return refusedWith({ ...result, refused: result.committed === null ? 'no_answer' : 'github' });
   return json({ ok: true, committed: true, path: doc.path, commit: result.commit, docs_today: hold.count });
+}
+
+/**
+ * R3's births appended to main (lib/desk.mjs `admitBirths`): admitted by its path, lines and message first, then the
+ * file main holds read whole (lines that all stand there already commit nothing and take no place: the answer names the
+ * file's latest commit and its time), then one of the day's DOCS_PER_DAY places, then GitHub's Contents API with the
+ * blob it replaces. The answer carries GitHub's commit time, the birth's registration (`committed_at`).
+ */
+async function birthsDocs(parsed, env, account, { gate, fetcher, now }) {
+  const doc = desk.admitBirths(parsed, env);
+  if (doc.error) return refusedWith(doc);
+  if (await gate.docsToday(now()) >= desk.DOCS_PER_DAY) {
+    return refusedWith({ status: 429, cap: 'docs_day', error: `Today's cap of ${desk.DOCS_PER_DAY} docs commits is already reached.` });
+  }
+  const held = await desk.readBirths({ ...account, path: doc.path, fetcher });
+  if (held.error) return refusedWith(held);
+  const plan = desk.appendBirths(held, doc);
+  if (plan.error) return refusedWith(plan);
+  if (plan.unchanged) {
+    const last = await desk.lastCommit({ ...account, path: doc.path, fetcher });
+    if (last.error) return refusedWith(last);
+    return json({ ok: true, committed: false, unchanged: true, path: doc.path, commit: last.commit,
+      committed_at: last.committed_at, lines: doc.lines.length });
+  }
+  const hold = await gate.docsReserve({ path: doc.path, at: now() });
+  if (!hold.ok) return refusedWith(hold);
+  const result = await desk.putDoc({ ...account, doc: { path: doc.path, content: plan.content, message: doc.message }, sha: held.sha, fetcher });
+  const outcome = result.committed === true ? 'committed' : result.committed === false ? 'refused' : 'unknown';
+  try {
+    await gate.docsSettle({ day: hold.day, id: hold.id, outcome, commit: result.commit ?? null, at: now() });
+  } catch {
+    // The place stays taken; the record of what became of it is the only thing lost.
+  }
+  if (result.committed !== true) return refusedWith({ ...result, refused: result.committed === null ? 'no_answer' : 'github' });
+  return json({ ok: true, committed: true, path: doc.path, commit: result.commit, committed_at: result.committed_at,
+    lines: doc.lines.length, docs_today: hold.count });
 }
 
 /**

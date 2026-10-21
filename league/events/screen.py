@@ -409,7 +409,7 @@ def judge_look(rows: Sequence[Mapping[str, Any]], sessions: Sequence[Any], k: in
         fails.append("mean a <= 0")
     if not (f["mean_r"] is not None and f["mean_r"] > 0):
         fails.append("mean r <= 0")
-    control = CONTROLS.get(program)
+    control = control_of(program)
     if control is not None:
         c_mean, c_blocks = control_mean(control_rows or [], [b.day for b in f["block_list"]])
         look["control"] = {"program": control, "mean_block": c_mean, "blocks": c_blocks,
@@ -793,6 +793,22 @@ RECORD_FORMS = ("8-K", "4")
 #: never decided (the reading that waits: a House that never ran it could only delay the look).
 NAMED_FROM = 4
 FOUR_KIND = "close-evl4"
+#: A DECISION MADE WITHOUT A REGISTERED BIRTH'S ROWS IS NOT MADE FOR IT (release 1019e's review; PREREG-EVL-1 section 3:
+#: "an outage removes nothing"). A birth (R3, league/events/births.py) is prereg 3, so the rule above (`NAMED_FROM`)
+#: never reached it: a receipt that never named a birth, made by a release without births (the documented rollback to
+#: release 1019d) or in a turn whose loader had no births, read as made for it, and once outside the re-decision
+#: reach its looks counted a record with that session's events missing. So for a registered birth, and for each
+#: member of its group (a READ birth's derived control, `control_of`), a decision whose time (09:15 ET, or the close's
+#: decision time) is AFTER the birth's registration and whose latest receipt is finished `ok` or `pending` without
+#: naming it is NOT MADE for it, unless a later receipt of THE BIRTHS' ROWS DECIDED BY THEMSELVES (`BIRTHS_KIND`:
+#: league/events/run.py `decide_open` / `decide_close` with `births_only`, a backfill) names it: then that receipt is
+#: its decision. A decision made before the birth's registration is made for it as for every program (none of its
+#: events is in that decision's windows). The House's lane and the CLI's catchup run those decisions, once, for every
+#: such session (`births_made_without`); until one is made the session is not final for the birth (the reading that
+#: waits). A birth's look also waits when any member of its group failed its part of a decision (`births_failed`), or
+#: is pending on its verdicts: the look compares the birth with its control, so neither record may be missing a
+#: session's events. No PREREG program reads any of this.
+BIRTHS_KIND = {"open": "open-births", "close": "close-births"}
 
 
 def program_key(program: str, version: int) -> str:
@@ -867,6 +883,61 @@ def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None)
     return out
 
 
+def _decision_time(x: C.Session, kind: str) -> dt.datetime:
+    return x.open_decide if kind == "open" else x.close_decide
+
+
+def birth_group(prog: Any) -> list[str]:
+    """The decision keys a registered birth's look reads (`BIRTHS_KIND`'s comment): its own and its derived control's
+    (a READ birth's, when loaded); [] for every PREREG program."""
+    if getattr(prog, "spec", None) is None:
+        return []
+    keys = [program_key(prog.id, prog.version)]
+    control = control_of(prog.id) if prog.version == 1 else None
+    if control is not None:
+        keys.append(program_key(control, 1))
+    return keys
+
+
+def births_made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None
+                        ) -> dict[tuple[str, dt.date], bool]:
+    """THE DECISIONS WHOSE REGISTERED BIRTHS ARE STILL TO DECIDE BY THEMSELVES (`BIRTHS_KIND`'s comment): {(kind, day):
+    again} for every open and close decision of the sessions from the first registered birth's registration (from
+    `first`, when later) to `last` whose latest receipt (`decide-<kind>:<day>`) is finished `ok` or `pending` without
+    naming every registered birth (and control) of that entry kind registered before its decision time, and with no
+    later births-only receipt (`decide-<BIRTHS_KIND[kind]>:<day>`) finished `ok` that names them all. `again` when an
+    `ok` births-only receipt of it exists (an older one, the session decided again since by a release without births:
+    stale; or a later one that names not all, a birth's part of it having failed): the House decides it again. The
+    House's lane and the CLI's catchup decide each of them (`BIRTHS_KIND`), as a backfill."""
+    from .programs import BIRTHS
+
+    if not BIRTHS:
+        return {}
+    since = min(p.registered_at for p in BIRTHS).astimezone(C.NY).date()
+    if first is not None:
+        since = max(since, first)
+    if since > last:
+        return {}
+    latest = _latest_receipts(store, ("open", "close", *BIRTHS_KIND.values()))
+    out: dict[tuple[str, dt.date], bool] = {}
+    for x in C.sessions(store, since, last):
+        for kind in ("open", "close"):
+            at = _decision_time(x, kind)
+            keys = [program_key(p.id, p.version) for p in BIRTHS if p.entry_at == kind and p.registered_at < at]
+            if not keys:
+                continue
+            rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
+            if status not in ("ok", "pending"):
+                continue    # not made (none, cut, failed, running): the House decides it again whole, naming them
+            if all(names(summary, k) for k in keys):
+                continue
+            ridb, statusb, summaryb = latest.get(f"decide-{BIRTHS_KIND[kind]}:{x.day.isoformat()}", (0, "", None))
+            if ridb > rid and statusb == "ok" and all(names(summaryb, k) for k in keys):
+                continue
+            out[(kind, x.day)] = statusb == "ok"
+    return out
+
+
 def _reach() -> tuple[int, dt.timedelta, int]:
     """(sessions, look-back, backfill weekdays) a look waits out: the constants above, or the House lane's as it runs
     when they reach further (league/events/house.py takes these; a copy it widened would only delay looks)."""
@@ -913,12 +984,16 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     # (release 1019c's review: a program of PREREG-EVL-4 or later reads a receipt that does not name it as not made,
     # unless a later receipt of its file's rows decided by themselves names it: `NAMED_FROM`, above)
     named = prog.prereg >= NAMED_FROM
-    latest = _latest_receipts(store, (kind, FOUR_KIND) if named else (kind,))
+    group = birth_group(prog)       # (R3: a birth and its control; [] for every PREREG program, which reads none of it)
+    born_kind = BIRTHS_KIND.get(kind) if group else None
+    latest = _latest_receipts(store, (kind,) + ((FOUR_KIND,) if named else ()) + ((born_kind,) if born_kind else ()))
     since = max(first, (now - reach_lookback).astimezone(C.NY).date())
     # A66's second rule and A69's (iv): the first session from the look-back on whose decision is not made for it. A
     # program of PREREG-EVL-4 or later (`named`) reads a receipt finished `ok` or `pending` that does not name it as not
     # made, unless a later receipt of its file's rows decided by themselves (`FOUR_KIND`) names it: then that one is
-    # its decision (`NAMED_FROM`, above).
+    # its decision (`NAMED_FROM`, above). A registered birth (`group`) reads a decision made after its registration
+    # that does not name every member of its group the same way, with the births' own decision (`BIRTHS_KIND`), and
+    # waits when a member of its group failed its part or is pending on its verdicts (`BIRTHS_KIND`'s comment).
     unmade: tuple[dt.date, str] | None = None
     for x in C.sessions(store, since, today):
         rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
@@ -930,7 +1005,18 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
                 status = f"made without its rows ({FOUR_KIND}: {status4 or 'running'})"
             else:
                 status = "made without its rows"
-        if _waits_on(status, summary, key):
+        if group and status in ("ok", "pending") and _decision_time(x, kind) > prog.registered_at and \
+                not all(names(summary, k) for k in group):
+            ridb, statusb, summaryb = latest.get(f"decide-{born_kind}:{x.day.isoformat()}", (0, "", None))
+            if ridb > rid and all(names(summaryb, k) for k in group):
+                status, summary = statusb, summaryb        # the births' rows decided by themselves, after that decision
+            elif ridb > rid:
+                status = f"made without its rows ({born_kind}: {statusb or 'running'})"
+            else:
+                status = "made without its rows"
+        if status in ("ok", "pending") and group and any(k in _births_failed(summary) for k in group):
+            status = "failed"       # (R3: a member of this birth's group raised in its own part; never a PREREG program)
+        if _waits_on(status, summary, key) or any(_waits_on(status, summary, k) for k in group[1:]):
             unmade = (x.day, f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}")
             break
     decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
@@ -1110,17 +1196,22 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
         now: dt.datetime | None = None, draws: int = B) -> dict[str, Any]:
     """The screen job: every seatable program's looks whose as-of session is on or before `today` and not yet written,
     each read from the record as of its session, once that close is FINAL for the program (`final_until`) and every
-    intent (the control's too) scheduled to exit by then has settled. At a held look the skew checks go to meta
+    intent (the control's too) scheduled to exit by then has settled. A registered SEATABLE birth (R3, loaded by
+    league/events/programs.py `load_births`) is judged by PREREG-EVL-3's looks unchanged (`_run_v2`); a birth that is
+    a record, and a birth's control, are never screened. At a held look the skew checks go to meta
     `skew:<program>:<version>:<k>` before p is computed. One program's failure is its own (release 1019b's review):
     it is in `errors` and the others' looks go on. Returns {written, waiting, errors}."""
     now = now or S.utc_now()
     written, waiting, errors = [], [], []
     for program, version in programs or program_versions(store):
-        if program not in SEATABLE:
+        born = _born(program, version)
+        if program not in SEATABLE and born is None:
             continue
         try:
             if _seating(program, version):
                 out = _run_v2(store, program, version, today, now=now, draws=draws)
+            elif born is not None:
+                continue        # (R3: a birth that is a record, or a birth's control, is never screened)
             elif version == 1:
                 out = _run_v1(store, program, version, today, now=now, draws=draws)
             else:
@@ -1182,7 +1273,9 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 def expected_false_passes(store: S.Store) -> dict[str, Any]:
     """0.10 x every version that can seat (PREREG-EVL-3 section 4: the nine version 2 programs, version 1 of their ids
     never seats; PREREG-EVL-4 section 3: version 1 of its three, 1.2 in all), plus any later version of a seatable
-    program seen in the store (a version above the program's highest seating version)."""
+    program seen in the store (a version above the program's highest seating version); and (R3) every seatable birth
+    registered, through SEATING once league/events/programs.py `load_births` has loaded them (A81: R3's validator
+    charges each 0.10 against `LANE_BUDGET`, 3.0 in all, counted from this sum)."""
     from .programs import SEATING
 
     seating = {(p.id, p.version) for p in SEATING}
@@ -1193,6 +1286,38 @@ def expected_false_passes(store: S.Store) -> dict[str, Any]:
     expected = round(FALSE_PASS_RATE * len(versions), 3)
     return {"versions": len(versions), "expected": expected, "budget": LANE_BUDGET,
             "left": round(LANE_BUDGET - expected, 3)}
+
+
+def _births_failed(summary: Any) -> dict[str, Any]:
+    """The registered births whose own part of a decision raised (league/events/run.py `BIRTHS_FAILED`), {} when none
+    or unreadable."""
+    try:
+        body = json.loads(summary or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return dict(body.get("births_failed") or {}) if isinstance(body, dict) else {}
+
+
+def _born(program: str, version: int) -> Any:
+    """The registered birth (R3) of this key, or None (every PREREG program)."""
+    from .programs import BY_KEY
+
+    p = BY_KEY.get((program, int(version)))
+    return p if p is not None and p.spec is not None else None
+
+
+def control_of(program: str) -> str | None:
+    """A READ program's control (PREREG-EVL-1 section 7: its mean block value must exceed the control's): PREREG's own
+    table (`CONTROLS`), or a registered READ birth's derived control (R3, league/events/births.py `control_spec`: its
+    rule with every verdict condition removed, registered with it). Every PREREG program's answer is its table's."""
+    if program in CONTROLS:
+        return CONTROLS[program]
+    born = _born(program, 1)
+    if born is None or not born.reads:
+        return None
+    from .births import control_id
+
+    return control_id(program)
 
 
 # ------------------------------------------------------------------------------------------- version 2: PREREG-EVL-3
@@ -1280,7 +1405,7 @@ def _run_v2(store: S.Store, program: str, version: int, today: dt.date, *, now: 
     if on_record["done"] and on_record["next"] is None:
         return {"written": written, "waiting": waiting}
     after = (on_record["last"], on_record["next"] - 1) if on_record["done"] else None
-    control = CONTROLS.get(program)
+    control = control_of(program)
     pending = _pending(store, program, version) + (_pending(store, control, 1) if control else [])
     plan = v2_schedule(store, rows, today, pending, after=after, final=final_until(store, program, version, today, now))
     if plan["stopped"] is not None:
@@ -1326,10 +1451,11 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
            "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "NAMED_FROM",
-           "FOUR_KIND", "program_key", "names", "four_programs", "made_without", "B", "TIE", "LOOKS", "SEATABLE",
+           "FOUR_KIND", "BIRTHS_KIND", "program_key", "names", "four_programs", "made_without", "births_made_without",
+           "birth_group", "B", "TIE", "LOOKS", "SEATABLE",
            "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",
            "skew_check", "look_figures", "control_mean", "judge_look", "write_look", "look_detail", "bootstrap_bounds",
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",
            "exit_overrides", "settled_rows", "first_settled_exit", "covered", "skew_records", "look_rows", "next_look",
-           "run", "expected_false_passes", "LANE_BUDGET"]
+           "run", "expected_false_passes", "LANE_BUDGET", "control_of"]

@@ -1,7 +1,9 @@
 // A GitHub small enough to read for the V3-A routes (WP8): the engineer's pull requests (their files, the checks.yml
-// runs and jobs on a commit, the squash merge) and the Contents API the desk's docs commits use. State is plain data a
-// test edits: `pulls`, `files`, `runs`, `jobs`, `contents`. `script(key, init, body)` may answer a call first (`key`
-// is `METHOD /path` inside the repository). Every call is kept in `calls`, its headers included.
+// runs and jobs on a commit, the squash merge) and the Contents API the desk's docs commits use (R3's births file too:
+// its text returned base64 as GitHub does, each commit with GitHub's committer time, `clock()`, and the file's latest
+// commit by `GET /commits?path=`). State is plain data a test edits: `pulls`, `files`, `runs`, `jobs`, `contents`,
+// `clock`. `script(key, init, body)` may answer a call first (`key` is `METHOD /path` inside the repository). Every
+// call is kept in `calls`, its headers included.
 
 import { createHash } from 'node:crypto';
 import { GITHUB_REPO } from './helpers.mjs';
@@ -39,6 +41,7 @@ export function fakeHub({ script = () => undefined } = {}) {
     contents: new Map(),       // path -> text on main
     commits: [],               // the docs commits made, in order
     merged: [],                // the merges made
+    clock: () => '2026-10-19T01:15:07Z',   // GitHub's committer time of the next commit
   };
   state.fetcher = async (url, init = {}) => {
     const prefix = `https://api.github.com/repos/${GITHUB_REPO}`;
@@ -75,19 +78,29 @@ export function fakeHub({ script = () => undefined } = {}) {
       state.merged.push({ number: pull.number, ...body, merge_sha: sha });
       return reply(200, { sha, merged: true, message: 'Pull Request successfully merged' });
     }
-    if ((match = /^GET \/contents\/(docs\/runs\/desk\/[^?]+)\?ref=main$/.exec(key))) {
+    if ((match = /^GET \/contents\/(docs\/(?:runs\/desk|births)\/[^?]+)\?ref=main$/.exec(key))) {
       const text = state.contents.get(match[1]);
-      return text === undefined ? reply(404, { message: 'Not Found' }) : reply(200, { type: 'file', path: match[1], sha: gitBlob(text) });
+      return text === undefined ? reply(404, { message: 'Not Found' }) : reply(200, {
+        type: 'file', path: match[1], sha: gitBlob(text), encoding: 'base64',
+        // GitHub wraps the base64 at 60 characters.
+        content: (Buffer.from(text, 'utf8').toString('base64').match(/.{1,60}/g) || []).join('\n'),
+      });
     }
-    if ((match = /^PUT \/contents\/(docs\/runs\/desk\/.+)$/.exec(key))) {
+    if ((match = /^GET \/commits\?path=([^&]+)&sha=main&per_page=1$/.exec(key))) {
+      const path = decodeURIComponent(match[1]);
+      const last = [...state.commits].reverse().find(made => made.path === path);
+      return reply(200, last ? [{ sha: last.commit, commit: { committer: { date: last.at } } }] : []);
+    }
+    if ((match = /^PUT \/contents\/(docs\/(?:runs\/desk|births)\/.+)$/.exec(key))) {
       const held = state.contents.get(match[1]);
       if (held !== undefined && body.sha !== gitBlob(held)) return reply(409, { message: `${match[1]} does not match ${body.sha}` });
       if (held === undefined && body.sha) return reply(422, { message: 'sha wasn\'t supplied.' });
       const text = Buffer.from(body.content, 'base64').toString('utf8');
       state.contents.set(match[1], text);
       const commit = createHash('sha1').update(`commit ${state.commits.length} ${text}`).digest('hex');
-      state.commits.push({ path: match[1], message: body.message, branch: body.branch, commit });
-      return reply(held === undefined ? 201 : 200, { content: { path: match[1], sha: gitBlob(text) }, commit: { sha: commit } });
+      const at = state.clock();
+      state.commits.push({ path: match[1], message: body.message, branch: body.branch, commit, at });
+      return reply(held === undefined ? 201 : 200, { content: { path: match[1], sha: gitBlob(text) }, commit: { sha: commit, committer: { date: at } } });
     }
     return reply(404, { message: `unscripted: ${key}` });
   };

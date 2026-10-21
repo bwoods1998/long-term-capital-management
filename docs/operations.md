@@ -8,6 +8,73 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019e (Oct 21-22, 2026): R3's births, A80's re-send, the site follows the lane, the cost fix: `rel/1019e`, not deployed
+
+Four merges on release 1019d's head `5a17bd25` (#581, **Release 1019d**, below), `--no-ff`, in this order:
+`feat/evl-births` (`ad9c8513`, #577: R3, **Births** below and [events.md](events.md), "Births"), `feat/site-events`
+(`da0d0581`, #576: `lane_v1`, the site's half personal-site #25), `fix/venue-cancel-retry` (`960a4fa9`, #582: A80's
+one re-send, **The event lane's real money on the House**) and `fix/subs-end-economics` (`2d769db3`: the close
+economics stop charging the cancelled subscriptions); then A81 (the births' budget: the lane's stated 3.0 counted from
+SEATING's own sum, 0.10 a seatable birth, three a night) and A83 (3) (PREREG-EVL-4's part of a close decision fails
+alone, recorded as `evl4_error`; the PM rows ask their stored-prompt PROMPT-NEWS verdicts when EVL-NEWS-READ-O1's group
+is frozen). It deploys ON TOP OF RELEASE 1019d, as an owner deploy: `gateway/` changed (the births' docs route), so
+THE GATEWAY GOES FIRST. Identities, all release 1019d's (the tree's own functions, 3.14 and 3.11): money `055e5313`,
+constitution `a8d4cbd9`, options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`,
+gate contract `397b22b7`; the standing grant pins the money digest, which does not move.
+
+**The review round** (the adversarial reviews of `4ab66a39`; league/tests/test_events_1019e_review.py, each test failing
+without its fix): THE BIRTHS CALL IS INSIDE THE LANE'S LINE (house.py `_spend_today` counts `birth_calls` by their
+answer time, and the call is made only when its worst case fits under `line_left`; budget.py `lane_spend` and
+site_lane.py `verdict_usd` count it too); AN `ins` BIRTH IS A RECORD ONLY (A89: a Form 4 cluster
+reads filings that may be stored after a decision, so births.parse refuses a seatable one and book.rows_for reads no
+`ins` rows; a family it reads no rows for is an error, and every other family's real-money picks equal its shadow's
+intents in a test); A DECISION MADE WITHOUT A BIRTH IS NOT MADE FOR IT
+(screen.py `final_until` reads a birth's group like PREREG-EVL-4's named receipts, with the births' own decision,
+`decide-open-births` / `decide-close-births`, run by the lane and the CLI's catchup as a backfill for every older such
+decision: `births_made_without`); A BIRTH'S LOOK WAITS ON ITS CONTROL'S FAILED OR PENDING PART; THE LIMIT AT ENTRY FOR
+ANY PROGRAM THE PROCESS DOES NOT KNOW (score.py, fail closed); A BIRTHS TABLE READ ERROR KEEPS THE BIRTHS LAST READ
+(programs.py `load_births`). No PREREG program's selection, judge or constant moves; no identity moves.
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
+green on the exact head; release 1019d live first, and main at its head):
+1. THE GATEWAY from this head: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`
+   (record the version it replaces: release 1019c's, deployed with release 1019d). It adds only the docs route's births
+   appends (`docs/births/<YYYY-MM-DD>.jsonl`, JSON lines, at most 12 lines of 8 KB a post and a 256 KB file, the
+   desk's six commits a New York day shared); no order path, cap or `wrangler.jsonc` change. The running House sends
+   no births append, so nothing changes until step 3.
+2. THE HOUSE from the same head, by the captain's ship script: `ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`
+   (`events.births` is TRUE as shipped: the captain's A90, so tonight's births job runs; it was false until
+   `99d8bddb`). Verify (read-only): promoted, `real_money` true, failures []; the ids
+   `b60410ad` / `78022ca6` / `055e5313` / `a8d4cbd9` and the grant on `055e5313`; `release.live.equity.events.enabled`
+   true; the next `decide-close:<day>` receipt `ok` with no `evl4_error`; `eq_event_programs` still twelve rows; the
+   daily report's "Expected false passes: 1.2 ... of the lane's stated 3.0".
+3. BIRTHS ON: shipped on in this head (A90: the births review said ship and a night of births is a session of every
+   birth's 8-block clock; the job's failure is a warning and costs at most $0.25). Verify after 21:15 ET: the lane's `births` receipt `ok`, its `budget` reading
+   `used` 1.2 and `limit` 3.0 before any birth; at most three seatable births a night; each registered line in
+   `docs/births/<night>.jsonl` on main and its row in the store's `births`; the next turn's decisions name each birth;
+   ROOM puts every birth after the twelve PREREG seating versions; `lane.json` `verdict_usd_today` holds the births
+   call's cost from the next task on (the line is the lane's, births included); `SN.births_made_without(st, today)`
+   prints `{}`.
+
+**Rollback**: `events.births` false stops new births (registered births keep trading at their bands). The House by
+`floor_box.py rollback` and repoint release 1019d's deployed head (`5a17bd25` unless it deployed from another): the
+births tables are additive and ignored by it, a registered birth stops deciding and is not seated, and its open lots
+exit by their own stored plans (`live._event_exits` reads the lot's plan, never its program); A80's re-sends stop (a
+re-sent buy that filled is an ordinary event lot to it). The gateway last, by `wrangler rollback` to the version step 1
+replaced, or never (the House without births sends no append). The instant stop of event buys is release 1019b's
+(**Release 1019b**, Rollback).
+
+**What a House rollback costs once births exist** (release 1019e's review): release 1019d knows no birth, so while it
+runs (a) every decision it makes leaves the births' events out of their shadow records, and (b) its score settles a
+birth's planned or entered intents with no limit at entry (it reads every program it does not know as PREREG-EVL-1's).
+Release 1019e, deployed again, reads (a) as decisions NOT MADE for the births (`screen.final_until`): their looks wait,
+and the lane decides the births by themselves (`decide-open-births`, `decide-close-births`) for every such decision its
+hourly re-decision no longer reaches, once (verify: `SN.births_made_without(st, today)` prints `{}` within the hour,
+each such decision with one births-only receipt `ok`). (b) is not undone: a birth's entry above 1.25 x the previous
+close that release 1019d settled filled stays in its record. So once births are registered, PREFER `events.births`
+false plus the instant stop of event buys over a House rollback; roll the House back only for a fault in the House
+itself, and read the births' settled intents of the rollback's sessions before their next look.
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
@@ -518,7 +585,21 @@ Release 1019b's review adds the modules that hold the rules' inputs: `league/eve
 `edgar.py`, `news.py`, `run.py` and `store.py` (eligibility and the benchmark, the windows and decision times, the
 knowable lag, which program gets which rows, the record's schema). `league/events/house.py`, `gw.py`, `report.py`,
 `league/service.py` and `scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is
-the owner's.
+the owner's. R3 adds `league/events/births.py` (the births' grammar, validator and budget, the facts' wall).
+
+**Births (R3, on `feat/evl-births`, not deployed; [events.md](events.md), "Births").** Deploy THE GATEWAY FIRST (its
+docs route admits `docs/births/<YYYY-MM-DD>.jsonl` appends), then the House release with `league/config.json`
+`events.births` true: the lane then runs the births job once a session night at 21:15 ET after the report (receipt
+`births`; the architect's one Haiku call, at most $0.25 a night, refused under PAUSE and INSIDE THE LANE'S LINE since
+release 1019e's review: made only when its worst case fits under what is left of the lane's line that UTC day, its
+stored cost counted in that line, in `budget.lane_spend` and in the site's Claude bill; the night's facts, candidates
+and verdicts in `birth_calls` and `birth_candidates`; registered births in
+`births`, each with its GitHub commit). The captain's own births, with no model call: `python3 -m league.events --state
+/workspace/state/events births --specs FILE` on the box (FILE a JSON list of `{spec, why}`; `--dry-run` validates and
+records only); the facts alone: `facts`. Watching: the daily report's "Births" line and "Expected false passes" (0.10 a
+seatable birth, at most the lane's stated 3.0 in all, A81). Stopping: `events.births` false stops new births (a deploy); the registered
+births go on trading at their bands, as any program (a new version is the only change; retirement is the screen's).
+A night whose registration got no answer reads `unknown` and is posted again the next night.
 
 ## The old lanes are exits only (Oct 19, 2026): `equity_money.enabled` False: `fix/equity-opens-off`, deployed 03:46Z Oct 19 (release 1019a)
 
@@ -3962,7 +4043,7 @@ session):
 | 09:16-09:27 ET | the `opg` sends (`_event_send`), each minute in this order: the exits due planned, the SALES sent, the decision (while not made), then the BUYS in ROOM's order (release 1019b's third review: a decision never holds a sale) |
 | close - 14 min (15:46) | THE CLOSE DECISION, the same way (it waits up to 1 minute for `decide-close:<day>`; its T29 reads are bounded by the window: a failed request is sent again once, never after a timeout, and none starts in the window's last minute; a REACT row of a name not read is not taken and every other pick goes) |
 | close - 13 to - 11 min (15:47-15:49) | the `cls` sends, the sales before the decision and the buys after it |
-| auction + 2 min | the auction's end (`_event_finish`): a buy done or missed; a sale not filled climbs the ladder |
+| auction + 2 min | the auction's end (`_event_finish`): a buy done or missed (one the venue cancelled at once names the cancels: A80, below); a sale not filled climbs the ladder; after the close's, A80's one info alert of the session when the venue cancelled a buy at once |
 | every minute | the real fills of event lots written back to the lane (`_event_fills`) |
 
 - **The bands are the lane's** (PREREG-EVL-3 section 2; league/events/book.py `bands`, read at each session's first
@@ -4010,6 +4091,25 @@ session):
   make (`asset`, `bars`, `stock_eligible`, the rate) goes again next minute until the cut-off; any other refusal ends
   the buy at once in the gateway's words; `stock_event_buys` (the switch off) is also an error alert once a session,
   naming the owner's step.
+- **A buy the venue cancelled at once goes again ONCE** (the captain's A80, Oct 21, 2026; on `fix/venue-cancel-retry`,
+  not yet deployed; league/equity/live.py `_event_last`, `venue_cancel_ms`). The venue accepted about a quarter of the
+  lane's auction buys and cancelled them 5-6 ms later, no reason, nothing filled. A buy whose last order the venue
+  cancelled within `VENUE_CANCEL_RETRY_S` (60 s) of that order's own `submitted_at` (its `canceled_at` less it, the
+  venue's stamps), nothing filled and no cancel of the House's own sent, is sent again once at the next minute that
+  reads the cancel: the same body (symbol, side, size rule, limit price, `opg` or `cls`, type `limit`) under a new
+  client id, `replaces` the cancelled order, through every gate above, `_size_event` and `_send`'s wall-clock cut-off
+  again (09:27 ET at the open, 15:49 at a full day's close); the re-send is one more order of the day's count, and the
+  gateway judges every cap again (a cap ends it refused at once; a reading it could not make sends it again the next
+  minute, still the one re-send). A second cancel at once, or a cancel later than 60 s (the venue ends every unfilled
+  auction order at its cross, minutes after it was sent: the auction's own cancel), leaves the buy missed at the
+  auction's end, its why naming both cancels or why the re-send did not go (a gate's reason after "A80's one re-send
+  held: ", or the window's cut-off). Reading it: the re-sent order's `why` opens "A80's one re-send (the venue cancelled
+  the first buy N ms after its submission, nothing filled)"; the minute's summary (`equity.venue_cancel_resends`) counts
+  the re-sends it wrote; one info alert a session after the close's end ("equity: A80: the venue cancelled n event
+  buy(s) of <day> at once ...; r went again once (f filled), ...") with an `equity.alert` record of the counts (kv
+  `eq_venue_cancel_said`). A sale the venue cancelled is never re-sent so: its ladder carries it. Stopping it: the
+  previous House release, or `equity_money.event.enabled` False (every event buy). The cause is the venue's and unknown:
+  the owner may ask the venue's support with the order ids in the captain's record.
 - **A sale** of an event lot is a MARKET order in its auction, `{"symbol", "qty": "<the lot's shares>", "side": "sell",
   "type": "market", "time_in_force": "cls" | "opg", "client_order_id"}`, no limit price: the shadow sells at the
   auction's print, and a limit could only leave the lot held through it. Exits wait on the kill switch alone (the

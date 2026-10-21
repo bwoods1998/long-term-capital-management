@@ -27,6 +27,8 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+import threading
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from . import calendar as C
@@ -74,16 +76,29 @@ class Program:
     exit_at: str = "close"   # PREREG-EVL-2's overnight programs exit at the next session's OPEN
     rule: str = "min2"       # min2 (score >= 2) | guide | top (score 3) | none; ern-react adds the reaction
     prereg: int = 1          # which pre-registration (and so which registration time) the program belongs to
+    #: R3 (league/events/births.py): a REGISTERED BIRTH's own registration time (the later of GitHub's commit time of its
+    #: line in docs/births/ and the House's receipt of that answer) and its canonical spec (JSON: its rule, which
+    #: `select` hands to births.select). None for every PREREG program, whose rule and time are the ones above.
+    born_at: str | None = None
+    spec: str | None = None
 
     @property
     def key(self) -> tuple[str, int]:
         return (self.id, self.version)
 
     @property
+    def born(self) -> bool:
+        """A registered birth of R3 (its rule is its spec's, its time its own registration's)."""
+        return self.spec is not None
+
+    @property
     def registered_at(self) -> dt.datetime:
         """The program's OWN registration time, its file's (an event counts only when knowable after it): PREREG-EVL-1's,
         -2's, -3's or -4's; never another file's (PREREG-EVL-4: "not PREREG-EVL-1's, -2's or -3's"). A file this code
-        does not know has none (ValueError), so no event of it is ever counted under another file's time."""
+        does not know has none (ValueError), so no event of it is ever counted under another file's time. A registered
+        birth (R3) has its OWN registration time (`born_at`), never its file's."""
+        if self.born_at is not None:
+            return S.parse_iso(self.born_at)
         if self.prereg == 1:
             return registered()
         if self.prereg == 2:
@@ -101,7 +116,8 @@ class Program:
         """Whether this version may ever trade real money: PREREG-EVL-3 section 1, version 2 of the nine seatable
         programs (prereg 3), and PREREG-EVL-4 section 2, version 1 of its three seatable programs (prereg 4: its seating
         version). Version 1 of PREREG-EVL-1's and -2's programs stays a shadow record with its own screen, never seated;
-        a record or a control (`seatable` False) never seats, whatever its file."""
+        a record or a control (`seatable` False) never seats, whatever its file. R3: a seatable registered birth (prereg
+        3: PREREG-EVL-3's learning band, screen and limit at entry) seats at its own version 1 (R3-SPEC section 1)."""
         return self.seatable and self.prereg in SEATING_PREREGS
 
 
@@ -148,12 +164,79 @@ BY_ID = {p.id: p for p in PROGRAMS if p.version == 1}
 #: The versions that may ever trade real money (PREREG-EVL-3 section 1, PREREG-EVL-4 section 2), in the tables' order:
 #: the nine version 2 rows (PREREG-EVL-1's four, then PREREG-EVL-2's five), then PREREG-EVL-4's three (version 1).
 SEATING = tuple(p for p in PROGRAMS if p.can_seat)
+#: THE PREREG PROGRAMS (PREREG-EVL-1, -2, -3 and -4), fixed: `load_births` keeps them first and unchanged, and adds
+#: the registered births after them (after PREREG-EVL-4's rows, so ROOM's order puts every PREREG program first).
+PREREG_PROGRAMS = PROGRAMS
+PREREG_SEATING = SEATING
+#: R3's registered births as last loaded from a store (`load_births`), in registration order, each READ birth followed
+#: by its derived control (a record).
+BIRTHS: tuple[Program, ...] = ()
+_LOAD = threading.Lock()
+#: (the store's root, the births) of the last load that READ its store's `births` table (`load_births`): what a later
+#: load of the SAME store keeps when its read fails (release 1019e's review).
+_LAST_READ: tuple[str | None, tuple[Program, ...]] = (None, ())
+
+
+def _where(store: Any) -> str | None:
+    """The store's root, resolved (the lane's `Store` and the book's read-only `Lane` of one store give the same), or
+    None when it has none."""
+    root = getattr(store, "root", None)
+    if root is None:
+        return None
+    try:
+        return str(Path(root).resolve())
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
 
 
 def registered() -> dt.datetime:
     if REGISTERED_AT is None:
         raise RuntimeError("PREREG-EVL-1 is not pinned: no decision is made before its registration time")
     return S.parse_iso(REGISTERED_AT)
+
+
+def load_births(store: Any) -> tuple[Program, ...]:
+    """R3'S ONE LOADER (goal-2026-10-19/R3-SPEC.md; league/events/births.py): every birth registered in `store`'s
+    `births` table (filled only from the gateway's receipts of its docs/births/ line), in registration order, as a
+    Program row with its own registration time, PREREG-EVL-3's learning band, screen and minimums (prereg 3) and its
+    spec's rule; a READ birth followed by its derived control (a record). They are added AFTER every PREREG program:
+    PROGRAMS, BY_KEY, BY_ID and SEATING are rebound with the PREREG rows first and unchanged (no PREREG program's
+    selection, judge or constant moves), so the lane's decisions, its screen (`screen.expected_false_passes` counts each
+    seatable birth's 0.10 through SEATING), its bands and the House's event book (league/events/book.py, which reads
+    SEATING and BY_KEY) take them like any version 2 program. `store` is the lane's store or the book's read-only view
+    of it (`.db`); a store without the table loads none (and a load that would give two rows one key loads none); None
+    unloads every birth. A store whose `births` table CANNOT BE READ keeps the births last read from that same store
+    (release 1019e's review: the rows are process-wide and both House threads, the lane's and the book's, load them,
+    so a read error that unloaded them would have the next decision made, and the next record settled, as if a
+    registered birth did not exist: its events left out of its shadow record and its entries settled with no limit at
+    entry); a store never read before loads none (fail closed: nothing seats). Returns the births loaded."""
+    global PROGRAMS, BY_KEY, BY_ID, SEATING, BIRTHS, _LAST_READ
+    from . import births as BI
+
+    where = None if store is None else _where(store)
+    try:
+        born = () if store is None else tuple(BI.registered_programs(store))
+        read = True
+    except Exception:  # noqa: BLE001 - an unreadable births table: the same store's last read births, else none
+        last_where, last_born = _LAST_READ
+        born = last_born if where is not None and where == last_where else ()
+        read = False
+    with _LOAD:
+        programs = PREREG_PROGRAMS + born
+        by_key = {(p.id, p.version): p for p in programs}
+        if len(by_key) != len(programs):
+            born, programs = (), PREREG_PROGRAMS
+            by_key = {(p.id, p.version): p for p in programs}
+        if store is None:
+            _LAST_READ = (None, ())
+        elif read:
+            _LAST_READ = (where, born)
+        BIRTHS = born
+        BY_KEY = by_key
+        BY_ID = {p.id: p for p in programs if p.version == 1}
+        SEATING = PREREG_SEATING + tuple(p for p in born if p.can_seat)
+        PROGRAMS = programs
+    return born
 
 
 # ---------------------------------------------------------------------------------------------------- windows
@@ -191,12 +274,16 @@ def day_news_window(store: S.Store, day: dt.date) -> tuple[dt.datetime, dt.datet
 
 
 # ---------------------------------------------------------------------------------------------------- events
-def filings_in(store: S.Store, form: str, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
-    """Fetched filings of `form` knowable in [lo, hi) and after the registration time, oldest first."""
-    lo = max(lo, registered())
+def filings_in(store: S.Store, form: str, lo: dt.datetime, hi: dt.datetime, *,
+               since: dt.datetime | None = None) -> list[Mapping[str, Any]]:
+    """Fetched filings of `form` knowable in [lo, hi) and after the registration time, oldest first. `since` (R3's
+    outcome-free facts, league/events/births.py, which count what a rule WOULD have selected in sessions before any
+    registration): another time than PREREG-EVL-1's registration; no decision passes it."""
+    since = registered() if since is None else since
+    lo = max(lo, since)
     rows = store.db.execute("SELECT * FROM filings WHERE form=? AND status='fetched' AND knowable_at>=? AND knowable_at<? "
                             "ORDER BY knowable_at, accession", (form, S.iso(lo), S.iso(hi)))
-    return [dict(r) for r in rows if S.parse_iso(r["knowable_at"]) > registered()]
+    return [dict(r) for r in rows if S.parse_iso(r["knowable_at"]) > since]
 
 
 def items_of(row: Mapping[str, Any]) -> set[str]:
@@ -206,14 +293,16 @@ def items_of(row: Mapping[str, Any]) -> set[str]:
         return set()
 
 
-def news_in(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+def news_in(store: S.Store, lo: dt.datetime, hi: dt.datetime, *,
+            since: dt.datetime | None = None) -> list[Mapping[str, Any]]:
     """Single-symbol articles KNOWABLE in (lo, hi] and after the registration time, oldest first (PREREG draft 2:
-    knowable after the previous session's close and by 09:00 ET of D)."""
+    knowable after the previous session's close and by 09:00 ET of D). `since`: as `filings_in`'s."""
+    since = registered() if since is None else since
     rows = store.db.execute("SELECT * FROM news WHERE knowable_at>? AND knowable_at<=? ORDER BY knowable_at, id",
                             (S.iso(lo), S.iso(hi)))
     out = []
     for r in rows:
-        if S.parse_iso(r["knowable_at"]) <= registered():
+        if S.parse_iso(r["knowable_at"]) <= since:
             continue
         if not r["live"] and r["updated_at"] and \
                 S.parse_iso(r["updated_at"]) - S.parse_iso(r["created_at"]) > NEWS_UPDATE_LIMIT:
@@ -328,16 +417,17 @@ def close_rows_4(all8k: Iterable[Mapping[str, Any]], day_articles: Iterable[Mapp
     return {"8k-react": f8k, "8k-day": list(f8k), "news-pm": pm}
 
 
-def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime, *,
+                 since: dt.datetime | None = None) -> list[Mapping[str, Any]]:
     """Form 4 filings knowable in [lo, hi) that trigger EVL-INS-CLUSTER-O5 (a record; PREREG draft 2 section 6).
 
     The cluster at a filing F of issuer X: open-market purchases (code P, acquired A) whose transaction dates fall in
     the window, by >= 2 distinct reporting owners who are directors or officers of X, in >= 2 different filings, all
     filed within the 10 calendar days ending at F's acceptance, total shares x price >= $50,000. F triggers when the
     cluster holds at F, held at no earlier Form 4 of X inside F's window, and X has no trigger in the 10 calendar days
-    before F."""
+    before F. `since`: as `filings_in`'s."""
     out = []
-    for f in filings_in(store, "4", lo, hi):
+    for f in filings_in(store, "4", lo, hi, since=since):
         accepted = S.parse_iso(f["accepted_at"])
         holds, value = _cluster(store, f["cik"], accepted)
         if not holds:
@@ -348,17 +438,21 @@ def ins_triggers(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mappi
     return out
 
 
-def ins_buys(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[str, Any]]:
+def ins_buys(store: S.Store, lo: dt.datetime, hi: dt.datetime, *,
+             since: dt.datetime | None = None) -> list[Mapping[str, Any]]:
     """Form 4 filings knowable in [lo, hi) with PREREG-EVL-2's INSIDER BUY: a reporting owner who is a director or an
     officer of the issuer, and >= $50,000 of open-market purchases (code P, acquired A) dated within the 10 calendar
     days ending on the acceptance date (Eastern), each transaction counted once, a transaction with no price counting
-    0. Each row carries its `purchase_value`."""
+    0. Each row carries its `purchase_value`, and (R3's role filter, league/events/births.py; no PREREG rule reads
+    them) `by_director` and `by_officer`: whether a reporting owner is one. `since`: as `filings_in`'s."""
     out = []
-    for f in filings_in(store, "4", lo, hi):
+    for f in filings_in(store, "4", lo, hi, since=since):
         insider = store.db.execute("SELECT 1 FROM form4_owners WHERE accession=? AND (is_director OR is_officer) LIMIT 1",
                                    (f["accession"],)).fetchone()
         if insider is None:
             continue
+        roles = store.db.execute("SELECT MAX(COALESCE(is_director, 0) <> 0) AS d, MAX(COALESCE(is_officer, 0) <> 0) AS o "
+                                 "FROM form4_owners WHERE accession=?", (f["accession"],)).fetchone()
         accepted_day = S.parse_iso(f["accepted_at"]).astimezone(C.NY).date()
         first_day = (accepted_day - dt.timedelta(days=9)).isoformat()
         value = 0.0
@@ -372,7 +466,7 @@ def ins_buys(store: S.Store, lo: dt.datetime, hi: dt.datetime) -> list[Mapping[s
                 continue
             value += float(t["shares"]) * float(t["price"])
         if value >= INS_BUY_MIN_VALUE:
-            out.append(dict(f) | {"purchase_value": value})
+            out.append(dict(f) | {"purchase_value": value, "by_director": bool(roles["d"]), "by_officer": bool(roles["o"])})
     return out
 
 
@@ -504,7 +598,13 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     registration time is never taken. PREREG-EVL-4's families take rows already windowed and cleared of the issuers its
     sets skip (`close_rows_4`): "8k-react" and "8k-day" apply EVL-8K-READ-O1's item rule (event `8k:<accession>`), the
     first ranked by the reaction (>= 1.04, no model), the second by the stored PROMPT-DOC score; "news-pm" ranks by the
-    stored PROMPT-NEWS score, one per issuer (the highest, then the earliest), its `verdict` the stored reader alone."""
+    stored PROMPT-NEWS score, one per issuer (the highest, then the earliest), its `verdict` the stored reader alone.
+    A registered birth (R3, `Program.born`) is selected by its own spec's rule (league/events/births.py `select`, the
+    same callables); no PREREG program ever reaches it."""
+    if program.spec is not None:
+        from . import births as BI
+
+        return BI.select(program, rows, eligible=eligible, verdict=verdict, reaction=reaction, guidance=guidance)
     out = []
     since = program.registered_at
     for row in rows:
@@ -561,8 +661,9 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     return out
 
 
-__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "REGISTERED_AT_3", "REGISTERED_AT_4", "SEATING_PREREGS", "Program",
-           "Candidate", "REGISTERED_AT", "REGISTERED_AT_2", "registered", "open_window", "close_window", "news_window",
-           "day_news_window", "filings_in", "news_in", "ins_triggers", "ins_buys", "select", "write_intents", "items_of",
-           "NEWS_FAMILIES", "BEST_SCORE", "REACT_FAMILIES", "FAMILY_8K", "CLOSE_FAMILIES_4", "filings_window", "news_rows",
-           "family_8k", "ern_ciks", "day_ciks", "f8k_ciks", "excluded", "close_rows_4"]
+__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "PREREG_PROGRAMS", "PREREG_SEATING", "BIRTHS", "load_births",
+           "REGISTERED_AT_3", "REGISTERED_AT_4", "SEATING_PREREGS", "Program", "Candidate", "REGISTERED_AT",
+           "REGISTERED_AT_2", "registered", "open_window", "close_window", "news_window", "day_news_window", "filings_in",
+           "news_in", "ins_triggers", "ins_buys", "select", "write_intents", "items_of", "NEWS_FAMILIES", "BEST_SCORE",
+           "REACT_FAMILIES", "FAMILY_8K", "CLOSE_FAMILIES_4", "filings_window", "news_rows", "family_8k", "ern_ciks",
+           "day_ciks", "f8k_ciks", "excluded", "close_rows_4"]

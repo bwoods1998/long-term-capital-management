@@ -115,12 +115,14 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
 def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
     """{decision key (`id`, or `id@vN` for a later version): {"events", "unjudged"}}: the event ids the finished decisions
     of the entry sessions through `day` left out of each program's record (their summaries' `kept` entries, written by
-    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, included), each event once; an event listed unjudged by one run and taken on a stored verdict
-    by a later one counts as left out (`events`) only."""
+    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, and the births' own,
+    `decide-open-births` and `decide-close-births`, included), each event once; an event listed unjudged by one run and
+    taken on a stored verdict by a later one counts as left out (`events`) only."""
     events: dict[str, set[str]] = {}
     unjudged: dict[str, set[str]] = {}
     for row in store.db.execute("SELECT job, summary FROM receipts WHERE (job LIKE 'decide-open:%' OR job LIKE "
-                                "'decide-close:%' OR job LIKE 'decide-close-evl4:%') AND status IN ('ok', 'pending')"):
+                                "'decide-close:%' OR job LIKE 'decide-close-evl4:%' OR job LIKE 'decide-open-births:%' "
+                                "OR job LIKE 'decide-close-births:%') AND status IN ('ok', 'pending')"):
         if str(row["job"]).split(":", 1)[1] > day.isoformat():
             continue
         try:
@@ -237,7 +239,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
                                                 (program, version))}
     out_events = set(mine.get("events") or ()) - held
     return {
-        "program": program, "version": version, "seatable": program in SC.SEATABLE,
+        "program": program, "version": version, "seatable": program in SC.SEATABLE or bool(v2),
         "band": _bands(store).get((program, int(version))) if v2 else None,
         "intents_today": today, "intents_all": every, "settled": settled,
         "kept_out": {"events": len(out_events), "unjudged": len(set(mine.get("unjudged") or ()) - held - out_events)},
@@ -315,8 +317,18 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "events": events(store, day), "verdicts": verdicts(store, day), "programs": programs,
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
-        "jobs": jobs(store, day, now),
+        "births": _births(store), "jobs": jobs(store, day, now),
     }
+
+
+def _births(store: S.Store) -> dict[str, Any]:
+    """R3's births (league/events/births.py `summary`): registered (seatable, records) and the last night's candidates."""
+    from . import births as BI
+
+    try:
+        return BI.summary(store)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
 
 def _pct(x: float | None) -> str:
@@ -378,6 +390,13 @@ def render(report: Mapping[str, Any]) -> str:
     if efp.get("budget") is not None:
         line += f" of the lane's stated {efp['budget']:.1f} (PREREG-EVL-4 section 3; {efp['left']:.1f} left)"
     lines.append(line)
+    bi = report.get("births") or {}
+    if bi.get("registered") or bi.get("last_night"):
+        night = bi.get("last_night") or {}
+        lines.append(f"Births: {bi.get('registered', 0)} registered ({bi.get('seatable', 0)} seatable, "
+                     f"{bi.get('records', 0)} records); last night {night.get('night') or 'none'}: "
+                     + ", ".join(f"{k} {v}" for k, v in sorted(night.items()) if k not in ("night", "usd"))
+                     + f"; model ${float(night.get('usd') or 0):.2f}")
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"

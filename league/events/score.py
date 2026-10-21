@@ -278,13 +278,16 @@ def exit_ladder(store: S.Store, exit_day: dt.date, exit_at: str) -> list[tuple[C
 
 
 def _above_limit(intent: Mapping[str, Any], uni: Mapping[str, Any], stock_in: float) -> bool:
-    """PREREG-EVL-2's LIMIT AT ENTRY, for that file's programs only: an entry auction above 1.25 x the raw SIP close of
-    the session before the entry session is not filled (real money's limit, PREREG-EVL-1 section 8). With no such
-    close on the universe row the event is not filled either (the reading that trades less)."""
+    """PREREG-EVL-2's LIMIT AT ENTRY, for that file's programs and every later one's (PREREG-EVL-3's, -4's and R3's
+    births, which take PREREG-EVL-3's limit at entry): an entry auction above 1.25 x the raw SIP close of the session
+    before the entry session is not filled (real money's limit, PREREG-EVL-1 section 8). With no such close on the
+    universe row the event is not filled either (the reading that trades less). A program this process does not know
+    takes the limit too (release 1019e's review, FAIL CLOSED): every PREREG program is always known, so only a
+    registered birth can be unknown (its rows not loaded), and every birth takes the limit."""
     from .programs import BY_KEY
 
     program = BY_KEY.get((str(intent["program"]), int(intent.get("version") or 1)))
-    if program is None or program.prereg < 2:
+    if program is not None and program.prereg < 2:
         return False
     prev = uni.get("prev_close")
     return prev is None or stock_in > LIMIT_MULTIPLE * float(prev)
