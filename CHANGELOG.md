@@ -38,6 +38,39 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### A86, Probe more and smaller: the Probe band at 3.5% of equity with at most 8 open, on `fix/a86-probe-more-smaller` (unreleased; the captain decides whether it ships, in release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House alone: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `515c26b6` and the constitution `a8d4cbd9` -> `32c3cb25` (the Probe band's three rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no gateway file, no setting)
+
+- **Why.** The captain's A86 (Oct 21, 2026, recorded before any Probe event; the audit's capacity lens): cash at the
+  auction binds first at Probe, so PREREG-EVL-3's Probe band (PREREG-EVL-1 section 8: 5% of E, at most 6 open a
+  program, one share up to the name's 10% wall) fits about 9-11 Probe buys an auction. More, smaller Probe lots raise
+  the Probe events a session, the count Done needs (300 from >= 3 programs with >= 50 each), at no more dollars.
+- **The rows** (league/constitution.py `equity_money.event`, the one source the book reads): `position_share.probe`
+  0.05 -> 0.035, `max_open.probe` 6 -> 8, and a new `one_share_max.probe` 0.05: when the 3.5% target buys no whole
+  share, one share goes only when one share at the limit is at most 5% of E, as at learning. Their bounds take the new
+  values as their loose end (`event.position_share.probe` [0, 0.035], `event.max_open.probe` [0, 8],
+  `event.one_share_max.probe` [0, 0.05], held under `per_name_share`), so no value inside them gives a Probe program
+  more than before: 8 x 0.035 = 0.28 x E at target (0.30 before), 8 x 0.05 = 0.40 x E of one-share lots at worst
+  (0.60 before). Learning (2%, 8, one share at most 5%) and Sized (10%, 8) do not move; no judge, look, alpha,
+  false-positive rate or wall moves; the screen's cost allowance keeps its frozen 5% notional (league/events/score.py).
+  league/events/book.py and league/equity/live.py change only their docstrings (the code reads the rows by band).
+- **Its cost.** A name whose one share at the limit is above 5% of E (and inside the wall) is skipped at Probe, where
+  PREREG-EVL-1 bought one share (the shadow keeps the event); a Probe lot of a name priced near the target buys fewer
+  whole shares.
+- **Tests.** league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped, over the wall
+  skipped; eight open at Probe; learning and Sized as before; the rows, their bounds, the dollars' ceiling, the
+  digests); league/tests/equity_design.py `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86`);
+  test_events_book.py and test_events_1019c.py read the new Probe sizes; the design blocks' digest line rewritten.
+- **Identities** (the tree's own functions, 3.14 and 3.11): money `515c26b6`, constitution `32c3cb25` (`PINNED_DIGEST`),
+  options execution `b60410ad`, equity `78022ca6`, xs `2f0083bc`, gate `397b22b7`; with `equity_money.event.enabled`
+  False `8e034de9` / `ca071751` (release 1019c's `1b7a5c22` / `50e951c9` with A86's rows set back).
+- **Deploy.** With the release that carries it, by the captain's ship script with the new pair; verify the ids, the
+  grant on `515c26b6` and the event line's Probe share "0.035". A program already at Probe keeps its open lots; its
+  next buys size at 3.5%.
+- **Rollback.** `equity_money.event.enabled` False (a constitution-only owner deploy: money `8e034de9`, constitution
+  `ca071751`), or the House release before it. PREREG-EVL-1's 5% is outside the new bound: going back to it is a code
+  change.
+
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
@@ -2439,7 +2472,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `515c26b6`, full digest `32c3cb25` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `018f1eeb` / `1541b612`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

@@ -797,8 +797,8 @@ class RoomIsGivenInRoomsOrder(EventTest):
         for hh, mm in ((15, 46), (15, 47)):
             h.tick(hh, mm)
         got = by_program(h.event_intents("buy"))
-        self.assertEqual(sorted(got["EVL-ERN-REACT-ON"]), sorted(syms[4:]), "Probe first: its 6 best")
-        self.assertEqual(sorted(got["EVL-ERN-REACT-C1"]), sorted(syms[:4]), "C1 at learning: the other 4")
+        self.assertEqual(sorted(got["EVL-ERN-REACT-ON"]), sorted(syms[2:]), "Probe first: its 8 best (A86; 6 before)")
+        self.assertEqual(sorted(got["EVL-ERN-REACT-C1"]), sorted(syms[:2]), "C1 at learning: the other 2")
 
 
 class APickNoShareFitsTakesNoSlot(EventTest):

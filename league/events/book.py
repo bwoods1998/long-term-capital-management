@@ -44,12 +44,14 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   each program takes its own ranked picks whose name no earlier program was given, until its room is full
   (`allocate`, release 1019b's second review), passing over a pick the book's rules skip whatever the room (no whole
   share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`).
-- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
-  the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
-  when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
-  most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
-  (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
-  book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
+- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.035, Sized 0.10; Probe by the captain's
+  A86, PREREG-EVL-1 section 8's 0.05 before it), E the account equity at the previous close, at the limit,
+  `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares; when that rounds to none, one
+  share when one share fits every wall (and, at learning and at Probe, one share at the limit is at most the band's
+  `one_share_max`, 5%, of E; A86 added Probe's, which went up to the name's wall before); else skipped (the shadow keeps
+  the event). The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the loss budget are
+  `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). At most `max_open`
+  positions a program (learning 8, Probe 8 (A86; 6 before), Sized 8).
 - THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
   the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
   every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the

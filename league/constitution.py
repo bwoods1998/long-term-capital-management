@@ -1218,10 +1218,20 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   auction paper proof's BUY stage has passed. False is the instant stop of every event buy (a constitution-only
 #   change; exits never wait on it).
 # - `position_share`: a position's target share of E, the account equity at the previous close (learning 0.02, Probe
-#   0.05, Sized 0.10: PREREG-EVL-3 section 2), sized in whole shares at the limit; when that rounds to none, one share
-#   when it fits every wall and, at learning, when one share at the limit is at most `one_share_max.learning` (0.05) of
-#   E; otherwise the event is skipped (the shadow keeps it).
-# - `max_open`: open positions a program may hold (learning 8, Probe 6, Sized 8).
+#   0.035, Sized 0.10: PREREG-EVL-3 section 2 with the captain's A86 for Probe), sized in whole shares at the limit;
+#   when that rounds to none, one share when it fits every wall and, at learning and at Probe, when one share at the
+#   limit is at most `one_share_max` of the band (0.05 each) of E; otherwise the event is skipped (the shadow keeps it).
+# - `max_open`: open positions a program may hold (learning 8, Probe 8, Sized 8).
+# - A86, PROBE MORE, SMALLER (the captain's amendment of Oct 21, 2026, recorded before any Probe event; a sizing rule:
+#   no judge, look, alpha or false-positive rate moves): the Probe band was PREREG-EVL-1 section 8's 5% of E with at
+#   most 6 open and one share up to the 10% name wall. Cash at the auction binds first at Probe, so about 9-11 Probe
+#   buys fit an auction; Probe is now `position_share.probe` 0.035 with `max_open.probe` 8 and `one_share_max.probe`
+#   0.05, so more, smaller Probe lots (the count Done needs) fit the same cash: a program's target dollars 8 x 0.035 =
+#   0.28 x E (before 6 x 0.05 = 0.30), its worst case 8 one-share lots x 0.05 = 0.40 x E (before 6 x 0.10 = 0.60).
+#   The bounds take these values as their loose end, so no value inside them holds more. ITS COST: a name whose one
+#   share at the limit is above 5% of E (and inside the wall) is skipped at Probe as at learning, where PREREG-EVL-1
+#   bought one share (the shadow keeps it); a Probe lot of a name priced near the target buys fewer whole shares. The
+#   screen's cost allowance keeps its frozen 5% notional (league/events/score.py). Learning and Sized do not move.
 # - `per_name_share`: THE GOAL'S 10% A NAME, BOOK-WIDE: every lot of the name on the book, every working buy of it and
 #   the account's own position, all programs and lanes together, plus this entry, at most 0.10 x E (`size_entry`'s
 #   instrument cap; the gateway holds the same 10% of its own equity reading as a code ceiling).
@@ -1242,10 +1252,10 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   own 60 (`order_path.max_orders_day`), and both stay under the House-wide line (`options_money.order_path.
 #   max_orders_day`, 250, both books' orders together) and the gateway's (`options_money.gateway.max_day_orders`,
 #   300): `equity_money_problems` holds the two equity lines' sum under the first and this line under the second. 150 =
-#   2 x the sum of `max_open` over the live bands (2 x (8 + 6 + 8) = 44), at least 150: nine programs at learning hold at
-#   most 9 x 8 = 72 lots, a buy and a sale each in one day, 144 orders. Under the equity book's shared 60 (release
-#   1019b), the event kind's entries stopped at about 30 open-entry lots sold the same day (a day of 40 open-entry lots
-#   left that day's close entries no room).
+#   2 x the sum of `max_open` over the live bands (2 x (8 + 8 + 8) = 48 since A86, 44 before), at least 150: nine
+#   programs at learning hold at most 9 x 8 = 72 lots, a buy and a sale each in one day, 144 orders. Under the equity
+#   book's shared 60 (release 1019b), the event kind's entries stopped at about 30 open-entry lots sold the same day (a
+#   day of 40 open-entry lots left that day's close entries no room).
 # PROMOTION, SIZED, DEMOTION AND RETIREMENT are the lane's (PREREG-EVL-3 sections 2 and 3, counted in settled events):
 # it writes each program's band in its store, from its looks and the real fills the book writes back (`real_fills`);
 # the book reads the band at each session's first decision. ROOM: Sized programs first, then Probe, then learning;
@@ -1261,9 +1271,9 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # read this one).
 CONSTITUTION["equity_money"]["event"] = {
     "enabled": True,
-    "position_share": {"learning": "0.02", "probe": "0.05", "sized": "0.10"},
-    "one_share_max": {"learning": "0.05"},
-    "max_open": {"learning": 8, "probe": 6, "sized": 8},
+    "position_share": {"learning": "0.02", "probe": "0.035", "sized": "0.10"},
+    "one_share_max": {"learning": "0.05", "probe": "0.05"},
+    "max_open": {"learning": 8, "probe": 8, "sized": 8},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
     "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
@@ -1496,14 +1506,18 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "panel.seats": ("0", "2"),
     "panel.sleeve_share": ("0", "0.25"),
     # THE EVENT LANE'S REAL MONEY (release R2; the comment under the table; PREREG-EVL-3 section 2). The pre-registered
-    # values are the loose end of each row (a lower share, a lower one-share cap, fewer open positions, a lower limit, a
-    # stricter floor or z may only trade less); the moments the rules fix are exact.
+    # values (the captain's A86 for the Probe band) are the loose end of each row (a lower share, a lower one-share
+    # cap, fewer open positions, a lower limit, a stricter floor or z may only trade less); the moments the rules fix
+    # are exact.
     "event.position_share.learning": ("0", "0.02"),
-    "event.position_share.probe": ("0", "0.05"),
+    "event.position_share.probe": ("0", "0.035"),
     "event.position_share.sized": ("0", "0.10"),
     "event.one_share_max.learning": ("0", "0.05"),
+    # A86: no value inside the Probe band's three rows gives a Probe program more than PREREG-EVL-1's 6 x 5% at target
+    # or its 6 one-share lots up to the wall (8 x 0.035 = 0.28, 8 x 0.05 = 0.40 x E).
+    "event.one_share_max.probe": ("0", "0.05"),
     "event.max_open.learning": ("0", "8"),
-    "event.max_open.probe": ("0", "6"),
+    "event.max_open.probe": ("0", "8"),
     "event.max_open.sized": ("0", "8"),
     "event.per_name_share": ("0", "0.10"),
     "event.limit_ratio": ("1.00", "1.25"),
@@ -1701,7 +1715,8 @@ def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[st
                  "a learning position is never larger than a Probe one"),
                 ("event.position_share.probe", "event.position_share.sized", "a Probe position is never larger than a Sized one"),
                 ("event.position_share.sized", "event.per_name_share", "a position is never larger than the name's wall"),
-                ("event.one_share_max.learning", "event.per_name_share", "one share is never above the name's wall"))
+                ("event.one_share_max.learning", "event.per_name_share", "one share is never above the name's wall"),
+                ("event.one_share_max.probe", "event.per_name_share", "one share is never above the name's wall"))
     for first, second, why in order_eq:
         if first in values and second in values and values[first] > values[second]:
             problems.append(f"equity_money.{first} ({values[first]}) is above {second} ({values[second]}): {why}")
@@ -1756,4 +1771,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'a8d4cbd908b7730daf11294ddd9e1db7dbf0eb5c787ef44b72193a740291cd86'
+PINNED_DIGEST = '32c3cb25a175af5dbd349ba970181ea6475f31d956f2f9255f8028184231f51a'

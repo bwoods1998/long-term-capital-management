@@ -8,6 +8,40 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## A86, Probe more and smaller (Oct 21, 2026): the Probe band at 3.5% of E, at most 8 open: `fix/a86-probe-more-smaller`, not deployed
+
+The captain's amendment A86 (recorded before any Probe event; the captain decides whether this branch ships, in release
+1019f on top of release 1019e): cash at the auction binds first at Probe, so PREREG-EVL-3's Probe band (PREREG-EVL-1
+section 8: 5% of E, at most 6 open a program, one share up to the name's 10% wall) fits about 9-11 Probe buys an
+auction. Three money rows of `equity_money.event` move (league/constitution.py, the one source the book reads through
+league/events/book.py `settings`): `position_share.probe` 0.05 -> 0.035, `max_open.probe` 6 -> 8, and a new
+`one_share_max.probe` 0.05 (one share at Probe, when the 3.5% target buys no whole share, only when one share at the
+limit is at most 5% of E, as at learning). A Probe program's target dollars are 8 x 0.035 = 0.28 x E (0.30 before),
+its worst case 8 one-share lots x 0.05 = 0.40 x E (6 up to the wall, 0.60, before); the bounds take the new values as
+their loose end (`event.position_share.probe` [0, 0.035], `event.max_open.probe` [0, 8], `event.one_share_max.probe`
+[0, 0.05]), so no value inside them holds more. Learning (2%, 8 open, one share at most 5%) and Sized (10%, 8) do not
+move; no judge, look, alpha, false-positive rate or wall moves; the screen's cost allowance keeps its frozen 5% notional
+(league/events/score.py). THE COST: a name whose one share at the limit is above 5% of E (and inside the wall) is
+skipped at Probe, where PREREG-EVL-1 bought one share (the shadow keeps the event), and a Probe lot of a name priced
+near the target buys fewer whole shares. An owner deploy of the House alone (league/constitution.py and
+league/events/book.py are behind league/ci.py's wall): no gateway file, no setting.
+
+Identities (the tree's own functions, 3.14 and 3.11): THE MONEY DIGEST MOVES `055e5313` -> `515c26b6` and the
+constitution `a8d4cbd9` -> `32c3cb25` (these three rows, nothing else); the rollback pair with
+`equity_money.event.enabled` False is `8e034de9` / `ca071751` (release 1019c's `1b7a5c22` / `50e951c9` with A86's rows
+set back); the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`
+and the gate contract `397b22b7` do not move. The standing grant pins the money digest: it re-ratifies at the House's
+start (league/ops/grant.py, a deploy that moved the digest), and new real entries wait until it has.
+
+**Deploy**: with the release that carries it, by the captain's ship script with the new pair (`ship_house.sh <head>
+<PR> <release> 515c26b6 32c3cb25` on a head where nothing else moved them); verify the ids, the grant on `515c26b6`,
+and `release.live.equity.events.shares.probe` "0.035". A program already at Probe keeps its open lots (each exits by
+its own plan); its next buys size at 3.5%, and its room is 8 less what it holds and has on order.
+
+**Rollback**: `equity_money.event.enabled` False (a constitution-only owner deploy: money `8e034de9`, constitution
+`ca071751`), or the House release before it (the Probe band at 5% with 6 open again: release 1019e's, money
+`055e5313`). PREREG-EVL-1's 5% is outside the new bound: going back to it is a code change, not a row.
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
@@ -3074,7 +3108,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `515c26b6`, full digest `32c3cb25` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `018f1eeb` / `1541b612`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered
@@ -3981,8 +4015,9 @@ session):
   SLOTS (release 1019b's second review, `book.allocate`): the programs in ROOM's order, each taking its own ranked
   picks, passing over a name an earlier program was given at this auction and a pick `_event_gate` skips (no whole
   share fits by price on E at the previous close: one share at the limit above the book-wide 10% a name, or at learning
-  a 2% target of no whole share with one share above 5% of E; or its name is sold at this auction), until its room
-  (`max_open` less what it holds and has on order: learning 8, Probe 6, Sized 8) is full; only a name given is taken.
+  (Probe) a 2% (3.5%) target of no whole share with one share above 5% of E; or its name is sold at this auction), until
+  its room (`max_open` less what it holds and has on order: learning 8, Probe 8, Sized 8; Probe 6 before the captain's
+  A86) is full; only a name given is taken.
   Each pick given a slot is a buy intent with its side row in `eq_event_intents`: its band, the limit (`limit_ratio` x
   the universe row's previous SIP close, rounded down to the cent), sigma (60 sessions of adjusted SIP daily closes
   before the entry session), its open-risk weight and its exit plan. One `eq_event_decisions` row a session and auction
@@ -3999,11 +4034,12 @@ session):
   lot not yet sold that day; before it, the equity book's one 60 for every lane) and the House-wide day count, the
   program's room.
   Its size is `size_entry`'s, the one sizing function: a target of the band's
-  `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at the previous close
+  `position_share` x E (learning 0.02, Probe 0.035 (A86; 0.05 before), Sized 0.10), E the account equity at the previous close
   (`last_equity`, never above the House's sizing equity), at the limit, capped by the name's BOOK-WIDE 10%
   (`per_name_share`: every lot, working buy and account position of the name), the 100% book, the House-wide cash and
   THE LOSS BUDGET at the lot's own weight; floored to WHOLE shares; when that rounds to none, one share when one share
-  passes every cap and, at learning, one share at the limit is at most 5% of E (`one_share_max.learning`); else
+  passes every cap and, at learning and at Probe, one share at the limit is at most 5% of E (the band's `one_share_max`;
+  A86 added Probe's, which went up to the name's wall before); else
   refused ("no whole share fits": the shadow keeps the event). The body: `{"symbol", "qty": "<whole>", "side": "buy",
   "type": "limit", "limit_price": "<limit>", "time_in_force": "opg" | "cls", "client_order_id"}`. An auction order is
   never re-priced and never ended by `_end_stale` in its own session. A refusal for a reading the gateway could not
