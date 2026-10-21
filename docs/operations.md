@@ -8,6 +8,46 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019e (Oct 21-22, 2026): R3's births, A80's re-send, the site follows the lane, the cost fix: `rel/1019e`, not deployed
+
+Four merges on release 1019d's head `5a17bd25` (#581, **Release 1019d**, below), `--no-ff`, in this order:
+`feat/evl-births` (`ad9c8513`, #577: R3, **Births** below and [events.md](events.md), "Births"), `feat/site-events`
+(`da0d0581`, #576: `lane_v1`, the site's half personal-site #25), `fix/venue-cancel-retry` (`960a4fa9`, #582: A80's
+one re-send, **The event lane's real money on the House**) and `fix/subs-end-economics` (`2d769db3`: the close
+economics stop charging the cancelled subscriptions); then A81 (the births' budget: the lane's stated 3.0 counted from
+SEATING's own sum, 0.10 a seatable birth, three a night) and A83 (3) (PREREG-EVL-4's part of a close decision fails
+alone, recorded as `evl4_error`; the PM rows ask their stored-prompt PROMPT-NEWS verdicts when EVL-NEWS-READ-O1's group
+is frozen). It deploys ON TOP OF RELEASE 1019d, as an owner deploy: `gateway/` changed (the births' docs route), so
+THE GATEWAY GOES FIRST. Identities, all release 1019d's (the tree's own functions, 3.14 and 3.11): money `055e5313`,
+constitution `a8d4cbd9`, options execution fingerprint `b60410ad`, equity identity `78022ca6`, xs identity `2f0083bc`,
+gate contract `397b22b7`; the standing grant pins the money digest, which does not move.
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
+green on the exact head; release 1019d live first, and main at its head):
+1. THE GATEWAY from this head: `cd gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`
+   (record the version it replaces: release 1019c's, deployed with release 1019d). It adds only the docs route's births
+   appends (`docs/births/<YYYY-MM-DD>.jsonl`, JSON lines, at most 12 lines of 8 KB a post and a 256 KB file, the
+   desk's six commits a New York day shared); no order path, cap or `wrangler.jsonc` change. The running House sends
+   no births append, so nothing changes until step 3.
+2. THE HOUSE from the same head, by the captain's ship script: `ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`
+   (`events.births` is false as shipped). Verify (read-only): promoted, `real_money` true, failures []; the ids
+   `b60410ad` / `78022ca6` / `055e5313` / `a8d4cbd9` and the grant on `055e5313`; `release.live.equity.events.enabled`
+   true; the next `decide-close:<day>` receipt `ok` with no `evl4_error`; `eq_event_programs` still twelve rows; the
+   daily report's "Expected false passes: 1.2 ... of the lane's stated 3.0".
+3. BIRTHS ON: `league/config.json` `events.births` true (a one-line commit on main, deployed by the same ship script
+   before 21:15 ET of a session night). Verify after 21:15 ET: the lane's `births` receipt `ok`, its `budget` reading
+   `used` 1.2 and `limit` 3.0 before any birth; at most three seatable births a night; each registered line in
+   `docs/births/<night>.jsonl` on main and its row in the store's `births`; the next turn's decisions name each birth;
+   ROOM puts every birth after the twelve PREREG seating versions.
+
+**Rollback**: `events.births` false stops new births (registered births keep trading at their bands). The House by
+`floor_box.py rollback` and repoint release 1019d's deployed head (`5a17bd25` unless it deployed from another): the
+births tables are additive and ignored by it, a registered birth stops deciding and is not seated, and its open lots
+exit by their own stored plans (`live._event_exits` reads the lot's plan, never its program); A80's re-sends stop (a
+re-sent buy that filled is an ordinary event lot to it). The gateway last, by `wrangler rollback` to the version step 1
+replaced, or never (the House without births sends no append). The instant stop of event buys is release 1019b's
+(**Release 1019b**, Rollback).
+
 ## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,

@@ -38,6 +38,55 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
+
+- **What it carries**, merged `--no-ff` in this order (each entry below as its branch wrote it):
+  `feat/evl-births` `ad9c8513` (#577, R3: births; built on `rel/1019b` `5cad27f2`, never merged with 1019c or 1019d
+  before), `feat/site-events` `da0d0581` (#576, WP4: the public site follows the lane under `lane_v1`; built on
+  `5cad27f2`; the site's half is personal-site #25, `capital/event-lane` `86e82899`), `fix/venue-cancel-retry`
+  `960a4fa9` (#582, A80: one re-send of an event entry the venue cancelled at once; on `rel/1019c` `f85cc152`) and
+  `fix/subs-end-economics` `2d769db3` (the close economics stop charging the cancelled subscriptions; on `rel/1019c`
+  `b35c018f`); then three commits of this release: lane_v1 reads the merged lane, A81, and A83 (3).
+- **The births merge kept every side** (its commit message lists each file): release 1019c's A69 fast path, A74 (5)'s
+  group freeze, A66's rules and A79's withdrawal of A74 (6); release 1019d's PREREG-EVL-4 rows, named receipts,
+  `decide-close-evl4` and `_refill_redecide`; R3's births table, loader, `BIRTH_ROOM` after every PREREG program (all
+  twelve seating versions first), `births_failed` (a birth whose own part of a decision raised; the screen reads that
+  decision failed for that birth alone) and the screen's handling of births (a seatable birth judged by PREREG-EVL-3's
+  looks, its READ control by `control_of`, a record or control never). `programs.can_seat` stays release 1019d's
+  (`SEATING_PREREGS`; a birth is prereg 3), so the book seats PREREG-EVL-4's version 1 and a birth's version 1 alike;
+  `PREREG_PROGRAMS` is taken after PREREG-EVL-4's rows. A74 (5) for births: a READ birth's group is the birth and its
+  derived control (`run._group`); every PREREG group is its table's.
+- **A81, the births' budget** (the captain's, 16:25Z Oct 21): `births.BUDGET_TENTHS` is the screen's `LANE_BUDGET`,
+  3.0 (A71's stated budget, not R3's draft 2.0), counted from SEATING's own sum (`screen.expected_false_passes`: 1.2
+  with PREREG-EVL-4, never a written 0.9), 0.10 a seatable birth, at most 3 a night, so at most 18 seatable births; a
+  retired program stays counted. Pinned by `test_events_births`'s
+  `test_a81_the_budget_is_the_lanes_stated_three_counted_from_seatings_own_sum`.
+- **A83 (3), release 1019d's review minors** (league/tests/test_events_1019e.py; each test fails without its fix):
+  (i) PREREG-EVL-4's part of a close decision is isolated: an exception in it that is not the task's time bound
+  (`run.Deadline`, which the House's `LaneDeadline` now subclasses) finishes the receipt with the earlier rows'
+  results, records `evl4_error` (the House warns) and names none of its five programs, so the judge reads the close as
+  made without their rows and `decide-close-evl4` or the next whole re-decision decides them; `evl4_only`'s failure is
+  its own; (ii) the PM rows' stored-prompt PROMPT-NEWS verdicts are asked by the close decision when a written look of
+  EVL-NEWS-READ-O1's group freezes it over D (`run.PM_ASKER`; the same prompt sha, the open decision's rendering,
+  stored once; the frozen group asked and written nothing; with no freeze nothing moves).
+- **The site** (`league/site_lane.py`): `lane_v1` is unchanged as a key and an allowlist and lists the lane as merged:
+  PREREG-EVL-4's three seating versions at their band and its two controls as shadow (five new plain names), each
+  registered birth (its family's name, "birth" and its place in registration order; its control "... control"). The
+  lane fixture is regenerated; the site's own contract test (#25 at `86e82899`) passes on it, 13/13.
+- **Kept exactly**: A80's single re-send (league/equity/live.py, INTERFACES section 22, its tests: the same lines as on
+  its base); the cost fix (the same lines as on its base).
+- **The proof that no PREREG program moves**: test_events_births's invented week now carries PREREG-EVL-4's rows and
+  compares, with and without five registered births, every PREREG program's intents and the real-money picks
+  (`book.picks`) of all twelve seating versions at every auction.
+- **Settings**: `league/config.json` `events.births` ships false (the deploy's step 3 turns it on); no money row, no
+  constitution row.
+- **Deploy** (docs/operations.md, **Release 1019e**): the gateway from this head, then the House by the captain's ship
+  script (`ship_house.sh <head> <PR> r1019e 055e5313 a8d4cbd9`), then `events.births` true.
+- **Rollback**: `events.births` false stops new births (registered births keep trading at their bands); the House to
+  release 1019d's deployed head by `floor_box.py rollback` (the births tables are additive and ignored by it; a birth's
+  open lots exit by their own stored plans, `live._event_exits`); the gateway last, by `wrangler rollback` to the version
+  this deploy replaced (its docs route then refuses births appends, and nothing else changes).
+
 ### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (unreleased; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
 
 - **Why.** The captain's A80 (16:10Z Oct 21, 2026; the goal's item 5, fill the gaps): the venue cancels about a quarter
