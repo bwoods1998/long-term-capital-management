@@ -107,13 +107,17 @@ FINISH_S = 15.0
 RECEIPT = {"open": "decide-open-lrn", "close": "decide-close-lrn"}
 LIVE_RECEIPT = {"open": "decide-open-lrnlive", "close": "decide-close-lrnlive"}
 KINDS = ("live", "catchup", "late", "reconstruct")
-#: Section 4 (E1, E2): each learner RUN is charged c7 = max(PREREG-EVL-6's 0.13, W7 rounded up) = 0.13 when it starts (W7
-#: measured 0.0870 at the worst plausible cell on fresh seeds), at most THREE runs an id over its life (so this file
-#: draws at most 6 x c7); the report's three ways of the count: c7, the base model 0.03 and the stresses' worst 0.13. In
-#: hundredths, as PREREG-EVL-6's own count is kept (league/events/screen.py on release 1019i).
+#: Section 4 AS FROZEN (E1, E2): each learner RUN is charged c7 = max(PREREG-EVL-6's 0.13, W7 rounded up) = 0.13 when it
+#: starts (W7 = 0.0890, SE 0.0045, EVL-LRN-ON's worst plausible fresh cell on the registered columns; EVL-LRN-O1's
+#: 0.0845), at most THREE runs an id over its life (so this file draws at most 6 x c7); every report's three ways of the
+#: count (`judge7.false_passes`): c7, the base model 0.03 (0.0255 rounded up) and the stresses' worst 0.13 (0.129, the
+#: learnable family drift at the corner, pool 800), and beside them PER VERSION within 120 sessions and PER ID over at
+#: most three runs at each learner's worst fresh cell. In hundredths, as PREREG-EVL-6's own count is kept.
 CHARGE7_HUNDREDTHS = 13
 BASE7_HUNDREDTHS = 3
 STRESS7_HUNDREDTHS = 13
+PER_VERSION_7 = {"EVL-LRN-O1": 0.1585, "EVL-LRN-ON": 0.1683}
+PER_ID_7 = {"EVL-LRN-O1": 0.235, "EVL-LRN-ON": 0.233}
 RUNS_MAX = 3
 #: A catch-up decision that raised is tried again this many times, then written closed (it picks nothing).
 CATCHUP_TRIES = 3
@@ -1476,11 +1480,20 @@ def report_lines(store: Any, day: dt.date) -> list[dict[str, Any]]:
     """THE REPORT'S LEARNER LINES (section 3.2; the task's item 5): per learner in force, the decision of `day` (its
     kind, status, candidates, kept, picks, training rows and sessions, warm-up) and whether its part failed or expired.
     COUNTS ONLY: no beta, d, xbar, e, z, ahat or anything fitted reaches a report, the site or births."""
+    from . import judge7 as J7
+
     out = []
+    try:
+        rates = J7.false_passes(store).get("learners") or {}
+    except Exception:  # noqa: BLE001 - the report is read whatever this says
+        rates = {}
     for learner in P.learners():
         rec = decided(store, learner, day)
         part = store.meta(PART_KEY.format(program=learner.id, version=learner.version, day=day.isoformat()))
         line: dict[str, Any] = {"program": learner.id, "version": learner.version, "day": day.isoformat()}
+        if learner.id in rates:     # (section 4: the three ways and the per-version and per-id figures, counts only)
+            line["false_passes"] = {k: rates[learner.id][k] for k in ("charges", "count", "base", "stress",
+                                                                      "per_version", "per_id")}
         if rec is not None:
             line |= {"kind": rec["kind"], "status": rec["status"], "candidates": rec.get("n_cands"),
                      "kept": rec.get("n_kept"), "picks": rec.get("n_picks"), "training_rows": rec.get("n_rows"),
@@ -1506,6 +1519,10 @@ def render_lines(lines: Sequence[Mapping[str, Any]]) -> list[str]:
                     f"{x.get('training_sessions')} sessions{'' if x.get('warm') else ' (warm-up)'}")
         if x.get("part"):
             text += f"; part {x['part'].get('status')}"
+        fp = x.get("false_passes")
+        if fp:
+            text += (f"; false passes {fp['count']:.2f} for {fp['charges']} run(s) at 0.13 (base {fp['base']:.2f}, "
+                     f"stresses {fp['stress']:.2f}; per version {fp['per_version']}, per id {fp['per_id']})")
         out.append(text)
     return out
 
@@ -1517,4 +1534,5 @@ __all__ = ["POOLS", "K", "LAMBDA", "HALF_LIFE", "LOOKBACK", "WARM_ROWS", "WARM_S
            "training", "session_stats", "cholesky", "solve", "fit", "replay_cost", "predict", "choose", "decided",
            "compute", "decide", "live_part", "live_job", "live_key", "live_state", "LIVE_RECEIPT", "due", "catchup", "first_live", "recompute", "inputs_sha",
            "remember_inputs", "live_picks", "report_lines", "render_lines", "PART_KEY", "RECOMPUTE_KEY", "INPUTS_KEY",
-           "CHARGE7_HUNDREDTHS", "BASE7_HUNDREDTHS", "STRESS7_HUNDREDTHS", "RUNS_MAX"]
+           "CHARGE7_HUNDREDTHS", "BASE7_HUNDREDTHS", "STRESS7_HUNDREDTHS", "PER_VERSION_7",
+           "PER_ID_7", "RUNS_MAX"]

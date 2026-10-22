@@ -110,6 +110,9 @@ NAMES = {
     "EVL-ERN-UNDER-ON": "Muted earnings read overnight",
     "EVL-NEWS-NIGHT2-ON": "News second night",
     "EVL-CTRL-ERN-UNDER-ON": "All muted earnings overnight",
+    # PREREG-EVL-7's (registered 2026-10-22T20:14:13Z, A125; two online learners over the controls' candidates)
+    "EVL-LRN-O1": "Learner, open to close",
+    "EVL-LRN-ON": "Learner overnight",
 }
 FAMILY_NAMES = {"ern": "Earnings", "ern-react": "Earnings reaction", "8k": "8-K", "news": "Morning news", "news-day": "Day news",
                 "news-react": "News reaction", "ins": "Insider cluster", "ins-buy": "Insider buy",
@@ -286,6 +289,10 @@ def read_programs(lane: Any, today: dt.date) -> dict[str, Any]:
         if p.can_seat:
             probe_events += _real_events(lane, p.id, p.version, PROBE_PLUS)
         rows.append({"id": slug_of(p.id), "name": name_of(p), "band": band, "real": real, "shadow": shadow, "look": look})
+    learners = {slug_of(p.id) for p in P.PROGRAMS if P.is_learner(p)}
+    for row in rows:        # (PREREG-EVL-7's learners: judged in settled session blocks, league/events/judge7.py, which
+        if row["id"] in learners:       # lane_v1's ring cannot read; PREREG-EVL-3's next look is never theirs)
+            row["look"] = None
     now_in = lambda wanted: {p.id for p in P.SEATING if bands.get((p.id, p.version)) in wanted}  # noqa: E731
     reached = lambda wanted: len(now_in(wanted) | set().union(*(ever.get(b, set()) for b in wanted)))  # noqa: E731
     funnel = {"since": P.REGISTERED_AT, "shadow": len(P.BY_ID), "learning": len(P.SEATING),

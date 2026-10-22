@@ -216,9 +216,13 @@ _LAST_READ: tuple[str | None, tuple[Program, ...]] = (None, ())
 # ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
 #: PREREG-EVL-7's REGISTRATION TIME (its preamble, A92's method: the latest of its commit's time, the pushing client's
 #: clock after the push of the tag `prereg-evl-7` returned and GitHub's activity time for the branch `prereg/evl-7`),
-#: the ONE CONSTANT the freeze sets (the captain's amendment that pins it). NONE UNTIL THEN: the two learners are in no
-#: registry (`learners`), so they neither decide nor trade nor are charged (E3), and nothing of the lane moves.
-REGISTERED_AT_7: str | None = None
+#: the ONE CONSTANT the freeze sets: A125 (the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the client's
+#: 20:14:13Z after the tag push returned; tag prereg-evl-7, commit 367a2970, docs/prereg/PREREG-EVL-7.md sha256
+#: ced186aa..., docs/prereg/evl-7/ 211 files). None refuses every decision of the learners: they are then in no registry
+#: (`learners`), so they neither decide nor trade nor are charged (E3), and nothing of the lane moves. Pinned, they
+#: start with the first release that carries this code (section 1.7: their judged clock starts at its first live
+#: decision; the decisions from this time to it are the catch-up's training state, never judged or traded).
+REGISTERED_AT_7: str | None = "2026-10-22T20:14:13Z"  # A125: tag prereg-evl-7, commit 367a2970
 #: PREREG-EVL-6's registration time as the captain's A116 records it (tag prereg-evl-6, commit 4ae9017a): PREREG-EVL-7
 #: registers anything only when it is EARLIER than REGISTERED_AT_7 (section 3.3, E3; `registers_7`). Kept here beside
 #: the learners so this file's rows read no other branch's constant; a test holds it equal to `REGISTERED_AT_6` wherever

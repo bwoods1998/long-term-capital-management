@@ -328,6 +328,28 @@ class TheRuns(JudgeCase):
         self.assertEqual((J7.look_key("run", 1, 22), J7.key_of(2025)), (1022, ("run", 2, 25)))
         self.assertTrue(set(J7.ALARM_KINDS) <= set(EL.ALARM_GATES))
 
+    def test_every_report_shows_the_learners_false_passes_three_ways_and_beside_them_per_version_and_per_id(self):
+        """Section 4 as frozen: each learner charge (its run 1, each fresh run started) at c7 0.13, the base model 0.03
+        and the stresses' worst 0.13, with each learner's per-version and per-id figures, in the report's learner
+        lines; nothing while no learner is pinned."""
+        got = J7.false_passes(self.st)
+        self.assertEqual((got["charges"], got["count"], got["base"], got["stress"]), (2, 0.26, 0.06, 0.26))
+        self.assertEqual(got["learners"][O1]["per_version"], 0.1585)
+        self.assertEqual((got["learners"][ON]["per_version"], got["learners"][ON]["per_id"]), (0.1683, 0.233))
+        self.st.set_meta(J7.RUN_KEY.format(program=O1, version=1, n=2), json.dumps({"n": 2, "after_day": "2027-01-29"}))
+        self.st.set_meta(J7.NORUN_KEY.format(program=ON, version=1, n=2), json.dumps({"n": 2, "why": "invented"}))
+        got = J7.false_passes(self.st)
+        self.assertEqual((got["charges"], got["count"], got["base"], got["stress"]), (3, 0.39, 0.09, 0.39),
+                         "O1's run 2 is a charge; ON's refused run 2 is none")
+        lines = {x["program"]: x for x in LR.report_lines(self.st, dt.date(2026, 10, 26))}
+        self.assertEqual(lines[O1]["false_passes"], {"charges": 2, "count": 0.26, "base": 0.06, "stress": 0.26,
+                                                     "per_version": 0.1585, "per_id": 0.235})
+        [text] = LR.render_lines([lines[ON]])
+        self.assertIn("false passes 0.13 for 1 run(s) at 0.13 (base 0.03, stresses 0.13; per version 0.1683, per id "
+                      "0.233)", text)
+        pin(self, None)
+        self.assertEqual(J7.false_passes(self.st), {})
+
     def test_final_is_the_earliest_pool_programs_and_none_while_one_has_none(self):
         lrn = learner(O1)
         today = dt.date(2026, 11, 20)
@@ -659,6 +681,33 @@ class TheLine(TB.EventTest):
         self.assertEqual(keep, 1, "inside its own auction: no earlier buy there, only the entry's own exit")
 
 
+# --------------------------------------------------------------------------------------------------------- the site
+class TheSite(T7.WorldCase):
+    """The site's lane rows with the learners pinned (league/site_lane.py, lane_v1 unchanged): each learner has a plain
+    name of its own (two rows reading "Event rule" before), and no next look, PREREG-EVL-3's being never theirs."""
+
+    def test_each_learner_has_a_plain_name_of_its_own_and_no_preregevl3_look(self):
+        from types import SimpleNamespace
+
+        from league import publish, site_lane
+
+        names = [site_lane.name_of(p) for p in P.PROGRAMS if p.version == 1]
+        self.assertEqual(len(set(names)), len(names), "every name unique, the learners' included")
+        for pid in (O1, ON):
+            name = site_lane.name_of(learner(pid))
+            self.assertRegex(name, publish._PROGRAM_NAME)
+            self.assertNotEqual(name, site_lane.name_of(SimpleNamespace(id="EVL-X", family="learner-o1")))
+        lane = EB.Lane(self.st.root / S.DB_NAME)
+        self.addCleanup(lane.close)
+        live_sessions(self, self.days(3))
+        with mock.patch.object(SN, "next_look_v2", lambda *a, **k: {"k": 1, "events_needed": 80, "events": 6}):
+            rows = {r["id"]: r for r in site_lane.read_programs(lane, dt.date(2026, 10, 29))["programs"]}
+        self.assertEqual((rows["lrn-o1"]["band"], rows["lrn-o1"]["look"]), ("learning", None))
+        self.assertIsNone(rows["lrn-on"]["look"])
+        self.assertEqual(rows["lrn-o1"]["name"], "Learner, open to close")
+        self.assertIsNotNone(rows["ern-read-o1"]["look"], "an earlier row's look is PREREG-EVL-3's, as before")
+
+
 # ----------------------------------------------------------------------------------------------- the House's night
 from league.events import house as H  # noqa: E402
 from league.tests import test_events_house as TH  # noqa: E402
@@ -709,7 +758,31 @@ class TheScreenStep(TH.LaneCase):
         self.assertEqual((status, calls), ("partial", [dt.date(2026, 10, 20)]))
         self.assertIn("an invented failure", out["learners"]["error"])
 
+    def test_the_cost_basis_is_owed_only_before_the_nights_screen_and_never_inside_a_decisions_lead(self):
+        """Section 2.2 ("after the score and before the screen"), as the House plans it once the learners are pinned:
+        a night whose screen is on record (a release before the learners screened it) owes no cost_basis row, so the
+        first morning after the deploy computes none; and, like the screen, the row never starts within SCREEN_CLEAR of
+        the lane's next decision, so a row owed in the morning never holds that morning's verdicts or decisions."""
+        pin(self)
+        _, day = self.night()
+        morning = TH.et("2026-10-21", "09:12")       # (the open's decision at 09:15 ET: inside SCREEN_CLEAR)
+        self.at(morning)
+        with self.store() as st:
+            self.assertIsNone(self.lane._nightly(st, morning, morning.astimezone(C.NY).date(),
+                                                 C.session(st, morning.astimezone(C.NY).date()), []),
+                              "inside the open's lead: no cost-basis task (nor the screen)")
+        early = TH.et("2026-10-21", "07:31")
+        self.at(early)
+        with self.store() as st:
+            task = self.lane._nightly(st, early, early.astimezone(C.NY).date(), C.session(st, early.astimezone(C.NY).date()), [])
+            self.assertEqual(getattr(task, "name", None), H.COST_BASIS_JOB, "clear of a decision: the row is owed")
+            rid = st.start_receipt("screen", now=TH.et("2026-10-20", "21:00"))
+            st.finish_receipt(rid, "ok", {}, now=TH.et("2026-10-20", "21:01"))
+            task = self.lane._nightly(st, early, early.astimezone(C.NY).date(), C.session(st, early.astimezone(C.NY).date()), [])
+            self.assertNotEqual(getattr(task, "name", None), H.COST_BASIS_JOB, "the night is screened: no row owed")
+
     def test_unpinned_the_learner_judge_never_runs(self):
+        pin(self, None)
         calls: list = []
         status, out = self.screen(calls)
         self.assertEqual((calls, "learners" in out), ([], False))

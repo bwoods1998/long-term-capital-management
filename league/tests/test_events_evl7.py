@@ -293,8 +293,31 @@ def snapshot(got: dict) -> tuple:
 
 # -------------------------------------------------------------------------------------------------------- the rows
 class TheRows(unittest.TestCase):
+    def test_the_constant_is_a125s_and_names_the_frozen_file(self):
+        """THE FREEZE (A125): REGISTERED_AT_7 is the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the
+        client's 20:14:13Z; the tag's file is in the tree byte for byte (docs/prereg/PREREG-EVL-7.md, sha256 ced186aa,
+        and its calibration record with every file its SHA256SUMS lists); PREREG-EVL-6's time is earlier (E3)."""
+        import hashlib
+
+        self.assertEqual(P.REGISTERED_AT_7, "2026-10-22T20:14:13Z")
+        self.assertTrue(P.registers_7())
+        self.assertLess(S.parse_iso(P.REGISTERED_AT_6_FOR_7), S.parse_iso(P.REGISTERED_AT_7))
+        root = Path(__file__).resolve().parents[2] / "docs" / "prereg"
+        text = (root / "PREREG-EVL-7.md").read_bytes()
+        self.assertEqual(hashlib.sha256(text).hexdigest(),
+                         "ced186aab93bb7d0b2925b5a5019c648a55fcd28bb32bfcaba52feb96ad9afd1")
+        sums = (root / "evl-7" / "SHA256SUMS").read_text().split("\n")
+        listed = {name.strip().lstrip("*"): digest for digest, name in
+                  (line.split(None, 1) for line in sums if line.strip())}
+        for name, digest in listed.items():
+            self.assertEqual(hashlib.sha256((root / "evl-7" / name).read_bytes()).hexdigest(), digest, name)
+        files = {f.name for f in (root / "evl-7").iterdir() if f.is_file()}
+        self.assertEqual(files, set(listed) | {"SHA256SUMS"}, "every file listed, no other")
+        self.assertEqual(len(files), 211, "A125: 211 files")
+
     def test_unpinned_the_learners_are_in_no_registry_and_decide_nothing(self):
-        self.assertIsNone(P.REGISTERED_AT_7, "None until the freeze sets it")
+        pin(self, None)
+        self.assertIsNone(P.REGISTERED_AT_7, "None refuses every decision of the learners")
         self.assertEqual(P.learners(), ())
         self.assertFalse(any(P.is_learner(p) for p in P.PROGRAMS + P.SEATING + tuple(P.BY_KEY.values())))
         self.assertFalse(any(P.is_learner(p) for p in EB.seatable()))
@@ -311,6 +334,7 @@ class TheRows(unittest.TestCase):
             P.LEARNER_ROWS[0].registered_at
 
     def test_pinned_both_rows_follow_every_earlier_row_at_learning_and_precede_the_births(self):
+        pin(self, None)
         before = P.PROGRAMS, P.SEATING
         pin(self)
         o1, on = learner(O1), learner(ON)
@@ -1278,6 +1302,7 @@ class TheHousePlan(TH.LaneCase):
     cost-basis row after the score and before the screen, never holding the screen."""
 
     def test_unpinned_no_learner_task_and_no_cost_basis_step(self):
+        pin(self, None)
         now = TH.et("2026-10-20", "21:00")
         self.at(now)
         with self.store() as st:

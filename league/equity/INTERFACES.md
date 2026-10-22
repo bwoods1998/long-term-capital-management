@@ -1872,7 +1872,7 @@ unknown (not the price, the buying power, the size, the account or the gateway).
 ## 28. PREREG-EVL-7's learners in the event book (release 1019i; `feat/evl-7`; book, as built; after section 27, PREREG-EVL-6's)
 
 The two learners (league/events/learner.py; nothing of them exists while league/events/programs.py `REGISTERED_AT_7`
-is None) trade through the event kind's own path with these additions, each additive:
+is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's own path with these additions, each additive:
 
 - `book.picks(lane, program, ...)` for a learner returns `book.learner_picks`: the intents of its LIVE decision of the
   session ONLY ONCE ITS OWN LIVE RECEIPT `decide-<at>-lrnlive:<D>` HAS FINISHED `ok` NAMING IT (`learner.live_picks`,

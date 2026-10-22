@@ -700,6 +700,12 @@ class ReadOnly(DoneCase):
         self.assertEqual([h["c"] for h in doc["checkpoints"]], [100])
 
 
+# (PREREG-EVL-7, A125 pinned REGISTERED_AT_7: the House's nightly sequence of release 1019h, before the learners' cost
+# basis joined it ahead of the screen; that order is league/tests/test_events_evl7.py's and test_events_evl7_fix.py's)
+from league.tests.evl7_fakes import off_7  # noqa: E402
+
+
+@off_7
 class OnTheHouse(unittest.TestCase):
     def night(self):
         """The lane of league/tests/test_events_house.py at Tue Oct 20, 20:31 ET with the day decided and scored."""

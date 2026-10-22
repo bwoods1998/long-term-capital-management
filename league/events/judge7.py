@@ -66,8 +66,8 @@ from . import store as S
 LOOKS = (22, 25, 30, 35, 40, 50, 60)
 RUN_BLOCKS = 60
 MIN_EVENTS, MIN_ISSUERS, MIN_BLOCKS = 30, 30, 6
-#: Section 1.10 and 4 (E1, E2): c7 = max(PREREG-EVL-6's 0.13, W7 0.087 rounded up) = 0.13 a run, at most three runs an
-#: id; the lane's lifetime budget on PREREG-EVL-6's frozen basis (30 x 0.13), all in hundredths (no float drift).
+#: Section 1.10 and 4 as frozen (E1, E2): c7 = max(PREREG-EVL-6's 0.13, W7 0.0890 rounded up) = 0.13 a run, at most
+#: three runs an id; the lane's lifetime budget on PREREG-EVL-6's frozen basis (30 x 0.13), all in hundredths.
 CHARGE = 13
 BUDGET = 390
 RUNS_MAX = 3
@@ -577,6 +577,35 @@ def run(store: Any, today: dt.date, *, now: dt.datetime | None = None, draws: in
     return out
 
 
+def false_passes(store: Any) -> dict[str, Any]:
+    """SECTION 4's REPORT FIGURES OF THIS FILE'S VERSIONS AS FROZEN ("every report shows the lane's expected false passes
+    three ways ...: its count (c7 = 0.13 a learner run), the base model (0.03 a learner run) and the stresses' worst
+    (0.13 a learner run), and beside them the per-version and per-id figures"): each learner version in force that can
+    seat is one charge (its run 1) and each fresh run on record one more (`runs`; a refused run is none), counted at
+    c7, the base model and the stresses' worst, with each learner's per-version (within 120 sessions) and per-id (at
+    most three runs) figure. {} while no learner is pinned. Counts only, no figure of a look. PREREG-EVL-6's line
+    (league/events/screen.py `expected_false_passes` on release 1019i) counts every charge at ITS stresses' 0.17: the
+    release's merge counts these charges at this `stress` instead (docs/events.md)."""
+    from . import learner as LR
+
+    per: dict[str, dict[str, Any]] = {}
+    for learner in in_force():
+        if not getattr(learner, "can_seat", True):
+            continue
+        n = 1 + sum(1 for r in runs(store, learner) if int(r["n"]) >= 2)
+        per[learner.id] = {"version": int(learner.version), "charges": n,
+                           "count": round(LR.CHARGE7_HUNDREDTHS * n / 100, 2),
+                           "base": round(LR.BASE7_HUNDREDTHS * n / 100, 2),
+                           "stress": round(LR.STRESS7_HUNDREDTHS * n / 100, 2),
+                           "per_version": LR.PER_VERSION_7.get(learner.id), "per_id": LR.PER_ID_7.get(learner.id)}
+    if not per:
+        return {}
+    n = sum(x["charges"] for x in per.values())
+    return {"rule": "PREREG-EVL-7 section 4", "charges": n, "count": round(LR.CHARGE7_HUNDREDTHS * n / 100, 2),
+            "base": round(LR.BASE7_HUNDREDTHS * n / 100, 2), "stress": round(LR.STRESS7_HUNDREDTHS * n / 100, 2),
+            "learners": per}
+
+
 # ------------------------------------------------------------------------------------------------ the money gate
 def live_rows(store: Any, learner: Any) -> list[dict[str, Any]]:
     """The learner's settled, TRADABLE (the shadow's, an upper bound of COST-7's) intents of its LIVE decisions: what the
@@ -655,4 +684,5 @@ def next_look(store: Any, learner: Any) -> dict[str, Any]:
 __all__ = ["LOOKS", "RUN_BLOCKS", "MIN_EVENTS", "MIN_ISSUERS", "MIN_BLOCKS", "CHARGE", "BUDGET", "RUNS_MAX", "STAY_BASE",
            "RUN_KEY", "END_KEY", "NORUN_KEY", "LOOK_KEY", "STAYS_JUDGED", "ALARM_KINDS", "in_force", "tag", "look_key",
            "key_of", "band_of", "runs", "written", "run_record", "covered", "blocks", "minimums", "pending", "final",
-           "schedule", "run_one", "used", "start_runs", "run", "live_rows", "blocked", "gate", "next_look"]
+           "schedule", "run_one", "used", "start_runs", "run", "false_passes", "live_rows", "blocked", "gate",
+           "next_look"]

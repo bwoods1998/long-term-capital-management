@@ -1516,9 +1516,14 @@ class EventLane:
                     return Task("score", lambda ctx, deadline: self._score(ctx, deadline, night), SCORE_BUDGET)
                 return None
             if P.learners() and not self._receipt_since(st, COST_BASIS_JOB, since) and \
-                    not self._quiet(COST_BASIS_JOB, now, soon):
-                # (PREREG-EVL-7 section 2.2: the night's cost_basis row after the score and before the screen; one that
-                # fails waits its back-off and the screen goes on: only the learners' looks wait for a row, 2.2 (d))
+                    not self._receipt_since(st, "screen", since) and not self._quiet(COST_BASIS_JOB, now, soon):
+                # (PREREG-EVL-7 section 2.2: the night's cost_basis row after the score and BEFORE THE SCREEN, so only
+                # while that night's screen is owed (a night screened already, by a release before the learners, owes
+                # none); one that fails waits its back-off and the screen goes on: only the learners' looks wait for a
+                # row, 2.2 (d). Like the screen it never starts inside a decision's lead (`_clear_of_decision`), so a
+                # night's row owed in the morning never holds that morning's verdicts or decisions)
+                if not self._clear_of_decision(st, now, soon):
+                    return None
                 return Task(COST_BASIS_JOB, lambda ctx, deadline: self._cost_basis(ctx, deadline, night), LEARNER_BUDGET)
             if not self._receipt_since(st, "screen", since):
                 if not self._quiet("screen", now, soon) and self._clear_of_decision(st, now, soon):
