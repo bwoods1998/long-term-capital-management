@@ -749,6 +749,22 @@ class Pick:
     knowable_at: str
 
 
+def pick_record(pick: Pick) -> dict[str, Any]:
+    """A pick as JSON (PREREG-EVL-7 section 1.9: the picks the auction's own decision read for the programs whose names
+    wait for the learners, kept in its summary until the learners' decision gives them: league/equity/live.py
+    `_event_decide_lrn`); `pick_of` reads it back exactly (the previous close as its decimal text)."""
+    return {"program": pick.program, "version": int(pick.version), "event": pick.event, "symbol": pick.symbol,
+            "cik": pick.cik, "rank": pick.rank, "adv20": float(pick.adv20), "prev_close": str(pick.prev_close),
+            "knowable_at": pick.knowable_at}
+
+
+def pick_of(record: Mapping[str, Any]) -> Pick:
+    rank = record.get("rank")
+    return Pick(str(record["program"]), int(record["version"]), str(record["event"]), str(record["symbol"]),
+                str(record["cik"]), None if rank is None else float(rank), float(record.get("adv20") or 0.0),
+                Decimal(str(record["prev_close"])), str(record.get("knowable_at") or ""))
+
+
 def _stored_before(row: Mapping[str, Any], decided_at: dt.datetime, lane: Any = None) -> bool:
     """PREREG-EVL-1 section 3: a real-money decision reads only an event STORED before its decision time. A news article
     is stored whole when it is read (`received_at`); a FILING is stored when its documents are fetched (the latest
@@ -1331,22 +1347,16 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
 
 
 # ----------------------------------------------------------------------------------------------------- PREREG-EVL-7
-#: PREREG-EVL-7 section 1.9's DAY ORDER LINE: a learner's entry leaves this many slots of the event kind's line
-#: (`Settings.max_orders_day`) to every earlier file's rows (16 entries and 16 exits a day, this file's own most), on
-#: top of its own entry and exit, so the line refuses this file's entries before any earlier PREREG row's; an exit is
-#: never stopped by it (league/equity/live.py `_count_refusal`).
-LEARNER_LINE_KEEP = 32
+#: PREREG-EVL-7 section 1.9's DAY ORDER LINE ("refuses this file's entries after every earlier PREREG row's; an exit is
+#: never stopped by it"): a learner's entry keeps, on the event kind's line of its day, every order the earlier PREREG
+#: rows may still send that day after it, across the day's auctions (league/equity/live.py `_event_line_keep`, passed
+#: to `_count_refusal` as `keep`; the money review of release 1019i replaced a fixed keep of 32 slots, which held
+#: inside one auction only).
 
 
 def is_learner(program: Any) -> bool:
     """Whether a Program row (or an id) is one of PREREG-EVL-7's learners (league/events/programs.py `is_learner`)."""
     return P.is_learner(program)
-
-
-def line_keep(program: str) -> int:
-    """The buys' worth of the day order line a buy of `program` leaves to the earlier rows (`HeldAhead`'s unit: each
-    keeps a send and an exit): LEARNER_LINE_KEEP / 2 for a learner, 0 for every other program."""
-    return LEARNER_LINE_KEEP // 2 if P.is_learner(program) else 0
 
 
 def ern_issuer(lane: Lane, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
@@ -1395,6 +1405,33 @@ def issuer_8k_guard(lane: Lane, cik: str, session: C.Session | None, decided_at:
     return False
 
 
+def learner_gate(lane: Lane, program: P.Program) -> str | None:
+    """Why a PREREG-EVL-7 learner's real money buys nothing now (league/events/judge7.py `gate`: retired; at Probe or
+    Sized with no stay judge for COST-7's versions; its run ended, refused or its three runs spent; a look due and not
+    written, failing closed), None when it may buy. Unreadable reads as a reason (fail closed)."""
+    from . import judge7 as J7
+
+    try:
+        return J7.gate(lane, program)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return f"the learner's gate could not be read ({type(exc).__name__})"
+
+
+def learner_cut(learners: Iterable[tuple[str, str]]) -> tuple[int, int] | None:
+    """PREREG-EVL-7 SECTION 1.9's ROOM WITH ITS LEARNERS AT ONE AUCTION ((family, band) of each learner there that may
+    take a name): the first ROOM key (`room_key`) whose program's names DEPEND ON A LEARNER'S PICKS, so the book gives
+    the names before it at the auction's own decision and every name from it on only once the learners' parts are on
+    record or waited out (league/equity/live.py `_event_decide_lrn`): at LEARNING the learner's own key (after every
+    PREREG-EVL-1 to -6 row of the tier, which never waits; R3's births at learning, `BIRTH_ROOM`, come after it); in a
+    ROUND-ROBIN tier (Probe, Sized: A85) the whole tier, the learner being the LAST program of each pass (its picks
+    move the earlier rows' second and later passes), and every tier after it. None with no learner."""
+    cuts = []
+    for family, band in learners:
+        tier, order = room_key(family, band)
+        cuts.append((tier, -1) if tier in ROUND_ROBIN_TIERS else (tier, order))
+    return min(cuts) if cuts else None
+
+
 def learner_pending(lane: Lane, program: P.Program, day: dt.date) -> bool:
     """Whether the learner's LIVE PART of `day` may still write (PREREG-EVL-7 section 1.7): no decision on record and
     no failure or expiry recorded for it (league/events/learner.py `PART_KEY`). The book's learner decision of the
@@ -1416,6 +1453,8 @@ def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: d
     learner's: no fitted figure goes to the book."""
     from . import learner as LR
 
+    if learner_gate(lane, program) is not None:
+        return []       # (PREREG-EVL-7 sections 1.9-1.10 and 3.1: no run, a look overdue, retired: `judge7.blocked`)
     got = LR.live_picks(lane, program, day)
     if not got:
         return []
@@ -1574,3 +1613,6 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
+#: (PREREG-EVL-7, release 1019i: the learners' real money, their gate and their place in ROOM's order)
+__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "learner_pending",
+            "learner_picks", "pick_record", "pick_of"]

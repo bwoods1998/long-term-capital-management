@@ -10,7 +10,10 @@ lane's store: a learner fails quietly (it trains on old rows, or picks nothing),
   evening score chain ran late (A95);
 - THE NIGHTLY RECOMPUTE MISMATCHED (`RECOMPUTE_KEY`): a decision re-decided on unchanged inputs gave other picks or
   another beta;
-- THE WARM-UP IS UNMET after `WARM_SESSIONS_MAX` live decisions.
+- THE WARM-UP IS UNMET after `WARM_SESSIONS_MAX` live decisions;
+- A LOOK IS OVERDUE (league/events/judge7.py `blocked`, kinds `ALARM_KINDS`): the current run's record holds the blocks
+  of its next look (or 60 and no end) and none is written (as with no PREREG-EVL-6 screen in the tree), or the learner
+  is at Probe or Sized with no stay judge for COST-7's versions: its real money buys nothing until it is (fail closed).
 
 Counts and dates only: no fitted figure (beta, e, z, ahat) is read into the alarm. Nothing is judged while
 REGISTERED_AT_7 is None (no learner exists)."""
@@ -29,6 +32,12 @@ STORE = Path("events") / "events.sqlite"
 OWED_HOURS = 2.0
 LOOK_SESSIONS = 5
 WARM_SESSIONS_MAX = 5
+#: The real-money gate's kinds this alarm raises (league/events/judge7.py `ALARM_KINDS`, held equal by a test; an
+#: unreadable gate too): a look or a run's end overdue, a learner at Probe or Sized with no stay judge.
+ALARM_GATES = ("look_overdue", "end_overdue", "no_stay_judge", "unreadable")
+#: A look (or a run's end) normally waits a few sessions for its close to be final (A66's reach) and its intents to
+#: settle, the gate shut meanwhile: the alarm says so once the block that made it due is this many sessions old.
+OVERDUE_SESSIONS = 5
 DOING = ("A learner's part of each live decision runs after the House's own decision of the auction, under its own "
          "bound (90 s at the open, 120 s at the close); one that fails or runs past its bound is never traded at that "
          "auction and is decided later by the learner by itself (the lane's learner task, shadow only); the nightly "
@@ -110,6 +119,15 @@ def facts(root: str | Path, now: float) -> dict[str, Any] | None:
                     got = {"status": "unreadable"}
                 mine["recompute"].append({"day": s.day.isoformat(), "status": got.get("status"),
                                           "cause": str(got.get("cause") or "")[:200]})
+            try:        # (PREREG-EVL-7 sections 1.10 and 3.1: the learner's real-money gate, league/events/judge7.py)
+                from ..events import judge7 as J7
+
+                mine["gate"] = J7.blocked(view, learner)
+                since = (mine["gate"] or {}).get("since")
+                if since:
+                    mine["gate"]["sessions"] = len(C.sessions(view, dt.date.fromisoformat(since), today))
+            except Exception as exc:  # noqa: BLE001 - said as unreadable
+                mine["gate"] = {"kind": "unreadable", "why": f"the learner's gate could not be read ({type(exc).__name__})"}
             out["learners"][learner.id] = mine
         # COST-7 (section 2.2 (c) and (d)): the latest night's row, its incomplete sessions, and whether a night whose
         # score is in has none (every look of these versions then waits)
@@ -163,7 +181,11 @@ def judge(now: float, f: dict[str, Any] | None) -> dict[str, Any]:
         for r in m["recompute"]:
             if r["status"] == "mismatch":
                 said.append(f"{pid}'s nightly recompute of {r['day']} MISMATCHED on unchanged inputs: {r['cause']}")
-        numbers[pid] = {"parts_failed": len(m["parts"]), "parts_open": len(open_parts), "owed": len(m["owed"]),
+        gate = m.get("gate") or {}
+        if gate.get("kind") in ALARM_GATES and ("since" not in gate or int(gate.get("sessions") or 0) > OVERDUE_SESSIONS):
+            said.append(f"{pid}: {gate.get('why')}" + (f" (due since {gate['since']})" if gate.get("since") else ""))
+        numbers[pid] = {"gate": gate.get("kind"), "parts_failed": len(m["parts"]), "parts_open": len(open_parts),
+                        "owed": len(m["owed"]),
                         "lagging": bool(lag.get("lagging")), "warmup": warm,
                         "mismatch": sum(1 for r in m["recompute"] if r["status"] == "mismatch")}
     cb = f.get("cost_basis") or {}
@@ -195,4 +217,5 @@ def check(root: str | Path, now: float) -> dict[str, Any]:
     return judge(now, facts(root, now))
 
 
-__all__ = ["CAUSE", "DOING", "check", "facts", "judge", "OWED_HOURS", "LOOK_SESSIONS", "WARM_SESSIONS_MAX"]
+__all__ = ["CAUSE", "DOING", "check", "facts", "judge", "OWED_HOURS", "LOOK_SESSIONS", "WARM_SESSIONS_MAX", "ALARM_GATES",
+           "OVERDUE_SESSIONS"]

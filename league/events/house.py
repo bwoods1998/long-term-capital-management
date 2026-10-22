@@ -1650,6 +1650,31 @@ class EventLane:
         day = night or now.astimezone(C.NY).date()
         status, summary = self._looks_pass(ctx.store, day, now, "screen", None, self._horizons(ctx.store, day, now))
         summary["run"] = "night"
+        if P.learners():
+            # PREREG-EVL-7 sections 1.10 and 3.1: the learners' looks, their run's end and their next runs, judged by
+            # PREREG-EVL-6's screen through COST-7's one interface (league/events/judge7.py), after every earlier
+            # file's looks and PREREG-EVL-6's own start of its waiting runs (registration order); nothing while no
+            # learner is pinned. A failure is the learners' own: the earlier looks are written, the receipt says so.
+            try:
+                from . import judge7 as J7
+
+                got = J7.run(ctx.store, day, now=now)
+            except Exception as exc:  # noqa: BLE001 - computed again next night; the learners' gate holds their money
+                status = "partial"
+                summary["learners"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+                self.warn("learner looks", exc)
+            else:
+                summary["learners"] = {
+                    "written": [{k: w.get(k) for k in ("program", "version", "k", "decision", "band", "end")}
+                                for w in got["written"]],
+                    "waits": [{"program": w.get("program"), "k": w.get("k"), "why": str(w.get("why") or "")[:WHY_CHARS]}
+                              for w in got["waiting"][:WAITS_KEPT]],
+                    "started": [{k: w.get(k) for k in ("program", "version", "n")} for w in got["started"]],
+                    "refused": [{k: w.get(k) for k in ("program", "version", "n", "why")} for w in got["refused"]]}
+                if got["errors"]:
+                    status = "partial"
+                    summary["learners"]["errors"] = got["errors"][:5]
+                    self.warn("learner looks", f"{len(got['errors'])} learner(s) could not be screened: {got['errors'][0]}")
         try:
             moved = BA.review(ctx.store, now=now)
         except Exception as exc:  # noqa: BLE001 - the looks are written; the review is read again next night

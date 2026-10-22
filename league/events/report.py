@@ -437,18 +437,20 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
 
 
 def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
-    """A learner's next look as the report reads it: PREREG-EVL-6's first look of a run at its 22nd settled block, the
-    blocks counted over its LIVE decisions' settled picks only (league/events/costs7.py `record7`: never a catch-up's)."""
+    """A learner's next look as the report reads it (league/events/judge7.py `next_look`): its current run, the next
+    look's threshold in blocks (PREREG-EVL-6's 22, 25, 30, 35, 40, 50, 60), the run's settled blocks over its LIVE
+    decisions' picks only (never a catch-up's), and what holds its real money when something does (the gate's why).
+    Counts only."""
+    from . import judge7 as J7
+    from .programs import BY_KEY
+
+    prog = BY_KEY.get((program, int(version)))
     try:
-        blocks = store.db.execute("SELECT COUNT(DISTINCT i.entry_day) FROM intents i JOIN learner_fits f ON "
-                                  "f.program=i.program AND f.version=i.version AND f.day=i.entry_day JOIN outcomes o ON "
-                                  "o.program=i.program AND o.version=i.version AND o.event=i.event WHERE i.program=? AND "
-                                  "i.version=? AND f.kind='live' AND o.status='settled' AND o.tradable=1",
-                                  (program, int(version))).fetchone()[0]
-    except Exception:  # noqa: BLE001 - no learner table yet: no block
-        blocks = 0
-    return {"k": 1, "at_sessions": 22, "sessions": int(blocks or 0),
-            "status": "PREREG-EVL-6's screen on COST-7, live decisions only"}
+        if prog is None:
+            raise LookupError(f"{program} v{version} is in no registry")
+        return J7.next_look(store, prog)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"k": None, "at_sessions": None, "sessions": 0, "status": f"unreadable ({type(exc).__name__})"}
 
 
 def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:

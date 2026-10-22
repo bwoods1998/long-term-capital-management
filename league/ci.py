@@ -261,8 +261,9 @@ PENDING_GATEWAY += ("league/events/done.py",)
 #: read as of tau, their training rows, their fit and their picks, which real money buys) and league/events/costs7.py the
 #: cost basis their judge reads (a7, r7, the measured terms that only rise, the judged record): a program's rule and a
 #: judge's input, so no main commit the in-box updater would ship can change either without the owner's deploy. They
-#: wait here for the gateway's merge-list follow-up, as the lane's judges do.
-PENDING_GATEWAY += ("league/events/learner.py", "league/events/costs7.py")
+#: wait here for the gateway's merge-list follow-up, as the lane's judges do. league/events/judge7.py (the review round)
+#: is their judge's runner: their looks, band moves, runs and the real-money gate.
+PENDING_GATEWAY += ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
