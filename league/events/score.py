@@ -33,15 +33,40 @@ dividend inside the hold applies through each day's ratio of adjusted to raw clo
   else the latest earlier record; none: NULL).
 The outcome row (`settled`) and the intent's move to `exited` are one transaction, so a rerun changes nothing. The NBBO
 stress (`spread_*`, `stress_r`) is left NULL here.
+
+THE BATCHED SCORE (release 1019i, PREREG-EVL-8's harness plan H1, the flywheel's F1: the nightly score settled 15-25
+events a minute, A95, while every intent paid two daily-bar requests of its own). A pass first PREFETCHES the daily bars
+(raw and `adjustment=all`) of every due intent's symbol and of both benchmarks ONCE over the union window (`prefetch`:
+from the earliest due entry session to the pass's own day, `SYMBOLS_PER_REQUEST` (200) symbols a request, page by page,
+as `universe.fetch_daily_bars` reads them), and then `settle_one(prefetched=...)` skips its own two fetches when every
+bar its settlement reads (the symbol's and the benchmark's, raw and adjusted, at entry and at exit) was fetched by this
+pass (`fresh`); a bar the vendor did not send (a missing bar) falls back to the intent's own two fetches, exactly as
+before, so the batched pass can only save requests, never read a bar the old path would not have read. Alpaca adjusts
+every bar to today's basis whatever the window, so the bars a wider window stores are the bars a narrower one stores and
+every outcome row is the same, byte for byte (league/tests/test_events_score_batch.py's golden tape, with a missing
+bar and a split). Prints stay read once per (symbol, day, label) (`tape_print`, `marks`). THE ORDER (`order_due`): the
+seating versions (programs.SEATING) and their controls (screen.control_of) settle first, then every other record, each
+group in `due`'s order, so a pass its bound cuts has settled what the looks of real money wait for. THE SWITCH:
+league/config.json `events.score_batch` (`batch_on`; a missing key is ON, false restores the per-intent path of release
+1019h exactly: `due`'s order and the two fetches an intent). THE PARITY NIGHT (`parity_due`, `check_parity`): on the
+first night the batched score settles anything (meta `PARITY_FIRST`), a sample of `PARITY_SHARE` (5%) of the intents it
+settles (`parity_sampled`, by sha256 of the intent's key) is settled again by the per-intent path into memory and only
+an EQUALITY FLAG is written (`score_parity`: 1 when every outcome field is identical, else 0; never a value), so the
+first live night shows the two paths agree before anyone relies on them; `events.score_parity` true runs it every night,
+false never. Each pass's counts (requests by kind, seconds, the parity flags) go into its receipt for the daily report's
+settle-pace line (league/ops/daily_report.py `settle_pace`).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
+import hashlib
 import json
 import math
+import time
 import urllib.parse
-from typing import Any, Iterator, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from . import calendar as C
 from . import store as S
@@ -67,6 +92,17 @@ CAT_USD = 0.01
 TAF_USD = 0.01
 TRADABLE_SHARE = 0.10
 ACCOUNT_PATH = "/v1/alpaca/v2/account"
+#: THE BATCHED SCORE (release 1019i, the module docstring): its switch's default (league/config.json
+#: `events.score_batch`), both benchmarks (PREREG-EVL-1 section 2: IWM under $50,000,000 of ADV, else SPY), the parity
+#: night's sample share and its meta key (the first night the batched score settled an intent), and the outcome fields
+#: the parity compares (every column the settlement writes but its time).
+BATCH_DEFAULT = True
+BENCHMARKS = ("SPY", "IWM")
+PARITY_SHARE = 0.05
+PARITY_FIRST = "evl:score:batch:first_night"
+PARITY_FIELDS = ("entry_px", "exit_px", "bench", "bench_entry", "bench_exit", "cost_entry_bp", "cost_exit_bp", "r", "b",
+                 "a", "tradable", "status")
+BARS_PATH = "/v1/alpaca/v2/stocks/bars"
 
 
 class Waiting(Exception):
@@ -299,24 +335,48 @@ def _skip(store: S.Store, intent: Mapping[str, Any], why: str) -> str:
     return f"skipped:{why}"
 
 
-def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.datetime) -> str:
+def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.datetime,
+               prefetched: "bool | Prefetch" = False) -> str:
     """Settle one due intent. Returns 'settled', 'skipped:<why>' or 'waiting:<why>' (then nothing is written but the
-    tape prints read so far)."""
+    tape prints read so far). `prefetched` (release 1019i, the batched score): this pass prefetched the daily bars
+    (`prefetch`, or True for bars fetched at `now`), so the settlement's own two fetches are skipped when every bar it
+    reads was fetched by this pass (`fresh`); else they are made as before."""
     try:
-        return _settle(store, gw, intent, now)
+        got = _compute(store, gw, intent, now, prefetched)
     except Waiting as wait:
         return f"waiting:{wait}"
+    if isinstance(got, str):
+        return _skip(store, intent, got)
+    row, moved = got
+    with store.tx() as db:
+        db.execute("INSERT OR IGNORE INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                   "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, ?, ?, ?, ?, "
+                   "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled')",
+                   (intent["program"], intent["version"], intent["event"], row["entry_px"], row["exit_px"], row["bench"],
+                    row["bench_entry"], row["bench_exit"], row["cost_entry_bp"], row["cost_exit_bp"], row["r"], row["b"],
+                    row["a"], row["tradable"], S.iso(now)))
+        if moved is not None:
+            db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
+                       (f"exit:{intent['program']}:{intent['version']}:{intent['event']}",
+                        json.dumps(moved, sort_keys=True)))
+        store.move_intent(intent["program"], intent["version"], intent["event"], "exited",
+                          None if moved is None else f"exit {moved['kind']} {moved['day']}")
+    return "settled"
 
 
-def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime) -> str:
+def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime, prefetched: Any = False
+             ) -> str | tuple[dict[str, Any], dict[str, str] | None]:
+    """The settlement of one intent, computed and not written: the skip's why (a str), or (the outcome row's fields,
+    the late exit's meta {day, kind, planned} or None). Raises Waiting. Prints read are kept in `marks` and bars in
+    `bars`, as they are read (the tape is read once)."""
     entry_day, exit_day = dt.date.fromisoformat(intent["entry_day"]), dt.date.fromisoformat(intent["exit_day"])
     symbol = str(intent["symbol"]).upper()
     uni = _universe(store, intent["entry_day"], symbol)
     if uni is None or not uni.get("bench") or uni.get("adv20") is None:
-        return _skip(store, intent, "no-universe-row")
+        return "no-universe-row"
     code = U.EXCHANGE_CODES.get(str(uni.get("exchange") or "").upper())
     if code is None:
-        return _skip(store, intent, "no-listing-exchange")
+        return "no-listing-exchange"
     bench = str(uni["bench"]).upper()
     entry_s = C.session(store, entry_day)
     if entry_s is None:
@@ -328,9 +388,9 @@ def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime
     if stock_in is None:
         if not known:
             raise Waiting(f"{symbol} {entry_kind} {entry_day}: tape not complete")
-        return _skip(store, intent, "no-auction")
+        return "no-auction"
     if _above_limit(intent, uni, stock_in):
-        return _skip(store, intent, "limit")
+        return "limit"
 
     exit_s: C.Session | None = None
     exit_kind, stock_out = "", 0.0
@@ -353,9 +413,12 @@ def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime
     bench_kind = {"open": "open", "close": "close", "first": "open", "zero": "close"}[exit_kind]
     bench_out = bench_print(store, gw, bench, exit_s, bench_kind, now)
 
-    # One fetch of the window's daily bars, raw and adjusted, so entry and exit share one adjustment.
-    for adj in ("raw", "all"):
-        U.fetch_daily_bars(store, gw, [symbol, bench], entry_day, exit_s.day, adj=adj, now=now)
+    # One fetch of the window's daily bars, raw and adjusted, so entry and exit share one adjustment; skipped when this
+    # pass prefetched every bar read below (release 1019i: the batched score; a bar it did not get is fetched here).
+    at = prefetched.at if isinstance(prefetched, Prefetch) else S.iso(now)
+    if not (prefetched and fresh(store, (symbol, bench), (entry_day, exit_s.day), at)):
+        for adj in ("raw", "all"):
+            U.fetch_daily_bars(store, gw, [symbol, bench], entry_day, exit_s.day, adj=adj, now=now)
     entry_px = stock_in * _ratio(store, symbol, entry_day)
     exit_px = stock_out * _ratio(store, symbol, exit_s.day) if stock_out else 0.0
     b_in = bench_in * _ratio(store, bench, entry_day)
@@ -371,31 +434,223 @@ def _settle(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime
     tradable = (None if equity is None or prev_close is None
                 else int(LIMIT_MULTIPLE * float(prev_close) <= TRADABLE_SHARE * equity))
     moved = (exit_s.day != exit_day) or (exit_kind != intent["exit_at"])
-    with store.tx() as db:
-        db.execute("INSERT OR IGNORE INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
-                   "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, ?, ?, ?, ?, "
-                   "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled')",
-                   (intent["program"], intent["version"], intent["event"], entry_px, exit_px, bench, b_in, b_out, c_in,
-                    c_out, r, b, r - b, tradable, S.iso(now)))
-        if moved:
-            db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
-                       (f"exit:{intent['program']}:{intent['version']}:{intent['event']}",
-                        json.dumps({"day": exit_s.day.isoformat(), "kind": exit_kind, "planned": exit_day.isoformat()},
-                                   sort_keys=True)))
-        store.move_intent(intent["program"], intent["version"], intent["event"], "exited",
-                          None if not moved else f"exit {exit_kind} {exit_s.day.isoformat()}")
-    return "settled"
+    row = {"entry_px": entry_px, "exit_px": exit_px, "bench": bench, "bench_entry": b_in, "bench_exit": b_out,
+           "cost_entry_bp": c_in, "cost_exit_bp": c_out, "r": r, "b": b, "a": r - b, "tradable": tradable,
+           "status": "settled"}
+    late = {"day": exit_s.day.isoformat(), "kind": exit_kind, "planned": exit_day.isoformat()} if moved else None
+    return row, late
 
 
-def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None) -> dict[str, Any]:
+# -------------------------------------------------------------------------------------------- the batched score
+@dataclasses.dataclass
+class Prefetch:
+    """One pass's prefetch of daily bars (`prefetch`): its time as the store writes `fetched_at` (`at`), the union
+    window, the symbols, the requests and rows, whether every chunk was fetched (`done`) and the failures. Always
+    truthy: `settle_one(prefetched=...)` then checks each intent's bars (`fresh`)."""
+
+    at: str
+    first: dt.date | None = None
+    last: dt.date | None = None
+    symbols: int = 0
+    requests: int = 0
+    rows: int = 0
+    done: bool = True
+    errors: list[str] = dataclasses.field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return True
+
+    def summary(self) -> dict[str, Any]:
+        return {"first": None if self.first is None else self.first.isoformat(),
+                "last": None if self.last is None else self.last.isoformat(), "symbols": self.symbols,
+                "requests": self.requests, "rows": self.rows, "done": self.done, "errors": self.errors[:3]}
+
+
+class Counted:
+    """A gateway that counts its GETs by kind ('bars', 'trades', 'other') and passes each on unchanged."""
+
+    def __init__(self, inner: Any):
+        self.inner = inner
+        self.counts: dict[str, int] = {"bars": 0, "trades": 0, "other": 0}
+
+    @property
+    def last_headers(self) -> Mapping[str, str]:
+        return getattr(self.inner, "last_headers", {}) or {}
+
+    def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        kind = "bars" if path == BARS_PATH else "trades" if path.endswith("/trades") else "other"
+        self.counts[kind] += 1
+        return self.inner.get_json(path, params)
+
+    def __getattr__(self, name: str) -> Any:
+        inner = self.__dict__.get("inner")
+        if inner is None:
+            raise AttributeError(name)
+        return getattr(inner, name)
+
+
+def batch_on(settings: Mapping[str, Any] | None) -> bool:
+    """league/config.json `events.score_batch` (the module docstring): a missing key is ON (`BATCH_DEFAULT`); only false
+    turns it off."""
+    value = (settings or {}).get("score_batch", BATCH_DEFAULT)
+    return value is not False
+
+
+def fresh(store: S.Store, symbols: Iterable[str], days: Iterable[dt.date], at: str) -> bool:
+    """Whether every daily bar of `symbols` on `days`, raw and adjusted, is in `bars` as fetched at or after `at` (this
+    pass's prefetch): the settlement's own two fetches would store nothing newer."""
+    for symbol in {str(s).upper() for s in symbols}:
+        for day in {d.isoformat() for d in days}:
+            for adj in ("raw", "all"):
+                row = store.db.execute("SELECT fetched_at FROM bars WHERE symbol=? AND day=? AND adj=?",
+                                       (symbol, day, adj)).fetchone()
+                if row is None or str(row["fetched_at"]) < at:
+                    return False
+    return True
+
+
+def order_due(intents: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """THE ORDER OF THE BATCHED SCORE: the seating versions (programs.SEATING: what real money trades) and the controls
+    their screens compare them with (screen.control_of) first, then every other record, each group in `due`'s order."""
+    from .programs import SEATING
+    from .screen import control_of
+
+    seats = {(p.id, int(p.version)) for p in SEATING}
+    controls = {c for p in SEATING for c in (control_of(p.id),) if c}
+
+    def first(intent: Mapping[str, Any]) -> bool:
+        return (str(intent["program"]), int(intent["version"])) in seats or str(intent["program"]) in controls
+    return [i for i in intents if first(i)] + [i for i in intents if not first(i)]
+
+
+def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, now: dt.datetime,
+             late: Callable[[], bool] | None = None) -> Prefetch:
+    """THE BATCHED SCORE'S ONE READ OF DAILY BARS (the module docstring): the raw and adjusted SIP daily bars of every
+    symbol of `intents` that has its universe row (one without is skipped by the settlement before any bar is read)
+    and of both benchmarks, over the union window (the earliest entry session to the day 16 minutes ago), 200 symbols a
+    request (`universe.fetch_daily_bars`). Stops between chunks once `late()` says so; a chunk that fails is counted
+    and skipped: either way the intents it left out fetch their own bars, as before. Never raises."""
+    out = Prefetch(at=S.iso(now))
+    symbols: set[str] = set()
+    first: dt.date | None = None
+    for intent in intents:
+        symbol, entry_day = str(intent.get("symbol") or "").upper(), intent.get("entry_day")
+        if not symbol or not entry_day:
+            continue
+        uni = _universe(store, str(entry_day), symbol)
+        if uni is None or not uni.get("bench") or uni.get("adv20") is None:
+            continue
+        symbols.add(symbol)
+        entry = dt.date.fromisoformat(str(entry_day))
+        first = entry if first is None or entry < first else first
+    if first is None:
+        return out
+    names = sorted(symbols | set(BENCHMARKS))
+    last = (now - TAPE_DELAY).astimezone(C.NY).date()
+    out.first, out.last, out.symbols = first, max(first, last), len(names)
+    counted = Counted(gw)
+    for adj in ("raw", "all"):
+        for i in range(0, len(names), U.SYMBOLS_PER_REQUEST):
+            if late is not None and late():
+                out.done = False
+                break
+            chunk = names[i:i + U.SYMBOLS_PER_REQUEST]
+            try:
+                out.rows += U.fetch_daily_bars(store, counted, chunk, out.first, out.last, adj=adj, now=now)
+            except Exception as exc:  # noqa: BLE001 - its intents fetch their own bars
+                out.done = False
+                out.errors.append(f"{adj} {chunk[0]}..{chunk[-1]}: {type(exc).__name__}: {str(exc)[:120]}")
+    out.requests = counted.counts["bars"]
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ the parity night
+def parity_sampled(intent: Mapping[str, Any], share: float = PARITY_SHARE) -> bool:
+    """Whether an intent is in the parity night's sample: the first 8 hex digits of sha256("<program>|<version>|<event>")
+    over 2^32 below `share` (about 5% of intents, the same ones on every run)."""
+    key = f"{intent['program']}|{int(intent['version'])}|{intent['event']}".encode("utf-8")
+    return int(hashlib.sha256(key).hexdigest()[:8], 16) / float(1 << 32) < share
+
+
+def parity_due(store: S.Store, night: dt.date, settings: Mapping[str, Any] | None = None) -> bool:
+    """Whether this night's batched passes run THE PARITY CHECK: `events.score_parity` true every night, false never;
+    else on the first night the batched score settles anything (meta `PARITY_FIRST`, written by `note_first_night`)."""
+    forced = (settings or {}).get("score_parity")
+    if forced is True or forced is False:
+        return forced
+    first = store.meta(PARITY_FIRST)
+    return first is None or first == night.isoformat()
+
+
+def note_first_night(store: S.Store, night: dt.date) -> None:
+    """Keep the first night the batched score settled an intent (meta `PARITY_FIRST`, once)."""
+    store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)", (PARITY_FIRST, night.isoformat()))
+
+
+def check_parity(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, *, now: dt.datetime) -> int | None:
+    """THE PARITY CHECK of one intent the batched pass settled: settled again by the per-intent path (its own two fetches,
+    the prints as stored), in memory, and compared field by field with its stored outcome row; ONLY THE FLAG is written
+    (`score_parity`: 1 equal, 0 not; never a value). Returns the flag, or None when there is nothing to compare (no
+    outcome row, or the recomputation waited or skipped)."""
+    stored = store.db.execute("SELECT * FROM outcomes WHERE program=? AND version=? AND event=?",
+                              (intent["program"], intent["version"], intent["event"])).fetchone()
+    if stored is None:
+        return None
+    try:
+        got = _compute(store, gw, intent, now, False)
+    except Waiting:
+        return None
+    if isinstance(got, str):
+        equal = 0
+    else:
+        row, _ = got
+        equal = int(all(_same(row[f], stored[f]) for f in PARITY_FIELDS))
+    store.db.execute("INSERT OR REPLACE INTO score_parity(program, version, event, night, equal, checked_at) VALUES(?, ?, ?, "
+                     "?, ?, ?)", (intent["program"], int(intent["version"]), intent["event"], night.isoformat(), equal,
+                                  S.iso(now)))
+    return equal
+
+
+def _same(a: Any, b: Any) -> bool:
+    """Byte-identical as the store keeps it: the same type of value and the same value (floats by their repr)."""
+    if isinstance(a, float) or isinstance(b, float):
+        return isinstance(a, float) and isinstance(b, float) and repr(a) == repr(b)
+    return a == b
+
+
+def parity_counts(store: S.Store, night: dt.date) -> dict[str, int]:
+    """The parity night's flags of `night`: {checked, equal} (counts only)."""
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='score_parity'").fetchone() is None:
+        return {"checked": 0, "equal": 0}
+    row = store.db.execute("SELECT COUNT(*), COALESCE(SUM(equal), 0) FROM score_parity WHERE night=?",
+                           (night.isoformat(),)).fetchone()
+    return {"checked": int(row[0] or 0), "equal": int(row[1] or 0)}
+
+
+# ------------------------------------------------------------------------------------------------------- the pass
+def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bool | None = None,
+           parity: bool | None = None) -> dict[str, Any]:
     """The score job: every due intent settled, skipped (no entry print) or left waiting. Returns counts and the
-    failures (an intent's failure is its own; the job goes on)."""
+    failures (an intent's failure is its own; the job goes on). `batch` (release 1019i; None: `BATCH_DEFAULT`): the
+    batched score (`order_due`, `prefetch`, `settle_one(prefetched=...)`); False: the per-intent path of release 1019h.
+    `parity` (None: `parity_due`): the parity check of the sampled intents a batched pass settles."""
     now = now or S.utc_now()
+    batch = BATCH_DEFAULT if batch is None else bool(batch)
+    began = time.monotonic()
+    night = now.astimezone(C.NY).date()
+    counted = Counted(gw)
     summary: dict[str, Any] = {"due": 0, "settled": 0, "skipped": 0, "waiting": 0, "errors": [], "waits": []}
-    for intent in due(store, now):
+    intents: Sequence[Mapping[str, Any]] = due(store, now)
+    pre: Prefetch | None = None
+    if batch and intents:
+        intents = order_due(intents)
+        pre = prefetch(store, counted, intents, now=now)
+    check = batch and (parity_due(store, night) if parity is None else bool(parity))
+    flags = {"checked": 0, "equal": 0}
+    for intent in intents:
         summary["due"] += 1
         try:
-            status = settle_one(store, gw, intent, now=now)
+            status = settle_one(store, counted, intent, now=now, prefetched=pre if pre is not None and pre.symbols else False)
         except Exception as exc:  # noqa: BLE001 - one intent's failure is reported, never the job's
             summary["errors"].append(f"{intent['program']}:{intent['event']}: {type(exc).__name__}: {str(exc)[:160]}")
             summary["waiting"] += 1
@@ -404,8 +659,30 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None) -> dict[s
         summary[key] += 1
         if key == "waiting":
             summary["waits"].append(f"{intent['program']}:{intent['event']}: {status[len('waiting:'):]}")
+        if key == "settled" and batch:
+            note_first_night(store, night)
+            if check and parity_sampled(intent):
+                flag = _parity(store, counted, intent, night, now)
+                if flag is not None:
+                    flags["checked"] += 1
+                    flags["equal"] += flag
+    summary.update(batched=batch, requests=dict(counted.counts), seconds=round(time.monotonic() - began, 3))
+    if pre is not None:
+        summary["prefetch"] = pre.summary()
+    if check:
+        summary["parity"] = flags
     return summary
 
 
+def _parity(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, now: dt.datetime) -> int | None:
+    """`check_parity`, whose failure is never the settlement's (it is written already)."""
+    try:
+        return check_parity(store, gw, intent, night, now=now)
+    except Exception:  # noqa: BLE001 - a flag not written is a flag not counted
+        return None
+
+
 __all__ = ["cost_bp", "impact_bp", "after_cost_return", "equity_on", "equity_key", "record_equity", "tape_print",
-           "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting"]
+           "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting", "Prefetch", "Counted", "prefetch",
+           "fresh", "order_due", "batch_on", "parity_sampled", "parity_due", "note_first_night", "check_parity",
+           "parity_counts", "BATCH_DEFAULT", "BENCHMARKS", "PARITY_SHARE", "PARITY_FIRST", "PARITY_FIELDS"]

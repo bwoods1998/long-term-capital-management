@@ -131,6 +131,15 @@ CREATE TABLE IF NOT EXISTS birth_candidates(night TEXT NOT NULL, seq INTEGER NOT
   PRIMARY KEY(night, seq));
 """
 
+#: RELEASE 1019i'S ADDITIVE TABLE (made by `Store` beside `SCHEMA`, so `SCHEMA_VERSION` stays 1: an older release never
+#: reads it, and a rollback opens the store as before): `score_parity` (PREREG-EVL-8's harness plan H1,
+#: league/events/score.py `check_parity`), the batched score's parity night, one EQUALITY FLAG per sampled intent (1 when
+#: the per-intent path settles it identically, else 0), never a value.
+SCHEMA_1019I = """
+CREATE TABLE IF NOT EXISTS score_parity(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
+  night TEXT NOT NULL, equal INTEGER NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(program, version, event));
+"""
+
 #: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).
 LIVE_RULE = "live"
 BACKFILL_RULE = "backfill"
@@ -210,6 +219,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        self.db.executescript(SCHEMA_1019I)     # (release 1019i: `score_parity`, additive)
         have = self.meta("schema_version")
         if have is None:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -373,4 +383,4 @@ def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
 
 __all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
            "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers", "FILL_COLUMNS_DDL",
-           "migrate_fills"]
+           "migrate_fills", "SCHEMA_1019I"]

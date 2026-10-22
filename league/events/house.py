@@ -214,6 +214,10 @@ UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
 TICKERS_RETRY = dt.timedelta(minutes=5)
 SCORE_AT = dt.time(20, 30)
+#: RELEASE 1019i, THE BATCHED SCORE (`_score`): a pass prefetches the daily bars of this many of its intents at a time
+#: (their symbols and both benchmarks in about two requests a 200 symbols), so a pass its bound cuts has read no bars
+#: for intents it never reached.
+PREFETCH_WINDOW = 400
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 #: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
 #: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
@@ -1593,8 +1597,17 @@ class EventLane:
         """The score job (league.events.score.settle), resumable: each due intent is tried once a night, in order,
         while the bound lasts; the night's pass is `ok` once every one has been tried. The night is the SESSION's
         (`night`, `_night`; release 1019f): a pass that runs past midnight ET goes on with the same night, each intent
-        still tried once, and its receipt's `day` is that session."""
+        still tried once, and its receipt's `day` is that session.
+        RELEASE 1019i, THE BATCHED SCORE (PREREG-EVL-8's harness plan H1; league/events/score.py's docstring), while
+        league/config.json `events.score_batch` is not false (`score.batch_on`): the seating versions and their controls
+        first (`score.order_due`), and before each `PREFETCH_WINDOW` intents of the pass the daily bars of their
+        symbols and both benchmarks in one read (`score.prefetch`, stopped at the bound), so each settles with no bar
+        request of its own (`settle_one(prefetched=...)`); on the parity night (`score.parity_due`) a 5% sample is
+        settled again by the per-intent path and only its equality flag kept (`score_parity`). False: release 1019h's
+        per-intent path. The receipt carries the pass's requests by kind, its seconds and the flags (the daily report's
+        settle-pace line)."""
         st, now = ctx.store, ctx.now()
+        began = self._mono()
         day = night or now.astimezone(C.NY).date()
         for other in [d for d in self._score_seen if d != day]:
             self._score_seen.pop(other)
@@ -1602,23 +1615,54 @@ class EventLane:
         counts = {"due": 0, "settled": 0, "skipped": 0, "waiting": 0, "errors": 0}
         errors: list[str] = []
         complete = True
-        for intent in SC.due(st, now):
+        batch = SC.batch_on(self.settings)
+        gw = SC.Counted(ctx.gw)
+        pending = [i for i in SC.due(st, now)
+                   if (str(i["program"]), int(i["version"]), str(i["event"])) not in seen]
+        if batch:
+            pending = SC.order_due(pending)
+        check = batch and SC.parity_due(st, day, self.settings)
+        flags = {"checked": 0, "equal": 0}
+        pre: SC.Prefetch | None = None
+        fetched = {"requests": 0, "rows": 0, "windows": 0, "done": True}
+        for n, intent in enumerate(pending):
             key = (str(intent["program"]), int(intent["version"]), str(intent["event"]))
-            if key in seen:
-                continue
             if self.late(deadline):
                 complete = False
                 break
+            if batch and n % PREFETCH_WINDOW == 0:
+                pre = SC.prefetch(st, gw, pending[n:n + PREFETCH_WINDOW], now=now, late=lambda: self.late(deadline))
+                fetched["requests"] += pre.requests
+                fetched["rows"] += pre.rows
+                fetched["windows"] += 1
+                fetched["done"] = fetched["done"] and pre.done
             seen.add(key)
             counts["due"] += 1
             try:
-                status = SC.settle_one(st, ctx.gw, intent, now=now)
+                use = pre if pre is not None and pre.symbols else None     # (nothing prefetched: nothing to skip)
+                status = SC.settle_one(st, gw, intent, now=now, **({"prefetched": use} if use is not None else {}))
             except Exception as exc:  # noqa: BLE001 - one intent's failure is its own (as score.settle)
                 counts["errors"] += 1
                 errors.append(f"{key[0]}:{key[2]}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
-            counts[status.split(":")[0]] = counts.get(status.split(":")[0], 0) + 1
-        summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5]}
+            kind = status.split(":")[0]
+            counts[kind] = counts.get(kind, 0) + 1
+            if kind == "settled" and batch:
+                SC.note_first_night(st, day)
+                if check and SC.parity_sampled(intent) and not self.late(deadline):
+                    try:
+                        flag = SC.check_parity(st, gw, intent, day, now=now)
+                    except Exception:  # noqa: BLE001 - a flag not written is a flag not counted
+                        flag = None
+                    if flag is not None:
+                        flags["checked"] += 1
+                        flags["equal"] += flag
+        summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5],
+                   "batched": batch, "requests": dict(gw.counts), "seconds": round(self._mono() - began, 3)}
+        if batch:
+            summary["prefetch"] = fetched
+        if check:
+            summary["parity"] = flags
         self._receipted(st, "score", "ok" if complete else "partial", summary)
         if errors:
             self.warn("score", f"{len(errors)} intents could not be settled this pass, the first: {errors[0]}")
