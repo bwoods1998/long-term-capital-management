@@ -33,6 +33,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league import constitution as K
 from league.constitution import EQUITY_MONEY_BOUNDS, equity_money_problems
 from league.events import births as BI
@@ -141,6 +142,7 @@ class TheRule(unittest.TestCase):
         self.assertEqual(EB.most_ask(EB.settings(), "learning", D(2000)), D("40.00"), "learning: its target")
 
 
+@on_1019h
 class TheRows(unittest.TestCase):
     """S2's money rows (the design's `at_size.probe` as the captain's A100 names them, `event.reach_bar.probe` and
     `.sized`) and the digests they move: the design's check, condition (4): "Ship the new row and its bound in one
@@ -180,29 +182,35 @@ class TheRows(unittest.TestCase):
         off["equity_money"]["event"]["reach_bar"] = {"probe": "0", "sized": "0"}
         self.assertEqual(equity_money_problems(off), [], "0 is inside the bound: the tighten-only switch")
         self.assertEqual(EB.settings(off).reach_bar("probe"), 0)
-        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_OFF, "one money-digest move")
+        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_OFF_1019I, "one money-digest move")
+        self.assertEqual((K.money_digest(X.before_1019i(off))[:8], K.digest(X.before_1019i(off))[:8]), X.S2_OFF,
+                         "release 1019h's switch pair, with release 1019i's row left out")
 
     def test_the_digests_moved_once_with_the_two_rows_and_nothing_else(self):
         pair = X.in_force()
         self.assertEqual((K.money_digest(), K.digest()), X.DIGESTS[pair])
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
-        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("8e63ce64", "c3026eba"))
+        # (release 1019i's row moved them once more, `event.max_open_v6.probe`: release 1019h's table is the one in force
+        # with that row left out, `before_1019i`; league/tests/test_events_evl6.py holds that move)
+        at_1019h = X.before_1019i()
+        self.assertEqual((K.money_digest(at_1019h)[:8], K.digest(at_1019h)[:8]), ("8e63ce64", "c3026eba"))
+        self.assertEqual((K.money_digest(at_1019h), K.digest(at_1019h)), X.DIGESTS_1019H[pair])
         before = X.before_1019h()
         self.assertEqual((K.money_digest(before), K.digest(before)), X.DIGESTS_A86[pair], "release 1019g's pair")
         self.assertEqual((K.money_digest(before)[:8], K.digest(before)[:8]), ("c2f0a478", "24f73f18"))
-        moved = {k for k, v in flat(K.CONSTITUTION).items() if flat(before).get(k, "absent") != v}
+        moved = {k for k, v in flat(at_1019h).items() if flat(before).get(k, "absent") != v}
         self.assertEqual(moved, {"equity_money.event.reach_bar.probe", "equity_money.event.reach_bar.sized"})
-        self.assertEqual(set(flat(before)) - set(flat(K.CONSTITUTION)), set(), "no row left out")
+        self.assertEqual(set(flat(before)) - set(flat(at_1019h)), set(), "no row left out")
         for candidate in X.CANDIDATES:
             at = X.constitution_at(*candidate)
             self.assertEqual((K.money_digest(at), K.digest(at)), X.DIGESTS[candidate], candidate)
             back = X.before_1019h(at)
             self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_A86[candidate], candidate)
         self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_A86.values()), set())
-        off = json.loads(json.dumps(K.CONSTITUTION))
+        off = X.before_1019i()
         off["equity_money"]["event"]["enabled"] = False
         self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_ROLLBACK,
-                         "the rollback: every event buy stopped, the rows kept")
+                         "release 1019h's rollback: every event buy stopped, the rows kept")
         self.assertEqual((K.money_digest(X.before_1019h(off))[:8], K.digest(X.before_1019h(off))[:8]),
                          X.A86_ROLLBACK, "release 1019g's rollback pair, with the rows left out")
 
@@ -218,6 +226,7 @@ def flat(c, prefix: str = "") -> dict:
 
 
 # ======================================================================================== S2, through the real book
+@on_1019h
 class AtDonesSize(TB.EventTest):
     """E $1,898 and cash $1,898 (the reserve $50); EVL-8K-READ-O1 at Probe on 8.01 filings, the limit 1.25 x the
     previous close."""
@@ -349,6 +358,7 @@ class AtDonesSize(TB.EventTest):
         self.assertTrue(DN.at_size(float(D(row["target_usd"])), float(D(row["sized_usd"]))))
 
 
+@on_1019h
 class TheWaitingBuysAhead(TB.EventTest):
     """PREREG-EVL-5 section 1.3's ROOM while a buy waits for the lane's close decision (release 1019g's `HeldAhead`,
     feat/evl-5's): `_event_keep_room` keeps, from every buy after the waiting one in ROOM's order, what `_size_event`

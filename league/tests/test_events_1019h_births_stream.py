@@ -215,8 +215,10 @@ class TheStream(World):
         self.assertLessEqual(body["max_tokens"], int(ceiling))
         self.assertNotIn("temperature", body)
         # The stream and the display are how the answer arrives, not what is asked: the prompt's sha stays A109's.
-        self.assertEqual(BI.prompt_sha(), "0cae215b0cebb21e9313d392e358c443a4d2caf06554e593f32fbaba8cfe6c21")
-        self.assertEqual(BI.PARSE_VERSION, 4)
+        # (release 1019i: the prompt tells PREREG-EVL-6's charge, 0.13: its sha and PARSE_VERSION 5 moved; the stream,
+        # the display and the model did not)
+        self.assertEqual(BI.prompt_sha(), "1442a2a23637e66158ad01b072b2df85f4c6d9fa60b2d7640c8ff98226a6914e")
+        self.assertEqual(BI.PARSE_VERSION, 5)
 
     def test_a_streamed_answer_is_read_to_its_text_and_the_gateways_cost(self):
         st = self.s.st
@@ -390,21 +392,25 @@ class TheHouse(TH.LaneCase):
         self.assertGreaterEqual(self.lane._usd["usd"], row["usd"], "the lane's line counts it")
         self.assertRegex(text, r"Births: .*; last call 2026-10-19 lost \$0\.1\d{3} in \d+\.\d s")
 
-    def test_the_streamed_call_starts_only_with_its_limit_and_a_gap_left_before_the_bound(self):
+    def test_the_streamed_call_starts_only_with_its_limit_and_two_gaps_left_before_the_bound(self):
+        """Release 1019h's re-review, fixed in release 1019i: the room the call needs is its whole limit and TWO gaps (a
+        read that starts just inside the limit waits a whole gap, and the answer's own last read another), inside the
+        births job's bound of 300 s."""
         lane = self.new_lane(births=True)
         with self.store() as st:
             lane._spend_today(st, self.clock_dt())
         lane._line = {"usd_day": 5.0, "source": "test"}
-        short = H.LaneGateway(self.gw, lane, self.mono() + BI.CALL_LIMIT + BI.STREAM_GAP - 1, cut=True)
+        short = H.LaneGateway(self.gw, lane, self.mono() + BI.CALL_LIMIT + 2 * BI.STREAM_GAP - 1, cut=True)
         with self.assertRaises(H.LaneCut) as cut:
             short.post_stream(V.PATH, {"system": BI.SYSTEM}, limit=BI.CALL_LIMIT, gap=BI.STREAM_GAP)
         self.assertIsInstance(cut.exception, G.NotSent, "refused before it went out")
         self.assertEqual((str(cut.exception), dict(short.counts), self.births_calls()), ("room", {"cut_room": 1}, []))
-        room = H.LaneGateway(self.gw, lane, self.mono() + BI.CALL_LIMIT + BI.STREAM_GAP + 1, cut=True)
+        room = H.LaneGateway(self.gw, lane, self.mono() + BI.CALL_LIMIT + 2 * BI.STREAM_GAP + 1, cut=True)
         with self.assertRaises(TimeoutError):
             room.post_stream(V.PATH, {"system": BI.SYSTEM}, limit=BI.CALL_LIMIT, gap=BI.STREAM_GAP)
         self.assertEqual(dict(room.counts), {"asked": 1, "failed": 1})
-        self.assertGreater(H.BIRTHS_BUDGET, BI.CALL_LIMIT + BI.STREAM_GAP, "the births job's bound holds the call")
+        self.assertGreater(H.BIRTHS_BUDGET, BI.CALL_LIMIT + 2 * BI.STREAM_GAP, "the births job's bound holds the call")
+        self.assertEqual(H.BIRTHS_BUDGET, 300.0)
 
     def test_a_call_the_lane_refused_stores_nothing_and_is_not_asked(self):
         with self.store() as st:

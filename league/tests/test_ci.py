@@ -362,7 +362,8 @@ class TheEquityLane(unittest.TestCase):
         for path in ("league/events/programs.py", "League/Events/Programs.py", "league/events/verdicts.py",
                      "league/events/score.py", "league/events/screen.py", "docs/prereg/PREREG-EVL-1.md",
                      "docs/prereg/PREREG-EVL-2.md", "docs/prereg/PREREG-EVL-3.md", "docs/prereg/PREREG-EVL-4.md",
-                     "docs/prereg/PREREG-EVL-5.md", "docs/prereg/evl-5/calib_evl5.py", "league/events/bands.py",
+                     "docs/prereg/PREREG-EVL-5.md", "docs/prereg/evl-5/calib_evl5.py", "docs/prereg/PREREG-EVL-6.md",
+                     "docs/prereg/evl-6/calib_v2.py", "docs/prereg/evl-6/demotion_v2.py", "league/events/bands.py",
                      "League/Events/Bands.py", "league/events/universe.py", "league/events/calendar.py",
                      "league/events/edgar.py", "league/events/news.py", "league/events/run.py",
                      "league/events/store.py", "League/Events/Universe.py"):

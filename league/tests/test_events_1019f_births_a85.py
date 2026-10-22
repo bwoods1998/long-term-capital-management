@@ -22,6 +22,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal as D
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.events import births as BI
 from league.events import book as EB
@@ -40,6 +41,7 @@ def pick(symbol: str, program: str = "x") -> EB.Pick:
     return EB.Pick(program, 2, f"8k:{symbol}", symbol, f"c-{symbol}", 3.0, 1e6, D("16"), "t")
 
 
+@on_1019h
 class Births(unittest.TestCase):
     def setUp(self):
         self.case = TB.EventTest("run")

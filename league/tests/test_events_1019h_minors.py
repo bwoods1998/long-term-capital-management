@@ -30,6 +30,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.events import births as BI
 from league.events import book as EB
@@ -158,7 +159,9 @@ class TheFactsSeeTheLaterFiles(unittest.TestCase):
     def test_no_reading_of_the_grammar_moves(self):
         # The minors moved neither (`fix/1019h-minors` read 3 and 890806ff); release 1019h's A109 (the architect on
         # Claude Opus 5.5, league/tests/test_events_1019h_architect.py) moved both, the model being in the sha's spec.
-        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()[:8]), (4, "0cae215b"),
+        # (release 1019i: the prompt tells PREREG-EVL-6's restated charge, 0.13 a seatable spec, from the budget, so
+        # its sha moved with PARSE_VERSION 5, the prompt's text and its version pinned together: A95)
+        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()[:8]), (5, "1442a2a2"),
                          "more Jaccard targets only refuse more: no refused answer can turn accepted")
         self.assertEqual(set(BI.FILE_FAMILIES), set(P.CLOSE_FAMILIES_4) | set(P.CLOSE_FAMILIES_5))
         self.assertTrue(set(BI.FILE_FAMILIES).isdisjoint(BI.FAMILIES), "no birth names one")
@@ -335,6 +338,7 @@ class TheLeadAfterAFailedLiveRun(TH.LaneCase):
 
 
 # ------------------------------------------------------------------------------------------------- (5) the room
+@on_1019h
 class TheRoomOnceOverdue(TB.EventTest):
     """(5) THE CAPTAIN'S DECISION on PREREG-EVL-5's money re-review (option 1): once the lane's close receipt is still
     unfinished one book minute before the close window's cut-off (15:48:00 ET on a full day), a waiting PREREG-EVL-5

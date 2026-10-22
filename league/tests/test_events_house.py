@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import edgar as E
 from league.events import house as H
@@ -826,6 +827,7 @@ class TheRecordPass(LaneCase):
         self.assertEqual(receipt["verdicts"][0]["missing"], 0)
 
 
+@on_1019h
 class Nightly(LaneCase):
     def test_equity_after_the_close_then_score_screen_and_report(self):
         self.at(et("2026-10-20", "16:04"))

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import programs as P
 from league.events import run as R
 from league.events import store as S
@@ -75,6 +76,7 @@ def sec_pages(url):
     raise AssertionError(url)
 
 
+@on_1019h
 class RunTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

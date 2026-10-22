@@ -31,6 +31,7 @@ from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+from league.tests.evl6_fakes import on_1019h
 from league.constitution import CONSTITUTION
 from league.equity import live as L
 from league.equity import schedule as ES
@@ -372,6 +373,7 @@ class EventTest(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------------- the rows
+@on_1019h
 class TheRows(unittest.TestCase):
     def test_the_event_block_is_the_prereg_and_its_switch_ships_on_beside_the_old_lanes_off(self):
         s = EB.settings()
@@ -467,6 +469,7 @@ class TheRows(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------------- the bands
+@on_1019h
 class TheBands(EventTest):
     def test_learning_from_birth_and_the_lanes_word_after(self):
         h = self.harness()
@@ -520,6 +523,7 @@ class TheBands(EventTest):
 
 
 # ------------------------------------------------------------------------------------------------------- the picks
+@on_1019h
 class ThePicks(EventTest):
     def test_only_events_stored_and_verdicts_answered_before_the_decision_count(self):
         h = self.harness()
@@ -625,6 +629,7 @@ class ThePicks(EventTest):
 
 
 # ------------------------------------------------------------------------------------------------------- the day
+@on_1019h
 class TheDay(EventTest):
     def test_a_program_at_learning_buys_at_the_open_and_sells_at_the_close_in_whole_shares(self):
         h = self.harness()
@@ -1052,6 +1057,7 @@ class LaneGateway:
                                                                        "reasons": []})}], "stop_reason": "end_turn"}
 
 
+@on_1019h
 class TheRealLane(EventTest):
     """THE LANE INTERFACE, END TO END (release 1019b): the lane's OWN code (league/events/edgar.py records an invented
     8-K; league/events/run.py asks its verdict from 07:30 ET and decides DAY's open at 09:15 ET) writes its VERSION 2
@@ -1234,6 +1240,7 @@ class TheTwins(EventTest):
 
 
 # ------------------------------------------------------------------------------------------------------- the readers
+@on_1019h
 class TheReaders(EventTest):
     """The swarm era's readers of the live book leave an event program's instance and lots out (release R2): the
     forward register (no forward program, no identity watch), the forward twins (no replay of a pre-registered rule),

@@ -32,6 +32,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league import site_lane
 from league.events import births as BI
 from league.events import book as EB
@@ -409,6 +410,7 @@ def _decide(case: type, root: Path, loaded: bool) -> S.Store:
 
 
 # ======================================================================================================== the House
+@on_1019h
 class TheHouseDecidesTheBirthsByThemselves(TH.LaneCase):
     """A birth registered Mon Oct 19 20:30 ET; every decision from Tue Oct 20 to Tue Oct 27 made by a release without
     births (release 1019d's receipts); release 1019e's lane on the evening of Tue Oct 27: the hourly re-decision decides

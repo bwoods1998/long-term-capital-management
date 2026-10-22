@@ -11,6 +11,7 @@ import unittest
 from fractions import Fraction
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import screen as SC
 from league.events import store as S
 
@@ -398,6 +399,7 @@ class CalibrationTest(unittest.TestCase):
         self.assertAlmostEqual(tail, 0.05, delta=0.006)
 
 
+@on_1019h
 class ScreenJobTest(unittest.TestCase):
     """The job on a synthetic store: C1 (close to next close) and a READ program with its control."""
 
@@ -490,7 +492,9 @@ class ScreenJobTest(unittest.TestCase):
     def test_expected_false_passes_count_every_seatable_version(self):
         # PREREG-EVL-3's nine version 2 rows and PREREG-EVL-4's three (their version 1), of the lane's stated 3.0
         # (PREREG-EVL-5, release 1019g: its three seatable programs at version 1 too, 1.5 of the stated 3.0)
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
+        efp = SC.expected_false_passes(self.st)     # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version or run of 3.9)
+        self.assertEqual({k: efp[k] for k in ("versions", "expected", "budget", "left")},
+                         {"versions": 15, "expected": 1.95, "budget": 3.9, "left": 1.95})
         with self.st.tx() as db:
             db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
                        "exit_at, mode, status) VALUES('EVL-8K-READ-O1', 3, 'x', 'S', 'z', '2026-10-19', 'open', "
