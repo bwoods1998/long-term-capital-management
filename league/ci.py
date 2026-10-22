@@ -263,6 +263,14 @@ PENDING_GATEWAY += ("league/events/done.py",)
 #: decision reads them): rule inputs like universe.py and store.py, so no main commit the in-box updater would ship can
 #: change them without the owner's deploy. They wait here for the gateway's merge-list follow-up, as the lane's do.
 PENDING_GATEWAY += ("league/events/attempts.py", "league/events/pxstore.py", "league/events/pxdata.py")
+#: RELEASE 1019j'S NEW MODULES (PREREG-EVL-8): the price lane's programs, its pinned record grid and its decisions
+#: (league/events/px.py, px_grid8.json: which prices make an event, which names a seat or a record takes, what real money
+#: buys), the meta-learners (league/events/meta.py: the algorithm and constants that fill real-money slots) and this
+#: file's judge (league/events/screen8.py: PREREG-EVL-6's screen with F4's cap, the runs, the stays and the placebo
+#: audit): judges and rule inputs like screen.py and programs.py, so no main commit the in-box updater would ship can
+#: change them without the owner's deploy. They wait here for the gateway's merge-list follow-up, as the lane's do.
+PENDING_GATEWAY += ("league/events/px.py", "league/events/px_grid8.json", "league/events/meta.py",
+                    "league/events/screen8.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

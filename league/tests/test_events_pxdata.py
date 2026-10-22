@@ -486,11 +486,17 @@ class TheHouse(unittest.TestCase):
 class OnlyWarming(unittest.TestCase):
     def test_no_decision_judge_or_money_module_reads_the_price_lanes_store(self):
         """With `events.px_data` on the recorders only warm px.sqlite: no module that decides, judges or trades opens it
-        (PREREG-EVL-8's programs, H3, are the first readers, in their own release)."""
+        but PREREG-EVL-8's own (release 1019j: league/events/px.py, meta.py and screen8.py, the first readers): the
+        lane's book and its score read it only for PREREG-EVL-8's rows and only through px.py (`book.picks_8`, a PX
+        event's settlement), never through the store or the recorders themselves."""
         events = Path(__file__).resolve().parents[1] / "events"
-        for name in ("run.py", "book.py", "screen.py", "score.py", "bands.py", "done.py", "programs.py", "universe.py"):
+        for name in ("run.py", "screen.py", "bands.py", "done.py", "programs.py", "universe.py"):
             text = (events / name).read_text(encoding="utf-8")
             for word in ("pxstore", "pxdata", "px.sqlite", "PxStore"):
+                self.assertNotIn(word, text, f"{name} names {word}")
+        for name in ("book.py", "score.py"):
+            text = (events / name).read_text(encoding="utf-8")
+            for word in ("pxstore", "PxStore("):
                 self.assertNotIn(word, text, f"{name} names {word}")
         equity = Path(__file__).resolve().parents[1] / "equity"
         for path in equity.glob("*.py"):

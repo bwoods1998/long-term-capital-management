@@ -113,6 +113,8 @@ def on_look(store: S.Store, look: Mapping[str, Any], *, now: Any = None, db: Any
     key = (str(look["program"]), int(look["version"]))
     if key not in seating() or not int(look.get("held") or 0):
         return None
+    if P.is_8(key[0]):
+        return None     # (PREREG-EVL-8's versions move only by their own judge's looks: league/events/screen8.py `on_look`)
     if (look.get("retirement") or {}).get("retire"):
         if set_band(store, key[0], key[1], "retired", since=str(look["at"]), now=now, db=db,
                     why=f"look {look['k']}: mean a < 0, reversed p {look['retirement']['p_below']:.4f} <= {RETIRE_P}"):
@@ -185,6 +187,8 @@ def review(store: S.Store, *, now: Any = None) -> list[dict[str, Any]]:
     for (program, version), band in bands(store).items():
         if band not in PROBE_PLUS:
             continue
+        if P.is_8(program):
+            continue        # (PREREG-EVL-8's versions: PREREG-EVL-6 section 3 with its cap, league/events/screen8.py `review`)
         events = real_events(store, program, version)
         if not events:
             continue

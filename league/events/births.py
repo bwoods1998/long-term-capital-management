@@ -158,6 +158,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from . import calendar as C
 from . import gw as G
 from . import programs as P
+from . import meta as MT
+from . import px as PXL
 from . import pxstore as PXS
 from . import screen as SN
 from . import store as S
@@ -320,6 +322,12 @@ FACTS_DENY = FACTS_DENY | frozenset({"real_attempts", "score_parity"})
 #: the PX universe's prices and the decided values): px.sqlite is a file of its own, which the facts never open, and
 #: each of its tables is refused by name as well.
 FACTS_DENY = FACTS_DENY | PXS.TABLES
+#: ... and (release 1019j, PREREG-EVL-8 section 10, F8) every px.sqlite table PREREG-EVL-8 adds (league/events/px.py
+#: `TABLES_8`: the morning values, the decisions, the panel, the record days, the basis, the prints, the placebos) and
+#: every mrl_* table of its meta-learners (league/events/meta.py `TABLES`: the members, the state, the walk, their runs):
+#: machine-only figures no designer, judge, captain or birth reads. The facts read no intent at all, the meta-learners'
+#: included.
+FACTS_DENY = FACTS_DENY | PXL.TABLES_8 | MT.TABLES
 #: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
 #: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
 #: of their programs has a selection count and every candidate a Jaccard against them.

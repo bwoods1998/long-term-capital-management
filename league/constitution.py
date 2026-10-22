@@ -1222,6 +1222,16 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   when that rounds to none, one share when it fits every wall and, at learning and at Probe, when one share at the
 #   limit is at most `one_share_max` of the band (0.05 each) of E; otherwise the event is skipped (the shadow keeps it).
 # - `max_open`: open positions a program may hold (learning 8, Probe 6, Sized 8).
+# - `max_open_v8` (release 1019j; PREREG-EVL-8 section 4.1, F4): THE PX SEATS' LEARNING ROOM. PREREG-EVL-8's three PX
+#   seats (PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1) hold AT MOST 4 OPEN LEARNING POSITIONS a program, read for them ALONE
+#   (league/events/book.py `max_open_8`; every other program, PREREG-EVL-8's meta-learners included, keeps
+#   `max_open.learning` 8). Its bound is 0-4: 4 is the registered loose end (the text's own number, so a change may only
+#   trade less) and 0 stops every PX learning buy. The red team's reason (goal-2026-10-19/evl8/redteam/rt_budget.py):
+#   five more programs' full learning books would hold loss-budget and cash room the Probe tier needs; the PX screen's
+#   money weights and top guard read the same 4 (F4). ITS COST, PLAINLY: at most 3 x 4 = 12 more learning lots at about
+#   2% of E each (0.24 x E at target), every lot under the name's 10%, the 100% book, the cash, the loss budget at the
+#   lot's weight and A85's reservation; no wall moves; this file's buys are planned and sent after every earlier row's
+#   (league/events/book.py `EIGHT_ROOM`), so no earlier row's room moves.
 # - A86 REVISED, PROBE SMALLER, INSIDE THE TRADE-LESS ENVELOPE (the captain's amendment of 20:30Z Oct 21, 2026,
 #   replacing A86's proposal; decided before any Probe event; a sizing rule inside the frozen envelope: no program's
 #   rule and no judge, look, alpha or Done rule moves): the Probe band was PREREG-EVL-1 section 8's 5% of E with at
@@ -1300,6 +1310,7 @@ CONSTITUTION["equity_money"]["event"] = {
     "one_share_max": {"learning": "0.05", "probe": "0.05"},
     "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
+    "max_open_v8": {"learning": 4},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
     "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
@@ -1550,6 +1561,9 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "event.max_open.learning": ("0", "8"),
     "event.max_open.probe": ("0", "6"),
     "event.max_open.sized": ("0", "8"),
+    # RELEASE 1019j (PREREG-EVL-8 section 4.1): the PX seats' learning room alone; every other program keeps
+    # `event.max_open.learning` 8 and its bound.
+    "event.max_open_v8.learning": ("0", "4"),
     "event.per_name_share": ("0", "0.10"),
     "event.limit_ratio": ("1.00", "1.25"),
     "event.open_risk.floor": ("0.10", "1.00"),
@@ -1642,7 +1656,7 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
                   "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
-                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized",
+                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized", "event.max_open_v8.learning",
                   "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS),
                   "event.max_orders_day")
 EQUITY_CLASSES = ("etf", "stock")
@@ -1802,4 +1816,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'c3026ebacddf03bc853d7dc1f1b64d5788ecdd9dd90623adb2e6365baf9e9f53'
+PINNED_DIGEST = '84dc7041f2de5d7811698284cb7287a334cd341198c0e2b09f4f27f70c0c8fe2'

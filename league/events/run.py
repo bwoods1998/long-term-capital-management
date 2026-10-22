@@ -610,8 +610,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
 
     for prog in P.PROGRAMS:
-        if prog.entry_at != "open" or (births_only and prog.spec is None):
-            continue
+        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.FAMILIES_8:
+            continue        # (PREREG-EVL-8's rows decide in their own runs: league/events/px.py, meta.py)
         _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
         def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows) -> None:
@@ -1520,7 +1520,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     if not evl4_only and not evl5_only:       # (one file's rows by themselves: no earlier row is decided again)
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
-                    prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None):
+                    prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None) and \
+                    prog.family not in P.FAMILIES_8:     # (PREREG-EVL-8's: their own runs, league/events/px.py, meta.py)
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
         if not births_only and not evl5_only:     # (the births, or PREREG-EVL-5's rows, by themselves: no PREREG-EVL-4 row)

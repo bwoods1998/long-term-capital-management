@@ -58,7 +58,7 @@ SCHEMA_VERSION = 1
 FLAG_TOLERANCE = 0.001
 SOURCES = ("live", "backfill")
 RULES = (S.LIVE_RULE, S.BACKFILL_RULE)
-LABELS = ("px1530", "v1530", "pm")
+LABELS = ("px1530", "v1530", "pm", "o0930")      # (o0930: PREREG-EVL-8 section 3.3's OPENGAP, D's 09:30 minute's open)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS px_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);

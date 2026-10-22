@@ -1020,6 +1020,15 @@ def wall_equity(E: Decimal, account: Mapping[str, Any] | None) -> Decimal:
     return E if now is None else min(E, now)
 
 
+def _eight(adapter: Any, inst: Any) -> bool:
+    """Whether an event instance is one of PREREG-EVL-8's seats (league/events/programs.py `is_8`, through the adapter's
+    `P`; an adapter without it has none): its auction's picks are planned in this file's own late passes, after every
+    other row's (`EquityBook._event_decide_8`)."""
+    progs = getattr(adapter, "P", None)
+    test = getattr(progs, "is_8", None) if progs is not None else None
+    return bool(test is not None and getattr(inst, "kind", None) == EVENT_KIND and test(inst.family))
+
+
 @dataclass
 class HeldAhead:
     """PREREG-EVL-5 section 1.3's ROOM WHILE A BUY WAITS FOR THE LANE'S CLOSE DECISION (league/events/book.py
@@ -5214,6 +5223,10 @@ class EquityBook:
                     self._event_decide(now, em, at, s, adapter, out)
                 except Exception as exc:  # noqa: BLE001 - its exits were planned first; decided again next minute
                     self._error(f"event decide {at}", exc, out)
+                try:    # (PREREG-EVL-8: this file's late passes of the auction, after every earlier row's)
+                    self._event_decide_8(now, em, at, s, adapter, out)
+                except Exception as exc:  # noqa: BLE001 - planned again next minute; no earlier row waits on it
+                    self._error(f"event decide {at} PREREG-EVL-8", exc, out)
                 if sending:
                     self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",))
         try:
@@ -5358,6 +5371,8 @@ class EquityBook:
             rooms: dict[str, int] = {}
             insts = {}
             for inst in self._instances(alive=True):
+                if _eight(adapter, inst):
+                    continue        # (PREREG-EVL-8's seats: their own late passes after this one, `_event_decide_8`)
                 program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
                 if program is None or not inst.live or program.entry_at != at:
                     continue
@@ -5447,6 +5462,121 @@ class EquityBook:
                                             "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()},
                                             **({"sale_to_later": summary["sale_to_later"]}
                                                if summary.get("sale_to_later") else {})})
+
+    #: PREREG-EVL-8 section 4.6: how long this file's late passes wait for a run still owed, after the auction's decision
+    #: time (the open's PX-GAP-O1 and EVL-META-O1 run, bounded to 09:19:30 ET: 270 s; EVL-META-ON's, never past the
+    #: close - 11:20, 160 s after the close decision time), then plan what is on record (a part not finished trades
+    #: nothing at that auction). PX-DROP-ON's and PX-SURGE-ON's run ends 10 s before the lane's close run starts: their
+    #: pass waits for nothing.
+    EVENT_8_WAIT_S = {"open-px8": 270.0, "close-meta8": 160.0, "close-px8": 0.0}
+
+    def _event_decide_8(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
+        """PREREG-EVL-8 SECTION 4.2-4.6: THIS FILE'S LATE PASSES OF THE AUCTION (`eq_event_decisions` rows (day,
+        "open-px8"), (day, "close-px8") and (day, "close-meta8")), each once a session, AFTER the auction's own decision
+        of every earlier row (`_event_decide`, births included) and after PREREG-EVL-7's learners' pass where the tree
+        has one (its row "<at>-lrn"), so the book plans every earlier row exactly as without this file: each live seat
+        of the pass asked for its picks (`book.picks_8`: its LIVE run's ranked names, or the meta-learner's live
+        intents, less its guard and one position per issuer), passing over every name already given at this auction
+        and the picks `_event_gate` skips, up to its room (`book.max_open_8`: PX's learning room 4 by the money row
+        `event.max_open_v8.learning`), allocated in this file's ROOM (`book.allocate`, `room_key`'s EIGHT tiers) and
+        planned as buys sent after every earlier buy (`send_key`). A pass waits for its run up to `EVENT_8_WAIT_S`,
+        then plans what is on record: a run that did not finish is never traded at that auction. Nothing while this
+        file registers nothing."""
+        progs = getattr(adapter, "P", None)
+        if progs is None or not getattr(progs, "registers_8", lambda: False)():
+            return
+        day = em.day.isoformat()
+        if not self._event_decided(day, at):
+            return
+        lane = self._event_lane_store()
+        if lane is None or not s.enabled:
+            return
+        is_learner = getattr(adapter, "is_learner", None)
+        if is_learner is not None and not self._event_decided(day, f"{at}-lrn") and \
+                any(is_learner(i.family) for i in self._instances(alive=True) if i.kind == EVENT_KIND):
+            return      # (PREREG-EVL-7's learners' pass first: a name a learner is given is never also bought here)
+        decided_at = em.open_decide if at == "open" else em.close_decide
+        passes = [("open-px8", ("PX-GAP-O1", "EVL-META-O1"))] if at == "open" else \
+            [("close-px8", ("PX-DROP-ON", "PX-SURGE-ON")), ("close-meta8", ("EVL-META-ON",))]
+        for key, ids in passes:
+            if self._event_decided(day, key):
+                continue
+            ready = adapter.decided_8(lane, em.day, key) and (key != "open-px8" or adapter.meta_o1_done(lane, em.day))
+            if not ready and now < decided_at + self.EVENT_8_WAIT_S[key]:
+                out["event_decide_8"] = f"waiting for PREREG-EVL-8's run of {key} ({day})"
+                return      # (the later pass of the same auction waits behind it: ROOM's order among this file's rows)
+            self._event_decide_8_pass(now, em, at, key, ids, s, adapter, lane, decided_at, out)
+
+    def _event_decide_8_pass(self, now: float, em: S.EventMoments, at: str, key: str, ids: Sequence[str], s: Any,
+                             adapter: Any, lane: Any, decided_at: float, out: dict) -> None:
+        """One late pass of PREREG-EVL-8 (`_event_decide_8`), planned and written once."""
+        day = em.day.isoformat()
+        seats = []
+        for inst in self._instances(alive=True):
+            program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
+            if program is not None and program.id in ids and inst.live and program.entry_at == at:
+                seats.append((inst, program))
+        summary: dict[str, Any] = {"programs": {}, "after": at, "pass": key}
+        planned: list[tuple[Any, Any, Any]] = []
+        sigmas: dict[str, float | None] = {}
+        if seats:
+            moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
+            given_names = {str(r["symbol"]).upper() for r in self.state.rows(
+                "SELECT symbol FROM eq_event_intents WHERE side='buy' AND day=? AND at=?", (day, at))}
+            wanted: dict[str, list[Any]] = {}
+            rooms: dict[str, int] = {}
+            insts = {}
+            for inst, program in seats:
+                room = adapter.max_open_8(s, inst.band, program) - self._event_open_count(inst.id)
+                insts[inst.family] = (inst, program)
+                if room <= 0:
+                    wanted[inst.family], rooms[inst.family] = [], 0
+                    summary["programs"][inst.family] = {"picks": None, "room": 0}
+                    continue
+                held = self._event_held(inst, em.day, adapter)
+                try:
+                    got = adapter.picks(lane, program, em.day, decided_at=moment, held=lambda cik, held=held: cik in held)
+                except Exception as exc:  # noqa: BLE001 - that seat plans nothing this auction
+                    self._error(f"event picks {inst.family}", exc, out)
+                    summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+                    continue
+                wanted[inst.family], rooms[inst.family] = list(got), room
+                summary["programs"][inst.family] = {"picks": len(got), "room": room}
+            if any(wanted.values()):
+                gate, unreadable = self._event_gate(day, at, s, adapter)
+                if unreadable:
+                    summary["errors"] = [unreadable]
+                    with self.state.transaction():
+                        self.state.upsert("eq_event_decisions", {"day": day, "at": key, "decided_at": _iso(decided_at),
+                                                                 "status": "failed", "summary": dumps(summary),
+                                                                 "created_at": now}, "day, at")
+                    return
+
+                def skip(family: str, pick: Any) -> str | None:
+                    if str(pick.symbol).upper() in given_names:
+                        return "name_given"
+                    return gate(insts[family][0].band, pick) if gate else None
+                given, passed = adapter.allocate(wanted, rooms, {f: insts[f][0].band for f in wanted}, skip)
+                symbols = sorted({p.symbol for picks in given.values() for p in picks})
+                sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
+                for family, picks in given.items():
+                    inst, program = insts[family]
+                    for pick in picks:
+                        planned.append((inst, program, pick))
+                    summary["programs"][family]["planned"] = len(picks)
+                    if passed.get(family):
+                        summary["programs"][family]["skipped"] = dict(passed[family])
+        with self.state.transaction():
+            for inst, program, pick in planned:
+                self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
+            self.state.upsert("eq_event_decisions", {"day": day, "at": key, "decided_at": _iso(decided_at),
+                                                     "status": "done", "summary": dumps(summary), "created_at": now},
+                              "day, at")
+        out["event_decide_8"] = f"{key} {day}: {len(planned)} PREREG-EVL-8 buys planned"
+        if planned:
+            self._event_publish(em.day, adapter, lane, out)
+        self.record("equity.event_decide", {"day": day, "at": key, "exits": 0, "buys": len(planned),
+                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()}})
 
     def _event_plan_buy(self, inst: Instance, program: Any, pick: Any, em: S.EventMoments, at: str, s: Any,
                         adapter: Any, sd: float | None, now: float) -> None:
@@ -6142,6 +6272,11 @@ class EquityBook:
         # PREREG-EVL-1 to -4 is sized and counted without the room the waiting PREREG-EVL-5 buys keep; a birth's buy,
         # and a PREREG-EVL-5 row's, still keep out of it)
         room = ahead.for_buy(ahead.overdue and inst is not None and _room_free(adapter, inst.family, inst.version))
+        keep8 = getattr(adapter, "line_keep_8", None)
+        if inst is not None and keep8 is not None and keep8(inst.family):
+            # (PREREG-EVL-8 section 4.3: this file's entry leaves `book.EIGHT_LINE_KEEP` slots of the day order line to
+            # every earlier row, so the line refuses its entries first; an exit is never stopped by it)
+            room = replace(room, orders=room.orders + int(keep8(inst.family)))
         why = self._open_block(real_block, inst, killed)
         hold = None
         if why is None:
@@ -6160,6 +6295,12 @@ class EquityBook:
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
                 self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders)
+        cap8 = None
+        if inst is not None and _eight(adapter, inst):
+            prog8 = adapter.program_of(inst.family, inst.version)
+            cap8 = adapter.max_open_8(s, inst.band, prog8) if prog8 is not None else 0
+        if why is None and cap8 is not None and self._event_open_count(intent.instance) > cap8:
+            why = f"the program holds and has on order more than its {cap8} positions (PREREG-EVL-8 section 4.1)"
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why is None and hold is not None:

@@ -227,6 +227,17 @@ def span_pm(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
             dt.datetime.combine(day, dt.time(8, 59), tzinfo=C.NY).astimezone(dt.timezone.utc))
 
 
+def span_o0930(session: C.Session) -> tuple[dt.datetime, dt.datetime]:
+    """THE 09:30 MINUTE (PREREG-EVL-8 section 3.3's OPENGAP o_D, PREREG-EVL-5's gap minute): the regular-session bar
+    starting at the open (09:30:00 ET), as [start, end) of bar starts."""
+    return session.open_at, session.open_at + dt.timedelta(minutes=1)
+
+
+def first_open(bars: Sequence[Mapping[str, Any]]) -> float | None:
+    """o_D: the OPEN of the span's first bar (the bar starting at 09:30:00 ET), None without one."""
+    return _positive(bars[0].get("o")) if bars else None
+
+
 def span_v1530(session: C.Session) -> tuple[dt.datetime, dt.datetime]:
     """V_D's span: the session's regular minute bars through the bar ending at 15:30 ET (close - 30 on an early close)."""
     return session.open_at, span_1530(session)[1]
@@ -273,7 +284,7 @@ def minutes(px: PS.PxStore, gw: Any, symbols: Sequence[str], session: C.Session,
     once its span is whole on the tape (else {"waiting": ...}, nothing written): WRITE-ONCE, a symbol with no bar in
     the span stored as no value (read once). Returns {written, kept, waiting}."""
     span = {"px1530": lambda: span_1530(session), "pm": lambda: span_pm(session.day),
-            "v1530": lambda: span_v1530(session)}[label]()
+            "v1530": lambda: span_v1530(session), "o0930": lambda: span_o0930(session)}[label]()
     todo = [s for s in sorted({str(x).upper() for x in symbols}) if px.minute(s, session.day, label) is None]
     if not todo:
         return {"written": 0, "kept": len(set(symbols)), "waiting": None}
@@ -283,7 +294,7 @@ def minutes(px: PS.PxStore, gw: Any, symbols: Sequence[str], session: C.Session,
     written = 0
     for sym in todo:
         bars = _in(got.get(sym) or [], *span)
-        value = {"px1530": last_close, "pm": pm_value, "v1530": volume}[label](bars)
+        value = {"px1530": last_close, "pm": pm_value, "v1530": volume, "o0930": first_open}[label](bars)
         written += px.put_minute(sym, session.day, label, value if bars else None, bars=len(bars),
                                  first_t=str(bars[0]["t"]) if bars else None, last_t=str(bars[-1]["t"]) if bars else None,
                                  run=run, now=now)
@@ -487,6 +498,7 @@ def names(px: PS.PxStore, day: dt.date, rule: str = S.LIVE_RULE) -> list[str]:
 
 
 __all__ = ["TokenBucket", "PxGateway", "PxCut", "daily_bars", "minute_bars", "span_1530", "span_pm", "span_v1530",
+           "span_o0930", "first_open",
            "pm_value", "last_close", "volume", "minutes", "backfill", "daily", "flags", "listed_tickers",
            "operating_fill", "cached_operating", "universe", "pm_names", "names", "BARS_PATH", "RATE_PER_MINUTE",
            "LANE_RESERVE", "BACKFILL_SESSIONS", "NIGHTLY_SESSIONS", "ADJUSTED_SESSIONS", "PX_MIN_PRICE", "PX_MIN_ADV",

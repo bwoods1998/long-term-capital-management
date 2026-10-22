@@ -180,29 +180,36 @@ class TheRows(unittest.TestCase):
         off["equity_money"]["event"]["reach_bar"] = {"probe": "0", "sized": "0"}
         self.assertEqual(equity_money_problems(off), [], "0 is inside the bound: the tighten-only switch")
         self.assertEqual(EB.settings(off).reach_bar("probe"), 0)
-        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_OFF, "one money-digest move")
+        # (release 1019j's row moved every pair once more, `event.max_open_v8.learning`: release 1019h's switch pair is the
+        # one in force with that row left out, `before_1019j`; league/tests/test_events_evl8.py holds that move)
+        self.assertEqual((K.money_digest(X.before_1019j(off))[:8], K.digest(X.before_1019j(off))[:8]), X.S2_OFF,
+                         "one money-digest move")
 
     def test_the_digests_moved_once_with_the_two_rows_and_nothing_else(self):
         pair = X.in_force()
         self.assertEqual((K.money_digest(), K.digest()), X.DIGESTS[pair])
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
-        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("8e63ce64", "c3026eba"))
+        # (release 1019j's row moved them once more, `event.max_open_v8.learning`: release 1019h's table is the one in force
+        # with that row left out, `before_1019j`; league/tests/test_events_evl8.py holds that move)
+        at_1019h = X.before_1019j()
+        self.assertEqual((K.money_digest(at_1019h)[:8], K.digest(at_1019h)[:8]), ("8e63ce64", "c3026eba"))
+        self.assertEqual((K.money_digest(at_1019h), K.digest(at_1019h)), X.DIGESTS_1019H[pair])
         before = X.before_1019h()
         self.assertEqual((K.money_digest(before), K.digest(before)), X.DIGESTS_A86[pair], "release 1019g's pair")
         self.assertEqual((K.money_digest(before)[:8], K.digest(before)[:8]), ("c2f0a478", "24f73f18"))
-        moved = {k for k, v in flat(K.CONSTITUTION).items() if flat(before).get(k, "absent") != v}
+        moved = {k for k, v in flat(at_1019h).items() if flat(before).get(k, "absent") != v}
         self.assertEqual(moved, {"equity_money.event.reach_bar.probe", "equity_money.event.reach_bar.sized"})
-        self.assertEqual(set(flat(before)) - set(flat(K.CONSTITUTION)), set(), "no row left out")
+        self.assertEqual(set(flat(before)) - set(flat(at_1019h)), set(), "no row left out")
         for candidate in X.CANDIDATES:
             at = X.constitution_at(*candidate)
             self.assertEqual((K.money_digest(at), K.digest(at)), X.DIGESTS[candidate], candidate)
             back = X.before_1019h(at)
             self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_A86[candidate], candidate)
         self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_A86.values()), set())
-        off = json.loads(json.dumps(K.CONSTITUTION))
+        off = X.before_1019j()
         off["equity_money"]["event"]["enabled"] = False
         self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_ROLLBACK,
-                         "the rollback: every event buy stopped, the rows kept")
+                         "release 1019h's rollback: every event buy stopped, the rows kept")
         self.assertEqual((K.money_digest(X.before_1019h(off))[:8], K.digest(X.before_1019h(off))[:8]),
                          X.A86_ROLLBACK, "release 1019g's rollback pair, with the rows left out")
 

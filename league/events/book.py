@@ -238,6 +238,8 @@ def room_key(program: str, band: str | None) -> tuple[int, int]:
     found = next((p for p in seatable() if p.id == program), None)
     if found is not None and found.spec is not None and str(band) not in PROBE_UP:
         return (BIRTH_ROOM, order_of(program))
+    if found is not None and P.is_8(found):
+        return (EIGHT_ROOM[str(band)] if str(band) in EIGHT_ROOM else 9, order_of(program))   # (PREREG-EVL-8 s4.2)
     return (PRIORITY.get(str(band), 9), order_of(program))
 
 
@@ -356,7 +358,7 @@ def send_key(program: str, band: str | None, n: int) -> tuple[int, int, int]:
     pass, so the last Probe row in the tables is not left the cash the earlier rows did not take); learning, and the
     births at learning, in the tables' order, each program's buys in its ranking (release 1019e's `room_key` order)."""
     tier, order = room_key(program, band)
-    return (tier, max(0, int(n)) if tier in ROUND_ROBIN_TIERS else 0, order)
+    return (tier, max(0, int(n)) if tier in ROUND_ROBIN_TIERS or tier in EIGHT_ROUND_ROBIN else 0, order)
 
 
 SCHEMA = """
@@ -554,7 +556,8 @@ def eligible(lane: Lane, day: dt.date) -> list[str]:
     """THE ELIGIBLE LIST of entry session `day`: the symbols of the live rule's eligible universe rows the lane wrote for
     it (`LIVE_ROWS`; PREREG-EVL-1 section 2, the issuers with events), sorted. The gateway admits an event buy only for
     a name on it."""
-    return sorted({str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))})
+    names = {str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))}
+    return sorted(names | eligible_8(lane, day))
 
 
 def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
@@ -1051,6 +1054,8 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
     rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
     price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`)."""
+    if P.is_8(program):     # (PREREG-EVL-8: its own decisions' picks, never `select`: `picks_8`)
+        return picks_8(lane, program, day, decided_at=decided_at, held=held)
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
     guard = program.id in NEXT_OPEN_GUARD
@@ -1146,7 +1151,7 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
         while i < len(order) and tier(order[i]) == rank:   # (one ROOM tier: a birth's at learning is BIRTH_ROOM)
             group.append(order[i])
             i += 1
-        if rank in ROUND_ROBIN_TIERS:
+        if rank in ROUND_ROBIN_TIERS or rank in EIGHT_ROUND_ROBIN:
             live = [program for program in group if open_(program)]
             while live:                     # (one pass: each program in the tables' order is given at most one pick)
                 for program in live:
@@ -1492,3 +1497,225 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
+
+
+# ----------------------------------------------------------------------------------------------------- PREREG-EVL-8
+#: PREREG-EVL-8 SECTION 4.2, THIS FILE'S BUYS KEEP NO ROOM: the ROOM tiers of its five seats, AFTER every earlier file's
+#: row whatever its band (PREREG-EVL-1 to -7's Sized, Probe and learning tiers 0, 1 and 2) and before R3's births at
+#: learning (`BIRTH_ROOM`, A101), in ROOM's order among themselves (Sized, then Probe, then learning, the tables' order:
+#: PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON); round-robin inside this file's Sized and Probe tiers
+#: (`EIGHT_ROUND_ROBIN`, A85's rule among them). So the book plans and sends every earlier row of an auction exactly as
+#: without this file (the reading of section 4.2 under which its "keep no room" and its band order both hold: this
+#: file's rows are planned in their own late passes, league/equity/live.py `_event_decide_8`, and sent after every
+#: earlier buy), A85's reservation never holds room for them (`reserved_for`: their tiers are not the PREREG tiers) and
+#: each of their buys sizes less the reservation of the earlier Probe and Sized rows (`leaves_room`).
+EIGHT_ROOM = {"sized": 6, "probe": 7, "learning": 8}
+EIGHT_ROUND_ROBIN = (EIGHT_ROOM["sized"], EIGHT_ROOM["probe"])
+#: PREREG-EVL-8 section 4.3's 150-ORDER LINE: a buy of this file leaves this many slots of the event kind's day line to
+#: every earlier row (PREREG-EVL-7's learners' keep, 32, and their own most, 2 x 8 entries and their exits, 32), on top
+#: of its own entry and exit, so the line refuses this file's entries first among the PREREG rows, after PREREG-EVL-7's;
+#: an exit is never stopped by it (league/equity/live.py `_count_refusal`). Each overnight lot keeps its exit's order of
+#: the next session's line (`_exit_reserve`: a lot not yet sold that day).
+EIGHT_LINE_KEEP = 64
+#: PREREG-EVL-8 section 4.1: the PX seats' learning band holds at most `event.max_open_v8.learning` (4) open (read only
+#: for them); its Probe band PREREG-EVL-6 section 6's `event.max_open_v6.probe` (14) when the table carries it (release
+#: 1019i), else 6 (the reading that trades less until A100's rows are live); the meta-learners PREREG-EVL-3's bands.
+MAX_OPEN_V8 = "max_open_v8"
+
+
+def line_keep_8(program: str) -> int:
+    """The buys' worth of the day order line a buy of `program` leaves to the earlier rows (`HeldAhead`'s unit: each
+    keeps a send and an exit): EIGHT_LINE_KEEP / 2 for this file's seats, 0 for every other program."""
+    return EIGHT_LINE_KEEP // 2 if P.is_8(program) else 0
+
+
+def max_open_8(s: Settings, band: str, program: Any, constitution: Mapping[str, Any] | None = None) -> int:
+    """PREREG-EVL-8 section 4.1's open positions a seat of this file may hold at `band`: a PX seat at learning the money
+    row `event.max_open_v8.learning` (4, bounds 0-4; none readable: 0, nothing opens); at Probe
+    `event.max_open_v6.probe` (14) where the table carries it, else `event.max_open.probe` (6); at Sized
+    `event.max_open.sized` (8); a meta-learner PREREG-EVL-3's bands (`event.max_open`: learning 8, Probe as a PX seat's,
+    Sized 8)."""
+    from ..constitution import CONSTITUTION
+
+    rules = CONSTITUTION if constitution is None else constitution
+    try:
+        e = rules["equity_money"]["event"]
+    except (KeyError, TypeError):
+        return 0
+    band = str(band)
+    if band == "learning" and P.is_px8(program):
+        try:
+            return int(e[MAX_OPEN_V8]["learning"])
+        except (KeyError, TypeError, ValueError):
+            return 0
+    if band == "probe":
+        try:
+            return int(e["max_open_v6"]["probe"])
+        except (KeyError, TypeError, ValueError):
+            return s.max_open("probe")
+    return s.max_open(band)
+
+
+def px_store(lane: Any) -> Any:
+    """px.sqlite beside the lane's store, READ-ONLY (league/events/px.py `read_only`), None when there is none."""
+    from . import px as PXL
+
+    root = getattr(lane, "root", None)
+    return None if root is None else PXL.read_only(root)
+
+
+def meta_on_guard(lane: Any, cik: str, session: C.Session | None, decided_at: dt.datetime) -> bool:
+    """EVL-META-ON'S GUARD (PREREG-EVL-8 section 7.7, PREREG-EVL-7's E10 reading), IN REAL MONEY ONLY: True when the
+    issuer is NOT bought: an 8-K of the issuer (form exactly 8-K) knowable at or after 09:00 ET of D and stored before
+    the decision time whose stored PROMPT-DOC verdict is `ok` with score >= 2, or `ok` with score >= 1 and guidance
+    "raised", or has no answer by then (PREREG-EVL-4's NEXT_OPEN_GUARD with RAISED_GUARD). Unreadable inputs read as
+    barred (fail closed). The shadow keeps every pick."""
+    if session is None:
+        return True
+    try:
+        rows = lane.db.execute("SELECT * FROM filings WHERE form='8-K' AND status='fetched' AND cik=? AND knowable_at>=? "
+                               "AND knowable_at<=? ORDER BY knowable_at, accession",
+                               (str(cik), S.iso(session.open_cutoff), S.iso(decided_at))).fetchall()
+        for r in rows:
+            row = dict(r)
+            if not _stored_before(row, decided_at, lane):
+                continue
+            got = V.stored(lane, f"8k:{row['accession']}", V.PROMPTS["doc"])
+            if not got or not got.get("answered_at") or S.parse_iso(str(got["answered_at"])) > decided_at:
+                return True
+            score = None if got.get("score") is None else int(got["score"])
+            if got.get("status") != "ok" or score is None:
+                continue
+            if score >= P.READ_MIN_SCORE or (score >= P.GUIDE_MIN_SCORE and got.get("guidance") == "raised"):
+                return True
+    except (sqlite3.Error, TypeError, ValueError, KeyError):
+        return True
+    return False
+
+
+def meta_o1_guard(lane: Any, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
+    """EVL-META-O1'S GUARD (PREREG-EVL-8 section 7.7, PREREG-EVL-7's E8 reading), IN REAL MONEY ONLY: True when the
+    issuer is an ERN(D) issuer (an 8-K with item 2.02 knowable in D's close window and stored before the decision
+    time), whose close-entry rows this learner's sale at D's close would take. Unreadable inputs read as barred."""
+    try:
+        lo, hi = P.close_window(lane, day)
+        for row in P.filings_window(lane, "8-K", lo, hi):
+            if str(row.get("cik")) == str(cik) and P.items_of(row) & P.ERN_ITEMS and _stored_before(row, decided_at, lane):
+                return True
+    except (LookupError, sqlite3.Error, TypeError, ValueError):
+        return True
+    return False
+
+
+def picks_8(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
+            held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-8 SEAT for entry session `day` (its section 4, 3.1 and 7.7): a PX seat's
+    ranked names of the LIVE run that decided its auction (league/events/px.py `live_picks`; none when a catch-up
+    decided it or none did), its eligibility, prev_close and adv20 from px_universe's live row of D; a meta-learner's
+    intents of its LIVE decision (league/events/meta.py `live_picks`) in rank_key order, its universe row the lane's
+    live one or px_universe's, less its guard (EVL-META-ON: `meta_on_guard`; EVL-META-O1: `meta_o1_guard`). Each less
+    one position per issuer (the shadow's earlier intents, `held_recently`, and real money's own lots, `held`). The
+    rank is the decision's order (a meta-learner's K + 1 - position): no figure of a meta-learner reaches the book."""
+    from . import meta as MT
+    from . import px as PXL
+
+    db = px_store(lane)
+    out: list[Pick] = []
+    try:
+        if P.is_px8(program):
+            if db is None:
+                return []
+            rows = PXL.live_picks(db, program, day)
+        else:
+            if not MT.has_tables(lane.db):
+                return []
+            rows = MT.live_picks(lane.db, program, day)
+        session = C.session(lane, day)
+        uni = universe_rows(lane, day)
+        for r in rows:
+            cik = str(r["cik"])
+            if P.is_meta8(program):
+                if program.id == "EVL-META-ON" and meta_on_guard(lane, cik, session, decided_at):
+                    continue
+                if program.id == "EVL-META-O1" and meta_o1_guard(lane, cik, day, decided_at):
+                    continue
+            if held_recently(lane, program, cik, day) or (held is not None and held(cik)):
+                continue
+            row = PXL.universe_row(db, day, cik) if (db is not None and (P.is_px8(program) or cik not in uni)) else \
+                uni.get(cik)
+            if row is None:
+                continue
+            try:
+                prev = Decimal(str(row["prev_close"]))
+            except (InvalidOperation, ValueError, TypeError, KeyError):
+                continue
+            if not prev.is_finite() or prev <= 0:
+                continue
+            rank = r.get("rank_key")
+            out.append(Pick(program.id, program.version, str(r["event"]), str(r["symbol"]).upper(), cik,
+                            None if rank is None else float(rank), float(row.get("adv20") or 0.0), prev,
+                            str(r.get("knowable_at") or "")))
+    finally:
+        if db is not None:
+            db.close()
+    return sorted(out, key=lambda p: (-(p.rank if p.rank is not None else float("-inf")), -p.adv20, p.event))
+
+
+def eligible_8(lane: Lane, day: dt.date) -> set[str]:
+    """PREREG-EVL-8 section 4.3: the eligible list's names of this file for D, each PX seat's first 40 names of its live
+    decision (px_universe's live rows) and each meta-learner's live picks (at most 152 names); none while this file
+    registers nothing, or no px.sqlite or mrl_* table is there."""
+    if not P.registers_8():
+        return set()
+    from . import meta as MT
+    from . import px as PXL
+
+    names: set[str] = set()
+    db = px_store(lane)
+    try:
+        for prog in P.rows_8():
+            if not prog.seatable:
+                continue
+            if prog.px and db is not None:
+                names |= {str(r["symbol"]).upper() for r in PXL.live_picks(db, prog, day)[:PXL.K]}
+            elif prog.meta and MT.has_tables(lane.db):
+                names |= {str(r["symbol"]).upper() for r in MT.live_picks(lane.db, prog, day)[:MT.K]}
+    except sqlite3.Error:
+        return names
+    finally:
+        if db is not None:
+            db.close()
+    return names
+
+
+def decided_8(lane: Any, day: dt.date, pass_: str) -> bool:
+    """Whether this file's run behind a late pass of the book has decided (D, X) LIVE (league/events/px.py `decided`
+    kind live; league/events/meta.py `decided` kind live): "open-px8" PX-GAP-O1's and EVL-META-O1's, "close-px8"
+    PX-DROP-ON's and PX-SURGE-ON's, "close-meta8" EVL-META-ON's. A pass is planned only once its run has finished; a run
+    that did not finish is never traded at that auction (section 4.6)."""
+    from . import meta as MT
+    from . import px as PXL
+
+    if pass_ == "close-meta8":
+        prog = next((p for p in P.rows_8() if p.id == "EVL-META-ON"), None)
+        got = MT.decided(lane.db, prog, day) if prog is not None else None
+        return got is not None
+    db = px_store(lane)
+    if db is None:
+        return False
+    try:
+        return PXL.decided(db, day, "o1" if pass_ == "open-px8" else "on") is not None
+    finally:
+        db.close()
+
+
+def meta_o1_done(lane: Any, day: dt.date) -> bool:
+    """Whether EVL-META-O1's decision of D is on record (live or not), so the open's late pass reads it."""
+    from . import meta as MT
+
+    prog = next((p for p in P.rows_8() if p.id == "EVL-META-O1"), None)
+    return prog is not None and MT.has_tables(lane.db) and MT.decided(lane.db, prog, day) is not None
+
+
+__all__ += ["EIGHT_ROOM", "EIGHT_ROUND_ROBIN", "EIGHT_LINE_KEEP", "MAX_OPEN_V8", "line_keep_8", "max_open_8", "px_store",
+            "meta_on_guard", "meta_o1_guard", "picks_8", "eligible_8", "decided_8", "meta_o1_done"]

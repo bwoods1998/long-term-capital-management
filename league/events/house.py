@@ -111,14 +111,17 @@ from . import calendar as C
 from . import done as DN
 from . import edgar as E
 from . import gw as G
+from . import meta as MT
 from . import news as N
 from . import programs as P
+from . import px as PXL
 from . import pxdata as PX
 from . import pxstore as PXS
 from . import report as RP
 from . import run as R
 from . import score as SC
 from . import screen as SN
+from . import screen8 as S8
 from . import store as S
 from . import universe as U
 from . import verdicts as V
@@ -304,6 +307,21 @@ PX_FLAGS_BEFORE_CLOSE = dt.timedelta(minutes=30)
 PX_PM_AT = dt.time(9, 35)
 PX_1530_AFTER = dt.timedelta(minutes=5)
 PX_NIGHT = (dt.time(21, 30), dt.time(7, 0))
+#: PREREG-EVL-8 (release 1019j; its section 4.6's timing table, league/events/px.py and meta.py), while REGISTERED_AT_8 is
+#: pinned (programs.py `registers_8`; with None nothing below is due, nothing decides, trades or is charged): THE
+#: MORNING PASS `px-am:<D>` from 09:05 ET (AM_BUDGET 300 s, never past 09:13), THE STATE PRE-PASSES `prepass-meta` at
+#: 09:00 ET and the close - 30 minutes (120 s, never past 09:13 or the close - 17 minutes), THE 09:30 OPENS `px-mid` from
+#: 10:00 ET, THE PX CLOSE RUN `decide-close-px8:<D>` from the close decision time (no read after it + 42 s, done by it +
+#: 50 s, only while no earlier task is due: it is planned after the lane's decisions, verdicts and record pass), THE
+#: OPEN RUN `decide-open-px8:<D>` and EVL-META-O1's part `decide-open-meta8:<D>` on the lane's live open receipt (60 s,
+#: never past 09:19:30), EVL-META-ON's part `decide-close-meta8:<D>` on the lane's live close receipt when it is in by
+#: the close - 11:35 (15 s, never past the close - 11:20), THE CATCH-UPS (`decide-px`, `decide-meta`), the night's panel
+#: (`px-panel`) and THE CUTOFF'S RECORD of every decision run (`meta.note_run`). The low-priority tasks run last of the
+#: plan, never inside the live close decision's lead and never within EIGHT_CLEAR of the next decision.
+EIGHT_CLEAR = dt.timedelta(minutes=10)
+EIGHT_BUDGET = 60.0
+EIGHT_PREPASS_UNTIL = {"o1": dt.time(9, 13), "on": dt.timedelta(minutes=17)}
+EIGHT_PANEL_AT = dt.time(21, 0)
 WARN_EVERY = 3600.0
 DATA_INTERVAL = 0.5
 ASSETS_TTL = 1800.0
@@ -708,6 +726,8 @@ class EventLane:
                 return
             with S.Store(self.root) as st:
                 P.load_births(st)       # (R3: the registered births, after every PREREG program, for every task)
+                if P.registers_8():     # (PREREG-EVL-8: THE RELEASE, written once, the first turn under this code)
+                    PXL.mark_release(st, self.now())
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
@@ -982,6 +1002,9 @@ class EventLane:
             kind, day, live = urgent
             return Task("verdicts", lambda ctx, deadline: self._verdicts(ctx, kind, day, live), VERDICT_BUDGET,
                         cut=True), now
+        close8 = self._eight_close_due(st, now, today, session, soon)   # (PREREG-EVL-8: its close run, from tau)
+        if close8 is not None:
+            return close8, now
         if decision is not None:   # the hourly re-decision, and the backfill's: after the record pass
             return self._decision_task(decision), now
         nightly = self._nightly(st, now, today, session, soon)
@@ -1002,6 +1025,9 @@ class EventLane:
         px = self._px_due(st, now, today, session, soon)     # (release 1019i: the PX recorders, last of all)
         if px is not None:
             return px, now
+        eight = self._eight_due(st, now, today, session, soon)     # (PREREG-EVL-8's low-priority tasks, after them)
+        if eight is not None:
+            return eight, now
         return None, min(soon)
 
     def _decision_task(self, decision: tuple[int, dt.datetime, str, dt.date, bool]) -> Task:
@@ -1164,6 +1190,7 @@ class EventLane:
         key = (kind, day)
         self._redecide.discard(key)
         before = self._stored_verdicts(ctx.store)
+        mark = self._eight_mark(ctx.store)      # (PREREG-EVL-8 section 7.2: the cutoff's record of this run)
         try:
             if kind == "open":
                 out = R.decide_open(ctx, day, backfill_run=not live)
@@ -1180,6 +1207,7 @@ class EventLane:
         except LaneDeadline:
             self._cut.add(key)
             self._close_running(ctx.store, f"decide-{kind}:{day.isoformat()}", "the lane's time bound; it goes on next turn")
+            self._eight_noted(ctx.store, mark)
             raise
         except Exception as exc:
             # (Release 1019b's review: a run that raised, one gateway 429 in its eligibility reads say, was left
@@ -1189,8 +1217,11 @@ class EventLane:
             self._cut.discard(key)
             self._close_running(ctx.store, f"decide-{kind}:{day.isoformat()}",
                                 f"{type(exc).__name__}: {str(exc)[:160]}", status="failed")
+            self._eight_noted(ctx.store, mark)
             raise
         self._cut.discard(key)
+        self._eight_noted(ctx.store, mark)
+        self._eight_after(ctx, kind, day, live)     # (PREREG-EVL-8: its parts on this receipt, its re-decision)
         if out.get("evl4_error"):   # (A83 (3)(i): PREREG-EVL-4's part failed alone; its own decision or the next whole one)
             self.warn("PREREG-EVL-4 part of a close decision", f"{day.isoformat()}: {out['evl4_error']}")
         if out.get("evl5_error"):   # (PREREG-EVL-5 section 1.3: its part failed alone; decide-close-evl5, never traded)
@@ -1722,6 +1753,23 @@ class EventLane:
             self.warn("bands", exc)
         else:
             summary["review"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in moved]
+        if P.registers_8():
+            # (PREREG-EVL-8 section 5: its versions' stays, reads, money stop and Sized, screen8.py `review`, never
+            # PREREG-EVL-3's; then THE PLACEBO AUDIT AND THE CANARY, section 3.3, records only)
+            try:
+                summary["review8"] = [{k: c.get(k) for k in ("program", "version", "band")} for c in S8.review(ctx.store,
+                                                                                                         now=now)]
+            except Exception as exc:  # noqa: BLE001 - read again next night
+                status = "partial"
+                summary["review8"] = f"failed: {type(exc).__name__}: {str(exc)[:160]}"
+                self.warn("screen8 review", exc)
+            try:
+                audit = S8.audit(ctx.store, day, now=now)
+                summary["audit8"] = {"alarm": len(audit.get("alarm") or []), "canary": len(audit.get("canary") or [])}
+                for why in audit.get("alarm") or []:
+                    self.warn("PX placebo audit", why)
+            except Exception as exc:  # noqa: BLE001 - read again next night
+                summary["audit8"] = f"failed: {type(exc).__name__}: {str(exc)[:160]}"
         self._receipted(ctx.store, "screen", status, summary)
         try:   # THE DONE READER (goal V2, docs/goals/DONE-RULE-EVL-2.md): after the band review, read-only but done.json
             done = DN.receipt(DN.run(ctx.store, now=now))
@@ -1810,6 +1858,14 @@ class EventLane:
             out = SN.run(st, day, programs=programs, now=now)
         except Exception as exc:  # noqa: BLE001 - the caller's receipt says so
             out = {"written": [], "waiting": [], "errors": [{"error": f"{type(exc).__name__}: {str(exc)[:200]}"}]}
+        if P.registers_8():     # (PREREG-EVL-8 section 5: its own screens, screen8.py, after the lane's)
+            try:
+                got8 = S8.run(st, day, now=now)
+            except Exception as exc:  # noqa: BLE001 - the caller's receipt says so
+                got8 = {"written": [], "waiting": [], "errors": [{"error": f"screen8: {type(exc).__name__}: {exc}"[:200]}]}
+            out = {"written": list(out.get("written") or []) + list(got8.get("written") or []),
+                   "waiting": list(out.get("waiting") or []) + list(got8.get("waiting") or []),
+                   "errors": list(out.get("errors") or []) + list(got8.get("errors") or [])}
         written, waiting = list(out.get("written") or []), list(out.get("waiting") or [])
         summary: dict[str, Any] = {
             "day": day.isoformat(), "written": len(written), "waiting": len(waiting),
@@ -2041,6 +2097,333 @@ class EventLane:
             return out | {"_status": "waiting"}
         px.set_meta(f"px:{label}:{session.day.isoformat()}", S.iso(ctx.now()))
         return out
+
+    # -- PREREG-EVL-8 (release 1019j) -------------------------------------------------------------------------------
+    def _eight_mark(self, st: S.Store) -> tuple[int, int] | None:
+        """(the intents' highest rowid, the receipts' highest id) before a decision run, while PREREG-EVL-8 registers
+        anything (section 7.2's cutoff: league/events/meta.py `note_run`); None otherwise."""
+        if not P.registers_8():
+            return None
+        try:
+            return MT.max_rowid(st), int(st.db.execute("SELECT COALESCE(MAX(id), 0) FROM receipts").fetchone()[0])
+        except sqlite3.Error:
+            return None
+
+    def _eight_noted(self, st: S.Store, mark: tuple[int, int] | None) -> None:
+        """THE CUTOFF'S RECORD of the run since `mark` (the lane runs one task at a time): every decision receipt it
+        wrote, with the interval of the intents' rowids written meanwhile. Never raises."""
+        if mark is None:
+            return
+        try:
+            hi = MT.max_rowid(st)
+            for r in st.db.execute("SELECT id, job, started_at, finished_at, status FROM receipts WHERE id>? AND job LIKE "
+                                   "'decide-%' ORDER BY id", (mark[1],)).fetchall():
+                MT.note_run(st, int(r["id"]), str(r["job"]), mark[0], hi,
+                            started=S.parse_iso(r["started_at"]) if r["started_at"] else None,
+                            finished=S.parse_iso(r["finished_at"]) if r["finished_at"] else None, status=r["status"])
+        except Exception as exc:  # noqa: BLE001 - the record of a run is never the run's failure
+            self.warn("PREREG-EVL-8 cutoff record", exc)
+
+    def _eight_after(self, ctx: LaneContext, kind: str, day: dt.date, live: bool) -> None:
+        """PREREG-EVL-8 on the lane's receipt (section 4.6): after its LIVE open decision, PX-GAP-O1's run and EVL-META-O1's
+        part; after its live close decision, EVL-META-ON's part (when the receipt is in by the close - 11:35); after a
+        re-decision of an open or a close, the PX rows' re-decision (section 3.4). Each bounded, each its own failure:
+        never the lane's decision's, whose receipt is finished already."""
+        if not P.registers_8():
+            return
+        try:
+            if kind == "open" and live:
+                self._eight_open(ctx, day)
+            elif kind == "close" and live:
+                self._eight_close_meta(ctx, day)
+            elif kind in ("open", "close") and not live:
+                self._eight_redecide(ctx, kind, day)
+        except Exception as exc:  # noqa: BLE001 - a part's failure is its own: decided later as a catch-up
+            self.warn("PREREG-EVL-8 part", exc)
+
+    def _eight_px(self, ctx: LaneContext, day: dt.date, auction: str, until: dt.datetime, *, kind: str = "live",
+                  request_until: dt.datetime | None = None) -> dict[str, Any]:
+        """One PX decision of (D, X) by itself (league/events/px.py `decide`) under its own bound (`until`; no read after
+        `request_until`), its reads through `PX.PxGateway` (the SIP bars route, the lane's bucket after the lane's own
+        reads), its intents' interval recorded for the cutoff."""
+        st = ctx.store
+        mark = self._eight_mark(st)
+        px = PXL.open_px(self.root)
+        last = request_until or until
+        try:
+            bucket = self._bucket or PX.TokenBucket(clock=self._mono, sleep=self._sleep)
+            mono_until = self._mono() + max(0.0, (last - self.now()).total_seconds())
+            gw = PX.PxGateway(self.gateway(), bucket, until=mono_until, late=lambda: self.now() >= last)
+            out = PXL.decide(px, st, gw, day, auction, now=self.now, kind=kind, tickers=ctx.tickers_for(day),
+                             late=lambda: self.now() >= until)
+        finally:
+            px.close()
+            self._eight_noted(st, mark)
+        return out
+
+    def _eight_open(self, ctx: LaneContext, day: dt.date) -> None:
+        """THE OPEN'S RUN on the lane's live open receipt (section 4.6): PX-GAP-O1 (`decide-open-px8:<D>`, while the PX
+        recorders are on) then EVL-META-O1 (`decide-open-meta8:<D>`), together at most 60 s and never past 09:19:30 ET;
+        a part not finished trades nothing at that open and is decided later as a catch-up."""
+        st = ctx.store
+        session = C.session(st, day)
+        if session is None:
+            return
+        until = min(self.now() + dt.timedelta(seconds=PXL.OPEN_BOUND), session.at(PXL.OPEN_UNTIL))
+        if self.now() >= until:
+            return
+        if self.px_on:
+            got = self._eight_px(ctx, day, "o1", until)
+            if got.get("_status") not in (None, "ok"):
+                self.warn("PX open run", f"{day.isoformat()}: {got.get('_status')} ({got.get('cut') or got.get('error')})")
+        if self.now() < until:
+            mark = self._eight_mark(st)
+            try:
+                got = MT.decide(st, day, "o1", now=self.now, kind="live", late=lambda: self.now() >= until)
+            finally:
+                self._eight_noted(st, mark)
+            if got.get("_status") not in (None, "ok"):
+                self.warn("META open part", f"{day.isoformat()}: {got.get('_status')} ({got.get('cut') or got.get('error')})")
+
+    def _eight_close_meta(self, ctx: LaneContext, day: dt.date) -> None:
+        """EVL-META-ON's part on the lane's live close receipt (section 4.6): only when that receipt (the lane's first
+        finished close decision of D, `ok` or `pending`) is in by the close - 11:35 (15:48:25 ET), 15 s, never past the
+        close - 11:20; else nothing at that close (a catch-up decides it later)."""
+        st = ctx.store
+        session = C.session(st, day)
+        if session is None:
+            return
+        row = st.db.execute("SELECT finished_at FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', "
+                            "'pending') ORDER BY id LIMIT 1", (f"decide-close:{day.isoformat()}",)).fetchone()
+        if row is None or S.parse_iso(str(row[0])) > session.close_at - MT.META_CLOSE_RECEIPT_BY:
+            return
+        until = min(self.now() + dt.timedelta(seconds=MT.META_CLOSE_BOUND), session.close_at - MT.META_CLOSE_UNTIL)
+        if self.now() >= until:
+            return
+        mark = self._eight_mark(st)
+        try:
+            got = MT.decide(st, day, "on", now=self.now, kind="live", late=lambda: self.now() >= until)
+        finally:
+            self._eight_noted(st, mark)
+        if got.get("_status") not in (None, "ok"):
+            self.warn("META close part", f"{day.isoformat()}: {got.get('_status')} ({got.get('cut') or got.get('error')})")
+
+    def _eight_redecide(self, ctx: LaneContext, kind: str, day: dt.date) -> None:
+        """THE PX ROWS' HOURLY RE-DECISION with the lane's (section 3.4; league/events/px.py `redecide`), a written look
+        of a program's group freezing it over D as it freezes every program (league/events/run.py `_scope`)."""
+        if not self.px_on:
+            return
+        st = ctx.store
+        kept = R._scope(st, kind, day, self.now())
+        px = PXL.open_px(self.root)
+        try:
+            PXL.redecide(px, st, day, "o1" if kind == "open" else "on", now=self.now(), tickers=ctx.tickers_for(day),
+                         keep=lambda prog: kept(prog) is not None)
+        finally:
+            px.close()
+
+    def _eight_close_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                         soon: list[dt.datetime]) -> Task | None:
+        """THE PX CLOSE RUN (`decide-close-px8:<D>`, section 4.6): due from the close decision time (tau, 15:46:00 ET on
+        a full day) while no read would go after tau + 42 s, once a session, only while the PX recorders are on and no
+        earlier task is due (the plan returns it after the lane's decisions, verdicts and record pass); bounded to end by
+        tau + 50 s, 10 s before the lane's live close run. Not run: PX trades nothing at that close."""
+        if session is None or not (self.px_on and P.registers_8()):
+            return None
+        tau = session.close_decide
+        if now < tau:
+            soon.append(tau)
+            return None
+        if now >= tau + PXL.CLOSE_LAST_REQUEST or self._quiet("px8-close", now, soon):
+            return None
+        db = PXL.read_only(self.root)
+        if db is None:
+            return None
+        try:
+            if PXL.decided(db, today, "on") is not None:
+                return None
+            ran = db.execute("SELECT 1 FROM px_runs WHERE job=? AND started_at>=? LIMIT 1",
+                             (PXL.JOB_LIVE["on"], S.iso(tau))).fetchone()
+        except sqlite3.Error:
+            return None
+        finally:
+            db.close()
+        if ran is not None:
+            return None
+        budget = max(1.0, (tau + PXL.CLOSE_DONE - now).total_seconds())
+        return Task("px8-close", lambda ctx, deadline: self._eight_close_run(ctx, today), budget)
+
+    def _eight_close_run(self, ctx: LaneContext, day: dt.date) -> dict[str, Any]:
+        session = C.session(ctx.store, day)
+        tau = session.close_decide
+        out = self._eight_px(ctx, day, "on", tau + PXL.CLOSE_DONE, request_until=tau + PXL.CLOSE_LAST_REQUEST)
+        brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
+        if out.get("_status") not in (None, "ok"):
+            self.warn("PX close run", f"{day.isoformat()}: {out.get('_status')} ({out.get('cut') or out.get('error')})")
+        return brief | {"_status": str(out.get("_status") or "ok")}
+
+    def _eight_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                   soon: list[dt.datetime]) -> Task | None:
+        """PREREG-EVL-8's LOW-PRIORITY TASKS, last of the plan, never inside the live close decision's lead: the morning
+        pass (09:05-09:13 ET) and the state pre-passes (09:00-09:13 ET; the close - 30 minutes to the close - 17), each
+        in its own window; then, never within EIGHT_CLEAR of the next decision, the 09:30 opens (from 10:00 ET), the
+        catch-ups (`decide-px`, then `decide-meta`, oldest first, a meta catch-up of (D, X) only when no earlier kind's
+        own decision of (D, X) is owed) and the night's panel (from 21:00 ET)."""
+        if not P.registers_8() or self._lead(st, now) is not None:
+            return None
+        t = _ny_time(now)
+        if session is not None and self.px_on and PXL.AM_AT <= t < PXL.AM_UNTIL and not self._quiet("px-px8-am", now, soon):
+            db = PXL.read_only(self.root)
+            done = db is not None and PXL._meta(db, PXL.AM_KEY.format(day=today.isoformat())) is not None
+            if db is not None:
+                db.close()
+            if not done:
+                until = session.at(PXL.AM_UNTIL)
+                return Task("px8-am", lambda ctx, deadline: self._eight_am(ctx, today, deadline),
+                            min(PXL.AM_BUDGET, max(1.0, (until - now).total_seconds())), cut=True)
+        if session is not None:
+            for auction in ("o1", "on"):
+                prog = MT.learner(auction)
+                sig = MT.sigma_time(session, auction)
+                until = session.at(EIGHT_PREPASS_UNTIL["o1"]) if auction == "o1" else \
+                    session.close_at - EIGHT_PREPASS_UNTIL["on"]
+                if prog is None or not sig <= now < until or self._quiet(f"meta8-prepass-{auction}", now, soon):
+                    continue
+                MT.ensure(st)
+                if MT.stored_state(st, prog, today, sig) is None:
+                    return Task(f"meta8-prepass-{auction}",
+                                lambda ctx, deadline, auction=auction: self._eight_prepass(ctx, today, auction),
+                                min(MT.PREPASS_BUDGET, max(1.0, (until - now).total_seconds())))
+        nxt = self._next_decision(st, now)
+        if nxt is not None and nxt - now < EIGHT_CLEAR:
+            soon.append(nxt + dt.timedelta(seconds=DECISION_MARGIN))
+            return None
+        if session is not None and self.px_on and t >= PXL.MID_AT and not self._quiet("px-px8-mid", now, soon):
+            db = PXL.read_only(self.root)
+            done = db is not None and PXL._meta(db, PXL.MID_KEY.format(day=today.isoformat())) is not None
+            if db is not None:
+                db.close()
+            if not done:
+                return Task("px8-mid", lambda ctx, deadline: self._eight_mid(ctx, today), EIGHT_BUDGET, cut=True)
+        owed = self._eight_owed(st, now, today)
+        if owed is not None and not self._quiet(f"eight-{owed[0]}", now, soon):
+            what, day, auction = owed
+            return Task(f"eight-{what}", lambda ctx, deadline: self._eight_catchup(ctx, what, day, auction, deadline),
+                        EIGHT_BUDGET, cut=True)
+        if self.px_on and t >= EIGHT_PANEL_AT and not self._quiet("px8-panel", now, soon):
+            day = self._eight_panel_owed(st, today)
+            if day is not None:
+                return Task("px8-panel", lambda ctx, deadline: self._eight_panel(ctx, day), EIGHT_BUDGET)
+        return None
+
+    def _eight_owed(self, st: S.Store, now: dt.datetime, today: dt.date) -> tuple[str, dt.date, str] | None:
+        """The oldest catch-up owed (section 3.4, 7.2, 8): ("px", D, X) for an auction a morning pass made PXU(D) for
+        that no run decided once its live window has passed; ("meta", D, X) for a session of the state (from Oct 20,
+        2026) whose meta-learner's decision is not on record once its live window has passed, when no earlier kind's
+        decision of (D, X) is owed (PREREG-EVL-4's and -5's rows' own, the births' own, the PX catch-up)."""
+        first = max(MT.STATE_FROM, (now - LOOKBACK).astimezone(C.NY).date())
+        sessions = [s for s in C.sessions(st, first, today)]
+        db = PXL.read_only(self.root) if self.px_on else None
+        try:
+            for s in sessions:
+                for auction in ("o1", "on"):
+                    window = s.at(PXL.OPEN_UNTIL) if auction == "o1" else s.close_decide + PXL.CLOSE_DONE
+                    if now < window:
+                        continue
+                    px_owed = False
+                    if db is not None and PXL._meta(db, PXL.AM_KEY.format(day=s.day.isoformat())) is not None and \
+                            PXL.decided(db, s.day, auction) is None:
+                        px_owed = True
+                        return "px", s.day, auction
+                    prog = MT.learner(auction)
+                    mwin = s.at(PXL.OPEN_UNTIL) if auction == "o1" else s.close_at - MT.META_CLOSE_UNTIL
+                    if prog is None or now < mwin or px_owed:
+                        continue
+                    if MT.has_tables(st.db) and MT.decided(st.db, prog, s.day) is not None:
+                        continue
+                    if auction == "on" and (s.day in self._five or s.day in self._four or
+                                            ("close", s.day) in self._births_redo):
+                        continue
+                    if auction == "o1" and ("open", s.day) in self._births_redo:
+                        continue
+                    return "meta", s.day, auction
+        finally:
+            if db is not None:
+                db.close()
+        return None
+
+    def _eight_catchup(self, ctx: LaneContext, what: str, day: dt.date, auction: str,
+                       deadline: float | None) -> dict[str, Any]:
+        """One catch-up (`decide-px:<X>:<D>` or `decide-meta:<X>:<D>`), never judged, never traded, its code's sha on
+        its receipt; bounded by the task's bound."""
+        st = ctx.store
+        if what == "px":
+            until = self.now() + dt.timedelta(seconds=max(1.0, (deadline - self._mono()) if deadline else EIGHT_BUDGET))
+            out = self._eight_px(ctx, day, auction, until, kind="catchup")
+        else:
+            mark = self._eight_mark(st)
+            try:
+                out = MT.decide(st, day, auction, now=self.now, kind="catchup", late=lambda: self.late(deadline))
+            finally:
+                self._eight_noted(st, mark)
+        brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
+        if out.get("_status") == "failed":
+            self._failed[f"eight-{what}"] = self.now()
+        return brief | {"_status": str(out.get("_status") or "ok")}
+
+    def _eight_am(self, ctx: LaneContext, day: dt.date, deadline: float | None) -> dict[str, Any]:
+        """THE MORNING PASS (`px-am:<D>`, league/events/px.py `morning`), its reads through the PX gateway."""
+        def work(c: LaneContext, px: Any, gw: Any, run: str, dl: float | None) -> dict[str, Any]:
+            return PXL.morning(px, c.store, gw, day, now=c.now(), run=run, tickers=c.tickers_for(day),
+                               assets=c.assets(True), late=lambda: self.late(dl))
+        return self._px(ctx, deadline, "px8-am", work)
+
+    def _eight_mid(self, ctx: LaneContext, day: dt.date) -> dict[str, Any]:
+        """THE 09:30 OPENS (`px-mid:<D>`, league/events/px.py `mid`)."""
+        return self._px(ctx, None, "px8-mid", lambda c, px, gw, run, dl: PXL.mid(px, gw, c.store, day, now=c.now(),
+                                                                                   run=run))
+
+    def _eight_prepass(self, ctx: LaneContext, day: dt.date, auction: str) -> dict[str, Any]:
+        """THE STATE PRE-PASS (`prepass-meta:<X>:<D>`, league/events/meta.py `prepass`)."""
+        st = ctx.store
+        rid = st.start_receipt(f"{MT.JOB_PREPASS}:{auction}:{day.isoformat()}", now=self.now())
+        try:
+            out = MT.prepass(st, day, auction, now=self.now(), run=f"{MT.JOB_PREPASS}#{rid}")
+        except Exception as exc:
+            st.finish_receipt(rid, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, now=self.now())
+            raise
+        st.finish_receipt(rid, "ok", out, now=self.now())
+        return out
+
+    def _eight_panel_owed(self, st: S.Store, today: dt.date) -> dt.date | None:
+        """The oldest recent session (the last 7) whose panel a window still owes (league/events/px.py `settle_panel`)."""
+        db = PXL.read_only(self.root)
+        if db is None:
+            return None
+        try:
+            for s in C.previous(st, today + dt.timedelta(days=1), 7):
+                if PXL._meta(db, PXL.AM_KEY.format(day=s.day.isoformat())) is None:
+                    continue
+                for window in ("O1", "ON", "C1"):
+                    if PXL._meta(db, PXL.PANEL_KEY.format(day=f"{s.day.isoformat()}:{window}")) is not None:
+                        continue
+                    end = PXL.exit_day(st, s.day, window)
+                    if end is not None and PXL._meta(db, f"px:bars:{end.isoformat()}") is not None:
+                        return s.day
+        except sqlite3.Error:
+            return None
+        finally:
+            db.close()
+        return None
+
+    def _eight_panel(self, ctx: LaneContext, day: dt.date) -> dict[str, Any]:
+        """THE NIGHT'S PANEL of a session (league/events/px.py `settle_panel`), from stored bars only (no read)."""
+        px = PXL.open_px(self.root)
+        try:
+            out = PXL.settle_panel(px, ctx.store, day, now=self.now())
+        finally:
+            px.close()
+        return {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
 
     # -- the ticker snapshot ----------------------------------------------------------------------------------------
     def _tickers_due(self, st: S.Store, now: dt.datetime, today: dt.date, soon: list[dt.datetime]) -> bool:
