@@ -472,6 +472,8 @@ class EventLane:
         self._failed: dict[str, dt.datetime] = {}
         # accession -> (the fetches tried, when the first one failed), this process's (`_record_steps`)
         self._fetch_tries: dict[str, tuple[int, dt.datetime | None]] = {}
+        self._release_marked = False            # (PREREG-EVL-6: the release's mark, written at the first turn)
+        self._copied_next = self._born          # (PREREG-EVL-6: the copied record's catch-up, hourly from the first turn)
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -673,6 +675,11 @@ class EventLane:
                 return
             with S.Store(self.root) as st:
                 P.load_births(st)       # (R3: the registered births, after every PREREG program, for every task)
+                if not self._release_marked:
+                    # PREREG-EVL-6 section 1.1 (D8): THE RELEASE carrying it is this code's first turn (written once;
+                    # a session decided before it is copied for the new versions, one from it on is their own)
+                    P.mark_release(st, self.now())
+                    self._release_marked = True
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
@@ -888,7 +895,19 @@ class EventLane:
 
     # -- the calendar ----------------------------------------------------------------------------------------------
     def _maintain(self, st: S.Store, now: dt.datetime) -> None:
-        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead."""
+        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead; and, from the
+        first turn and hourly, PREREG-EVL-6's COPIED RECORD BEFORE THE RELEASE (section 1.1, D8;
+        league/events/programs.py `copy_all_before_release`): every new version's copy of its superseded version's
+        intents of the sessions decided before the release, those a release without the new versions decided too (its
+        own decisions copy theirs as they run; a look waits for the copy: `programs.uncopied`)."""
+        if now >= self._copied_next:
+            self._copied_next = now + REDECIDE_EVERY
+            try:
+                got = P.copy_all_before_release(st, through=now.astimezone(C.NY).date())
+                if got.get("copied") or got.get("moved"):
+                    self._note("copy-evl6", "ok", got, self._mono())
+            except Exception as exc:  # noqa: BLE001 - copied again next hour; a look waits for it meanwhile
+                self.warn("PREREG-EVL-6's copied record", exc)
         last = st.meta("evl:lane:sessions_at")
         tried = self._attempts.get("sessions")
         today = now.astimezone(C.NY).date()

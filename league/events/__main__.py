@@ -49,9 +49,13 @@ def catchup(ctx: R.Context) -> dict:
     those closes are never decided again. Then PREREG-EVL-5'S ROWS the same way (its section 3: `made_without(prereg=5)`,
     `decide_evl5`, oldest first, once), and R3'S REGISTERED BIRTHS the same way (release 1019e's review): every
     decision a release or a turn without them made last (`births_made_without`) gets the births' own decision
-    (`births_only`), as a backfill, and no PREREG row of it is decided again."""
+    (`births_only`), as a backfill, and no PREREG row of it is decided again. PREREG-EVL-6 (section 1.1, D8): the
+    release's mark is written first (once: `programs.mark_release`), and last every new version's copy of its
+    superseded version's record of the sessions decided before the release (`programs.copy_all_before_release`), as
+    the House's lane makes them."""
     st = ctx.store
     now = ctx.now()
+    P.mark_release(st, now)
     start = P.registered().astimezone(C.NY).date()
     done = {r[0] for r in st.db.execute("SELECT job FROM receipts WHERE status='ok' AND job LIKE 'decide-%'")}
     due = [s for s in C.sessions(st, start, now.astimezone(C.NY).date()) if s.open_decide <= now]
@@ -71,6 +75,7 @@ def catchup(ctx: R.Context) -> dict:
     for kind, day in SN.births_made_without(st, now.astimezone(C.NY).date()):
         decide = R.decide_open if kind == "open" else R.decide_close
         out[f"{SN.BIRTHS_KIND[kind]}:{day}"] = decide(ctx, day, backfill_run=True, births_only=True)
+    out["copy-evl6"] = P.copy_all_before_release(st, through=now.astimezone(C.NY).date())
     return out
 
 
