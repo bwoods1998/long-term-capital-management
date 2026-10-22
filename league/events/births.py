@@ -48,12 +48,13 @@ sorted keys and no spaces; its sha256 (`sha`) names the birth.
 THE FACTS (`Facts`): what the ARCHITECT reads, OUTCOME-FREE. Over the last `SESSIONS` (20) sessions: event counts by
 family, 8-K item, form, news source and knowable hour; the stored verdict scores and guidance; which families and items
 no program selects; every registered program's selection count (PREREG-EVL-4's and -5's too from release 1019h, below);
-and a candidate rule's selection count (each run through the lane's own `select` over the same windows). The facts NEVER read bars, marks, outcomes, looks, bands,
-band_history, real_fills, the universe (its prices) or meta (the looks' details): a SQLite authorizer refuses those
-tables for the whole build (`outcome_free`), so a price after an event, a return, a P&L, a look's p or a band cannot
-reach the architect. Eligibility is the lane's kept result (`eligibility`: listed, operating, priced before the
-session), the session's own or else the issuer's nearest. The reactions of the react families are prices after the
-event: never read, so their counts are UPPER BOUNDS (every event passes the reaction) and say so.
+and a candidate rule's selection count (each run through the lane's own `select` over the same windows). The facts NEVER
+read bars, marks, outcomes, looks, bands, band_history, real_fills, the universe (its prices) or meta (the looks'
+details): a SQLite authorizer refuses those tables for the whole build (`outcome_free`), so a price after an event, a
+return, a P&L, a look's p or a band cannot reach the architect. Eligibility is the lane's kept result (`eligibility`:
+listed, operating, priced before the session), the session's own or else the issuer's nearest. The reactions of the
+react families are prices after the event: never read, so their counts are UPPER BOUNDS (every event passes the
+reaction) and say so.
 PREREG-EVL-4'S AND PREREG-EVL-5'S FAMILIES (release 1019h; PREREG-EVL-5 section 7, "births.py's facts for the new
 families"; the review of release 1019g found every one of their nine rows selecting 0, so no Jaccard was computed
 against them): their rows are read as their close decision reads them (league/events/programs.py `close_rows_4`,
@@ -84,7 +85,8 @@ stated charge, the screen's `FALSE_PASS_RATE`), at most A71's stated lifetime bu
 lane, counted from SEATING's own sum as the report counts it (league/events/screen.py `expected_false_passes`:
 PREREG-EVL-1 to -5's fifteen seatable versions, 1.5 (PREREG-EVL-4's three and PREREG-EVL-5's three included,
 release 1019g), and 0.10 for every seatable birth once loaded; never a figure written here), and at most
-`SEATABLE_A_NIGHT` (3) seatable births a night: so at most fifteen seatable births before the budget is spent. A retired program's past looks stay counted (a test that was run is never refunded). Records are free.
+`SEATABLE_A_NIGHT` (3) seatable births a night: so at most fifteen seatable births before the budget is spent. A
+retired program's past looks stay counted (a test that was run is never refunded). Records are free.
 
 THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 at temperature 0 (the lane's
 `/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict

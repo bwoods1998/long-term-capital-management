@@ -179,26 +179,24 @@ test_events_a86.py, test_events_births.py (`SeatableRate`; `Validation` sets a s
 test_daily_report.py (`DoneSupply`), league/tests/equity_design.py (`DIGESTS`, `DIGESTS_A86`, `before_1019h`),
 league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notice.test.mjs.
 
-### 05:36Z Oct 22, 2026: release 1019g (PR 595: release 1019f, `feat/evl-5`, `fix/births-names`, the fix and final rounds), House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`
-
-- The gateway first: version `354aeab2` deployed 05:34:42Z from the release head (its `gateway/` is release 1019f's;
-  rollback `68363043`), health ok, the kill switch off, nothing in flight.
-- The House: the captain's ship script at 05:35:13Z (CI 39720318083 green on the exact head: the gateway, 3.11, 3.14;
-  two reviews of the merged release "ship", minors only, A108), main fast-forwarded `eb5bedac` -> `b374d862`, promoted
-  05:36:23Z (previous `20261021T211621Z-0ee98209e903`), seven hours before A94's 12:55Z cut-off. Verified 05:46:36Z:
-  real money true, no failures, the options execution fingerprint `b60410ad`, the constitution `24f73f18`, the money
-  digest `c2f0a478` (release 1019f's pair, A86 REVISED's two Probe rows), the gate contract `397b22b7`, the equity
-  identity `78022ca6`.
-- What went live: release 1019f (A84's per-feed fast path and `evl_final`, A85's Probe cash reservation, A86 REVISED,
-  the probe size's record, the screen after the open, the backfill's retries, Sail's spend fields, the alarms, the Done
-  reader), PREREG-EVL-5's three rows and control (real money at learning size from the first close decision after the
-  release), the births fix (A95: canonical names, two examples, one re-run of an empty night before 12:55Z) and the held
-  turn for the live close decision. The open minors are release 1019h's (**Release 1019h's minors**, above).
-- Rollback: `scripts/floor_box.py rollback` to release 1019e's head and the gateway by `wrangler rollback 68363043`,
-  with no order in flight (operations.md, **Release 1019g**).
-
 ### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (DEPLOYED 05:36Z Oct 22 in PR 595, the gateway first at 05:34Z; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
+- **Deployed 05:36Z Oct 22, 2026** (PR 595): House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`.
+  - The gateway first: version `354aeab2` deployed 05:34:42Z from the release head (its `gateway/` is release 1019f's;
+    rollback `68363043`), health ok, the kill switch off, nothing in flight.
+  - The House: the captain's ship script at 05:35:13Z (CI 39720318083 green on the exact head: the gateway, 3.11, 3.14;
+    two reviews of the merged release "ship", minors only, A108), main fast-forwarded `eb5bedac` -> `b374d862`, promoted
+    05:36:23Z (previous `20261021T211621Z-0ee98209e903`), seven hours before A94's 12:55Z cut-off. Verified 05:46:36Z:
+    real money true, no failures, the options execution fingerprint `b60410ad`, the constitution `24f73f18`, the money
+    digest `c2f0a478` (release 1019f's pair, A86 REVISED's two Probe rows), the gate contract `397b22b7`, the equity
+    identity `78022ca6`.
+  - What went live: release 1019f (A84's per-feed fast path and `evl_final`, A85's Probe cash reservation, A86 REVISED,
+    the probe size's record, the screen after the open, the backfill's retries, Sail's spend fields, the alarms, the Done
+    reader), PREREG-EVL-5's three rows and control (real money at learning size from the first close decision after the
+    release), the births fix (A95: canonical names, two examples, one re-run of an empty night before 12:55Z) and the held
+    turn for the live close decision. The open minors are release 1019h's (**Release 1019h's minors**, above).
+  - Rollback: `scripts/floor_box.py rollback` to release 1019e's head and the gateway by `wrangler rollback 68363043`,
+    with no order in flight (operations.md, **Release 1019g**).
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
   reservation and round-robin, A86 REVISED, the Probe size's record, the screen after the open, the backfill's retries,
   Sail's spend fields, the alarms, the Done reader) and PREREG-EVL-5's code (its entry below: EVL-ERN-DROP-ON,
@@ -970,19 +968,17 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   event-book and PREREG-EVL-4 tests passed, and the event-lane modules there failed only on the counts this branch
   updates.
 
-### 21:17Z Oct 21, 2026: release 1019e (#583: R3's births, A80's re-send, the site follows the lane, the cost fix), House `20261021T211621Z-0ee98209e903`, main `c485dcfe`; gateway `68363043`
-
-- The gateway first: version `68363043` deployed 21:15:31Z (the births' docs route; rollback `fccaf9da`).
-- The House: promoted 21:17:15Z (previous `20261021T200543Z-98b98e817ece`), main fast-forwarded `5a17bd25` ->
-  `c485dcfe`; the ids `b60410ad` / `a8d4cbd9` / `055e5313` (no identity moved from release 1019d). `events.births` on
-  (A90; the first births night 21:15 ET), A80's re-send live from Oct 22's open, the site's `lane_v1` published by the
-  House (A93). The first ship attempt stopped safely at the nightly stop (the collector A87 switched off holds no lock);
-  the captain's nightly helper now writes the stop when that collector is disabled and its lock is free.
-- The site: personal-site #25 merged and deployed 21:29:56Z; `lane_v1` confirmed on the public page (A93 addendum).
-- Rollback: `scripts/floor_box.py rollback` to release 1019d's head and the gateway by `wrangler rollback fccaf9da`.
-
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (DEPLOYED 21:17Z Oct 21, the gateway first at 21:15Z; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
+- **Deployed 21:17Z Oct 21, 2026** (#583): House `20261021T211621Z-0ee98209e903`, main `c485dcfe`; gateway `68363043`.
+  - The gateway first: version `68363043` deployed 21:15:31Z (the births' docs route; rollback `fccaf9da`).
+  - The House: promoted 21:17:15Z (previous `20261021T200543Z-98b98e817ece`), main fast-forwarded `5a17bd25` ->
+    `c485dcfe`; the ids `b60410ad` / `a8d4cbd9` / `055e5313` (no identity moved from release 1019d). `events.births` on
+    (A90; the first births night 21:15 ET), A80's re-send live from Oct 22's open, the site's `lane_v1` published by the
+    House (A93). The first ship attempt stopped safely at the nightly stop (the collector A87 switched off holds no lock);
+    the captain's nightly helper now writes the stop when that collector is disabled and its lock is free.
+  - The site: personal-site #25 merged and deployed 21:29:56Z; `lane_v1` confirmed on the public page (A93 addendum).
+  - Rollback: `scripts/floor_box.py rollback` to release 1019d's head and the gateway by `wrangler rollback fccaf9da`.
 - **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET
   the night the release deploys (a night of births is a session of each birth's 8-block clock); `events.births` false
   stays the stop.
@@ -1208,19 +1204,18 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
   `...&window=1&lane=1`; every older read unchanged.
 
-### 20:06Z Oct 21, 2026: releases 1019c and 1019d in one step (#581: release 1019c's head `f85cc152` and `feat/evl-4`), House `20261021T200543Z-98b98e817ece`, main `5a17bd25`; gateway `fccaf9da`
-
-- The gateway first: version `fccaf9da` deployed 20:05:32Z from the release 1019d head (its `gateway/` is release
-  1019c's; rollback `29ed37e1`).
-- The House: promoted 20:06:38Z, main fast-forwarded `306cadd1` -> `5a17bd25`; verified real money true, no failures,
-  the ids `b60410ad` / `a8d4cbd9` / `055e5313` (THE MONEY DIGEST MOVED `285fa7af` -> `055e5313` and the constitution
-  `fd38e4e1` -> `a8d4cbd9`: release 1019c's row, `equity_money.event.max_orders_day` 150), budget rule 3 (A88). Release
-  1019c's step 3 (`ops.json` `stall.research` false) and A87's cuts applied 20:17Z. That evening's close still ran on
-  release 1019b's 60-order line; the 150 line governs from Oct 22.
-- Rollback: the floor is release 1019b (`scripts/floor_box.py rollback`; the gateway by `wrangler rollback 29ed37e1`).
-
 ### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (DEPLOYED 20:06Z Oct 21 with release 1019c in one step, #581, the gateway first at 20:05Z; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
+- **Deployed 20:06Z Oct 21, 2026** with release 1019c in one step (#581: release 1019c's head `f85cc152` and `feat/evl-4`):
+  House `20261021T200543Z-98b98e817ece`, main `5a17bd25`; gateway `fccaf9da`.
+  - The gateway first: version `fccaf9da` deployed 20:05:32Z from the release 1019d head (its `gateway/` is release
+    1019c's; rollback `29ed37e1`).
+  - The House: promoted 20:06:38Z, main fast-forwarded `306cadd1` -> `5a17bd25`; verified real money true, no failures,
+    the ids `b60410ad` / `a8d4cbd9` / `055e5313` (THE MONEY DIGEST MOVED `285fa7af` -> `055e5313` and the constitution
+    `fd38e4e1` -> `a8d4cbd9`: release 1019c's row, `equity_money.event.max_orders_day` 150), budget rule 3 (A88). Release
+    1019c's step 3 (`ops.json` `stall.research` false) and A87's cuts applied 20:17Z. That evening's close still ran on
+    release 1019b's 60-order line; the 150 line governs from Oct 22.
+  - Rollback: the floor is release 1019b (`scripts/floor_box.py rollback`; the gateway by `wrangler rollback 29ed37e1`).
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
   `b35c018f`, where `feat/evl-4` was merged, and then `f85cc152`, merged in after: main's two desk scoreboard pages, the
   band review test's write time (`bb3a1ee9`) and the daily-index backfill filing by filing, A82, its entry below) and
