@@ -100,6 +100,7 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -1904,7 +1905,7 @@ class EventLane:
         premarket and 15:30 marks, the night's bars, the backfill, the operating cache; each once done is not due again
         (px.sqlite `px_meta`), and one that failed waits FAIL_BACKOFF."""
         path = PXS.path_of(self.root)
-        px = PXS.PxStore(self.root) if path.exists() else None
+        px = _PxRead(path) if path.exists() else None    # (read-only: the plan never writes px.sqlite)
         try:
             meta = (lambda key: px.meta(key)) if px is not None else (lambda key: None)
             t = _ny_time(now)
@@ -1914,7 +1915,7 @@ class EventLane:
                 if PX_UNIVERSE_AT <= t < PX_FLAGS_AT and meta(f"px:universe:{d}") is None and \
                         not self._quiet("px-universe", now, soon):
                     return "universe", lambda ctx, px_, gw, run, dl: self._px_universe(ctx, px_, run, dl, today)
-                have = px is not None and bool(px.universe(today))
+                have = px is not None and px.has_universe(today)
                 if have and t >= PX_FLAGS_AT and now < session.close_at - PX_FLAGS_BEFORE_CLOSE and \
                         meta(f"px:flags:{d}") is None and not self._quiet("px-flags", now, soon):
                     return "flags", lambda ctx, px_, gw, run, dl: self._px_flags(ctx, px_, gw, run, today)
@@ -2211,6 +2212,30 @@ class EventLane:
 
 
 # ---------------------------------------------------------------------------------------------------- the hook
+class _PxRead:
+    """px.sqlite opened READ-ONLY for the plan (`EventLane._px_job`): its progress marks and whether a session's
+    universe holds a row; every read error reads as nothing (the recorder that would write it is then due)."""
+
+    def __init__(self, path: Path):
+        self.db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+
+    def meta(self, key: str) -> str | None:
+        try:
+            row = self.db.execute("SELECT value FROM px_meta WHERE key=?", (key,)).fetchone()
+        except sqlite3.Error:
+            return None
+        return None if row is None else str(row[0])
+
+    def has_universe(self, day: dt.date) -> bool:
+        try:
+            return self.db.execute("SELECT 1 FROM px_universe WHERE day=? LIMIT 1", (day.isoformat(),)).fetchone() is not None
+        except sqlite3.Error:
+            return False
+
+    def close(self) -> None:
+        self.db.close()
+
+
 def _ny_time(now: dt.datetime) -> dt.time:
     return now.astimezone(C.NY).time()
 
