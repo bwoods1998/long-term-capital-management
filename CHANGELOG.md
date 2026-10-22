@@ -105,7 +105,18 @@ programs trades real money at learning size.
   with and without these rows; the docs' hashes and the wall), and the earlier modules' counts (twelve seatable programs
   to fifteen, 1.2 to 1.5). The same week decided by release 1019e's own code (`c485dcfe`, `python
   league/tests/evl5_world.py OUT.json`) gives every earlier program the same 126 shadow intents and 28 real-money pick
-  lists. RUNS: see below.
+  lists.
+- **Runs, on `7f828831`** (the code, its tests and docs): the full league suite on 3.14, every one of league/tests' 470
+  test modules in four processes of `python -m unittest <modules>` (the box's load average was about 100, other agents'
+  runs, so the one `discover` process would have run past four hours), 12,770 OK (33 skipped: 2,991 + 3,202 + 3,324 +
+  3,253); on 3.11 the events, evl, equity, live, ci, constitution, daily_report, site_lane, e3_identities,
+  swarm_event_waits and stall modules, 96 modules, 2,375 OK; the gateway is unchanged (no gateway suite); `python -m
+  league.ci --base origin/main --branch feat/evl-5 --no-tests` passed; the identities, computed with the tree's own
+  functions (`constitution.money_digest`, `digest`, `swarm.evaluator.execution_fingerprint`, `equity_fingerprint`,
+  `xs.identity.xs_identity`, `swarm.gate.gate_contract`) on both Pythons, are the base's, as in the heading. On a scratch
+  merge with `rel/1019f` (`a62b6cf2`, A84 and A85 in it; the two conflicts kept both sides) test_events_evl5, the
+  event-book and PREREG-EVL-4 tests passed, and the event-lane modules there failed only on the counts this branch
+  updates.
 
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
