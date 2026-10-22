@@ -334,6 +334,10 @@ VENUE_STAMP_SLACK_S = 0.001
 VENUE_CANCEL_SAID = "eq_venue_cancel_said"
 #: What an A80 re-send held by a gate says on its intent (`_event_work_entry`); the auction's end reads it back.
 A80_HELD = "A80's one re-send held: "
+#: RELEASE 1019g (release 1019f's A85 send order with PREREG-EVL-5's `book.part_hold`): what a buy says on its intent
+#: while it WAITS FOR THE PREREG-EVL-5 BUYS AHEAD OF IT IN ROOM'S ORDER (`_event_send`'s `ahead`): their cash, invested
+#: room, loss budget and day orders left them took it to no whole share (`_event_work_entry`).
+AHEAD_HELD = "waits for the PREREG-EVL-5 buys ahead of it in ROOM's order: "
 #: kv: the lane's band mark (league/events/book.py `band_mark`) the session's last band sync read (release 1019f): the
 #: close decision reads the bands again when the lane's mark differs (`_event_bands_due`).
 EVENT_BAND_MARK = "eq_event_band_mark"
@@ -1822,7 +1826,7 @@ class EquityBook:
                 return f"one order a symbol: a working order on {symbol} that is not the equity book's"
         return None
 
-    def _count_refusal(self, day: str, *, exit_: bool, event_line: int | None = None) -> str | None:
+    def _count_refusal(self, day: str, *, exit_: bool, event_line: int | None = None, ahead: int = 0) -> str | None:
         """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit ITS LANE'S
         own count with room left for the exits of that lane's lots held (`_exit_reserve`: an old lane's lot's exit and
         one cancel of it; an event lot's one auction sale, none once sent): an old lane's entry the old lanes' orders
@@ -1842,17 +1846,23 @@ class EquityBook:
         lots' sales stopped below the rung that fills and were carried to the next session; the review of step two,
         review-live, measured it.) A lane's count still bounds its NEW risk: its entries stop once its day's sends and
         cancels, exits' included, leave too little room. (Under release 1019b's one count of 60 for both, the event
-        kind's entries stopped at about 30 open-entry lots sold the same day.)"""
+        kind's entries stopped at about 30 open-entry lots sold the same day.) RELEASE 1019g: an event entry with
+        `ahead` PREREG-EVL-5 buys before it in ROOM's order still waiting for the lane's close decision (`_event_send`)
+        keeps two orders for each of them (its send and its own exit) on the event kind's line and the House-wide one,
+        so the line refuses in ROOM's order whatever the minute each buy goes (PREREG-EVL-5 section 1.3 (a))."""
         mine = orders_today(self.state.rows, day)
         own = 0
+        kept_ahead = 2 * max(0, int(ahead)) if not exit_ and event_line is not None else 0
         if not exit_:
             events = event_orders_today(self.state.rows, day)
             if event_line is not None:
                 own = 1     # the event entry's own exit (one auction sale; an open-entry buy's is the same day's close)
                 cap, reserve = int(event_line), self._exit_reserve(day, event=True)
-                if events + 1 + own + reserve > cap:
+                if events + 1 + own + reserve + kept_ahead > cap:
                     return (f"the event kind's day order count: {events} of {cap} sent, {reserve + own} kept for "
-                            "exiting its lots and buys held and this one")
+                            "exiting its lots and buys held and this one"
+                            + (f", {kept_ahead} for the PREREG-EVL-5 buys ahead of it in ROOM's order" if kept_ahead
+                               else ""))
             else:
                 et = self._et()
                 cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
@@ -1863,7 +1873,7 @@ class EquityBook:
             try:
                 house = int(self.options_book.count_today(day)) + mine
                 room = int(self.table.max_orders_day) - house - int(self.options_book.exit_reserve())
-                kept = 0 if exit_ else self._exit_reserve(day) + own
+                kept = 0 if exit_ else self._exit_reserve(day) + own + kept_ahead
             except Exception:  # noqa: BLE001
                 return "the House's day order count could not be read"
             if room - kept < 1:
@@ -5897,15 +5907,38 @@ class EquityBook:
                 ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
             buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
         until = em.open_until if at == "open" else em.close_until
+        # RELEASE 1019g: ROOM'S ORDER HOLDS WHILE A PREREG-EVL-5 BUY WAITS. Its buy at D's close goes only once the lane's
+        # own close decision names its program (`book.part_hold`, PREREG-EVL-5 section 1.3), which can finish after the
+        # book's decision (it waits `EVENT_DECIDE_WAIT_S` for it, never longer); every buy after it in ROOM's order (a
+        # learning buy behind it at Probe, R3's births behind it at any band: A85's send order, `book.send_key`) would
+        # otherwise be sent first and take the cash, invested room, loss budget and day orders ROOM gives it first. So
+        # each buy is sent leaving the waiting PREREG-EVL-5 buys ahead of it (`ahead`: their side rows) what they will
+        # ask (`_size_event`, `_count_refusal`), and one taken by that to no whole share waits for them (`AHEAD_HELD`).
+        ahead: list[Mapping[str, Any]] = []
+        lane = self._event_lane_store() if at == "close" and buys else None
         for r in sells + buys:
             try:
                 side = self._event_row(r["iid"])
                 if r["e_side"] == "sell":
                     self._event_work_exit(Intent.of(r), side, now, day, at, until, killed)
                 else:
-                    self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out)
+                    waits = side is not None and self._event_part_waits(r, adapter, lane, day)
+                    self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out,
+                                           ahead=tuple(ahead))
+                    if waits:
+                        ahead.append(side)
             except Exception as exc:  # noqa: BLE001 - the next intent goes on
                 self._error(f"event {r['e_side']} {r['iid']}", exc, out)
+
+    def _event_part_waits(self, r: Mapping[str, Any], adapter: Any, lane: Any, day: str) -> bool:
+        """Release 1019g: whether the event buy `r` (an `eq_intents` row of this close) is a PREREG-EVL-5 buy still
+        WAITING for the lane's own close decision to name its program (`book.part_hold` "wait"), with no order of it sent:
+        the buys after it in ROOM's order leave it what it will ask (`_event_send`). Never at the open, never with no
+        lane store (every buy then waits for the eligible list) or no `part_hold` in the adapter."""
+        if lane is None or not hasattr(adapter, "part_hold") or str(r["status"]) != "planned":
+            return False
+        hold = adapter.part_hold(lane, str(r["family"]), int(r["version"]), dt.date.fromisoformat(day))
+        return hold is not None and hold[0] == "wait" and not self._intent_orders(int(r["iid"]))
 
     def _event_last(self, intent: Intent, *, entry: bool = False) -> tuple[Order | None, bool]:
         """(the intent's last order, whether a new one may go now): none yet, or the last one refused with nothing sent
@@ -5961,7 +5994,7 @@ class EquityBook:
 
     def _event_work_entry(self, intent: Intent, side: Mapping[str, Any] | None, now: float, day: str, at: str,
                           until: float, s: Any, adapter: Any, real_block: Callable[..., str | None],
-                          killed: Callable[[], bool], out: dict) -> None:
+                          killed: Callable[[], bool], out: dict, *, ahead: Sequence[Mapping[str, Any]] = ()) -> None:
         """One event BUY at its auction: every gate of a real equity open (`_open_block`: the House's, the kind's switch,
         the auction proof, the freezes, the program's band), the day's eligible list at the gateway, no sale of the name
         at this auction (an exit never waits on an entry: release 1019b's second review; a sale whose send the gateway
@@ -5971,7 +6004,11 @@ class EquityBook:
         (`_event_last`) goes again ONCE through all of it, the same symbol, side, size rule, limit, time in force and
         type under a new client id, while its window is open (`_send`'s wall clock); the re-sent order's why says so and
         how many ms the venue took, the minute counts it (`out["venue_cancel_resends"]`), and a gate that holds it
-        says so on the intent (`A80_HELD`), which the auction's end reads back."""
+        says so on the intent (`A80_HELD`), which the auction's end reads back. RELEASE 1019g: `ahead`, the side rows of
+        the PREREG-EVL-5 buys before this one in ROOM's order still waiting for the lane's close decision
+        (`_event_send`): the day's order lines keep their orders (`_count_refusal`), the size leaves them their dollars
+        (`_size_event`), and a buy that leaves it no whole share WAITS for them (`AHEAD_HELD`), sized again next minute,
+        never refused for them."""
         if side is None:
             self._finish(intent, "refused", "an event buy with no side row")
             return
@@ -6003,7 +6040,7 @@ class EquityBook:
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
-                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day))
+                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), ahead=len(ahead))
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why:
@@ -6016,11 +6053,19 @@ class EquityBook:
         if limit <= 0:
             self._finish(intent, "refused", "no limit price")
             return
-        sized = self._size_event(intent, inst, side, limit, day, s)
+        sized = self._size_event(intent, inst, side, limit, day, s, ahead=ahead)
         if sized is None:
             self._resend_held(intent, held)
             return
         qty, why = sized
+        if qty < 1 and ahead:
+            # (Release 1019g: ROOM's order holds while the PREREG-EVL-5 buys ahead of it wait: it waits for them, sized
+            # again next minute, and is never refused for what it left them; missed at the cut-off if they still wait.)
+            why = f"{held}{AHEAD_HELD}{why}"[:400]
+            if intent.why != why:
+                intent.why = why
+                self._save_intent(intent)
+            return
         if qty < 1:
             self._finish(intent, "refused", f"sizing: {why}" + (
                 f" (A80's one re-send of the buy the venue cancelled {resend[1]} ms after its submission)"
@@ -6084,7 +6129,7 @@ class EquityBook:
         self.state.execute("UPDATE eq_event_intents SET binding='gateway' WHERE iid=?", (int(intent.iid),))
 
     def _size_event(self, intent: Intent, inst: Instance, side: Mapping[str, Any], limit: Decimal, day: str,
-                    s: Any) -> tuple[Decimal, str] | None:
+                    s: Any, *, ahead: Sequence[Mapping[str, Any]] = ()) -> tuple[Decimal, str] | None:
         """THE EVENT ENTRY'S SIZE (PREREG-EVL-3 section 2, PREREG-EVL-1 section 8), by `sizing.size_entry` (the one
         sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.035 (A86
         REVISED), Sized 0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing
@@ -6102,7 +6147,10 @@ class EquityBook:
         current equity, the gateway's figure: the reading that trades less); the target and the one-share rule stay on
         E. Every answer is RECORDED on the buy's side row (`_event_sized`): the target's dollars, the constraint that
         cut it (a cut by A85's reservation reads as the cap it lowered: cash, invested or budget) and the dollars the
-        send asks."""
+        send asks. RELEASE 1019g: `ahead`, the PREREG-EVL-5 buys before this one in ROOM's order still waiting for the
+        lane's close decision (`_event_send`), are left what each will ask (`_event_ahead`) of the cash, the invested
+        room and the loss budget at its own weight, as A85's reservation is (no wall moves; it only makes this buy
+        smaller)."""
         et = self._et()
 
         def wait(why: str) -> None:
@@ -6132,6 +6180,11 @@ class EquityBook:
             # (A85: a learning buy leaves the next auction's Probe and Sized programs their cash, invested room and loss
             # budget; zero for a Probe or Sized buy, and while no program of the other auction is at either band.)
             held_cash, held_risk, held_note = self._event_reserve(inst, day, str(side.get("at") or intent.at), s, E)
+            # (Release 1019g: ROOM's order inside this auction while PREREG-EVL-5 buys ahead of it wait.)
+            ahead_cash, ahead_risk, ahead_note = self._event_ahead(ahead, s, E)
+            held_cash += ahead_cash
+            held_risk += ahead_risk
+            held_note += ahead_note
             available -= held_cash
             budget_room -= held_risk
         except Exception as exc:  # noqa: BLE001 - fail closed
@@ -6179,6 +6232,34 @@ class EquityBook:
                                 f"every wall ({one.reason}){held_note}")
         self._event_sized(intent, side, target, self._event_cut(replace(x, usd=limit), one, False), ZERO)
         return ZERO, f"no whole share fits ({one.binding}): {one.reason}{held_note}"
+
+    def _event_ahead(self, ahead: Sequence[Mapping[str, Any]], s: Any, E: Decimal) -> tuple[Decimal, Decimal, str]:
+        """RELEASE 1019g: what the waiting PREREG-EVL-5 buys ahead of a buy in ROOM's order (`_event_send`) will ask, as
+        (cash and invested room, loss budget, the note its sizing reason carries): for each, its band's target
+        (`share(band)` x E) in whole shares at its own limit, or one share at the limit when that rounds to none and one
+        share is within the band's one-share cap (`_size_event`'s rule, at the most it can send); the budget at its own
+        open-risk weight. (0, 0, "") with none ahead."""
+        cash = risk = ZERO
+        n = 0
+        for row in ahead:
+            limit = D(row.get("limit_px"), ZERO)
+            if limit <= 0:
+                continue
+            band = str(row.get("band") or "")
+            whole = (s.share(band) * E / limit).to_integral_value(rounding=ROUND_DOWN)
+            cap = s.one_share_cap(band)
+            usd = whole * limit if whole >= 1 else (ZERO if cap is not None and limit > cap * E else limit)
+            if usd <= 0:
+                continue
+            cash += usd
+            risk += usd * _event_weight_of(row.get("weight"))
+            n += 1
+        if cash <= 0:
+            return ZERO, ZERO, ""
+        cent = Decimal("0.01")
+        return cash, risk, (f"; ROOM leaves ${cash.quantize(cent)} of cash and invested room and ${risk.quantize(cent)} "
+                            f"of the loss budget to {n} PREREG-EVL-5 buy{'' if n == 1 else 's'} ahead of it in ROOM's "
+                            "order, waiting for the lane's close decision")
 
     def _event_reserve(self, inst: Instance, day: str, at: str, s: Any, E: Decimal) -> tuple[Decimal, Decimal, str]:
         """THE NEXT AUCTION'S RESERVATION FOR A LEARNING BUY (the captain's A85, recorded before the first Probe auction;
