@@ -36,6 +36,16 @@ of either kind never admits such a CIK, and a universe row of it is not labelled
 before the table kept no other ineligible result: meta `ELIGIBILITY_FROM` is the first entry session after the last
 one with a decision receipt then, and league/events/universe.py `seen_live` reads a session before it that has no
 markers.
+
+THE PROBE SIZE'S RECORD (release 1019f, the audit's capacity and probe lenses): a real BUY's row in `real_fills` keeps
+the dollars its band's target asked (`target_usd`: the band's `position_share` x E at the previous close, the House's
+event book's own figure) and which constraint cut it below that (`binding`, one of league/events/bands.py `BINDINGS`,
+NULL when none did), and the dollars its send asked (`sized_usd`: the shares sent x the limit, release 1019f's
+integration), so a reader can tell a full Probe event from one that cash, the loss budget, a wall or the whole shares
+cut. A sale's row, and every row written before the release, holds NULL in both. The two are NULLABLE COLUMNS,
+additive like a new table (an older release names its columns and never reads them, so `SCHEMA_VERSION` stays 1):
+the schema makes them in a new store, and `migrate_fills` adds them to a store from before them at every open
+(`FILL_COLUMNS_DDL`; idempotent).
 """
 
 from __future__ import annotations
@@ -105,7 +115,7 @@ CREATE TABLE IF NOT EXISTS band_history(id INTEGER PRIMARY KEY AUTOINCREMENT, pr
   version INTEGER NOT NULL, band TEXT NOT NULL, since TEXT NOT NULL, why TEXT, written_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS real_fills(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
   side TEXT NOT NULL, qty REAL NOT NULL, price REAL NOT NULL, fee REAL NOT NULL DEFAULT 0, filled_at TEXT NOT NULL,
-  band TEXT NOT NULL, PRIMARY KEY(program, version, event, side));
+  band TEXT NOT NULL, target_usd REAL, binding TEXT, sized_usd REAL, PRIMARY KEY(program, version, event, side));
 CREATE TABLE IF NOT EXISTS eligibility(day TEXT NOT NULL, cik TEXT NOT NULL, rule TEXT NOT NULL, eligible INTEGER NOT NULL,
   symbol TEXT, decided_at TEXT NOT NULL, PRIMARY KEY(day, cik, rule));
 CREATE TABLE IF NOT EXISTS births(id TEXT NOT NULL, version INTEGER NOT NULL, sha TEXT NOT NULL, spec TEXT NOT NULL,
@@ -136,6 +146,33 @@ _NY = ZoneInfo("America/New_York")
 
 #: The forward-only order of an intent's status (a `skipped:<why>` is terminal like `exited`).
 INTENT_ORDER = {"planned": 0, "entered": 1, "exited": 2}
+
+#: RELEASE 1019f: the nullable columns of `real_fills` a store from before them gains (`migrate_fills`), each by its
+#: own statement: a buy's target dollars, the constraint that cut it and the dollars its send asked (the module
+#: docstring).
+FILL_COLUMNS_DDL = {"target_usd": "ALTER TABLE real_fills ADD COLUMN target_usd REAL",
+                    "binding": "ALTER TABLE real_fills ADD COLUMN binding TEXT",
+                    "sized_usd": "ALTER TABLE real_fills ADD COLUMN sized_usd REAL"}
+
+
+def migrate_fills(db: sqlite3.Connection) -> list[str]:
+    """`FILL_COLUMNS_DDL`'s columns added to the store's `real_fills` where it lacks them (PRAGMA table_info, read
+    afresh): additive and idempotent; another process's first open adding one between the look and the ALTER is read
+    as done ("duplicate column name"). Nothing when the store holds no `real_fills` table. Returns the columns added."""
+    have = {str(r[1]) for r in db.execute("PRAGMA table_info(real_fills)")}
+    if not have:
+        return []
+    added = []
+    for column, ddl in FILL_COLUMNS_DDL.items():
+        if column in have:
+            continue
+        try:
+            db.execute(ddl)
+            added.append(column)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+    return added
 
 
 def utc_now() -> dt.datetime:
@@ -178,6 +215,7 @@ class Store:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
         elif int(have) != SCHEMA_VERSION:
             raise RuntimeError(f"events.sqlite schema {have} is not this code's {SCHEMA_VERSION}")
+        migrate_fills(self.db)      # (release 1019f: `real_fills.target_usd` and `binding` on a store from before them)
         if self.meta(ELIGIBILITY_FROM) is None:
             self._migrate()
 
@@ -334,4 +372,5 @@ def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
 
 
 __all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
-           "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers"]
+           "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers", "FILL_COLUMNS_DDL",
+           "migrate_fills"]

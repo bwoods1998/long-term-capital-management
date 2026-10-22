@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import unittest
+from decimal import Decimal
 
 from ltcm import sailbox
 from ltcm.sailbox import (
@@ -17,6 +18,7 @@ from ltcm.sailbox import (
     SailboxError,
     Transport,
     check_egress,
+    cost_nanos,
     floor_policy,
     hourly_cost,
     normalize_hosts,
@@ -662,6 +664,44 @@ class SpendTests(unittest.TestCase):
 
     def test_a_spend_response_missing_everything_still_reduces(self):
         self.assertEqual(usd({})["total_usd"], 0.0)
+        self.assertIsNone(usd({})["total_field"], "no cost field: the reduction says it read none")
+
+    #: SAIL'S SPEND RESPONSE SINCE OCT 2026 (invented figures): one `cost_usd_nanos` for the window, the response's and
+    #: each box row's, where the legacy split and its `estimated_total_cost_usd_nanos` were; `running_seconds` where
+    #: `duration_seconds` was.
+    RESPONSE_2026_10 = {
+        "start_at": "2026-09-01T00:00:00Z",
+        "end_at": "2026-09-15T12:00:00Z",
+        "cost_usd_nanos": 13_000_000,
+        "running_seconds": 3600.0,
+        "vcpu_seconds": 120.5,
+        "pricing_configured": True,
+        "rates": {"vcpu_second_usd_nanos": 4167, "s_creation_usd_nanos": 5_000_000},
+        "sailboxes": [{"sailbox_id": BOX, "app_id": APP, "cost_usd_nanos": 13_000_000, "running_seconds": 3600.0}],
+    }
+
+    def test_the_new_shape_carries_its_total_in_cost_usd_nanos(self):
+        report = usd(self.RESPONSE_2026_10)
+        self.assertAlmostEqual(report["total_usd"], 0.013, msg="was 0.0: the total field is gone")
+        self.assertEqual((report["total_field"], report["running_seconds"]), ("cost_usd_nanos", 3600.0))
+        legacy = usd(self.RESPONSE)
+        self.assertEqual((legacy["total_field"], legacy["running_seconds"]), ("estimated_total_cost_usd_nanos", 3600))
+
+    def test_cost_nanos_reads_both_shapes_and_never_reads_unknown_as_zero(self):
+        self.assertEqual(cost_nanos(self.RESPONSE), (Decimal(13_000_000), "estimated_total_cost_usd_nanos"))
+        self.assertEqual(cost_nanos(self.RESPONSE_2026_10), (Decimal(13_000_000), "cost_usd_nanos"))
+        self.assertEqual(cost_nanos(self.RESPONSE_2026_10["sailboxes"][0]), (Decimal(13_000_000), "cost_usd_nanos"))
+        split = {"finalized_cost_usd_nanos": "12300000", "estimated_active_cost_usd_nanos": "700000"}
+        self.assertEqual(cost_nanos(split),
+                         (Decimal(13_000_000), "finalized_cost_usd_nanos+estimated_active_cost_usd_nanos"))
+        self.assertEqual(cost_nanos({"finalized_cost_usd_nanos": "5"})[0], Decimal(5), "finalized alone is the total")
+        self.assertEqual(cost_nanos({"estimated_total_cost_usd_nanos": None, "cost_usd_nanos": "7"})[0], Decimal(7))
+        self.assertEqual(cost_nanos({"cost_usd_nanos": 0})[0], Decimal(0), "a zero bill is a reading")
+        for bad in ({}, {"cost_usd_nanos": None}, {"cost_usd_nanos": ""}, {"cost_usd_nanos": "lots"},
+                    {"cost_usd_nanos": -1}, {"cost_usd_nanos": True}, {"cost_usd_nanos": "NaN"},
+                    {"estimated_total_cost_usd_nanos": "x", "cost_usd_nanos": 5},
+                    {"finalized_cost_usd_nanos": "5", "estimated_active_cost_usd_nanos": "-1"}, None, "a string", []):
+            self.assertIsNone(cost_nanos(bad), bad)
 
     def test_hourly_cost_follows_observed_usage_not_the_ceiling(self):
         # Sail bills what a Sailbox uses, not what its size allows: a mostly idle floor is cheap.

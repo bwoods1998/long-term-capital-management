@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `c2f0a478`, full digest `24f73f18` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7709cadb` / `5e450ade`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1491,10 +1491,14 @@ path.
   ("limit"; "market" for an event sale), migrated in place; `book.SCHEMA` adds `eq_event_programs` (one row a version 2
   program: its band as last read from the lane, since, why), `eq_event_intents` (one row an event intent, keyed by
   `eq_intents.iid`: program, version, event, side, band, tif, otype, symbol, cik, day, at, rank_key, adv20, prev_close,
-  limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at) and `eq_event_decisions` (one row a session
+  limit_px, sigma, hold, weight, exit_day, exit_at, lid, rung, decided_at; release 1019f's nullable `target_usd`, a
+  buy's band target in Decimal dollars, `binding`, the constraint that cut it, `book.BINDINGS`, and `sized_usd`, the
+  Decimal dollars its send asked (the shares sent x the limit, 0 when none; release 1019f's integration), added in place to a
+  state from before them by `book.SCHEMA_COLUMNS` through `EquityBook._add_columns`) and `eq_event_decisions` (one row a session
   and auction: counts only; `sale_to_later` {skipped program: {selling program: n}} when the sale gate skipped an
   earlier row's pick because a later row's lot sells the name at that auction: PREREG-EVL-4 section 1.3's count,
-  `_event_sale_takers`, also in the decision's `equity.event_decide` record). kv `eq_event_synced`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
+  `_event_sale_takers`, also in the decision's `equity.event_decide` record; `band_sync` `first` | `moved`
+  when the decision ran the band sync, release 1019f: section 23). kv `eq_event_synced`, `eq_event_band_mark`, `eq_event_list` {day, sha, count, at}, `eq_event_off_said`,
   `paper_proof_auction`, `paper_proof_auction_buy`, `paper_proof_auction_sell`. A lot's `info.evl` (program, version,
   event, cik, band, weight, sigma, prev_close, limit), `info.evl_exit` {day, at, rung, first, zero} and `info.evl_fills`
   (what was written back).
@@ -1508,15 +1512,31 @@ path.
   House's rules for the old lanes (`_house_exits` skips it); it may sell in the session it was bought (the minimum hold
   is the old lanes'). `_open_block` asks an event instance the kind's switch and the auction proof
   (`_event_open_block`) and its band (`_event_seat_block`) in place of `equity_money.enabled` and the SPY day-order
-  proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session; `_event_send` orders the buys by
-  ROOM (`book.room_key`). `_size_event` calls `size_entry` with `usd` = the band's `position_share` x E (E the
-  `last_equity` of the account, never above the sizing equity), `position_share` = `per_name_share` (the name's
-  book-wide value as `account_symbol_value`), `weight` = the lot's own; whole shares; one share by `size_entry` at
-  `usd` = the limit, at learning only when the limit is at most `one_share_max.learning` x E. `probe_figures` weighs an
+  proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session (and again at the close decision when
+  the lane's band mark moved: section 23); `_event_send` orders the buys by ROOM (`book.send_key(program, band, n)`, n
+  the buy's place among its program's buys of the auction: `book.room_key`'s tiers, round-robin inside the PREREG
+  Sized and Probe tiers, the captain's A85; a birth's tier after them all, R3). `_size_event` calls `size_entry` with
+  `usd` = the band's `position_share` x E (E the `last_equity` of the account, never above the sizing equity), `E` and
+  `sleeve_equity` = `wall_equity(E, account)` (release 1019f: the lower of E and the account's current `equity`, the
+  gateway's figure, so the instrument, sleeve and invested caps trade less; `_event_gate`'s name wall reads it too),
+  `position_share` = `per_name_share` (the name's book-wide value as `account_symbol_value`), `weight` = the lot's own;
+  whole shares; one share by `size_entry` at `usd` = the limit, at learning only when the limit is at most
+  `one_share_max.learning` x E. A buy of a tier after the PREREG Probe tier (a PREREG learning program's, a birth's at
+  any band: `book.leaves_room`) has its `available_cash` and `sleeve_free_cash` less, its `invested_now` more, and its
+  `budget_room` less, by A85's reservation for the next auction (`_event_reserve(inst, day, at, s, E) -> (cash, budget,
+  note)`: the other auction's live PREREG Probe and Sized programs, `book.reserved_for`, through `book.reservation`,
+  their room from `_event_open_count` less `_event_selling` (their lots sold at this auction), their picks and buy
+  weights from `_event_recent` (`eq_event_decisions` summaries and `eq_event_intents`), less `_event_given_back(day,
+  at)` (the value and open risk of the event lots sold at this auction); (0, 0, "") for a PREREG Probe or Sized buy and
+  while the other auction has no PREREG Probe or Sized program; an error reading it waits the buy a minute, as any
+  sizing figure). Release 1019f: each answer writes the buy's `target_usd`, `binding` and `sized_usd` on its side row
+  (`_event_sized`, `_event_cut`), the gateway's final refusal `binding` "gateway" (`_event_refused_at_gateway`).
+  `probe_figures` weighs an
   open event lot by `event_lot_weight` (its `info.evl.weight`; 0.40 from the ladder's first rung or when unreadable; 1
   once at 0) and a working event buy by its side row's weight, and counts every closed event lot in `closes` whatever
   its band. `_event_fills` writes each event lot's buy (once its buy ended) and sale (once closed; again when its fees
-  move) into the lane's `real_fills` through `book.write_fills`.
+  move) into the lane's `real_fills` through `book.write_fills` (release 1019f: a buy's row with its side row's
+  `target_usd`, `binding` and `sized_usd`, "venue" when no cap cut it and the cross filled short, `_event_size_record`).
 - **The adapter** (league/events/book.py; standard library only; plumbing, in no identity): `settings`, `seatable()`,
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
   `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
@@ -1527,15 +1547,23 @@ path.
   decided_at)`: the rows stored before the decision, EXCLUDED and the F8K(D) skip read from them), `held_recently`,
   `allocate(picks, rooms,
   band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
-  each program its own ranked picks whose name no earlier program was given, until its room is full; the book's skip
+  each program its own ranked picks whose name no earlier-given program was given, until its room is full; inside
+  Sized and inside Probe one pick given a program a pass, A85; the book's skip
   is `EquityBook._event_gate`: no whole share by price, or the name sold at the same auction), `one_name_an_auction(picks,
-  band_of)` (`allocate` with no room limit), `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program,
+  band_of)` (`allocate` with no room limit), `send_key(program, band, n)`, `reservation(programs, s, E) -> (cash,
+  budget)` (A85: per Probe or Sized program {band, room, picks, weights}, min(room, median of its last
+  `RESERVE_DECISIONS` 5 pick counts, its room with none) x share(band) x E, and that x the median weight, 0.40 with
+  none), `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program,
   day) -> (day, "open" | "close")`,
   `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
   changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
   and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `BANDS`,
-  `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5,
-  `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`. THE LANE'S OWN MODULES IT USES (release 1019b; no stand-in in
+  `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `PROBE_UP` ("sized", "probe"), `RESERVE_DECISIONS` 5,
+  `ROUND_ROBIN_TIERS` (the PREREG Sized and Probe tiers), `reserved_for(program, band)`, `leaves_room(program, band)`,
+  `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5, `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`;
+  release 1019f's `SCHEMA_COLUMNS` ({table: {column: ALTER}}), `BINDINGS` (bands.py's), `SIZING_BINDINGS` and
+  `binding_of(sized) -> str | None` (`size_entry`'s cap as the record names it). THE LANE'S OWN MODULES IT USES
+  (release 1019b; no stand-in in
   the book or its tests): league/events/programs.py `SEATING`, `BY_KEY` and `Program.can_seat` (`seatable()` is
   `SEATING`, every version that can seat: version 2 of the nine, version 1 of PREREG-EVL-4's three, in the tables'
   order; `program_of` reads `BY_KEY` and `can_seat`); league/events/bands.py `bands(store)` (the band reader:
@@ -1543,7 +1571,9 @@ path.
   beside) and `record_fill(store, ...)` (the fill write-back, one row a (program, version, event, side), a write again
   changing only its fee), on a `FillWriter` (the existing store file only, a 5 s busy timeout); the store's tables
   `bands(program, version, band, since, why)` and `real_fills(program, version, event, side, qty, price, fee,
-  filled_at, band)` as league/events/store.py's schema makes them. league/tests/test_events_book.py `TheRealLane` runs
+  filled_at, band, target_usd, binding, sized_usd)` as league/events/store.py's schema makes them (release 1019f's three nullable
+  columns added to an older store by `store.migrate_fills`, at every open and by `write_fills`; `record_fill` takes
+  them as keywords, a buy's only, written once). league/tests/test_events_book.py `TheRealLane` runs
   the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
@@ -1554,6 +1584,18 @@ path.
   event lot so. The swarm's readers leave event programs out: league/ops/forward_register.py `live_instances`,
   league/ops/forward_twins.py `read_book`, league/ops/forward_report.py FW7 and FW9, league/ops/dlane_report.py
   `equity_closes`.
+- **10** (release 1019f; ops, READ-ONLY, the audit of the live House: alarms that did not exist): league/ops/evl_health.py
+  reads the book's own rows in `live.sqlite`, every open `mode=ro`, and writes nothing there. `entry_facts` (the stall
+  cause `evl_entries`, the daily report's real buys): `eq_event_intents` buys (`iid`, `program`, `version`, `day`, `at`)
+  joined with `eq_intents` (`status`, `why`: the book's own words at a buy's end, `_event_finish`, `_event_work_entry`,
+  `_size_event`), their `eq_orders` (`status`, `filled_qty`, `why`: "N shares at <band> (<binding>)", `tif`, `answer`:
+  `final`, `submitted_at`, `canceled_at`, `cancel_sent`, `cap`) and `eq_event_decisions.summary` (`programs`: `picks`,
+  `room`, `planned`, `skipped`); `handback_facts` (`evl_handback`): `eq_orders` with `filled_qty` > 0 joined with
+  `eq_lots` (`lane` "event", instance `:r`, `status`, `opened_at`, `closed_at`, `info.evl.event`), `eq_fills.at` and the
+  buy's `eq_intents` row (`status`, `updated_at`), against the lane's `real_fills`. A change of these columns or words
+  is a change of those readers (league/tests/test_evl_alarms_1019f.py writes them as the book does:
+  league/tests/evl_book_fakes.py, from live.py's and league/events/book.py's `SCHEMA`). Its `venue_cancel_ms` is the
+  rule of release 1019e's `live.venue_cancel_ms` (A80), read from the same stamps.
 - **Identities**: money `f4fc39ff` -> `285fa7af`, constitution `34bbe7a5` -> `fd38e4e1`; the options execution
   fingerprint, the equity identity, the xs identity and the gate contract do not move.
 - **Rollback**: `event.enabled` False (one owner deploy, one money-digest move: `25f5eb21` / `8a6a2160`); no lot is sold
@@ -1566,7 +1608,12 @@ path.
   readers left out, the auction proof's stages); the changed pins in test_constitution, test_ci, test_e3_identities,
   test_e4_e2e, test_equity_money, test_equity_opens_off, test_equity_design, test_equity_seats and
   test_equity_book_panel; league/tests/equity_week.py's golden ETF week normalizes R2's new columns and tables (no ETF
-  order moves).
+  order moves). league/tests/test_events_a85.py (the captain's A85): round-robin inside Probe and Sized at the
+  decision and at the send, learning in the tables' order; the two-auction case (learning close buys leave the next
+  open's Probe program its three whole buys; the same rows without the reservation leave it one and a cut one); R 0
+  with no program of the other auction at Probe or Sized (learning sizes as before) and for a Probe buy or a Probe
+  program of the same auction; the median of five decisions, the room cap, the buys' weights; the cash this auction's
+  sales give back; the loss budget held by R x the weight.
 
 ## 21. The event kind's own day order count (release 1019c, Oct 2026; under the owner's goal of Oct 19, 2026; money and book, as built)
 
@@ -1577,8 +1624,9 @@ path.
   150 (nine programs at learning hold at most 72 lots: a buy and a sale each in one day, 144 orders). With PREREG-EVL-4's
   three (release 1019d) twelve programs at learning could need 2 x 12 x 8 = 192; THE LINE STAYS 150 (A78, the reading
   that trades less; the House-wide line leaves it at most 190): on a day that needs more, ENTRIES stop in ROOM's order
-  (`_event_send` sends the buys in `room_key` order after the sales), so PREREG-EVL-4's rows, the last in the tables'
-  order within a band, are refused first; an exit is never stopped by it.
+  (`_event_send` sends the buys in `room_key` order after the sales; `send_key` order since A85, the tables' order at
+  learning), so PREREG-EVL-4's rows, the last in the tables' order within a band, are refused first at learning; an
+  exit is never stopped by it.
 - **The reader**: league/events/book.py `Settings.max_orders_day` (`FALLBACK` 0). league/live/money.py `EquityTable`
   (inside the options execution fingerprint) does not read it.
 - **The count** (book; league/equity/live.py): `event_orders_today(rows, day)` counts the orders of an event instance
@@ -1648,3 +1696,63 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   cut-off passed, by the minute or by the wall clock at the send, sends nothing; the kill switch holds it; a gateway cap
   ends it refused at once and a gateway reading it could not make sends it again the next minute, two orders at the
   venue; an exit cancelled at once is unchanged; a buy that filled before the cancel is not re-sent).
+
+## 23. The close decision reads the bands again when the lane's band history moved (release 1019f, Oct 2026; after section 22, release 1019e's A80; book, as built)
+
+- **Why**: the audit of the live House ("bands move a session late"): the lane's screen now runs its looks after the
+  open decision too (league/events/house.py `_screen_open`, docs/events.md **The screen after the open**), so a look the
+  open made final moves its program's band that morning; the book read the bands once a session, at its first decision,
+  so a close-entry program traded learning at that day's close although PREREG-EVL-3 section 2 gives Probe "from the
+  first decision after a passed look". No rule moves.
+- **The adapter** (league/events/book.py; plumbing, in no identity): `band_mark(lane) -> int | None`, the newest
+  `band_history` id (every `bands.set_band` writes a row: a look's Probe or retirement, the night's review); 0 with no
+  lane, no such table or no row; None when the table is there and cannot be read.
+- **The book** (league/equity/live.py; plumbing, outside the equity identity): `EVENT_BAND_MARK` = kv
+  `eq_event_band_mark`, written by `_event_sync` beside `eq_event_synced` with the mark it read BEFORE the bands (a move
+  written between the two reads is read at the next decision); `_event_bands_due(day, at, adapter, lane) -> "first" |
+  "moved" | None`: "first" when `eq_event_synced` is another day (the session's first decision, as before), "moved" at
+  THE CLOSE DECISION when the lane's mark differs from the kept one or cannot be read (fail closed: `_event_sync` then
+  says whether the bands can be read; unreadable, no buy is planned that decision), else None. `_event_decide` runs the
+  sync when it is due and writes `band_sync` in the decision's summary. The open decision is always a session's first;
+  a band moved after the close decision is read at the next session's first. A re-sync is the same `_event_sync`: the
+  rows of `eq_event_programs`, the instances' bands, the `equity.band` records and the band alerts, so `_event_seat_block`
+  and ROOM (`book.room_key`) at that close read the new band, and its buys are sized at it (`s.share(inst.band)`).
+- **Identities**: none moves (money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`,
+  the equity identity `78022ca6`, the gate contract `397b22b7`).
+- **Tests**: league/tests/test_events_1019f.py `TheCloseDecisionReadsTheBandsAgain` (the lane's screen at 10:00 ET of
+  DAY writes EVL-ERN-REACT-ON v2's look 1 as of Oct 30 and its Probe move; the 15:46 ET close decision gives ACME to it
+  at Probe's 5 shares, `band_sync` "moved", where without the move the earlier row EVL-ERN-REACT-C1 takes it at
+  learning's 2 and the bands are read once; an unreadable mark reads them again; the next session's open is its first)
+  and `TheBandMark`.
+
+## 24. The Probe band's size (the captain's A86 REVISED, 20:30Z Oct 21, 2026; money, as built; after section 23)
+
+- **The rows** (money; league/constitution.py `equity_money.event`, the one source: league/events/book.py `settings`
+  reads them, `_event_gate` and `_size_event` apply them): `position_share.probe` "0.05" -> "0.035" and a new
+  `one_share_max.probe` "0.05" (`one_share_max` {learning "0.05", probe "0.05"}); `max_open.probe` STAYS 6 (A86's
+  proposal of 8 lay outside its bound [0, 6]: `equity_money_problems` would have failed the whole event kind closed).
+  Learning ("0.02", 8, one share at most "0.05") and Sized ("0.10", 8, no one-share row) do not move.
+- **The bounds** (`EQUITY_MONEY_BOUNDS`): `event.position_share.probe` STAYS [0, 0.05] (the pre-registered value is the
+  loose end; 0.035 trades less inside it), `event.max_open.probe` STAYS [0, 6], and the one new row
+  `event.one_share_max.probe` [0, 0.05], which `equity_money_problems` holds under `per_name_share` as it holds
+  learning's. A Probe program holds at most 6 x 0.035 = 0.21 x E at target (6 x 0.05 = 0.30 before), 6 x 0.05 = 0.30
+  x E of one-share lots in the worst case (6 up to the 10% wall, 0.60, before). A table missing the new row is outside
+  its bounds and opens nothing (`FALLBACK`).
+- **What it changes**: a Probe buy targets 0.035 x E in whole shares; when that rounds to none, one share only when one
+  share at the limit is at most 0.05 x E (`_event_gate` skips the pick "one_share" before it takes a slot,
+  `_size_event` refuses it at the send), where PREREG-EVL-1 bought one share up to the name's wall. ROOM, the walls,
+  the loss budget, the open-risk weight, the day order line (150; 2 x the live bands' `max_open` is 44, at least 150)
+  and the gateway do not move. Done's "Probe size" is 3.5% from here (league/events/done.py: `sized_usd` >= 0.8 x
+  `target_usd`).
+- **Identities**: money `055e5313` -> `c2f0a478`, constitution `a8d4cbd9` -> `24f73f18`; the options execution
+  fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`
+  do not move.
+- **Rollback**: `event.enabled` False (money `fd9e90c0`, constitution `005745e9`), `position_share.probe` "0.05" with
+  `one_share_max.probe` removed (a constitution-row change back to release 1019e's pair, `055e5313` / `a8d4cbd9`), or
+  the House release before it.
+- **Tests**: league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped "one_share", over the
+  wall "name_wall"; at most six open at Probe; learning at 2% and Sized at 10% as before; the rows, their bounds, the
+  one-share row held under the name's wall, the dollars' ceiling and the digests); league/tests/equity_design.py
+  `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86` sets the two rows back; `before_1019c`
+  does too); test_events_book.py and test_events_1019c.py read the new Probe sizes.

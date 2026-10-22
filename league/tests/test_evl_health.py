@@ -42,6 +42,17 @@ def iso(epoch: float) -> str:
     return ES.iso(dt.datetime.fromtimestamp(epoch, UTC))
 
 
+#: The weekdays a test's daily-index backfill reaches (league/events/house.py `BACKFILL_WEEKDAYS` before Oct 19-23).
+REACH = tuple(dt.date(2026, 10, d) for d in (14, 15, 16, 19, 20, 21, 22))
+
+
+def backfill_done(st: ES.Store, days=REACH) -> None:
+    """Every weekday of `days` backfilled from the daily index (the lane's meta `evl:backfill:<day>` "done", as
+    league/events/house.py `_backfill` writes it; release 1019f's `evl_backfill` judges it)."""
+    for day in days:
+        st.set_meta(f"evl:backfill:{day.isoformat()}", "done")
+
+
 def blocks(**over) -> dict:
     """CLEAN with some blocks replaced (a block given as None is left out)."""
     out = {k: dict(v) if isinstance(v, dict) else v for k, v in CLEAN.items()}
@@ -100,7 +111,8 @@ class WhenJudged(Lane):
             switched = self.check(cause, now, settings={"stall": {"evl": False}})
             self.assertIn("switched off (ops.json stall.evl is false)", switched["what"])
         self.assertEqual(EV.checks({}, self.root, now)["evl_record"]["judged"], False, "no config: the lane is off")
-        self.assertEqual(ST.CAUSES[-9:-4], EV.CAUSES, "the five, before the equity lanes' own four")
+        self.assertEqual(ST.CAUSES[-13:-4], EV.CAUSES, "the nine (release 1019f: A84's evl_final after evl_fills, then "
+                         "evl_entries, evl_backfill and evl_handback), before the equity lanes' own four")
 
     def test_a_lane_switched_on_with_no_store_has_recorded_nothing(self):
         empty = Path(self.tmp.name) / "bare"
@@ -117,7 +129,7 @@ class WhenJudged(Lane):
         errors: list[str] = []
         out = EV.checks(self.ctx(), self.root, et(TUE, "12:00"), errors=errors)
         self.assertTrue(all(not c["stalled"] and c["judged"] is False for c in out.values()))
-        self.assertEqual(errors, ["the event lane's store could not be read (DatabaseError): its four causes are not judged"])
+        self.assertEqual(errors, ["the event lane's store could not be read (DatabaseError): its causes are not judged"])
 
     def test_the_lanes_stop_file_idles_all_four_and_excuses_its_window(self):
         """events/STOP idles the lane by design (league/events/house.py): nothing is judged while it stands, nor for the
@@ -452,6 +464,35 @@ class Score(Lane):
         self.assertFalse(check["stalled"])
         self.assertIn("1 the tape keeps waiting", check["what"])
 
+    def test_an_intent_a_catch_up_decision_wrote_after_the_nights_pass_waits_for_the_next_pass(self):
+        """Release 1019f's integration (Oct 21, 2026's false alarm): PREREG-EVL-4's rows decided by themselves for an
+        older close once release 1019d went live wrote an intent due by Tuesday after Tuesday night's score pass had
+        run. The next pass settles it; until then it is no stall (counted apart). An intent of a decision made before the
+        pass still stands, and with no pass after the close nothing is excused."""
+        self.intent("8k:new", TUE)
+        self.intent("8k:old", TUE)
+        self.st.db.execute("UPDATE intents SET program='EVL-CTRL-8K-ON', version=1, entry_at='close', "
+                           "entry_day='2026-10-19' WHERE event='8k:new'")
+        now = et(TUE, "23:30")
+        self.assertTrue(self.check("evl_score", now)["stalled"], "no score pass after the close: nothing excused")
+        self.receipt("score", et(TUE, "20:30"), status="ok", summary={"day": "2026-10-20", "complete": True})
+        self.receipt("decide-close-evl4:2026-10-19", et(TUE, "21:10"),
+                     summary={"EVL-CTRL-8K-ON": {"planned": 1, "skipped": 0, "known": 0}})
+        check = self.check("evl_score", now)
+        self.assertTrue(check["stalled"], "8k:old stands: its decision was made before the pass")
+        self.assertEqual((check["numbers"]["open_due"], check["numbers"]["after_last_pass"]), (1, 1))
+        self.st.db.execute("UPDATE intents SET status='exited' WHERE event='8k:old'")
+        check = self.check("evl_score", now)
+        self.assertFalse(check["stalled"])
+        self.assertIn("1 a decision wrote after the night's last score pass (the next pass settles them)", check["what"])
+        # the next night's pass that leaves it open: it stands then
+        self.receipt("score", et(WED, "20:30"), status="ok", summary={"day": "2026-10-21", "complete": True})
+        self.assertTrue(self.check("evl_score", et(WED, "23:30"))["stalled"])
+        # a decision receipt that wrote nothing new for the key excuses nothing
+        self.assertEqual(EV.written_after({"decide": {"decide-close-evl4:2026-10-19": [
+            {"started_at": iso(et(TUE, "21:10")), "summary": json.dumps({"EVL-CTRL-8K-ON": {"planned": 0, "known": 1}})}]}},
+            et(TUE, "20:30")), set())
+
     def test_a_night_with_nothing_due_is_no_stall(self):
         self.intent("8k:b", WED)  # due tomorrow
         self.intent("8k:c", TUE, status="exited")
@@ -531,6 +572,7 @@ class StallHarness(StallBase):
     def lane(self, *, record_ago_minutes=None):
         st = ES.Store(self.root / "events")
         try:
+            backfill_done(st)   # (release 1019f: the daily-index backfill of the reach is done, so evl_backfill is quiet)
             if record_ago_minutes is not None:
                 at = self.now_ - record_ago_minutes * 60
                 st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, "

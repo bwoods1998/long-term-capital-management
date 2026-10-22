@@ -100,13 +100,29 @@ test('every cause the House can name has its words here; no other cause, no empt
   }
 });
 
+test('an INFO notice sent while a told owner cause stands (release 1019f) says nothing new needs the owner and names what still waits', () => {
+  const evl = { ...BIRTHS, cause: 'evl_entries', what: 'Real event buys fell short at 1 of 2 auctions.', numbers: {} };
+  const message = composeNotice({ ...notice(evl), waiting_owner: ['kill_on', 'kill_on', 'evl_entries', 'Apple', '__proto__'] });
+  assert.equal(message.subject, `LTCM: stalled: ${STALL_CAUSES.evl_entries}`);
+  assert.equal(message.text.split('\n')[0], 'Nothing new here needs you: the House keeps working around it. Still waiting '
+    + `on you, as mailed within the last 12 hours: ${STALL_CAUSES.kill_on}.`);
+  assert.equal(message.text.includes('Apple'), false);
+  assert.equal(stallKey({ ...notice(evl), waiting_owner: ['kill_on'] }), 'stall:info:evl_entries', 'never part of the key');
+  // An owner notice ignores it (its steps lead it), and a list that names nothing known says the usual line.
+  assert.ok(composeNotice({ ...notice(RUNWAY, evl), waiting_owner: ['kill_on'] }).text.startsWith('Only you can do this'));
+  assert.equal(composeNotice({ ...notice(evl), waiting_owner: 'kill_on' }).text.split('\n')[0], NONE_NEEDED);
+  for (const cause of ['evl_entries', 'evl_backfill', 'evl_handback']) assert.ok(Object.hasOwn(STALL_CAUSES, cause), cause);
+});
+
 test('the composer reads every fact the House writes, and no fact it does not write', () => {
   const written = /\ndef cause_facts\([\s\S]*?\n    return \{([\s\S]*?)\}\n/.exec(STALL_SOURCE);
   assert.ok(written, 'league/ops/stall.py cause_facts returns its facts as one dict');
   const keys = [...written[1].matchAll(/"([a-z_]+)":/g)].map(match => match[1]).sort();
   assert.deepEqual(keys, Object.keys(BIRTHS).sort(), 'the fixture is the House\'s shape');
   const outer = /\ndef notice_facts\([\s\S]*?\n    return \{([\s\S]*?)\}\n/.exec(STALL_SOURCE);
-  assert.deepEqual([...outer[1].matchAll(/"([a-z_]+)":/g)].map(match => match[1]).sort(), Object.keys(notice(BIRTHS)).sort());
+  // (`waiting_owner`, release 1019f: only on an INFO notice sent while a told owner cause stands; its own test below.)
+  assert.deepEqual([...outer[1].matchAll(/"([a-z_]+)":/g)].map(match => match[1]).sort(),
+    [...Object.keys(notice(BIRTHS)), 'waiting_owner'].sort());
   const read = new Set();
   const spy = (facts, prefix) => new Proxy(facts, { get: (target, key) => (read.add(`${prefix}${String(key)}`), target[key]) });
   composeNotice(spy({ ...notice(spy({ ...RUNWAY }, 'cause.')) }, ''));
@@ -286,6 +302,14 @@ test('the causes of Oct 19, 2026 (release 1019c): the measured cap breach and th
     worse: 'none', better: 'entry,exit' } };
   const betterText = composeNotice(notice(better)).text.split('\n');
   for (const line of ['- entry_mean_bp: -40', '- off: entry,exit', '- better: entry,exit']) assert.ok(betterText.includes(line), line);
+  // A84 (release 1019f): the final record behind what A69 allows, the program a lower-case token, its days dates.
+  const final = { ...BIRTHS, cause: 'evl_final', numbers: { programs: 12, lagging: 12, program: 'evl-ins-buy-o1', version: 2,
+    final_through: '2026-10-27', a69_allows: '2026-10-29', lag_sessions: 2, max_lag_sessions: 2 } };
+  assert.equal(composeNotice(notice(final)).subject, 'LTCM: stalled: event-lane looks wait longer than the fast path allows');
+  const finalText = composeNotice(notice(final)).text.split('\n');
+  for (const line of ['- program: evl-ins-buy-o1', '- final_through: 2026-10-27', '- a69_allows: 2026-10-29', '- lag_sessions: 2',
+    NONE_NEEDED]) assert.ok(finalText.includes(line), line);
+  assert.equal(stallKey(notice(final, fills)), 'stall:info:evl_fills+evl_final');
   // The cap breach hold (the review's major 1) is a yes or no among the cause's figures.
   assert.ok(composeNotice(notice({ ...cap, numbers: { ...cap.numbers, held: true } })).text.split('\n').includes('- held: yes'));
 });

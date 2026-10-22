@@ -1,5 +1,5 @@
 {
- "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
+ "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
  "kind": "report",
  "notice_id": "report:2026-10-20",
  "day": "2026-10-20",
@@ -159,5 +159,84 @@
  "alarms": [
   "cap_breach",
   "evl_verdicts"
- ]
+ ],
+ "entries": {
+  "auctions": [
+   {
+    "at": "open",
+    "planned": 6,
+    "filled": 4,
+    "bound": "cash"
+   },
+   {
+    "at": "close",
+    "planned": 3,
+    "filled": 3,
+    "bound": "room"
+   }
+  ],
+  "totals": {
+   "planned": 9,
+   "filled": 7,
+   "venue_cancels": 2,
+   "resent": 1,
+   "resent_filled": 1,
+   "never_sent": 1,
+   "unfilled": 0,
+   "room_cut": 2,
+   "never": {
+    "order_line": 0,
+    "cash": 1,
+    "budget": 0,
+    "name_wall": 0,
+    "invested": 0,
+    "room": 0,
+    "price": 0,
+    "min_order": 0,
+    "gateway": 0,
+    "sale": 0,
+    "busy": 0,
+    "blocked": 0,
+    "unreadable": 0,
+    "other": 0
+   }
+  },
+  "why": null
+ },
+ "break_even": {
+  "since": null,
+  "compute_per_session": null,
+  "probe_per_session": null,
+  "edge_bp": null,
+  "partial": false,
+  "why": "n/a until a Probe buy"
+ },
+ "done": {
+  "counted": 120,
+  "toward": 300,
+  "next_checkpoint": 200,
+  "lower_bp": 12.5,
+  "lower_a_bp": -3.1,
+  "learning": 46,
+  "holds": false,
+  "pivot": false,
+  "stop": false,
+  "by_program": [
+   {
+    "id": "EVL-ERN-READ-O1",
+    "version": 2,
+    "n": 70
+   },
+   {
+    "id": "EVL-INS-BUY-O1",
+    "version": 2,
+    "n": 50
+   },
+   {
+    "id": "EVL-NEWS-READ-O1",
+    "version": 2,
+    "n": 0
+   }
+  ]
+ }
 }

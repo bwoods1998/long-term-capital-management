@@ -744,7 +744,8 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 #:   made, so nothing waits for it);
 #: - the EDGAR daily-index backfill (house.py BACKFILL_WEEKDAYS) of every weekday through X that the House still
 #:   backfills has run (meta `evl:backfill:<day>` "done": it adds the filings the live pass missed, and decides their
-#:   sessions again).
+#:   sessions again), through `index_through(X)` when X is an SEC holiday NYSE trades (release 1019f's review: the
+#:   index that holds the 8-Ks of X's eve; `SEC_HOLIDAYS`).
 #: THE REACH IS DEFINED HERE, ONCE (release 1019b's second review): the House's lane takes its REDECIDE_SESSIONS,
 #: LOOKBACK and BACKFILL_WEEKDAYS from these three (league/events/house.py imports them; this file is behind the wall,
 #: house.py is not), and `_reach` waits out the House's own when it is ever larger: a House change can only delay a
@@ -752,21 +753,81 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 FINAL_SESSIONS = 3
 FINAL_LOOKBACK = dt.timedelta(days=45)
 FINAL_BACKFILL_WEEKDAYS = 3
+#: SEC HOLIDAYS (release 1019f; moved here from league/events/house.py by its review, lens judges, as the reach above
+#: is: the House's lane takes this table, house.py `SEC_HOLIDAYS`, and `_sec_holidays` reads the House's own too, so
+#: a day only the House's copy lists, whose backfill it marks done, still has the index after it waited for): EDGAR
+#: accepts no filing on a US federal holiday and publishes no daily index for it; the House's backfill marks such a
+#: weekday done when its index read fails (house.py `_backfill`). The federal holidays of 2026 and 2027 as OPM lists
+#: them (https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/, read Oct 21, 2026), and Fri Dec 31,
+#: 2027: New Year's Day 2028 falls on a Saturday, so the Friday before is its holiday (5 U.S.C. 6103(b)(1)). A closure
+#: by executive order (a Christmas Eve) is not in it: add the day before it falls; 2028's before Jan 2028.
+#: THE INDEX THAT HOLDS A HOLIDAY'S EVE (the review's major): EDGAR dates an 8-K accepted after 17:30 ET as filed on
+#: the next day it is open (Regulation S-T Rule 13(a)(2); a Section 16 form to 22:00 ET the same day), so on a holiday
+#: NYSE trades (Columbus Day, Veterans Day) the 8-Ks accepted after 17:30 ET of the session before it, events of the
+#: holiday's open decision, are in the index of the next weekday EDGAR is open, not in the eve's, and the holiday has
+#: none. A close X is final (A66's third rule, A69's (iii)) only once the backfill of that index has run too
+#: (`index_through`); on any other session the index of X itself is the last, as before.
+SEC_HOLIDAYS: dict[dt.date, str] = {
+    dt.date(2026, 1, 1): "New Year's Day", dt.date(2026, 1, 19): "Birthday of Martin Luther King, Jr.",
+    dt.date(2026, 2, 16): "Washington's Birthday", dt.date(2026, 5, 25): "Memorial Day",
+    dt.date(2026, 6, 19): "Juneteenth National Independence Day", dt.date(2026, 7, 3): "Independence Day",
+    dt.date(2026, 9, 7): "Labor Day", dt.date(2026, 10, 12): "Columbus Day", dt.date(2026, 11, 11): "Veterans Day",
+    dt.date(2026, 11, 26): "Thanksgiving Day", dt.date(2026, 12, 25): "Christmas Day",
+    dt.date(2027, 1, 1): "New Year's Day", dt.date(2027, 1, 18): "Birthday of Martin Luther King, Jr.",
+    dt.date(2027, 2, 15): "Washington's Birthday", dt.date(2027, 5, 31): "Memorial Day",
+    dt.date(2027, 6, 18): "Juneteenth National Independence Day", dt.date(2027, 7, 5): "Independence Day",
+    dt.date(2027, 9, 6): "Labor Day", dt.date(2027, 10, 11): "Columbus Day", dt.date(2027, 11, 11): "Veterans Day",
+    dt.date(2027, 11, 25): "Thanksgiving Day", dt.date(2027, 12, 24): "Christmas Day",
+    dt.date(2027, 12, 31): "New Year's Day",
+}
+
+
+def _sec_holidays() -> frozenset[dt.date]:
+    """The SEC holidays a look reads: `SEC_HOLIDAYS`, and the House lane's own table as it runs when it holds more
+    (league/events/house.py takes this one; a day only it lists is a backfill it marks done, so the judge reads the
+    index after it too: a copy it widened can only delay a look, as `_reach`)."""
+    days = set(SEC_HOLIDAYS)
+    try:
+        from . import house as H
+
+        days |= set(H.SEC_HOLIDAYS)
+    except Exception:  # noqa: BLE001 - the House's lane cannot be read here: the judge's own table
+        pass
+    return frozenset(days)
+
+
+def index_through(day: dt.date, holidays: Iterable[dt.date] | None = None) -> dt.date:
+    """The last EDGAR daily index that can hold a filing of session `day`'s windows (`SEC_HOLIDAYS`' comment): `day`
+    itself, or, when EDGAR is closed on it (an SEC holiday NYSE trades), the next weekday EDGAR is open."""
+    closed = _sec_holidays() if holidays is None else frozenset(holidays)
+    while day.weekday() >= 5 or day in closed:
+        day += dt.timedelta(days=1)
+    return day
 #: A69 (the captain's amendment of 14:25Z Oct 19, 2026; release 1019c): THE FAST PATH TO A FINAL RECORD. The three
 #: sessions' wait above is for late data; when there is provably none, a close X is final for a program once the
 #: session after X has had its open decision AND
-#: (i) every record pass of the lane from the start of the earliest window that feeds X's decisions (09:00 ET of the
-#:     session before X: the open window's start; never before the program's registration time, before which no event
-#:     counts) through that open decision ran without a feed error: its receipt
-#:     (league/events/house.py `_record`, league/events/run.py `record_pass`) finished `ok` with its 8-K and Form 4
-#:     reads and its news read whole (no `error` in any, the news read not cut, the tickers copy read), the passes
-#:     no more than FAST_RECORD_GAP apart from before that start through that decision (a pass that never ran proves
-#:     nothing: the reading that waits);
+#: (i) EACH FEED WAS READ WHOLE from the start of the earliest window that feeds X's decisions (09:00 ET of the session
+#:     before X: the open window's start; never before the program's registration time, before which no event counts)
+#:     through that open decision, AS A84 READS IT (the captain's reading of 19:58Z Oct 21, 2026, recorded before any
+#:     look; release 1019f): "a record pass whose read of a feed errored, was cut, or had no tickers copy is a MISSING
+#:     read of that feed, not a broken span; the span is whole when, for each of 8-K, Form 4 and news separately,
+#:     clean reads of that feed are at most FAST_RECORD_GAP (15 min) apart from before the span's start through its
+#:     end." A CLEAN READ of a feed is a record pass's receipt (league/events/house.py `_record`, league/events/run.py
+#:     `record_pass`) finished `ok` whose part for that feed is present with no `error`: for the 8-K feed with the
+#:     tickers copy read too (no `error` under `tickers`: without it no 8-K is fetched), for the news its read not
+#:     `cut`; a pass not finished `ok` (failed, running) or with an unreadable summary reads no feed cleanly
+#:     (`_feed_problems`). SOUND because EDGAR's current feeds page back to the newest known accession and the news
+#:     read restarts from the newest stored less 5 minutes, so a clean read after a missing one recovers what it
+#:     missed; a pass that never ran proves nothing (the reading that waits). (Until A84, A69 (i) read "every record
+#:     pass ... ran without a feed error", so one 45-second SEC timeout broke a whole span: SEC's getcurrent feed timed
+#:     out about four times a night, each followed by a clean pass within 2-4 minutes, and no span was ever whole.);
 #: (ii) no filing knowable in those windows (from that start to X's close decision, or a daily-index row stored since
 #:     that start) is still listed or failed: a failed one, a listed Form 4, or a listed 8-K whose filer is in X's
 #:     tickers copy (an unlisted filer's 8-K is never fetched, and never an event of X);
 #: (iii) the daily-index backfill of every weekday from the session before X through X has run (meta
-#:     `evl:backfill:<day>` = done: the days whose indexes hold filings of X's windows; the reading that waits);
+#:     `evl:backfill:<day>` = done: the days whose indexes hold filings of X's windows; the reading that waits), and,
+#:     when X is an SEC holiday NYSE trades, through the next weekday EDGAR is open (`index_through`: its index holds
+#:     the 8-Ks accepted after 17:30 ET of X's eve; release 1019f's review, lens judges);
 #: (iv) every decision of the program's entry kind through X is made as A66's second rule reads it, and the session
 #:     after X's open decision is made (its receipt `ok` or `pending`).
 #: Otherwise A66's rules apply unchanged. Finality stays contiguous: X is final by the fast path only when every session
@@ -777,6 +838,9 @@ FAST_RECORD_GAP = dt.timedelta(minutes=15)
 #: The record pass's receipt, and the reads in it whose failure is a feed error.
 RECORD_JOB = "record"
 RECORD_FORMS = ("8-K", "4")
+#: A84: the three feeds A69 (i) judges, each by its own clean reads, in this order, and their names in a why.
+RECORD_FEEDS = RECORD_FORMS + ("news",)
+FEED_NAMES = {"8-K": "8-K", "4": "Form 4", "news": "news"}
 #: A DECISION MADE BY A RELEASE WITHOUT A PROGRAM'S ROWS IS NOT MADE FOR IT (release 1019c's review; PREREG-EVL-4
 #: section 2: "for every event after the registration time that comes before it (backfill included), the programs are
 #: decided by the same rules in shadow only"; PREREG-EVL-1 section 3: "all do"). A decision's receipt names every
@@ -1035,12 +1099,16 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
             day -= dt.timedelta(days=1)
             if day.weekday() < 5:
                 reach.append(day)
+        # (release 1019f's review: a weekday's index holds the windows of the sessions through it, and of an SEC holiday
+        # NYSE trades before it, `index_through`; so a backfill not run holds every session whose last index it is)
+        holidays = _sec_holidays()
         for day in sorted(reach):
             if horizon is None:
                 break
-            if day < first or day > horizon or store.meta(f"evl:backfill:{day.isoformat()}") == "done":
+            if day < first or day > index_through(horizon, holidays) or \
+                    store.meta(f"evl:backfill:{day.isoformat()}") == "done":
                 continue
-            before = [y for y in C.previous(store, day, 1) if y.day >= first]
+            before = [y for y in C.previous(store, day, 3) if y.day >= first and index_through(y.day, holidays) < day]
             horizon = before[-1].day if before else None
             why = f"the daily-index backfill of {day.isoformat()} has not run"
             break
@@ -1082,10 +1150,14 @@ def _fast_block(store: S.Store, prog: Any, first: dt.date, x: C.Session, unmade:
     if not before:
         return "no session before it in the calendar"
     prior = before[-1]
-    day = max(prior.day, first)
-    while day <= x.day:
+    if "holidays" not in cache:
+        cache["holidays"] = _sec_holidays()
+    day, last = max(prior.day, first), index_through(x.day, cache["holidays"])
+    while day <= last:
         if day.weekday() < 5 and store.meta(f"evl:backfill:{day.isoformat()}") != "done":
-            return f"the daily-index backfill of {day.isoformat()} has not run"
+            return f"the daily-index backfill of {day.isoformat()} has not run" + (
+                "" if day <= x.day else f" (its index holds the 8-Ks of {prior.day.isoformat()}'s evening: "
+                                        f"{x.day.isoformat()} is an SEC holiday)")
         day += dt.timedelta(days=1)
     start = max(prior.open_cutoff, prog.registered_at)     # (no event before its registration counts)
     end = max(after.open_decide, S.parse_iso(row["started_at"]))
@@ -1135,61 +1207,83 @@ def _listed_ciks(store: S.Store, day: dt.date, cutoff: dt.datetime, cache: dict[
 
 
 def _fast_passes(store: S.Store, start: dt.datetime, end: dt.datetime, cache: dict[str, Any]) -> str | None:
-    """A69 (i): why the record passes from `start` through `end` do not prove the feeds whole, or None: a pass not
-    finished `ok`, a feed error in one (an 8-K or Form 4 read, the news read, the tickers copy), a news read cut short,
-    or two passes (or the span's ends and the passes) more than FAST_RECORD_GAP apart."""
+    """A69 (i) as A84 reads it (the comment above FAST_RECORD_GAP): why the record passes from before `start` through
+    `end` do not prove EACH FEED read whole, or None. For each of `RECORD_FEEDS` separately (8-K, Form 4, news, in that
+    order), its CLEAN reads (a pass `_feed_problems` names no problem of that feed in) must be no more than
+    FAST_RECORD_GAP apart from before `start` (the first at or before it, within FAST_RECORD_GAP) through `end` (the
+    last within FAST_RECORD_GAP of it). A pass that missed a feed (its read errored or was cut, no tickers copy for the
+    8-Ks, or the pass itself failed or never finished) is a missing read of that feed, not a broken span: the why names
+    the feed, the gap and the first pass inside it that missed it."""
     span = f"passes:{S.iso(start)}:{S.iso(end)}"
     if span in cache:
         return cache[span]
     rows = store.db.execute("SELECT started_at, status, summary FROM receipts WHERE job=? AND started_at>=? AND "
                             "started_at<=? ORDER BY started_at, id",
                             (RECORD_JOB, S.iso(start - FAST_RECORD_GAP), S.iso(end))).fetchall()
+    passes = [(S.parse_iso(str(r["started_at"])), _feed_problems(str(r["status"] or ""), r["summary"])) for r in rows]
     out: str | None = None
-    marks = [S.parse_iso(str(r["started_at"])) for r in rows]
-    if not marks or marks[0] > start:
-        out = f"no record pass ran from {S.iso(start - FAST_RECORD_GAP)} to {S.iso(marks[0] if marks else end)}"
-    else:
-        for a, b in zip(marks + [end], marks[1:] + [end]):
-            if b - a > FAST_RECORD_GAP:
-                out = f"no record pass ran from {S.iso(a)} to {S.iso(b)}"
-                break
-    if out is None:
-        for r, at in zip(rows, marks):
-            problem = _pass_problem(str(r["status"] or ""), r["summary"])
-            if problem is not None:
-                out = f"the record pass of {S.iso(at)} {problem}"
-                break
+    for feed in RECORD_FEEDS:
+        reads = [at for at, problems in passes if feed not in problems]
+        if not reads or reads[0] > start:
+            out = _missing(passes, feed, start - FAST_RECORD_GAP, reads[0] if reads else end)
+        else:
+            for a, b in zip(reads, reads[1:] + [end]):
+                if b - a > FAST_RECORD_GAP:
+                    out = _missing(passes, feed, a, b)
+                    break
+        if out is not None:
+            break
     cache[span] = out
     return out
 
 
-def _pass_problem(status: str, summary: Any) -> str | None:
-    """Why one record pass's receipt does not show its feeds read whole (A69 (i)), or None."""
+def _missing(passes: Sequence[tuple[dt.datetime, Mapping[str, str]]], feed: str, a: dt.datetime,
+             b: dt.datetime) -> str:
+    """A84: the why of a gap from `a` to `b` in the clean reads of `feed`: no pass ran in it, or the first pass in it
+    missed the feed (and how many did)."""
+    missed = [(at, problems[feed]) for at, problems in passes if a <= at < b and feed in problems]
+    if not missed:
+        return f"no record pass ran from {S.iso(a)} to {S.iso(b)}"
+    at, problem = missed[0]
+    more = f" ({len(missed)} passes missed it)" if len(missed) > 1 else ""
+    return (f"no clean read of the {FEED_NAMES[feed]} feed from {S.iso(a)} to {S.iso(b)}, more than "
+            f"{int(FAST_RECORD_GAP.total_seconds() // 60)} minutes: the record pass of {S.iso(at)} {problem}{more}")
+
+
+def _feed_problems(status: str, summary: Any) -> dict[str, str]:
+    """A84: {feed: why} for each feed of `RECORD_FEEDS` one record pass's receipt did NOT read cleanly (A69 (i)), {} for
+    a pass that read all three. A pass not finished `ok`, or with an unreadable summary, read none cleanly; the 8-K
+    feed's read needs the tickers copy (without it no 8-K is fetched: they wait), the news read must not be cut."""
+    whole = None
     if status != "ok":
-        return f"is {status or 'unfinished'}"
-    try:
-        body = json.loads(summary or "{}")
-    except (TypeError, ValueError):
-        return "has an unreadable summary"
-    if not isinstance(body, dict):
-        return "has an unreadable summary"
+        whole = f"is {status or 'unfinished'}"
+    else:
+        try:
+            body = json.loads(summary or "{}")
+        except (TypeError, ValueError):
+            body = None
+        if not isinstance(body, dict):
+            whole = "has an unreadable summary"
+    if whole is not None:
+        return {feed: whole for feed in RECORD_FEEDS}
+    out: dict[str, str] = {}
     for form in RECORD_FORMS:
         part = body.get(form)
         if not isinstance(part, dict):
-            return f"has no {form} read"
-        if "error" in part:
-            return f"had a {form} feed error ({str(part['error'])[:80]})"
+            out[form] = f"has no {form} read"
+        elif "error" in part:
+            out[form] = f"had a {form} feed error ({str(part['error'])[:80]})"
+    tickers = body.get("tickers")
+    if "8-K" not in out and isinstance(tickers, dict) and "error" in tickers:
+        out["8-K"] = "could not read the tickers copy (its 8-Ks waited)"
     news = body.get("news")
     if not isinstance(news, dict):
-        return "has no news read"
-    if "error" in news:
-        return f"had a news error ({str(news['error'])[:80]})"
-    if news.get("cut"):
-        return "cut its news read short"
-    tickers = body.get("tickers")
-    if isinstance(tickers, dict) and "error" in tickers:
-        return "could not read the tickers copy (its 8-Ks waited)"
-    return None
+        out["news"] = "has no news read"
+    elif "error" in news:
+        out["news"] = f"had a news error ({str(news['error'])[:80]})"
+    elif news.get("cut"):
+        out["news"] = "cut its news read short"
+    return out
 
 
 def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] | None = None,
@@ -1450,7 +1544,8 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
-           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "NAMED_FROM",
+           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "SEC_HOLIDAYS", "index_through",
+           "FAST_RECORD_GAP", "NAMED_FROM",
            "FOUR_KIND", "BIRTHS_KIND", "program_key", "names", "four_programs", "made_without", "births_made_without",
            "birth_group", "B", "TIE", "LOOKS", "SEATABLE",
            "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",

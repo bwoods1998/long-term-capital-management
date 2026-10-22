@@ -25,9 +25,11 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
 - THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
   `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
   House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a seating version with no row
-  is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision; a store
-  whose band table cannot be read trades nothing that decision (fail closed), one with no band table yet is every
-  seating version at learning.
+  is at learning), PROBE, SIZED, RETIRED (no real money). The book reads them at each session's first decision, and
+  again at the close decision when the lane's `band_history` moved since (`band_mark`, release 1019f: a look the
+  lane's screen wrote after the open trades from that session's close, PREREG-EVL-3's "the first decision after a
+  passed look"); a store whose band table cannot be read trades nothing that decision (fail closed), one with no band
+  table yet is every seating version at learning.
 - A REAL-MONEY DECISION (PREREG-EVL-1 section 3) is the shadow rule over the same events and windows, which may in
   addition use only events STORED, and verdicts ANSWERED, before its decision time (`decided_at`, 09:15 ET or the
   close - 14 minutes): a filing or an article the recorder stored later, or a verdict answered later, is not read. It
@@ -41,15 +43,29 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   INS-BUY), higher first, then ADV.
 - ROOM (PREREG-EVL-3 section 2): Sized programs first, then Probe, then learning; within a band the tables' order;
   within a program its own ranking. One name at one auction goes to the first program in that order that is GIVEN it:
-  each program takes its own ranked picks whose name no earlier program was given, until its room is full
+  each program takes its own ranked picks whose name no earlier-given program was given, until its room is full
   (`allocate`, release 1019b's second review), passing over a pick the book's rules skip whatever the room (no whole
-  share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`).
-- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.05, Sized 0.10), E the account equity at
-  the previous close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares;
-  when that rounds to none, one share when one share fits every wall (and, at learning, one share at the limit is at
-  most `one_share_max.learning`, 5%, of E); else skipped (the shadow keeps the event). The book-wide 10% a name
-  (`per_name_share`), the 100% book, the cash and the loss budget are `league.equity.sizing.size_entry`'s own caps (the
-  book calls it; nothing here re-implements it). At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
+  share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`). INSIDE SIZED AND
+  INSIDE PROBE ROUND-ROBIN (the captain's A85, Oct 21, 2026): one pick given a program a pass, the tables' order inside
+  a pass, at the decision (`allocate`) and at the send (`send_key`); learning keeps the tables' order.
+- THE NEXT AUCTION'S RESERVATION (A85, recorded before the first Probe auction): ROOM's order holds inside one auction
+  (A83 (2)(b)) and a lot sold in an auction still holds its cash there, so a LEARNING buy sizes on the cash, the
+  invested room and the loss budget less what the other auction's live Probe and Sized programs will need,
+  `reservation`: min(their room, the median of their real-money picks at their last `RESERVE_DECISIONS` decisions) x
+  share(band) x E, and that x the median open-risk weight of their buys for the budget, less what this auction's event
+  sales give back by then (league/equity/live.py `_event_reserve`). 0 while the other auction has no Probe or Sized
+  program. No wall moves.
+- SIZE: a target of the band's `position_share` x E (learning 0.02, Probe 0.035, Sized 0.10; Probe by the captain's
+  A86 REVISED, PREREG-EVL-1 section 8's 0.05 before it, inside its bound 0-0.05), E the account equity at the previous
+  close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares; when that
+  rounds to none, one share when one share fits every wall (and, at learning and at Probe, one share at the limit is at
+  most the band's `one_share_max`, 5%, of E; A86 REVISED added Probe's, which went up to the name's wall before); else
+  skipped (the shadow keeps the event). The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the
+  loss budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
+  WALLS' EQUITY (release 1019f, the reading that trades less): the 10% a name (the decision's skip and the send's caps)
+  and the 100% book are judged on the LOWER of E and the account's current equity as the House last read it, since the
+  gateway judges the current equity (a buy sized on a higher E met its final refusal there); the target and the
+  one-share rule stay on E at the previous close. At most `max_open` positions a program (learning 8, Probe 6, Sized 8).
 - THE DAY'S ORDERS (release 1019c): the kind's auction orders count against its own line, `max_orders_day` (150), never
   the old lanes' 60 (league/equity/live.py `_count_refusal`): an entry leaves room for its own exit and for the exit of
   every event lot not yet sold that day and of every event buy still working that is sold the same day, and at the
@@ -72,6 +88,13 @@ EVENT INTENT of the book (`eq_intents.iid`): which program and event, its band, 
 order type, the symbol and issuer, the rank, the previous close and the limit, sigma and the weight, the exit plan of a
 buy, the ladder's rung of a sale, the lot it opened or sells; `eq_event_decisions`, one row a session and auction the
 book decided (what it read and planned, counts only).
+
+THE PROBE SIZE'S RECORD (release 1019f, the audit's capacity and probe lenses): a buy's side row keeps `target_usd`,
+the dollars its band's target asked (`position_share` x E at the previous close, as `size_entry` was asked them), and
+`binding`, which constraint cut it below that (`BINDINGS`: cash, budget, invested, name_wall, whole_shares; gateway
+when the gateway's final refusal ended it; NULL when none did), written at each sizing of its send; the buy's row in
+the lane's `real_fills` carries both (with venue when the venue filled less than the order asked), so the band label
+"probe" is no longer the only record of a Probe event's size. Nothing here reads them; the band rules count as before.
 
 Standard library only.
 """
@@ -121,6 +144,13 @@ LIVE_BANDS = ("learning", "probe", "sized")
 DEFAULT_BAND = "learning"
 #: ROOM: Sized programs first, then Probe, then learning.
 PRIORITY = {"sized": 0, "probe": 1, "learning": 2}
+#: THE BANDS AHEAD OF LEARNING (the captain's A85, Oct 21, 2026): inside each of them the auction's picks and its sends
+#: go ROUND-ROBIN (one a program a pass, the tables' order inside a pass: `allocate`, `send_key`), and a learning buy
+#: leaves the NEXT auction's programs of these bands their cash, invested room and loss budget (`reservation`).
+PROBE_UP = ("sized", "probe")
+#: A85: the decisions of its own entry auction whose real-money picks a Probe or Sized program's reservation reads (the
+#: median of their counts), the latest first.
+RESERVE_DECISIONS = 5
 #: The weight of a lot whose sigma cannot be read, or held past its exit: the House's stock floor before this release.
 STRICT_WEIGHT = Decimal("0.40")
 #: THE FALLBACK LADDER (PREREG-EVL-1 section 5): a sale the scheduled auction did not fill goes at the closing cross of
@@ -180,6 +210,39 @@ def room_key(program: str, band: str | None) -> tuple[int, int]:
     return (PRIORITY.get(str(band), 9), order_of(program))
 
 
+#: A85 WITH R3'S BIRTHS (release 1019f's integration; R3-SPEC section 4, `BIRTH_ROOM`): the ROOM tiers (`room_key`'s
+#: first figure) that go ROUND-ROBIN inside an auction (`allocate`, `send_key`) and that the next auction's reservation
+#: holds room for (`reserved_for`): the PREREG programs' Sized and Probe tiers only. A birth's tier is BIRTH_ROOM
+#: whatever its band (it comes after every PREREG program), so a birth is never reserved for, never round-robins with a
+#: PREREG program, and its buys leave the reservation as a PREREG learning program's do (`leaves_room`).
+ROUND_ROBIN_TIERS = (PRIORITY["sized"], PRIORITY["probe"])
+
+
+def reserved_for(program: str, band: str | None) -> bool:
+    """A85: whether the next auction's reservation holds room for `program` at `band`: a PREREG program at Sized or
+    Probe (its ROOM tier one of `ROUND_ROBIN_TIERS`); never a birth, whatever its band."""
+    return room_key(program, band)[0] in ROUND_ROBIN_TIERS
+
+
+def leaves_room(program: str, band: str | None) -> bool:
+    """A85: whether a buy of `program` at `band` sizes less the next auction's reservation: a live band whose ROOM tier
+    comes after the PREREG Probe tier, so a PREREG learning program's buy (A85's "a learning buy") and a birth's at any
+    band (R3: after every PREREG program); never a PREREG Probe or Sized buy."""
+    return str(band) in LIVE_BANDS and room_key(program, band)[0] > max(ROUND_ROBIN_TIERS)
+
+
+def send_key(program: str, band: str | None, n: int) -> tuple[int, int, int]:
+    """THE ORDER OF AN AUCTION'S BUYS AT THEIR SEND (league/equity/live.py `_event_send`), `n` the buy's place among its
+    program's buys of the auction (0 its first): ROOM's tiers (`room_key`: Sized, then Probe, then learning, then the
+    births whatever their bands, R3); inside the PREREG Sized tier and inside the PREREG Probe tier ROUND-ROBIN
+    (`ROUND_ROBIN_TIERS`), every program's first buy before any program's second, the tables' order inside a pass (A85:
+    the cash an auction's sends take goes one buy a program a pass, so the last Probe row in the tables is not left the
+    cash the earlier rows did not take); learning, and the births, in the tables' order, each program's buys in its
+    ranking (release 1019e's `room_key` order)."""
+    tier, order = room_key(program, band)
+    return (tier, max(0, int(n)) if tier in ROUND_ROBIN_TIERS else 0, order)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS eq_event_programs (
     program TEXT NOT NULL, version INTEGER NOT NULL, band TEXT NOT NULL, since TEXT, why TEXT, updated_at REAL NOT NULL,
@@ -194,12 +257,37 @@ CREATE TABLE IF NOT EXISTS eq_event_intents (
     rank_key REAL, adv20 REAL, prev_close TEXT, limit_px TEXT, sigma REAL, hold INTEGER, weight TEXT NOT NULL,
     exit_day TEXT, exit_at TEXT,        -- a buy's exit plan
     lid INTEGER, rung INTEGER NOT NULL DEFAULT 0,                              -- a sale's lot and its ladder rung
-    decided_at TEXT NOT NULL, why TEXT, created_at REAL NOT NULL);
+    decided_at TEXT NOT NULL, why TEXT, created_at REAL NOT NULL,
+    target_usd TEXT, binding TEXT,      -- a buy's band target (Decimal dollars) and what cut it (release 1019f)
+    sized_usd TEXT);                    -- ... and the dollars its send asked: the shares sent x the limit (release 1019f)
 CREATE INDEX IF NOT EXISTS eq_event_intents_lid ON eq_event_intents(lid);
 CREATE TABLE IF NOT EXISTS eq_event_decisions (
     day TEXT NOT NULL, at TEXT NOT NULL, decided_at TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
     created_at REAL NOT NULL, PRIMARY KEY (day, at));
 """
+#: THE COLUMNS ADDED TO THE BOOK'S TABLES AFTER THEIR FIRST RELEASE, each by its own statement, run by
+#: league/equity/live.py `EquityBook._adapter` after `SCHEMA` where the table lacks the column (PRAGMA table_info, read
+#: afresh; another process's first open adding it between the look and the ALTER is read as done), so a state from
+#: before them gains them in place and every older row reads NULL. Release 1019f: an event buy's band target in Decimal
+#: dollars (`target_usd`) and the constraint that cut it below that (`binding`, `BINDINGS`), written at its sizing and,
+#: for the gateway's final refusal, at its end (the module docstring, "THE PROBE SIZE'S RECORD").
+SCHEMA_COLUMNS = {"eq_event_intents": {"target_usd": "ALTER TABLE eq_event_intents ADD COLUMN target_usd TEXT",
+                                       "binding": "ALTER TABLE eq_event_intents ADD COLUMN binding TEXT",
+                                       "sized_usd": "ALTER TABLE eq_event_intents ADD COLUMN sized_usd TEXT"}}
+#: What may cut a real event buy below its band's target (league/events/bands.py `BINDINGS`, the lane's own list).
+BINDINGS = BA.BINDINGS
+#: `league.equity.sizing.size_entry`'s binding rule (`Sized.binding`) as the record names it (`binding_of`): the
+#: name's book-wide 10% (`instrument`) and the program's own share of it (`sleeve_cap`) are the NAME WALL; the program's
+#: free cash (`sleeve_cash`, the House-wide figure for an event program) and the House-wide cash, or cash below zero, are
+#: CASH; the 100% book is INVESTED; the loss budget at the lot's weight is BUDGET.
+SIZING_BINDINGS = {"instrument": "name_wall", "sleeve_cap": "name_wall", "sleeve_cash": "cash", "cash": "cash",
+                   "cash_negative": "cash", "invested": "invested", "budget": "budget"}
+
+
+def binding_of(sized: str | None) -> str | None:
+    """The record's name (`BINDINGS`) for `size_entry`'s binding rule `sized`; None for one that is no cap of the
+    list (`intent`: no cap cut the dollars; `short_held`, `min_order`: refusals the intent's why names)."""
+    return SIZING_BINDINGS.get(str(sized or ""))
 
 
 # ----------------------------------------------------------------------------------------------------------- settings
@@ -420,6 +508,24 @@ def bands(lane: Lane | None, s: Settings | None = None) -> list[Band] | None:
     return out
 
 
+def band_mark(lane: Lane | None) -> int | None:
+    """THE LANE'S BAND MARK (release 1019f): the newest `band_history` id. Every band move the lane writes raises it
+    (league/events/bands.py `set_band`: a look's Probe or retirement, written by the screen whenever it runs, the night's
+    review), so the book reads the bands again at a close decision when it differs from the mark of the morning's sync
+    (league/equity/live.py `_event_decide`). 0 with no lane, no such table or no row; None when the table is there and
+    cannot be read (the book then reads the bands again, and `bands` says whether they can be read)."""
+    if lane is None:
+        return 0
+    try:
+        tables = {r[0] for r in lane.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "band_history" not in tables:
+            return 0
+        row = lane.db.execute("SELECT max(id) FROM band_history").fetchone()
+        return int(row[0] or 0)
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+
+
 def sessions_back(day: dt.date, n: int) -> dt.date:
     """The session `n` sessions before `day` (the book's NYSE calendar)."""
     d = day
@@ -432,8 +538,9 @@ def sessions_back(day: dt.date, n: int) -> dt.date:
 class FillWriter:
     """The lane's store opened for the book's one write, `real_fills`, in the shape league/events/bands.py
     `record_fill` takes a store (`.db`, `.tx()`): an EXISTING file only (never created here, nor any table: the lane's
-    store is made by the lane or its migration), with a short busy timeout (the House's minute never waits long on the
-    lane's own writer)."""
+    store is made by the lane or its migration; `write_fills` runs the lane's own `store.migrate_fills` on it, which
+    only adds release 1019f's nullable columns to an existing table), with a short busy timeout (the House's minute
+    never waits long on the lane's own writer)."""
 
     def __init__(self, path: str | Path, *, timeout: float = 5.0):
         self.path = Path(path)
@@ -458,11 +565,14 @@ class FillWriter:
 
 def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> int | None:
     """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized and demotion from them): each of
-    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}) written into the lane's `real_fills` by
-    the lane's own league/events/bands.py `record_fill`: ONE ROW PER (program, version, event, side), idempotent; a
-    write again changes only its fee (the broker's posted fee). Returns how many rows were new or changed; None when
-    there is no lane store or it holds no `real_fills` table yet (nothing written: the book writes them once it does).
-    Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
+    `rows` ({program, version, event, side, qty, price, fee, filled_at, band}, and release 1019f's `target_usd`,
+    `binding` and `sized_usd` for a buy) written into the lane's `real_fills` by the lane's own league/events/bands.py
+    `record_fill`: ONE ROW PER (program, version, event, side), idempotent; a write again changes only its fee (the
+    broker's posted fee). A store whose `real_fills` predates release 1019f's columns gains them first (league/events/store.py
+    `migrate_fills`, the lane's own additive migration), so no buy row is written without its target. Returns how many
+    rows were new or changed; None when there is no lane store or it holds no `real_fills` table yet (nothing written:
+    the book writes them once it does). Raises `sqlite3.Error` when the store cannot be written (asked again next
+    minute)."""
     if root is None:
         return None
     path = lane_path(root)
@@ -476,12 +586,18 @@ def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> i
         missing = [c for c in FILL_COLUMNS if c not in columns]
         if missing:
             raise sqlite3.OperationalError(f"{FILLS_TABLE} lacks {', '.join(missing)}")
+        if any(c not in columns for c in S.FILL_COLUMNS_DDL):
+            S.migrate_fills(store.db)
         changed = 0
         for row in rows:
+            target, sent = row.get("target_usd"), row.get("sized_usd")
             changed += bool(BA.record_fill(store, program=str(row["program"]), version=int(row["version"]),
                                            event=str(row["event"]), side=str(row["side"]), qty=float(row["qty"]),
                                            price=float(row["price"]), fee=float(row["fee"] or 0),
-                                           filled_at=str(row["filled_at"]), band=str(row["band"])))
+                                           filled_at=str(row["filled_at"]), band=str(row["band"]),
+                                           target_usd=None if target is None else float(target),
+                                           binding=row.get("binding"),
+                                           sized_usd=None if sent is None else float(sent)))
         return changed
     finally:
         store.close()
@@ -700,32 +816,64 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
              band_of: Mapping[str, str] | None = None, skip: Callable[[str, Pick], str | None] | None = None
              ) -> tuple[dict[str, list[Pick]], dict[str, dict[str, int]]]:
     """ROOM AT ONE AUCTION (PREREG-EVL-3 section 2) WITH ONE NAME AT ONE AUCTION (PREREG-EVL-1 section 8, PREREG-EVL-2
-    section 3), release 1019b's second review: the programs in ROOM's order (Sized, then Probe, then learning, `band_of`
-    {program: band}; within a band the tables' order), and each takes ITS OWN ranked picks, in its order, until its room
-    (`rooms` {program: open positions it may still take}) is full, passing over a name an EARLIER program was given at
-    this auction and a pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever
-    the room: `EquityBook._event_gate`). Only a name GIVEN to a program is taken: a name a program wanted but had no room
-    for (or skipped) goes on to the next program that wants it, which then moves on to its next picks. Returns
-    ({program: the picks given, in its order}, {program: {why passed over: how many}}), both in ROOM's order."""
+    section 3), release 1019b's second review: the bands in ROOM's order (Sized, then Probe, then learning, `band_of`
+    {program: band}), and each program takes ITS OWN ranked picks, in its order, until its room (`rooms` {program: open
+    positions it may still take}) is full, passing over a name an EARLIER-GIVEN program was given at this auction and a
+    pick `skip(program, pick)` names a reason for (the real-money rules that skip an event whatever the room:
+    `EquityBook._event_gate`). Inside a band the programs go in the tables' order; inside the PREREG Sized tier and the
+    PREREG Probe tier (`ROUND_ROBIN_TIERS`, `room_key`'s first figure) ROUND-ROBIN (the captain's A85): one pick GIVEN a
+    program a pass, the tables' order inside a pass, pass after pass until every one of them is full or out of picks, so
+    no Probe row is given a second name before every later Probe row has had its first; learning as before, each
+    program in turn to its room; then the births (R3's `BIRTH_ROOM`, after every PREREG program whatever their bands), in
+    registration order, each in turn to its room, as release 1019e gave them. Only a name GIVEN to a
+    program is taken: a name a program wanted but had no room for (or skipped) goes on to the next program that wants
+    it, which then moves on to its next picks. Returns ({program: the picks given, in its order}, {program: {why passed
+    over: how many}}), both in ROOM's order."""
     bands_ = dict(band_of or {})
     taken: set[str] = set()
-    given: dict[str, list[Pick]] = {}
-    passed: dict[str, dict[str, int]] = {}
-    for program in sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND))):
-        room = max(0, int(rooms.get(program, 0)))
-        mine: list[Pick] = []
-        why: dict[str, int] = {}
-        for pick in picks_by_program[program]:
-            if len(mine) >= room:
-                break
+    order = sorted(picks_by_program, key=lambda p: room_key(p, bands_.get(p, DEFAULT_BAND)))
+    given: dict[str, list[Pick]] = {program: [] for program in order}
+    passed: dict[str, dict[str, int]] = {program: {} for program in order}
+    cursor = {program: 0 for program in order}
+    room = {program: max(0, int(rooms.get(program, 0))) for program in order}
+
+    def open_(program: str) -> bool:
+        return len(given[program]) < room[program] and cursor[program] < len(picks_by_program[program])
+
+    def give_one(program: str) -> None:
+        """The program's next pick GIVEN (its passed-over picks counted on the way), or its list run out."""
+        picks_, why = picks_by_program[program], passed[program]
+        while cursor[program] < len(picks_):
+            pick = picks_[cursor[program]]
+            cursor[program] += 1
             reason = "name_given" if pick.symbol in taken else (skip(program, pick) if skip is not None else None)
             if reason:
                 why[reason] = why.get(reason, 0) + 1
                 continue
-            mine.append(pick)
+            given[program].append(pick)
             taken.add(pick.symbol)
-        given[program] = mine
-        passed[program] = why
+            return
+
+    def tier(program: str) -> int:
+        return room_key(program, bands_.get(program, DEFAULT_BAND))[0]
+
+    i = 0
+    while i < len(order):
+        rank = tier(order[i])
+        group = []
+        while i < len(order) and tier(order[i]) == rank:   # (one ROOM tier: a birth's is BIRTH_ROOM, whatever its band)
+            group.append(order[i])
+            i += 1
+        if rank in ROUND_ROBIN_TIERS:
+            live = [program for program in group if open_(program)]
+            while live:                     # (one pass: each program in the tables' order is given at most one pick)
+                for program in live:
+                    give_one(program)
+                live = [program for program in live if open_(program)]
+        else:
+            for program in group:
+                while open_(program):
+                    give_one(program)
     return given, passed
 
 
@@ -737,6 +885,33 @@ def one_name_an_auction(picks_by_program: Mapping[str, Sequence[Pick]],
     skipped (one order a symbol). `allocate` with every program's room its whole list."""
     rooms = {program: len(picks) for program, picks in picks_by_program.items()}
     return allocate(picks_by_program, rooms, band_of)[0]
+
+
+def reservation(programs: Iterable[Mapping[str, Any]], s: Settings, E: Decimal) -> tuple[Decimal, Decimal]:
+    """THE NEXT AUCTION'S RESERVATION (the captain's A85, recorded before the first Probe auction): what a LEARNING buy
+    leaves for the Probe and Sized programs whose entry is the OTHER auction (league/equity/live.py `_event_reserve`
+    reads them from the House's rows). The book is 1x cash and a lot sold in an auction still holds its cash in that
+    auction, so learning lots bought at one auction (the overnight rows' close buys) would take the next auction's cash
+    from those programs, and ROOM's order holds only inside one auction (A83 (2)(b)). `programs`: one row each, {band,
+    room: max_open(band) less what it holds and has on order at that next auction, picks: the counts of its real-money
+    picks at its last `RESERVE_DECISIONS` decisions (the latest first), weights: the open-risk weights of its buys at
+    those decisions}. Each reserves n = min(room, the median of `picks`) buys (its whole room when it has no decision
+    yet) of share(band) x E at the limit, and that times the median of `weights` (`STRICT_WEIGHT` when it has none) of
+    the loss budget. Returns (dollars of cash and of invested room, dollars of loss budget), never below 0."""
+    cash = risk = ZERO
+    for row in programs:
+        band = str(row.get("band"))
+        if band not in PROBE_UP:
+            continue
+        room = Decimal(max(0, int(row.get("room") or 0)))
+        counts = [int(n) for n in list(row.get("picks") or ())[:RESERVE_DECISIONS]]
+        n = min(room, Decimal(str(statistics.median(counts)))) if counts else room
+        usd = n * s.share(band) * Decimal(E)
+        weights = [Decimal(str(w)) for w in row.get("weights") or ()]
+        weight = Decimal(statistics.median(weights)) if weights else STRICT_WEIGHT
+        cash += max(ZERO, usd)
+        risk += max(ZERO, usd * weight)
+    return cash, risk
 
 
 # ----------------------------------------------------------------------------------------------------------- reaction
@@ -905,4 +1080,9 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
-           "publish"]
+           "publish", "band_mark"]
+#: (release 1019f: the probe size's record)
+__all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
+#: (release 1019f: A85's reservation and round-robin, with R3's births' tier)
+__all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_ROBIN_TIERS", "reserved_for",
+            "leaves_room"]

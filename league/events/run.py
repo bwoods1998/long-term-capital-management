@@ -115,7 +115,7 @@ def record_pass(ctx: Context) -> dict[str, Any]:
     for form in E.FORMS:
         known = [r[0] for r in st.db.execute("SELECT accession FROM filings WHERE form=? ORDER BY accepted_at DESC LIMIT 2000",
                                              (form,))]
-        entries = E.poll_current(ctx.sec, form, known)
+        entries = E.poll_current(ctx.sec, form, known, prefer=listed)   # (a co-registered 8-K: the listed filer's)
         counts = {"new": len(entries), "fetched": 0, "failed": 0, "unlisted": 0}
         for entry in entries:
             # a Form 4 is always fetched (its XML names the issuer); an 8-K only when its filer is a listed company
@@ -159,7 +159,7 @@ def backfill(ctx: Context, first: dt.date, last: dt.date, *, forms: Iterable[str
                     n["unlisted"] += 1  # never stored: the index carries no acceptance time to store it with
                     continue
                 status = E.record_filing(st, ctx.sec, row | {"accepted_at": None, "index_url": None, "items": []},
-                                         source="daily-index", now=ctx.now(), fetch=True)
+                                         source="daily-index", now=ctx.now(), fetch=True, listed=listed)
                 if status == "fetched":
                     n["fetched"] += 1
                 elif status.startswith("failed"):

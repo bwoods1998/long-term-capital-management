@@ -18,9 +18,9 @@ day:
                calendar days a week of compute runs: seven days at the cap spend at most 7 x $5 plus half the week's
                profit, never more; a losing week lifts nothing and takes nothing from the $5
     cap      = min(CEILING_USD_DAY (25), BASE_USD_DAY (5) + earned)       every metered dollar of the day
-    fixed    = Sail's fixed boxes (the House box and the data box, as below) + Cloudflare (`CLOUDFLARE_USD_DAY`, the
-               Workers plan) + market data (`DATA_USD_DAY`: 0 since the owner cancelled ThetaData and Alpaca's Algo
-               Trader Plus on Oct 18, 2026): the fixed costs count INSIDE the cap
+    fixed    = Sail's fixed boxes (every box of the House's app but the Gym pool's, as below) + Cloudflare
+               (`CLOUDFLARE_USD_DAY`, the Workers plan) + market data (`DATA_USD_DAY`: 0 since the owner cancelled
+               ThetaData and Alpaca's Algo Trader Plus on Oct 18, 2026): the fixed costs count INSIDE the cap
     room     = max(0, cap - fixed)
     lane     = min(room, max(LANE_USD_DAY (3), LANE_HEADROOM (1.5) x the lane's heaviest UTC day of verdicts over the
                trailing `LANE_WINDOW_DAYS` (7))): the event lane's verdicts (PREREG-EVL-1 section 4), FIRST on the Claude
@@ -64,8 +64,11 @@ in {sail, claude}:
 - balance_m: Sail's balance as the Sail guard last read it well (its provider reading, kv `guard` in the swarm store:
   `last_good`, else `last`, at most `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway
   (`GET /v1/health`: its `remaining_usd`, else cap - spent, the holds in flight already inside spent);
-- fixed_m: Sail: the House box's and the data box's own billing over the trailing `FIXED_WINDOW_DAYS` days
-  (`SailboxClient.spend`) a day, never below `guard.house_burn_usd_day` (which is also the fallback); Claude: 0;
+- fixed_m: Sail: the billing of the House box's app over the trailing `FIXED_WINDOW_DAYS` days, a day, every box
+  but the Gym pool's (research, booked as `gym_box`): the House, the data box and any other box the swarm books
+  nowhere (`_sail_fixed`, since Oct 21, 2026; `SailboxClient.spend(app=...)`, either shape of Sail's response, its
+  `cost_usd_nanos` or the legacy `estimated_total_cost_usd_nanos`); the House box's and the data box's own billing alone
+  when the app or the pool cannot be read; never below `guard.house_burn_usd_day` (which is also the fallback); Claude: 0;
 - reserve_m: never spent. Claude's is `RESERVE_USD`. Sail's is THE SAIL GUARD'S OWN RELEASE LINE
   (league/swarm/guard.py `house_line` over the `guard` settings: two days of the House's burn plus the guard's margin
   and its release margin, $37 at the configured burn), never under `RESERVE_USD`: under its line the guard brakes the
@@ -1554,26 +1557,102 @@ def _house_boxes(root: Path, config: Mapping[str, Any]) -> list[str]:
     return boxes
 
 
-def _sail_fixed(sail: Any, boxes: list[str], now: float, house_burn: float, errors: list[str]) -> tuple[float, str]:
-    """Sail's fixed cost a day: the House box's and the data box's billing over `FIXED_WINDOW_DAYS`, never below the
-    configured `guard.house_burn_usd_day` (the guard's own rule; also the fallback)."""
+def _pool_boxes(root: Path) -> set[str] | None:
+    """Every box the swarm's Gym pool has forked, in any state (the swarm store's `boxes` table, read-only;
+    league/swarm/pool.py): research, whose time the swarm books as `gym_box` spend, so never Sail's fixed cost. None when
+    there is no store or it cannot be read: research cannot be told from fixed then (`_sail_fixed`)."""
+    path = root / "swarm.sqlite"
+    if not path.exists():
+        return None
+    try:
+        conn = _read_only(path)
+        try:
+            return {str(row["id"]) for row in conn.execute("SELECT id FROM boxes")}
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+class _Unread(Exception):
+    """A part of Sail's billing `_sail_fixed` cannot read; its text is the reading's own words, never the provider's."""
+
+
+def _why(exc: BaseException) -> str:
+    return str(exc) if isinstance(exc, _Unread) else type(exc).__name__
+
+
+def _sail_fixed(sail: Any, boxes: list[str], now: float, house_burn: float, errors: list[str],
+                pool: set[str] | None = None) -> tuple[float, str]:
+    """Sail's fixed cost a day over `FIXED_WINDOW_DAYS`, never below the configured `guard.house_burn_usd_day` (the
+    guard's own rule; also the fallback).
+
+    THE APP'S NON-RESEARCH BOXES (Oct 21, 2026; the audit of the live House, its cost lens): Sail's billing of the
+    House box's app (`SailboxClient.spend(app=...)`, one `sailboxes` row a box, each read by league/sailbox.py
+    `cost_nanos`, of either shape of the response), every box but the Gym pool's (`pool`, `_pool_boxes`): the House, the
+    data box and any other box the swarm books nowhere (an image build, an old box left asleep, the updater's canaries);
+    and each of `boxes` (the House box, the data box) the app's rows leave out, by its own billing. When the app or the
+    pool cannot be read (`pool` None, as the `sail_read` drill calls it, league/ops/drills.py): the House box's and the
+    data box's own billing alone, the reading before, and an error says so. A box row with no cost field is unknown,
+    never $0: the reading falls back."""
     if sail is None or not boxes:
         return house_burn, "guard.house_burn_usd_day (no Sail client or no House box id)"
-    from league.sailbox import usd
+    from league.sailbox import cost_nanos
 
-    total = 0.0
+    since, until = _iso(now - FIXED_WINDOW_DAYS * 86400), _iso(now)
+
+    def billed(spend: Any, box: str) -> float:
+        found = cost_nanos(spend)
+        if found is None:
+            raise _Unread(f"no cost field for {box}")
+        return float(found[0]) / 1e9
+
+    total, source = None, ""
     try:
+        if pool is None:
+            raise _Unread("the Gym pool's boxes could not be read")
+        row = sail.get(boxes[0]) or {}
+        app = row.get("app_id") or (row["app"].get("id") if isinstance(row.get("app"), Mapping) else None)
+        if not app:
+            raise _Unread("the House box's row names no app")
+        rows = (sail.spend(app=str(app), since=since, until=until) or {}).get("sailboxes")
+        if not isinstance(rows, list):
+            raise _Unread("the app's spend has no box rows")
+        seen: set[str] = set()
+        count = research = 0
+        total = 0.0
+        for entry in rows:
+            if not isinstance(entry, Mapping) or entry.get("app_id") not in (None, str(app)):
+                continue
+            box = str(entry.get("sailbox_id") or "")
+            if not box or box in seen:
+                raise _Unread("a box row with no id, or one box twice")
+            seen.add(box)
+            if box in pool:
+                research += 1
+                continue
+            total += billed(entry, box)
+            count += 1
         for box in boxes:
-            spent = _amount(usd(sail.spend(sailbox=box, since=_iso(now - FIXED_WINDOW_DAYS * 86400), until=_iso(now)))["total_usd"])
-            if spent is None:
-                raise ValueError(f"no spend for {box}")
-            total += spent
-    except Exception as exc:  # noqa: BLE001 - the configured burn stands in
-        errors.append(f"Sail's box spend could not be read ({type(exc).__name__}): guard.house_burn_usd_day is used")
-        return house_burn, "guard.house_burn_usd_day (the box spend could not be read)"
+            if box not in seen:
+                total += billed(sail.spend(sailbox=box, since=since, until=until), box)
+                count += 1
+        source = (f"measured: the app's {count} non-research box{'es' if count != 1 else ''} over {FIXED_WINDOW_DAYS} "
+                  f"days ({research} of the Gym pool's apart)")
+    except Exception as exc:  # noqa: BLE001 - the named boxes stand in
+        total = None
+        errors.append(f"Sail's app billing could not be read ({_why(exc)}): the House and data boxes' own billing is used")
+    if total is None:
+        try:
+            total = sum(billed(sail.spend(sailbox=box, since=since, until=until), box) for box in boxes)
+        except Exception as exc:  # noqa: BLE001 - the configured burn stands in
+            errors.append(f"Sail's box spend could not be read ({_why(exc)}): guard.house_burn_usd_day is used")
+            return house_burn, "guard.house_burn_usd_day (the box spend could not be read)"
+        source = (f"measured: the House and data boxes alone ({len(boxes)} box{'es' if len(boxes) != 1 else ''} over "
+                  f"{FIXED_WINDOW_DAYS} days)")
     measured = total / FIXED_WINDOW_DAYS
     if measured >= house_burn:
-        return measured, f"measured: {len(boxes)} boxes over {FIXED_WINDOW_DAYS} days"
+        return measured, source
     return house_burn, f"guard.house_burn_usd_day (over the measured {measured:.4f} a day)"
 
 
@@ -1779,7 +1858,7 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
     house_burn = _amount(guard_cfg.get("house_burn_usd_day"))
     house_burn = 1.0 if house_burn is None else house_burn
     balance, read_at, balance_source = _guard_reading(swarm["guard"], now)
-    fixed, fixed_source = _sail_fixed(sail, _house_boxes(root, config), now, house_burn, errors)
+    fixed, fixed_source = _sail_fixed(sail, _house_boxes(root, config), now, house_burn, errors, _pool_boxes(root))
     reserve, reserve_source = _sail_reserve(guard_cfg, fixed, errors)
     # What THE DAY'S FIRST RUN ADDS BACK: what each meter has paid since 00:00 UTC, as of its balance's reading.
     sail_paid, sail_paid_source = _sail_paid_today(swarm, read_at, now, fixed)

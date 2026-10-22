@@ -61,9 +61,25 @@ earlier files' programs, every record and every control never seat.
 | band | size | how a program gets there |
 |---|---|---|
 | learning | 2% of equity a position (whole shares; one share up to 5%), at most 8 open | from its first event |
-| probe | 5%, at most 6 open | the first decision after a passed look |
+| probe | 3.5% (whole shares; one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before) | the first decision after a passed look |
 | sized | 10%, at most 8 open | >= 150 settled real-money events at Probe size or above, 80% session-block lower bound > 0 |
 | retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
+
+THE PROBE BAND'S SIZE (the captain's A86 REVISED, 20:30Z Oct 21, 2026, replacing A86's proposal, decided before any
+Probe event; branch `fix/a86-probe-more-smaller`, integrated in release 1019f ONLY in this form): cash at the auction
+binds first at Probe, so PREREG-EVL-3's 5% with at most 6 open fitted about 9-11 Probe buys an auction; at 3.5%, still
+at most 6 open, smaller Probe lots fit the same cash, and Done counts Probe events. `position_share.probe` 0.035 sits
+inside its bound [0, 0.05] (the pre-registered value is the loose end: a change may only trade less); `max_open.probe`
+stays 6, its bound [0, 6] (A86's proposed 8 lay outside it and would have failed the event kind closed; a slot rise
+needs a reviewed bounds change and a new version, not taken). One share at Probe (the 3.5% target buys no whole share)
+goes only when it is at most 5% of equity, as at learning (`one_share_max.probe` 0.05, its own bounds row [0, 0.05],
+held under the name's wall): a Probe program's dollars are at most 6 x 3.5% = 21% of equity at target (30% before) and
+6 x 5% = 30% in the worst case (6 lots up to the 10% wall, 60%, before). ITS COSTS, stated: Probe events carry 30%
+fewer dollars each; total Probe dollars are unchanged while cash binds; Done's "Probe size" is 3.5% from here; a name
+whose one share at the limit is above 5% of equity is skipped at Probe, where PREREG-EVL-1 bought one share (the shadow
+keeps it). It is money management inside the frozen envelope, not a new version: no program's rule, judge, look,
+alpha, false-positive rate or Done rule moves (looks count shadow events, which do not depend on size), and the
+screen's cost allowance keeps its 5% notional.
 
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
 negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
@@ -75,9 +91,11 @@ review, the reading that trades less), so a program demoted from Sized earns Siz
 reached at the same close are one look; the skew check starts and caps at 0.018 (A65). Room when short: Sized, then
 Probe, then learning (how the book gives it out: "Real money" below). The lane writes the
 bands (`league/events/bands.py`, tables `bands` and `band_history`, CLI `bands`); the House's event book reads them
-with the same module's `bands(store)` and writes every real fill to `real_fills` with its `record_fill` (a posted fee
-updates its row); on the House the lane reviews the real fills after each night's screen (`bands.review`: demotion and
-Sized), whatever the screen did.
+with the same module's `bands(store)` at each session's first decision, and again at the close decision when the
+lane's `band_history` moved since (release 1019f, below: "The screen after the open"), and writes every real fill to
+`real_fills` with its `record_fill` (a posted fee updates its row; from release 1019f a buy's row also keeps its band
+target and what cut it, below: "THE PROBE SIZE'S RECORD"); on the House the lane reviews the real fills after each
+night's screen (`bands.review`: demotion and Sized), whatever the screen did.
 
 A LOOK READS A FINAL RECORD (release 1019b's review; `screen.final_until`, version 1 and version 2 alike): a look as of
 a close is computed once nothing more can be added to the sessions it covers: the hourly re-decision of the last three
@@ -97,21 +115,58 @@ a later receipt of its rows' own decision names it (`screen.names`, `made_withou
 under "PREREG-EVL-4"), so no look reads a record its rows never decided; the earlier files' programs read their
 receipts as before.
 
-THE FAST PATH TO A FINAL RECORD (the captain's amendment A69; release 1019c, not yet deployed): the three sessions' wait
-is for late data, so when there is provably none a close X is final for a program as soon as the session after X has
-had its open decision, if (i) every record pass from the start of the earliest window that feeds X's decisions (09:00 ET
-of the session before X, never before the program's registration) through that open decision finished `ok` with its
-8-K, Form 4 and news reads whole (no `error` in any, the news read not cut, the tickers copy read) and the passes ran
-at most 15 minutes apart (`screen.FAST_RECORD_GAP`: a pass that never ran proves nothing); (ii) no filing knowable in
-those windows that the lane would fetch is still `listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a
-filer in X's tickers copy; an unlisted filer's 8-K is never fetched and never an event of X); (iii) the daily-index
-backfill of every weekday from the session before X through X has run; and (iv) every decision of the program's entry
-kind through X is made (`ok`, or `pending` only on another program's verdicts) and the next session's open decision is
-made. Otherwise A66's rules apply unchanged, and finality stays contiguous: X is final by the fast path only when every
-session before it is final. The record receipts the House already writes prove (i) (league/events/house.py `_record`:
-a failed feed read is an `error` in its part of the summary, a news read cut short is `cut`, a pass that raised is
-`failed`, one that never finished stays `running`), so no new record was added. A clean record is final one session
-after its close, about two sessions sooner than A66's; the as-of date, the record and the look are the same.
+THE FAST PATH TO A FINAL RECORD (the captain's amendment A69, release 1019c; (i) as A84 reads it, release 1019f): the
+three sessions' wait is for late data, so when there is provably none a close X is final for a program as soon as the
+session after X has had its open decision, if (i) EACH FEED WAS READ WHOLE from the start of the earliest window that
+feeds X's decisions (09:00 ET of the session before X, never before the program's registration) through that open
+decision: as the captain's A84 reads it (19:58Z Oct 21, 2026, recorded before any look; release 1019f), for each of the
+8-K, Form 4 and news feeds separately, that feed's CLEAN reads (a record pass finished `ok` whose read of it has no
+`error`; the 8-K read with the tickers copy read, the news read not cut) at most 15 minutes apart
+(`screen.FAST_RECORD_GAP`) from before that start through that decision; a pass whose read of a feed errored, was cut or
+had no tickers copy is a missing read of THAT feed, not a broken span, and a pass that raised or never finished reads
+none (a pass that never ran proves nothing). Sound because EDGAR's current feeds page back to the newest known accession
+and the news read restarts from the newest stored less 5 minutes, so a clean read after a missing one recovers what it
+missed. (A69 first read "every pass whole": SEC's getcurrent feed times out in about four passes a night, 45 seconds
+each and a clean pass 2-4 minutes later, so no span was ever whole and every look waited A66's three sessions;
+`screen._fast_passes`, `_feed_problems`); (ii) no filing knowable in those windows that the lane would fetch is still
+`listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a filer in X's tickers copy; an unlisted filer's
+8-K is never fetched and never an event of X); (iii) the daily-index backfill of every weekday from the session before X
+through X has run, and, when X is an SEC holiday NYSE trades (Columbus Day, Veterans Day), through the next weekday EDGAR
+is open: EDGAR dates an 8-K accepted after 17:30 ET as filed on the next day it is open, so the 8-Ks of the holiday's
+eve are in that day's index (`screen.index_through`; release 1019f's review: A66's reach reads it the same way); and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
+another program's verdicts) and the next session's open decision is made. Otherwise A66's rules apply unchanged, and
+finality stays contiguous: X is final by the fast path only when every session before it is final. The record receipts
+the House already writes prove (i) (league/events/house.py `_record`: a failed feed read is an `error` in its part of
+the summary, a news read cut short is `cut`, a pass that raised is `failed`, one that never finished stays `running`),
+so no new record was added. A clean record is final one session after its close, about two sessions sooner than A66's;
+the as-of date, the record and the look are the same. When a seatable program's final record falls more than one session
+behind what A69 allows, the stall job's `evl_final` says so, naming the program and the judge's why (Alarms, below).
+
+THE SCREEN AFTER THE OPEN (release 1019f, not yet deployed; the audit of the live House, "bands move a session late"):
+the judge makes a close final at an OPEN decision (A69's fast path once the next session's open decision is made; A66's
+three sessions likewise move at an open), and the intents a look as of that close covers were settled by that close's
+own score, but the lane ran the screen only after the 20:30 ET score and the House's book read the bands once a
+session, at its first decision: a look the open made final was written that evening, so a close-entry program reached
+Probe at the next session's close instead of that day's. Now, on the House, from 09:40 ET of a session whose open
+decision is made (its receipt `ok` or `pending`) until 5 minutes before its close decision, the lane reads the final
+horizon (`screen.final_until`) of every seating version at most every 10 minutes, and when any differs from the
+horizons the last screen receipt kept (the nightly's or the morning's) it runs the screen's looks of the seating
+versions (`house.py` `_screen_open`, receipt `screen-open`); the band review of the real fills (demotion, Sized) stays
+nightly. A look is written once (`write_look`, INSERT OR IGNORE; version 2 resumes after the last look on record) and
+its band move in its own transaction, whichever run writes it, so the night's screen writes nothing the morning wrote,
+and the same horizons are never screened twice. The House's book reads the bands again at the close decision when the
+lane's band mark (`book.band_mark`: the newest `band_history` id) is not the one its morning sync kept (kv
+`eq_event_band_mark`; an unreadable mark reads them again, fail closed): PREREG-EVL-3 section 2's "Probe from the first
+decision after a passed look" is that session's close. The decision's summary says why it synced (`band_sync`: `first`,
+or `moved` at the close). No rule moves: the judge says when a close is final; the House reads it sooner. Open-entry
+programs still trade a morning look from the next session's open, the first decision after it.
+
+THE NIGHT IS THE SESSION'S (release 1019f): the nightly score, screen and report are keyed on the session, not the
+calendar day. The night is today's session from 20:30 ET, else the session before today: a score that ran past midnight
+ET goes on as that session's night (each due intent still tried once) and that session's screen and report follow the
+next day; a House down that evening makes the night's jobs the next morning (no screen within 5 minutes of a decision).
+Each screen receipt keeps the horizons it read (`horizons`), the looks it wrote (`looks`) and why each look waits
+(`waits`: program, version, k, why).
 
 WHAT A RE-DECISION WRITES (A66's owed rule and A69; release 1019c, `run._scope`): no decision ever writes an intent
 under a look already written, and A LOOK FREEZES ITS WHOLE GROUP (release 1019c's judges review, A74 (5);
@@ -252,10 +307,11 @@ order, so these rows are refused first; exits never.
 `edgar.py` and `news.py` (the recorders), `calendar.py` (sessions and decision moments), `universe.py` (eligibility),
 `verdicts.py` (the recorded Haiku verdicts), `programs.py` (the programs as data rows and their selection rules),
 `run.py` (the open and close decisions, backfill), `score.py` (settlement at the auction prints and the exit ladder),
-`screen.py` (the judge), `report.py` (the daily one-screen report), `house.py` (the lane on the House: its scheduler),
-`births.py` (R3: the births' grammar, the outcome-free facts, the validator and its budget, the proposer, the
-registration), `__main__.py` (the CLI: `record`, `backfill`, `decide-open`, `decide-close`, `catchup`, `tickers`,
-`equity`, `score`, `screen`, `report`, `births`, `facts`). The judges (`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
+`screen.py` (the judge), `report.py` (the daily one-screen report), `done.py` (the Done reader of the goal V2, a judge),
+`house.py` (the lane on the House: its scheduler), `births.py` (R3: the births' grammar, the outcome-free facts, the
+validator and its budget, the proposer, the registration), `__main__.py` (the CLI: `record`, `backfill`, `decide-open`,
+`decide-close`, `catchup`, `tickers`, `equity`, `score`, `screen`, `report`, `births`, `facts`). The judges
+(`programs.py`, `verdicts.py`, `score.py`, `screen.py`) and `docs/prereg/` are behind
 `league/ci.py`'s FORBIDDEN wall from release R1: no role changes them and the House's updater never ships one. Release
 R2's real-money side: `book.py` (the equity book's event kind's rules: the money rows, the bands, the real-money picks,
 the limit, the size target, the open-risk weight, the exit plan, the eligible list) and `proof.py` (the auction paper
@@ -293,7 +349,8 @@ turn, the most urgent due first.
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
-| 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report; then R3's births job (`events.births`) | close + 3 min; 20:30 ET; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
@@ -301,12 +358,33 @@ turn, the most urgent due first.
 THE BACKFILL GOES FILING BY FILING (A82, release 1019c): EDGAR's daily index lists a filing once per filer (a Form 4
 under its issuer and its reporting owner, an 8-K under each co-registrant: Oct 19, 2026's index had 1,189 rows and 665
 filings), so a day is complete when every filing is seen, and an 8-K is a listed filer's when any of its filers is
-listed. Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
+listed. The current feed lists a co-registered 8-K once per filer too: the live pass keeps it under a listed filer
+whichever the feed lists first (`edgar.poll_current`'s `prefer`), and the backfill moves one stored under an unlisted
+co-registrant to the listed filer's CIK before it fetches it (`edgar.record_filing`'s `listed`; release 1019f's review:
+kept under the first filer seen, such an 8-K was never an event of the listed issuer). Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
 never ran.
+
+A FAILED FETCH HOLDS ITS DAY, ONE DEAD DOCUMENT NEVER HOLDS IT FOR GOOD (`fix/backfill-robust`, release 1019f): a
+daily-index filing whose fetch fails is not seen. It is tried again at the first backfill pass 2, 4, 8, 16 and 32
+minutes after its first failure, six tries in all, as the record pass tries a live one (its own count), and the day
+is complete only when every filing is fetched, known or unlisted, or past its last try. Meanwhile the receipt is
+`partial` with `failed`, `retrying` and `next_try`, and a later day is backfilled while the day waits. A filing past
+its last try is named in the day's last receipt (`unfetched`: accession, form, tries, error), whose status is
+`done-failed`; the day is done with `failed` above 0. That filing stays `failed:` in the store, so A69's condition (ii)
+still waits on it for the closes whose windows hold it, and A66's reach does not. Before this fix a failed fetch
+counted as seen and the day was done at once: one transient SEC error lost the filing. SEC HOLIDAYS: EDGAR is closed on
+a federal holiday and publishes no daily index for it (Wed Nov 11, 2026, Veterans Day, is a trading day), so its index
+is never there; SEC answers a daily index that does not exist with 403 or 503, never 404 (the branch's independent
+check). A weekday in `SEC_HOLIDAYS` (league/events/screen.py, behind the wall, which house.py takes: OPM's 2026 and
+2027 federal holidays, and Fri Dec 31, 2027, New Year's Day 2028 observed) whose index read FAILS, WHATEVER THE STATUS, is done as `no index: SEC holiday` (receipt `ok`, `why`,
+`holiday`, `status`: EDGAR accepts no filing that day, so done is right even when the read failed for another reason).
+A failed read on any other weekday, 403, 503 or any status, waits an hour as before, and a holiday's index that
+exists is read as any day's. A closure by executive order is not in the table: add its day
+before it falls. A holiday NYSE trades is final only once the index after it is backfilled too (A69 (iii), above).
 
 A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
 first record pass 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, then left to the daily-index
-backfill (an SEC outage of half an hour, or SEC's 10-minute rate-limit block, no longer spends every try); a record
+backfill, which tries it again by the same steps from release 1019f (an SEC outage of half an hour, or SEC's 10-minute rate-limit block, no longer spends every try); a record
 pass whose feed failed counts its retried rows beside the feed's error; a decision that raised is closed `failed` and
 run again a minute later while it is live, then every 10 minutes (a cut one goes on at the next turn; one cut and then
 failing waits as a failed one). Verdicts are asked from
@@ -334,21 +412,34 @@ mail at its pace:
 | cause | stands when |
 |---|---|
 | `evl_record` | no clean record pass in 30 minutes: one finished `ok` whose 8-K, Form 4 and news reads ran without error (the failing feeds are named) |
-| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed |
-| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
-| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart) |
+| `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed. Since release 1019f also PREREG-EVL-4's rows of a close still to decide by themselves (the judge's `screen.made_without`) 2 hours after the stall job first saw it and after its latest `decide-close` finished, while its latest `decide-close-evl4` is not `ok` (or is older than that close's latest decision) |
+| `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included; since release 1019f the `decide-close-evl4` receipts' too) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
+| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart; so, from release 1019f, does an intent a decision wrote after the night's last score pass started, such as a catch-up decision of an older session: the next pass settles it, `after_last_pass`) |
 | `evl_fills` | the real fills off the shadow's own auction prints by more than 15 bp either way (worse or better, said), the signed mean of a side over the last 20 priced fills (the House's event twins) |
+| `evl_final` | a seatable program's final record (`screen.final_until`, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named, with the judge's own why (A84, release 1019f; read-only, the judge read and never run for a look; judged through a `PAUSE`; a registered seatable birth judged like any seating program) |
+| `evl_entries` (release 1019f) | an auction of the last 24 hours (judged 15 minutes after its cross) at which under 90% of the planned real buys filled, or one was never sent: from the book's own rows in `live.sqlite` (`eq_event_intents` buys, `eq_intents`, `eq_orders`). The numbers: planned, filled, the venue's cancels at once (A80: an auction buy ended `canceled` within 60 s of its own `submitted_at`, nothing filled), the re-sends after one and how many filled, the never-sent by reason (the day order count, cash, the loss budget, the 10% a name, the invested cap, the program's room, one share too dear, the gateway, ...), and the constraint that bound the auction most (cash, budget, room, order line, name wall, invested) |
+| `evl_backfill` (release 1019f) | a weekday of the daily-index backfill's reach not `done` by 12:00 ET of the next weekday, a run of its passes that are not `ok` (`waiting`, `partial`) lasting over 6 hours, or a done day whose passes failed to fetch a filing; the day and its counts named. The screen's looks wait for every weekday of the reach, so this says why one waits |
+| `evl_handback` (release 1019f) | a real event fill the book made (`eq_orders` of a real event lot with `filled_qty` > 0) owed to the lane's `real_fills` over an hour and not there (a buy once its intent ended, a sale once its lot closed: as the book hands them back): the lane computes Sized, demotion and retirement from those rows |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |
 
 None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while
-the House's `PAUSE` stands (no verdict is asked then).
+the House's `PAUSE` stands (no verdict is asked then), nor PREREG-EVL-4's part of `evl_decide`.
+
+Since release 1019f a told owner cause no longer holds these back: while an owner cause stands and was mailed inside its
+12 hours, a cause needing nothing that no notice told in the last 24 hours is mailed at once, as an INFO notice of those
+causes alone that names the owner causes still waiting. The daily report carries the day's real buys (planned and
+filled, the venue's cancels and A80's re-sends, the never-sent by reason, the room cut, and per auction the constraint
+that bound it: the captain's A80 (2)) and, once a Probe buy exists, THE BREAK-EVEN EDGE of Done's compute clause: the
+metered compute per session since the first Probe buy over the Probe dollars bought per session, in basis points.
 
 THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after the lane's own nightly report job
 (league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured
 metered costs beside it, by program and band (to date as far as `metered.json` covers it: "since <day>, partly
 measured" when it began after the first fill); the measured costs of the UTC day of the same date against its cap with
 its lines labelled the allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
-fees, the fill gap against the auction prints); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+fees, the fill gap against the auction prints); for each program that may trade real money (version 2 of the nine, version 1
+of PREREG-EVL-4's three, then each seatable birth of R3, which the report loads from the lane's store: release 1019f's
+review) its band, settled n (shadow TRADABLE and real), next look and events to go, its
 market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
@@ -368,6 +459,45 @@ activity to the account's Profit to the cent. The page (personal-site branch `ca
 as Shadow, Learning, Probe and Sized with the gold line under Learning, lists the lots among the positions and counts the
 checkpoint in events beside the Agents heading; an older page and an older site see nothing new.
 
+## The Done reader (the goal V2)
+
+The owner's Done is read by `league/events/done.py` under the pinned rule
+[docs/goals/DONE-RULE-EVL-2.md](goals/DONE-RULE-EVL-2.md) (its sha256 is `done.RULE_SHA256`; a test fails while the two
+differ; amended by A84 before any promotion). What counts: a settled real-money round trip of a seating program
+(`real_fills`, a buy and a sale) whose buy's band is probe or sized and whose buy came after the program's PROMOTION,
+its EARLIEST move to probe (`done.promoted_at`): a demotion and a return to Probe drop nothing, since a demotion fires
+only on losses; and AT PROBE SIZE OR ABOVE (release 1019f, amended before any promotion): the buy's `real_fills` row's
+`sized_usd` (the whole shares its send asked x its limit) at least 0.8 x its `target_usd` (its band's share of E: Probe
+3.5% from A86 REVISED, Sized 10%) (`done.at_size`, `PROBE_SIZE_SHARE`), so a full, uncut buy counts whatever the
+open's gap and one cut under 0.8 by a wall, the cash, the budget or the floor to whole shares, or with no record, does
+not (`under_size`, reported beside). Learning events are reported beside, never counted; a Probe+ buy with no
+promotion on record is a guard (`before_promotion`, read before the size) that fails `after_promotion`. It is read at every 100th such event: checkpoint c (100, 200,
+300, ...) reads exactly the first c events in sale order and is never rewritten: it is appended to
+`<state>/events/done-history.jsonl` before `done.json` is written, and when a Done record exists that cannot be read
+(done.json at another schema or cut, a cut log line, a checkpoint a `done` receipt names that neither file holds) the
+reader writes nothing and the House warns (`done.Unreadable`).
+
+| item | passes when |
+|---|---|
+| `events` | c >= 300 |
+| `programs` | >= 3 programs with >= 50 of the c events each |
+| `after_promotion` | every Probe+ event of the span was bought after its program's promotion: no `before_promotion` event sold within it |
+| `pnl` | the c events' realized after-fee P&L > $0 |
+| `bound` | the 95% issuer-block bootstrap lower bound of r (10,000 resamples, seed `DONE-RULE-EVL-2\|done\|issuer`, `screen.bootstrap_bounds`) > 0 |
+| `profit_vs_compute` | the lane's realized profit (every band) since the first promotion >= the metered compute over the span (`metered.since` over `metered.json`; partly measured fails) |
+| `fills` | the signed mean gap per side against the shadow's auction prices in `outcomes` (made raw again) within 15 bp |
+| `no_captain` | NEVER from the House's records alone (A84): `fail` when they show a step in the last 100's span (any `.before` copy or swarm.json, ops.json, PAUSE, swarm.stop by stamp, mtime or ctime; a stall run's owner step, pause or kill switch; a UTC day with no stall run), else `unverifiable`, and Done at c waits on the captain's attestation of that exact span in `<state>/events/done-attest.jsonl` with `steps` 0 (a deploy's hand steps count; the ship script's own run does not) |
+
+Beside: the benchmark-net figure (a = r - the shadow's b, its mean and bound), learning events (count, P&L). THE PIVOT:
+from checkpoint 400, the one-sided 95% upper bound of r below zero says retire the lane and move its budget. THE $800
+STOP: the loss budget's total realized plus open risk (`fast_lane.probe_budget` on `live.sqlite`) at $800 says stop all
+spend and report. The reader decides nothing and moves nothing: it reports. The House runs it in the nightly screen
+task, after the band review: `<state>/events/done.json` (every figure, the current reading, the checkpoints), the
+append-only `done-history.jsonl` and a `done` receipt; a failing reader is a warning and never fails the screen. The
+reader is behind `league/ci.py`'s wall (`PENDING_GATEWAY`), so only an owner deploy changes how Done is read. The daily report carries
+its line (Probe+ events toward 300 by program, the next checkpoint, the bound and the benchmark-net bound). The old
+`dlane` Done meter (DONE-RULE-A50) keeps running beside and is never read for this Done.
+
 ## Real money (release R2, shipped switched on in release 1019b; deployed 21:00Z Oct 19, 2026)
 
 [PREREG-EVL-3](prereg/PREREG-EVL-3.md) (the owner's goal as re-set at 05:15Z Oct 19, 2026): VERSION 2 of each of the
@@ -377,11 +507,13 @@ at version 1 the same way, after the nine in ROOM's order (above: "PREREG-EVL-4"
 Probe after a passed look, Sized, retired), counted in settled events from its looks and the real fills the House writes
 back (`real_fills`). The House trades them through its EquityBook (its event kind: league/equity/live.py `_event_step`,
 the rules in `book.py`), on the money rows `equity_money.event` of league/constitution.py: learning 2% of equity a
-position (one share at most 5%), Probe 5%, Sized 10%, at most 8 open a learning program (Probe 6, Sized 8), the
+position (one share at most 5%), Probe 3.5% (A86 REVISED; one share at most 5%), Sized 10%, at most 8 open a program
+(6 at Probe), the
 book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at 1.25 x the previous SIP close, exits
 market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1 section 5's fallback ladder, open risk
 value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in any 20 sessions, $800 net in total),
-ROOM in the order Sized, Probe, learning, then the tables' order. The real-money decision reads the lane's store, and
+ROOM in the order Sized, Probe, learning, then the tables' order (round-robin inside Sized and inside Probe, and a
+learning buy leaves the next auction's Probe and Sized programs their cash: the captain's A85, below). The real-money decision reads the lane's store, and
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
 `equity_money.enabled` stays False; nothing goes until the gateway's `STOCK_EVENT_BUYS` is on and the auction paper
 proof on the practice account has passed its BUY stage (filled, or accepted and ended unfilled at the open: the
@@ -406,9 +538,31 @@ How the book gives out the room (release 1019b's second review). ROOM IN ITS ORD
 Sized, then Probe, then learning, then the tables' order; each takes ITS OWN ranked picks whose name no earlier program
 was given at that auction, until its room (its open positions left) is full, and only a name given to a program is
 taken (`book.allocate`): REACT-ON takes the C1 events C1 has no room for, GUIDE-O1 the READ-O1 events READ-O1 has no
-room for. SIZE BEFORE SLOTS: before a pick takes a slot, the book skips (the shadow keeps the event) one that no whole
-share of fits by price, on the figures the send sizes on (E the equity at the previous close; the name's book-wide
-value): one share at the limit above the book-wide 10% a name (above 10% of E for a name held nowhere: not TRADABLE),
+room for. ROUND-ROBIN INSIDE SIZED AND INSIDE PROBE (the captain's A85, Oct 21, 2026, recorded before the first Probe
+auction): inside each of those two bands the picks are given one a program a pass (the tables' order inside a pass)
+until every program is full or out of picks, and the auction's buys are SENT in the same passes (`book.send_key`: every
+Probe program's first buy before any Probe program's second), so when the cash runs short inside one auction the last
+Probe row in the tables is not left only what the earlier rows did not take; learning keeps the tables' order. With
+R3's births (release 1019f's integration): the round-robin is the PREREG programs' Sized and Probe tiers only
+(`book.ROUND_ROBIN_TIERS`); a birth keeps its own tier after every PREREG program whatever its band (`BIRTH_ROOM`,
+R3-SPEC section 4), in registration order, as release 1019e gave it. THE NEXT AUCTION'S RESERVATION (A85): the book is
+1x cash, every buy holds its limit, and a lot sold in an auction still holds its cash in that auction, so a learning lot
+bought at one auction (the overnight rows' close buys) holds cash at the next one; ROOM's order alone held only inside
+one auction (A83 (2)(b)). A LEARNING buy is therefore sized on the cash, the invested room and the loss budget less R:
+for each live PREREG Probe or Sized program whose entry is the OTHER auction, min(its room there, max_open less what it
+holds and has on order, its lots sold at this auction not counted; the median of its real-money picks at its last 5
+decisions of that auction, its whole room with none yet) x its band's share x E, and that x the median open-risk weight
+of its buys there (0.40 with none) for the budget; less what this auction's event sales give back by then (each lot
+sold here: its value, and its value x its weight), never below 0 (league/equity/live.py `_event_reserve`,
+`book.reservation`). A birth is never reserved for (`book.reserved_for`), and a birth's buy at any band leaves R as a
+PREREG learning buy does (`book.leaves_room`: its tier comes after the PREREG Probe tier); A80's one re-send is sized
+again, R included, like any entry. A buy it cuts says so ("A85 holds $X ...") and the shadow keeps a skipped event. R
+is 0 while no PREREG program of the other auction is at Probe or Sized: learning sizes as it did. No wall moves and no
+money row changes: the reservation only makes such a buy smaller. SIZE BEFORE SLOTS: before a pick takes a slot, the
+book skips (the shadow keeps the event) one that no whole share of fits by price, on the figures the send sizes on (E
+the equity at the previous close, the 10% a name on the lower of E and the account's current equity from release
+1019f; the name's book-wide value): one share at the limit above the book-wide 10% a name (above 10% of E for a name
+held nowhere: not TRADABLE),
 or, at learning, a 2% target that buys no whole share with one share above 5% of E; and one whose name an event lot
 sells at that same auction. AN EXIT NEVER WAITS ON AN ENTRY: no buy of a name goes in the cross that sells it (a sale
 the gateway refused for a reading, a 424 or 409, goes again the next minute, never held by a buy sent in between). THE
@@ -450,6 +604,31 @@ STOPPING IT: `<state>/events/STOP` idles the LANE only (no record pass, decision
 still decides each auction on the store as it stands, so buys from events and verdicts already stored can still go.
 The instant stop of event buys is the gateway's `STOCK_EVENT_BUYS` off or `equity_money.event.enabled` False
 ([operations.md](operations.md), **Release 1019b**, Rollback).
+
+THE PROBE SIZE'S RECORD (release 1019f, on `fix/probe-target-honesty`, not yet deployed; the read-only audit of the live
+House, its capacity and probe lenses). A Probe or Sized buy that cash, the loss budget or a wall cut below its band's
+target was still labelled `probe` in `real_fills`, with no record of the target, so a reader of "Probe size or above"
+could not tell a full Probe event from a cut one. Now every event buy's side row in the House's `eq_event_intents` and
+its row in the lane's `real_fills` keep `target_usd`, the dollars its band's target asked (`position_share` x E at the
+previous close, as the sizing was asked them), and `binding`, which constraint cut it below that: `cash` (the House-wide
+cash), `budget` (the loss budget at the lot's weight), `invested` (the 100% book), `name_wall` (the book-wide 10% a
+name), `whole_shares` (no cap cut the dollars; the floor to whole shares did), `gateway` (the gateway's final refusal:
+no fill) or `venue` (the cross filled less than the order asked); NULL when none did, the buy at its target or one share
+above it. Both are nullable columns, added in place to a state or store from before them (idempotent); a sale's row and
+every older row read NULL. A record only: the band rules count a fill by its band label as PREREG-EVL-3 section 2 has
+it, and the Done reader reads the record. Reading it: the size is set AT THE LIMIT (1.25 x the previous close), so a
+full Probe buy's cost at a print near the previous close is about 0.8 x `target_usd`; so (release 1019f's integration,
+the branch's independent check) both rows also keep `sized_usd`, THE DOLLARS THE SEND ASKED: the whole shares sent x
+the limit (0 when it sent none; A80's one re-send is sized again and writes its own), and the Done reader counts a
+Probe+ event only when `sized_usd` >= 0.8 x `target_usd` (DONE-RULE-EVL-2 item 1: a full, uncut buy counts whatever the
+open's gap; a buy cut by a wall, the cash, the budget or the floor to whole shares below 0.8 does not).
+
+THE WALLS' EQUITY (release 1019f, the same audit; the reading that trades less). The House sized the 10% a name on E
+(`last_equity`, never above its sizing equity) while the gateway judges the account's CURRENT equity, so a one-share
+buy near 10% on a day the account was down met the gateway's final refusal (`stock_position`). The decision's name-wall
+skip and the send's caps of the name (book-wide and the program's own) and of the 100% book now read the lower of E and
+the account's current equity as the House last read it (league/equity/live.py `wall_equity`); the band's target and its
+one-share rule stay on E at the previous close. A current equity above E moves nothing; one that cannot be read leaves E.
 
 THE EVENT KIND'S OWN DAY ORDER COUNT (release 1019c, not yet deployed): the kind's auction orders of a day count against
 their own line, `equity_money.event.max_orders_day` (150: 2 x the open positions of the live bands, at least 150; nine

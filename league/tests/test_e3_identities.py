@@ -114,6 +114,8 @@ LINE_PENDING = ("league/events/house.py",)
 #: R3's births (league/events/births.py: the grammar, the validator and its false-pass budget, the facts' wall),
 #: beside them.
 R3_PENDING = ("league/events/births.py",)
+#: The goal V2's Done judge (the Done reader, A84): league/events/done.py.
+DONE_PENDING = ("league/events/done.py",)
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
 FGS_LITERAL = {
     "version": "fgs-prereg-1", "stat": "t_r over the first n counted days", "n": [20, 60, 120, 250], "then_every": 250,
@@ -379,7 +381,9 @@ class TheWiringIsWhole(unittest.TestCase):
                                            E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
                                            + R2_PENDING + LANE_PENDING,
                                            E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
-                                           + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING),
+                                           + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING,
+                                           E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
+                                           + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING + DONE_PENDING),
                       "nothing of E2's or E3's waits for the gateway")
         self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")

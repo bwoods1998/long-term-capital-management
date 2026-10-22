@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from league.events import calendar as C
+from league.events import edgar as E
 from league.events import house as H
 from league.events import programs as P
 from league.events import run as R
@@ -118,6 +119,8 @@ class FakeSEC:
         self.mono = mono
         self.slow = 0.0
         self.fail = None
+        self.broken = {}       # accession -> how many more of its index-page reads fail (HTTP 503)
+        self.daily_status = {}  # YYYYMMDD -> the status its daily index answers instead (e.g. 503)
 
     def add(self, acc, cik, accepted_et, *, form="8-K", items=("2.02",), company="Co", current=True):
         self.filings[acc] = {"form": form, "cik": cik, "company": company, "accepted": accepted_et, "items": list(items)}
@@ -140,9 +143,10 @@ class FakeSEC:
             return self._atom(form).encode()
         if "/daily-index/" in url:
             key = url.rsplit("form.", 1)[1].split(".")[0]
-            if key not in self.daily:
+            if key in self.daily_status or key not in self.daily:
                 from league.events.gw import GatewayError
-                raise GatewayError(404, "SEC")
+                # (SEC answers a daily index that does not exist with 403, or 503: never 404)
+                raise GatewayError(self.daily_status.get(key, 403), "SEC")
             lines = []
             for entry in self.daily[key]:
                 # An accession, or (accession, filer cik, filer name): the index lists a filing once per filer.
@@ -155,6 +159,10 @@ class FakeSEC:
         if url.endswith("-index.htm"):
             self._tick()
             acc = url.rsplit("/", 1)[1].replace("-index.htm", "")
+            if self.broken.get(acc):
+                from league.events.gw import GatewayError
+                self.broken[acc] -= 1
+                raise GatewayError(503, "SEC")
             f = self.filings[acc]
             items = "".join(f"Item {i}: x " for i in f["items"])
             return (f'<div class="infoHead">Accepted</div><div class="info">{f["accepted"]}</div>'
@@ -172,13 +180,16 @@ class FakeSEC:
 
     def _atom(self, form):
         out = ["<feed>"]
-        for acc in self.current[form]:
+        for item in self.current[form]:
+            # An accession, or (accession, filer cik, filer name): the feed lists a co-registered filing once per filer.
+            acc, cik, company = (item, None, None) if isinstance(item, str) else item
             f = self.filings[acc]
+            cik, company = cik or f["cik"], company or f["company"]
             wall = dt.datetime.strptime(f["accepted"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY)
             items = " ".join(f"Item {i}: x" for i in f["items"])
-            out.append(f'<entry><title>{form} - {f["company"]} ({f["cik"]}) (Filer)</title>'
+            out.append(f'<entry><title>{form} - {company} ({cik}) (Filer)</title>'
                        f'<link rel="alternate" type="text/html" href="https://www.sec.gov/Archives/edgar/data/'
-                       f'{int(f["cik"])}/{acc.replace("-", "")}/{acc}-index.htm"/>'
+                       f'{int(cik)}/{acc.replace("-", "")}/{acc}-index.htm"/>'
                        f'<summary type="html">Filed: x AccNo: {acc} Size: 1 KB {items}</summary>'
                        f'<updated>{wall.isoformat()}</updated></entry>')
         out.append("</feed>")
@@ -236,16 +247,25 @@ class LaneCase(unittest.TestCase):
             for kind, wall in (("open", "09:15"), ("close", "15:47")):   # Monday's decisions: the desktop made them
                 rid = st.start_receipt(f"decide-{kind}:2026-10-19", now=et("2026-10-19", wall))
                 st.finish_receipt(rid, "ok", {}, now=et("2026-10-19", wall))
+            # Monday night's score, screen and report, as the House made them (release 1019f keys the night on the
+            # session: a session before today without them has them made first)
+            for job, wall in (("score", "20:31"), ("screen", "20:32"), ("report", "20:33")):
+                rid = st.start_receipt(job, now=et("2026-10-19", wall))
+                st.finish_receipt(rid, "ok", {"day": "2026-10-19"}, now=et("2026-10-19", wall))
+            (st.root / "reports").mkdir(exist_ok=True)
+            (st.root / "reports" / "2026-10-19.txt").write_text("Monday's report\n", encoding="utf-8")
             st.set_meta("evl:backfill:2026-10-15", "done")
             st.set_meta("evl:backfill:2026-10-16", "done")
         self.gw.gets.clear()
         self.lane = self.new_lane()
 
-    def new_lane(self, redecide=False, **settings):
+    def new_lane(self, redecide=False, screen_open=False, **settings):
         lane = H.EventLane(self.house, self.root, gateway=self.gw, sec=self.sec, settings=settings, monotonic=self.mono,
                            sleep=self.mono.advance)
         if not redecide:   # the hourly re-decision is its own test's
             lane._redecide_next = dt.datetime(2100, 1, 1, tzinfo=UTC)
+        if not screen_open:   # so is the screen after the open (release 1019f: ScreenAfterTheOpen)
+            lane._open_checked = dt.datetime(2100, 1, 1, tzinfo=UTC)
         return lane
 
     def at(self, when):
@@ -874,7 +894,8 @@ class Nightly(LaneCase):
                 second = self.lane._score(ctx, self.mono() + H.SCORE_BUDGET)
                 self.assertTrue(second["complete"])
                 self.assertEqual(settled, [f"8k:{n}" for n in range(5)])  # each once
-        self.assertEqual([r["status"] for r in self.receipts("score")], ["partial", "ok"])
+        self.assertEqual([r["status"] for r in self.receipts("score") if r["started_at"] >= S.iso(et("2026-10-20", "00:00"))],
+                         ["partial", "ok"])   # (Monday night's is the fixture's)
 
     def test_the_tickers_snapshot_at_seven_on_a_weekday(self):
         with self.store() as st:
@@ -888,6 +909,99 @@ class Nightly(LaneCase):
         with self.store() as st:
             keys = [r[0] for r in st.db.execute("SELECT key FROM meta WHERE key LIKE 'tickers@2026-10-20%'")]
         self.assertEqual(keys, [f"tickers@{S.iso(et('2026-10-20', '07:01'))}"])
+
+
+class ACoRegistered8K(LaneCase):
+    """Release 1019f's review (lens judges, a major older than 1019f): a co-registered 8-K (Gamma Inc., listed, CIK 3,
+    and Gamma Subsidiary LLC, unlisted, CIK 888) is listed by EDGAR's current feed and its daily index once per filer.
+    Kept under the first filer the feed listed, an unlisted co-registrant first left the listed issuer's 8-K unfetched
+    by the live pass (no event of it, for the shadow or for real money, and out of A69 (ii)), and A82's backfill
+    fetched it through the listed filer's row yet left it under the unlisted CIK. The live pass keeps it under the
+    listed filer whichever the feed lists first, and the backfill moves one stored under an unlisted filer to the listed
+    filer's CIK before it fetches it."""
+
+    ACC = "0000000888-26-000901"
+    SUB = ("0000000888", "Gamma Subsidiary LLC")
+    LISTED = ("0000000003", "Gamma Inc.")
+
+    def setUp(self):
+        super().setUp()
+        self.sec.add(self.ACC, self.LISTED[0], "2026-10-20 08:10:00", company=self.LISTED[1], current=False)
+        self.sec.daily["20261020"] = [(self.ACC, *self.SUB), (self.ACC, *self.LISTED)]
+
+    def stored(self):
+        with self.store() as st:
+            row = st.db.execute("SELECT cik, company, status FROM filings WHERE accession=?", (self.ACC,)).fetchone()
+        return None if row is None else tuple(row)
+
+    def live(self, *filers):
+        self.sec.current["8-K"][:0] = [(self.ACC, *f) for f in filers]
+        self.at(et("2026-10-20", "08:20"))
+        self.assertEqual(self.turn()["task"], "record")
+
+    def test_the_live_pass_keeps_it_under_the_listed_filer_listed_second(self):
+        self.live(self.SUB, self.LISTED)
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"), "fetched by the live pass, the listed issuer's")
+
+    def test_the_live_pass_keeps_it_under_the_listed_filer_listed_first(self):
+        self.live(self.LISTED, self.SUB)
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"))
+
+    def test_the_backfill_moves_one_stored_under_the_unlisted_filer_to_the_listed_one(self):
+        self.live(self.SUB)     # (the listed filer's entry not read: past the feed's page cap, say)
+        self.assertEqual(self.stored(), (*self.SUB, "listed"), "the live pass skips an unlisted filer's 8-K")
+        self.at(et("2026-10-21", "06:00"))
+        out = TheBackfill.backfill_pass(self, dt.date(2026, 10, 20))
+        self.assertTrue(out["complete"], out)
+        self.assertEqual((out["filings"], out["fetched"], out["unlisted"]), (1, 1, 0))
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"), "the listed issuer's event")
+        self.assertIn(("open", dt.date(2026, 10, 20)), self.lane._redecide, "its entry session decided again")
+        with self.store() as st:
+            url = st.db.execute("SELECT index_url FROM filings WHERE accession=?", (self.ACC,)).fetchone()[0]
+        self.assertIn("/edgar/data/3/", url)
+
+    def test_the_clis_passes_alike(self):
+        self.sec.current["8-K"][:0] = [(self.ACC, *self.SUB), (self.ACC, *self.LISTED)]
+        self.at(et("2026-10-20", "08:20"))
+        with self.store() as st:
+            ctx = R.Context(st, self.gw, self.sec, now=self.lane.now)
+            out = R.record_pass(ctx)
+            self.assertEqual((out["8-K"]["new"], out["8-K"]["fetched"], out["8-K"]["unlisted"]), (1, 1, 0))
+            self.assertEqual(tuple(st.db.execute("SELECT cik, status FROM filings WHERE accession=?", (self.ACC,))
+                                   .fetchone()), (self.LISTED[0], "fetched"))
+            st.db.execute("UPDATE filings SET cik=?, company=?, status='listed' WHERE accession=?",
+                          (*self.SUB, self.ACC))    # (as a release before this one stored it)
+            R.backfill(ctx, dt.date(2026, 10, 20), dt.date(2026, 10, 20), news=False)
+            self.assertEqual(tuple(st.db.execute("SELECT cik, company, status FROM filings WHERE accession=?",
+                                                 (self.ACC,)).fetchone()), (*self.LISTED, "fetched"))
+
+    def test_a_filing_stored_under_a_listed_filer_keeps_it(self):
+        """Two listed co-registrants: the backfill never moves a filing the live pass stored under a listed filer."""
+        with self.store() as st:
+            E.record_filing(st, self.sec, {"form": "8-K", "cik": "0000000002", "accession": self.ACC, "company": "Beta",
+                                           "accepted_at": et("2026-10-20", "08:10"), "items": []},
+                            source="current", fetch=False)
+            status = E.record_filing(st, self.sec, {"form": "8-K", "cik": "0000000003", "accession": self.ACC,
+                                                    "company": "Gamma Inc.", "accepted_at": None, "index_url": None,
+                                                    "items": []},
+                                     source="daily-index", fetch=True, listed={"0000000002", "0000000003"})
+            self.assertEqual(status, "fetched")
+            self.assertEqual(st.db.execute("SELECT cik FROM filings WHERE accession=?", (self.ACC,)).fetchone()[0],
+                             "0000000002")
+
+    def test_one_filing_on_two_pages_of_the_feed_is_one_entry_under_the_listed_filer(self):
+        def entry(cik, name):
+            return (f'<entry><title>8-K - {name} ({cik}) (Filer)</title><summary type="html">AccNo: {self.ACC}'
+                    f'</summary><updated>2026-10-20T08:10:00-04:00</updated></entry>')
+        pages = {0: "<feed>" + entry(*self.SUB) + "</feed>", E.CURRENT_PAGE: "<feed>" + entry(*self.LISTED) + "</feed>"}
+
+        def get(url):
+            start = int(url.split("start=")[1].split("&")[0])
+            return pages.get(start, "<feed></feed>").encode()
+        [one] = E.poll_current(get, "8-K", [], prefer={"0000000003"})
+        self.assertEqual((one["cik"], one["company"]), self.LISTED)
+        [first] = E.poll_current(get, "8-K", [])
+        self.assertEqual(first["cik"], self.SUB[0], "no tickers copy: the first filer seen, as before")
 
 
 class TheBackfill(LaneCase):
@@ -959,6 +1073,156 @@ class TheBackfill(LaneCase):
             self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
             self.assertEqual(st.db.execute("SELECT count(*) FROM filings WHERE status='fetched' AND accession LIKE "
                                            "'0000000002-26-00050%'").fetchone()[0], 3)
+
+    def backfill_pass(self, day):
+        """One backfill pass of `day` on its own store connection, with a 90 s bound."""
+        with self.store() as st:
+            ctx = H.LaneContext(self.lane, st, H.LaneGateway(self.gw, self.lane, None, cut=False), self.sec, self.lane.now)
+            return self.lane._backfill(ctx, day, self.mono() + 90)
+
+    def due_day(self):
+        with self.store() as st:
+            now = self.clock_dt()
+            return self.lane._backfill_due(st, now, now.astimezone(NY).date(), [])
+
+    def test_a_failed_fetch_holds_its_day_and_is_tried_again_after_its_backoff(self):
+        # Release 1019f: a filing whose fetch failed no longer counts as seen; its day is not done, it is tried again
+        # FETCH_BACKOFF after its first failure, and a later day is backfilled meanwhile.
+        good, flaky = "0000000002-26-000601", "0000000003-26-000602"
+        self.sec.add(good, "0000000002", "2026-10-19 16:30:00", current=False)
+        self.sec.add(flaky, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [good, flaky]
+        self.sec.broken[flaky] = 1
+        t0 = et("2026-10-21", "06:00")
+        self.at(t0)
+        first = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertFalse(first["complete"], first)
+        self.assertEqual((first["fetched"], first["failed"], first["retrying"], first["retried"]), (1, 1, 1, 0))
+        self.assertEqual(first["next_try"], S.iso(t0 + H.FETCH_BACKOFF[0]))
+        self.assertNotIn("unfetched", first)
+        with self.store() as st:
+            self.assertIsNone(st.meta("evl:backfill:2026-10-19"))
+            self.assertTrue(st.db.execute("SELECT status FROM filings WHERE accession=?", (flaky,)).fetchone()[0]
+                            .startswith("failed:"))
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "partial")
+        self.assertEqual(self.due_day(), dt.date(2026, 10, 20))    # the waiting day holds no later day
+        with self.store() as st:
+            st.set_meta("evl:backfill:2026-10-20", "done")
+        self.at(t0 + H.FETCH_BACKOFF[0] - dt.timedelta(seconds=1))
+        self.assertIsNone(self.due_day())                            # its retry is not due yet
+        self.at(t0 + H.FETCH_BACKOFF[0])
+        self.assertEqual(self.due_day(), dt.date(2026, 10, 19))
+        second = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertTrue(second["complete"], second)
+        self.assertEqual((second["fetched"], second["failed"], second["retrying"], second["retried"]), (1, 0, 0, 1))
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+        with self.store() as st:
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+        self.assertIsNone(self.due_day())
+
+    def test_an_8k_whose_filer_is_unlisted_since_its_failed_fetch_leaves_the_failed_set(self):
+        # Release 1019f's integration (fix/backfill-robust's check, a minor): an 8-K whose fetch failed while its filer
+        # was listed, and whose filer is unlisted at the next pass, is no event: it is seen as unlisted and leaves the
+        # day's failed set, so the day is done `ok`, never `done-failed` naming it.
+        flaky = "0000000003-26-000611"
+        self.sec.add(flaky, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [flaky]
+        self.sec.broken[flaky] = 1
+        t0 = et("2026-10-21", "06:00")
+        self.at(t0)
+        first = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertEqual((first["complete"], first["failed"], first["retrying"]), (False, 1, 1))
+        self.at(t0 + H.FETCH_BACKOFF[0])
+        real = R.Context.tickers
+        with mock.patch.object(R.Context, "tickers", new=property(
+                lambda ctx: {k: v for k, v in real.fget(ctx).items() if k != "0000000003"})):
+            second = self.backfill_pass(dt.date(2026, 10, 19))
+        self.assertEqual((second["complete"], second["failed"], second["unlisted"]), (True, 0, 1), second)
+        self.assertNotIn("unfetched", second)
+        self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+
+    def test_a_dead_document_is_tried_fetch_tries_times_then_named_and_its_day_done(self):
+        # Release 1019f: a filing that never fetches (a dead document) is tried FETCH_TRIES times in all, at the
+        # FETCH_BACKOFF steps after its first failure, as the record pass tries a live one; then the receipt names it
+        # (accession, form, error) and the day is done, so no look waits on it for good.
+        good, dead = "0000000002-26-000701", "0000000003-26-000702"
+        self.sec.add(good, "0000000002", "2026-10-19 16:30:00", current=False)
+        self.sec.add(dead, "0000000003", "2026-10-19 16:40:00", current=False)
+        self.sec.daily["20261019"] = [good, dead]
+        self.sec.broken[dead] = 10 ** 6
+        t0 = et("2026-10-20", "11:00")
+        self.at(t0)
+        reads = lambda: sum(1 for url in self.sec.calls if url.endswith(f"{dead}-index.htm"))   # noqa: E731
+        outs = [self.backfill_pass(dt.date(2026, 10, 19))]
+        for k in range(H.FETCH_TRIES - 1):
+            self.assertFalse(outs[-1]["complete"], outs[-1])
+            with self.store() as st:
+                self.assertIsNone(st.meta("evl:backfill:2026-10-19"))
+            self.at(t0 + H.FETCH_BACKOFF[k] - dt.timedelta(seconds=30))   # before its next try: nothing is tried
+            before = reads()
+            early = self.backfill_pass(dt.date(2026, 10, 19))
+            self.assertEqual((reads(), early["retried"], early["complete"]), (before, 0, False))
+            self.at(t0 + H.FETCH_BACKOFF[k])
+            outs.append(self.backfill_pass(dt.date(2026, 10, 19)))
+            self.assertEqual(outs[-1]["retried"], 1)
+        last = outs[-1]
+        self.assertEqual(reads(), H.FETCH_TRIES)
+        self.assertTrue(last["complete"], last)
+        self.assertEqual((last["failed"], last["retrying"]), (1, 0))
+        self.assertEqual([(u["accession"], u["form"], u["tries"]) for u in last["unfetched"]],
+                         [(dead, "8-K", H.FETCH_TRIES)])
+        self.assertTrue(last["unfetched"][0]["error"].startswith("failed:GatewayError:HTTP 503"), last["unfetched"])
+        receipt = self.receipts("backfill")[-1]
+        self.assertEqual(receipt["status"], "done-failed")
+        self.assertEqual(json.loads(receipt["summary"])["unfetched"][0]["accession"], dead)
+        with self.store() as st:
+            self.assertEqual(st.meta("evl:backfill:2026-10-19"), "done")
+        self.assertIsNone(self.due_day())
+        self.assertNotIn(dt.date(2026, 10, 19), self.lane._backfill_failed)   # (the day's retry state is dropped)
+
+    def test_an_sec_holiday_without_an_index_is_done_and_any_other_missing_index_waits(self):
+        # Release 1019f: EDGAR is closed on a federal holiday and publishes no daily index for it (Wed Nov 11, 2026,
+        # Veterans Day: NYSE trades, EDGAR is closed). SEC answers a daily index that does not exist with 403 or 503,
+        # never 404 (fix/backfill-robust's independent check): a weekday IN THE TABLE whose index read fails, whatever
+        # the status, is done, "no index: SEC holiday"; a failed read on any other weekday, 403 or 503, waits as before.
+        for holiday, status, name in ((dt.date(2026, 11, 11), 403, "Veterans Day"),
+                                      (dt.date(2026, 11, 26), 503, "Thanksgiving Day")):
+            with self.subTest(holiday=holiday, status=status):
+                self.sec.daily_status[holiday.strftime("%Y%m%d")] = status
+                self.at(et((holiday + dt.timedelta(days=1)).isoformat(), "06:00"))
+                out = self.backfill_pass(holiday)
+                self.assertEqual((out["complete"], out["why"], out["holiday"], out["status"]),
+                                 (True, "no index: SEC holiday", name, status))
+                self.assertEqual(self.receipts("backfill")[-1]["status"], "ok")
+                with self.store() as st:
+                    self.assertEqual(st.meta(f"evl:backfill:{holiday.isoformat()}"), "done")
+        for day, status in ((dt.date(2026, 11, 10), 403), (dt.date(2026, 11, 13), 503)):   # no holiday: it waits
+            with self.subTest(day=day, status=status):
+                self.sec.daily_status[day.strftime("%Y%m%d")] = status
+                self.at(et((day + dt.timedelta(days=1)).isoformat(), "06:00"))
+                self.lane._attempts.pop(f"backfill:{day.isoformat()}", None)
+                other = self.backfill_pass(day)
+                self.assertEqual(other["_status"], "waiting")
+                self.assertIn(f"HTTP {status}", other["waiting"])
+                with self.store() as st:
+                    self.assertIsNone(st.meta(f"evl:backfill:{day.isoformat()}"))
+        self.at(et("2026-12-28", "06:00"))
+        self.assertEqual(self.backfill_pass(dt.date(2026, 12, 24))["_status"], "waiting")   # no holiday by the table
+        acc = "0000000002-26-000801"                                        # a holiday with an index: read as any day
+        self.sec.add(acc, "0000000002", "2026-12-25 16:30:00", current=False)
+        self.sec.daily["20261225"] = [acc]
+        read = self.backfill_pass(dt.date(2026, 12, 25))
+        self.assertEqual((read["complete"], read["fetched"]), (True, 1))
+        self.assertNotIn("why", read)
+
+    def test_the_sec_holiday_table_is_opms_for_2026_and_2027(self):
+        days = H.SEC_HOLIDAYS
+        self.assertTrue(all(d.weekday() < 5 and d.year in (2026, 2027) for d in days), days)
+        self.assertEqual(len(days), 23)                                       # OPM's 11 a year, and Dec 31, 2027
+        self.assertEqual(days[dt.date(2026, 11, 11)], "Veterans Day")
+        self.assertEqual(days[dt.date(2026, 7, 3)], "Independence Day")       # July 4, 2026 is a Saturday
+        self.assertEqual(days[dt.date(2027, 12, 31)], "New Year's Day")       # Jan 1, 2028 is a Saturday
+        self.assertNotIn(dt.date(2026, 4, 3), days)                           # Good Friday: NYSE shut, EDGAR open
 
     def test_an_unpublished_index_waits_an_hour(self):
         self.at(et("2026-10-20", "11:00"))

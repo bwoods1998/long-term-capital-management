@@ -334,6 +334,9 @@ VENUE_STAMP_SLACK_S = 0.001
 VENUE_CANCEL_SAID = "eq_venue_cancel_said"
 #: What an A80 re-send held by a gate says on its intent (`_event_work_entry`); the auction's end reads it back.
 A80_HELD = "A80's one re-send held: "
+#: kv: the lane's band mark (league/events/book.py `band_mark`) the session's last band sync read (release 1019f): the
+#: close decision reads the bands again when the lane's mark differs (`_event_bands_due`).
+EVENT_BAND_MARK = "eq_event_band_mark"
 #: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
 #: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
 ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
@@ -959,6 +962,18 @@ def _iso(t: float) -> str:
 def _lane_iso(t: float) -> str:
     """An instant as the event lane's store writes one (league/events/store.py `iso`: UTC to the second, a `Z`)."""
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def wall_equity(E: Decimal, account: Mapping[str, Any] | None) -> Decimal:
+    """RELEASE 1019f, THE WALLS' EQUITY (the audit's capacity lens; the reading that trades less): the lower of `E`, the
+    event kind's sizing equity (the House's sizing equity, never above the account's `last_equity`), and the account's
+    CURRENT equity as the House last read it (`equity`, the minute's reading), the figure the gateway judges an event
+    buy's 10% a name and the whole book against: a buy sized near 10% of the previous close's equity on a day the
+    account is down otherwise meets the gateway's final refusal (`stock_position`). An `equity` that is absent or cannot
+    be read leaves `E` as it is (as an unreadable `last_equity` does: the gateway, which reads the account itself,
+    refuses a buy it cannot judge); one at or below zero is read as it is (no buy fits)."""
+    now = A.dec((account or {}).get("equity"))
+    return E if now is None else min(E, now)
 
 
 class _NoYield(Exception):
@@ -2521,8 +2536,8 @@ class EquityBook:
         if inst.kind == PANEL_KIND:
             return Decimal(str(B.panel_settings().sleeve_share))
         if inst.kind == EVENT_KIND:
-            # (release R2: an event position's own target share of E, Probe 0.05, Sized 0.10; the event kind sizes
-            # one position at a time, `_size_event`, and holds no sleeve of its own)
+            # (release R2: an event position's own target share of E, Probe 0.035 (A86), Sized 0.10; the event kind
+            # sizes one position at a time, `_size_event`, and holds no sleeve of its own)
             return self._event_settings().share(inst.band)
         probe = Decimal(str(et.probe_sleeve_share))
         if inst.band != "sized":
@@ -3877,11 +3892,30 @@ class EquityBook:
                         for statement in _SQL_COMMENT.sub("", adapter.SCHEMA).split(";"):
                             if statement.strip():
                                 self.state.execute(statement)
+                        self._add_columns(getattr(adapter, "SCHEMA_COLUMNS", None) or {})
             except Exception as exc:  # noqa: BLE001 - that kind stays off; the book itself goes on
                 adapter = None
                 self._error(f"adapter {kind}", exc, {})
             self._adapters[kind] = adapter
         return self._adapters[kind]
+
+    def _add_columns(self, columns: Mapping[str, Mapping[str, str]]) -> None:
+        """RELEASE 1019f: an adapter's columns added to its tables after their first release (`adapter.SCHEMA_COLUMNS`:
+        {table: {column: its ALTER statement}}; league/events/book.py's `eq_event_intents.target_usd` and `binding`), each
+        where the table lacks it (PRAGMA table_info, read afresh), as `eq_orders.tif` is: a state from before them gains
+        them in place, every older row reading NULL; another process's first open adding one between the look and the
+        ALTER is read as done. Anything else is raised (the adapter is then off, `_adapter`)."""
+        for table, wanted in columns.items():
+            for column, ddl in wanted.items():
+                have = {str(r["name"]) for r in self.state.rows(f"PRAGMA table_info({table})")}
+                if column in have:
+                    continue
+                try:
+                    self.state.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    have = {str(r["name"]) for r in self.state.rows(f"PRAGMA table_info({table})")}
+                    if "duplicate column name" not in str(exc).lower() or column not in have:
+                        raise
 
     def _rebalances(self, instance: str) -> list[dict]:
         return self.state.rows("SELECT * FROM eq_rebalances WHERE instance=? ORDER BY decided_day, rid", (instance,))
@@ -5110,12 +5144,19 @@ class EquityBook:
 
     # ---------------------------------------------------------------- the band sync
     def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
-        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision: each seating version's band AS THE LANE'S
+        """THE EVENT KIND'S BAND SYNC, once a session, at its first decision, and again at its close decision when the
+        lane's band history moved since (`_event_bands_due`, release 1019f): each seating version's band AS THE LANE'S
         STORE SAYS IT (league/events/book.py `bands`: learning from birth, Probe, Sized, retired; PREREG-EVL-3 section
         2) written to `eq_event_programs`, and its instance (`<program>@<version>:r`, kind "event", lane "event") made,
         updated or retired. A program that leaves the live bands decides no more; its open lots exit at their own
         scheduled auctions (nothing is sold by a band move). None when the lane's band table cannot be read: nothing is
-        written, no buy is planned this decision, and the next decision reads it again."""
+        written, no buy is planned this decision, and the next decision reads it again. The lane's band mark
+        (`book.band_mark`) is read BEFORE the bands and kept with the sync (kv `eq_event_band_mark`), so a move the lane
+        writes between the two reads is read at the next decision."""
+        try:
+            mark = adapter.band_mark(lane)
+        except Exception:  # noqa: BLE001 - an unread mark makes the close decision read the bands again
+            mark = None
         bands = adapter.bands(lane, s)
         if bands is None:
             return None
@@ -5150,11 +5191,29 @@ class EquityBook:
                         self.alert("warning", f"equity: event program {b.program} v{b.version} is now {b.band}: "
                                               f"{b.why[:200]}")
             self.state.put("eq_event_synced", day.isoformat())
+            self.state.put(EVENT_BAND_MARK, mark)
         if born:
             self.alert("warning", f"equity: {len(born)} event program(s) trade real money from {day.isoformat()} at "
                                   f"their lane's bands ({', '.join(born)[:300]}); every buy waits on the gateway's "
                                   "STOCK_EVENT_BUYS and the auction paper proof's BUY stage")
         return bands
+
+    def _event_bands_due(self, day: str, at: str, adapter: Any, lane: Any) -> str | None:
+        """Why the band sync runs at this decision, or None: "first", the session's first decision (`eq_event_synced`
+        is another day); "moved", THE CLOSE DECISION when the lane's band mark (`book.band_mark`: the newest
+        `band_history` id) is not the one the session's sync kept, or cannot be read (release 1019f: the lane's screen
+        runs its looks after the open, so a look written that morning moves its program's band before the close, and
+        PREREG-EVL-3 section 2 gives Probe "from the first decision after a passed look"). The open decision is always
+        a session's first; a band moved after the close decision is read at the next session's first."""
+        if (self.state.get("eq_event_synced") or "") != day:
+            return "first"
+        if at != "close":
+            return None
+        try:
+            mark = adapter.band_mark(lane)
+        except Exception:  # noqa: BLE001 - read the bands again: `_event_sync` says whether they can be read
+            mark = None
+        return "moved" if mark is None or mark != self.state.get(EVENT_BAND_MARK) else None
 
     # ---------------------------------------------------------------- the decision
     def _event_decide(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
@@ -5162,7 +5221,8 @@ class EquityBook:
         planned first (`_event_exits`, whatever the switch says: an exit never waits on it), then, while the event kind
         is on, each live program of this auction's entries asked for its real-money picks (`book.picks`, ranked), and
         the auction's slots given out IN ROOM'S ORDER (`book.allocate`, release 1019b's second review: Sized, then
-        Probe, then learning, then the tables' order; each program takes its own ranked picks, passing over a name an
+        Probe, then learning, then the tables' order, round-robin inside Sized and inside Probe since the captain's A85;
+        each program takes its own ranked picks, passing over a name an
         earlier program was given and a pick `_event_gate` skips whatever the room (no whole share fits by price, or the
         name is sold at this auction), until its room, `max_open` less what it holds and has on order, is full), and
         recorded as buy intents with their side rows (the limit, sigma, the weight, the exit plan). It waits a few
@@ -5186,10 +5246,13 @@ class EquityBook:
             return
         exits = self._event_sales(day, at)
         readable = True
-        if lane is not None and (self.state.get("eq_event_synced") or "") != day:
+        synced = self._event_bands_due(day, at, adapter, lane) if lane is not None else None
+        if synced is not None:
             readable = self._event_sync(now, em.day, s, adapter, lane) is not None
         summary: dict[str, Any] = {"exits": exits, "lane": lane is not None, "enabled": bool(s.enabled), "programs": {},
                                    "bands": readable}
+        if synced is not None:
+            summary["band_sync"] = synced
         planned: list[tuple[Any, Any, Any]] = []
         sigmas: dict[str, float | None] = {}
         if not readable:
@@ -5363,12 +5426,15 @@ class EquityBook:
         - "name_wall": one share at the limit does not fit under the book-wide 10% a name (`per_name_share` x E less the
           name's book-wide value), so above 10% of E for a name held nowhere (not TRADABLE, PREREG-EVL-1 section 5);
         - "one_share": the band's target (`position_share` x E) buys no whole share at the limit and its one-share rule
-          refuses one (learning: one share at the limit above `one_share_max.learning` x E, 5%);
+          refuses one (learning and Probe: one share at the limit above the band's `one_share_max` x E, 5%);
         - "sale": a sale of the name is planned or working at this same auction (an event lot's exit, planned by this
           decision before its picks): no buy of the name goes in it (`_event_sales_at`; an exit never waits on an
           entry, the reading that trades less).
         The walls that depend on the whole book (the 100% book, the cash, the loss budget) are `_size_event`'s at the
-        send, as before. Returns (skip(band, pick) -> one of those keys or None, "") or (None, why E cannot be read)."""
+        send, as before. RELEASE 1019f: the 10% a name is judged on `wall_equity` (the lower of E and the account's
+        current equity, the gateway's figure: the reading that trades less), as `_size_event`'s caps are; the band's
+        target and its one-share rule stay on E. Returns (skip(band, pick) -> one of those keys or None, "") or (None,
+        why E cannot be read)."""
         E = self.sizing_equity()
         if E is None or E <= 0:
             return None, "no sizing equity (the grant or the account)"
@@ -5378,6 +5444,7 @@ class EquityBook:
         last = A.dec(account.get("last_equity"))
         if last is not None and last > 0:
             E = min(E, last)     # (the equity at the previous close, as `_size_event` reads it)
+        walls = wall_equity(E, account)     # (release 1019f: the name wall's equity, as the gateway judges it)
         held: dict[str, tuple[Decimal | None, Decimal]] = {}
         for r in self._read_positions() or []:
             if str(r.get("asset_class") or "") == "us_equity":
@@ -5387,7 +5454,7 @@ class EquityBook:
             if o.side == "buy":
                 buying[o.symbol] = buying.get(o.symbol, ZERO) + o.remaining * o.limit_px
         selling = self._event_sales_at(day, at)
-        wall = s.per_name * E
+        wall = s.per_name * walls
 
         def skip(band: str, pick: Any) -> str | None:
             symbol = str(pick.symbol).upper()
@@ -5766,10 +5833,19 @@ class EquityBook:
                                "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.day=? AND e.at=? ORDER BY i.iid",
                                (day, at))
         sells = [r for r in rows if r["e_side"] == "sell"] if "sell" in sides else []
-        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within a band the
-        # tables' order; within a program its own ranking (the decision planned them in it).
-        buys = sorted((r for r in rows if r["e_side"] == "buy"),
-                      key=lambda r: (*adapter.room_key(r["family"], r["e_band"]), int(r["iid"]))) if "buy" in sides else []
+        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within Sized and
+        # within Probe ROUND-ROBIN (A85, `book.send_key`: every program's first buy, in the tables' order, before any
+        # program's second); learning in the tables' order; within a program its own ranking (the decision planned
+        # them in it, so its iids are in it).
+        buys = []
+        if "buy" in sides:
+            nth: dict[str, int] = {}
+            ranked = []
+            for r in sorted((r for r in rows if r["e_side"] == "buy"), key=lambda r: int(r["iid"])):
+                n = nth.get(str(r["family"]), 0)
+                nth[str(r["family"])] = n + 1
+                ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
+            buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
         until = em.open_until if at == "open" else em.close_until
         for r in sells + buys:
             try:
@@ -5923,6 +5999,7 @@ class EquityBook:
             return False
         if not (current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)):
             return False
+        self._event_refused_at_gateway(intent, current)     # (release 1019f: the record's binding "gateway")
         cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
         note = venue_cancel_note(self._intent_orders(intent.iid))
         self._finish(intent, "refused" if current.status == "refused" else "missed",
@@ -5935,16 +6012,38 @@ class EquityBook:
                                 "gateway, or set equity_money.event.enabled False to stop the House asking")
         return True
 
+    def _event_refused_at_gateway(self, intent: Intent, current: Order) -> None:
+        """RELEASE 1019f, THE PROBE SIZE'S RECORD: an event buy whose last order the GATEWAY refused with its final answer
+        (a cap that is no reading it could not make: nothing reached the venue) is recorded as cut by it, `binding`
+        "gateway" on its side row, whatever its sizing named; its `target_usd` stays the sizing's. The House's own
+        refusals (nothing sent) and the venue's rejections are not the gateway's."""
+        if current.status != "refused" or current.again or not current.answer.get("gateway"):
+            return
+        side = self._event_row(intent.iid)
+        if side is None or "binding" not in side or side.get("binding") == "gateway":
+            return
+        self.state.execute("UPDATE eq_event_intents SET binding='gateway' WHERE iid=?", (int(intent.iid),))
+
     def _size_event(self, intent: Intent, inst: Instance, side: Mapping[str, Any], limit: Decimal, day: str,
                     s: Any) -> tuple[Decimal, str] | None:
         """THE EVENT ENTRY'S SIZE (PREREG-EVL-3 section 2, PREREG-EVL-1 section 8), by `sizing.size_entry` (the one
-        sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.05, Sized
-        0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing equity), every
-        wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the loss budget at
-        the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one share passes
-        every cap and, at learning, one share at the limit is at most `one_share_max.learning` x E; (0, why) otherwise
-        (skipped: the shadow keeps the event). None (the intent's why) when a figure cannot be read this minute (asked
-        again next minute until the cut-off)."""
+        sizing function): a target of the band's `position_share` x E at the limit (learning 0.02, Probe 0.035 (A86
+        REVISED), Sized 0.10), E the account equity at the previous close (`last_equity`, never above the House's sizing
+        equity), every wall a cap (the name's book-wide 10%, `per_name_share`; the 100% book; the House-wide cash; the
+        loss budget at the lot's own weight), then WHOLE shares (floored); when that rounds to none, ONE share when one
+        share passes every cap and, at learning and at Probe, one share at the limit is at most the band's
+        `one_share_max` x E (5%); (0, why) otherwise (skipped: the shadow keeps the event). A LEARNING buy, and any buy
+        of a lower ROOM tier (a birth's, R3: after every PREREG program whatever its band), sizes on the cash, the
+        invested room and the loss budget less THE NEXT AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what
+        the other auction's PREREG Probe and Sized programs will need, less what this auction's event sales give back;
+        no wall moves, the reservation only makes such a buy smaller); 0 while no PREREG program of the other auction is
+        at Probe or Sized, so learning sizes as before. None (the intent's why) when a figure cannot be read this minute
+        (asked again next minute until the cut-off). RELEASE 1019f: the name's 10% (`instrument`), the program's own
+        share of it (`sleeve_cap`) and the 100% book are judged on `wall_equity` (the lower of E and the account's
+        current equity, the gateway's figure: the reading that trades less); the target and the one-share rule stay on
+        E. Every answer is RECORDED on the buy's side row (`_event_sized`): the target's dollars, the constraint that
+        cut it (a cut by A85's reservation reads as the cap it lowered: cash, invested or budget) and the dollars the
+        send asks."""
         et = self._et()
 
         def wait(why: str) -> None:
@@ -5963,6 +6062,7 @@ class EquityBook:
         last = A.dec(account.get("last_equity"))
         if last is not None and last > 0:
             E = min(E, last)      # the equity at the previous close (PREREG-EVL-3 section 2); never above the House's
+        walls = wall_equity(E, account)     # (release 1019f: the walls' equity, the gateway's current one when lower)
         try:
             cash = D(account.get("cash"))
             options_loss = self._options_open_loss(day)
@@ -5970,6 +6070,11 @@ class EquityBook:
             available = M.available_cash(account, working_buys_worst=working_buys_worst(self.state.rows), reserved=reserved,
                                          reserve_usd=et.cash_reserve)
             budget_room = self._budget_room(day)
+            # (A85: a learning buy leaves the next auction's Probe and Sized programs their cash, invested room and loss
+            # budget; zero for a Probe or Sized buy, and while no program of the other auction is at either band.)
+            held_cash, held_risk, held_note = self._event_reserve(inst, day, str(side.get("at") or intent.at), s, E)
+            available -= held_cash
+            budget_room -= held_risk
         except Exception as exc:  # noqa: BLE001 - fail closed
             wait(f"a sizing figure could not be read ({type(exc).__name__}: {str(exc)[:120]})")
             return None
@@ -5989,33 +6094,208 @@ class EquityBook:
         all_buys_symbol = sum((o.remaining * o.limit_px for o in buys if o.symbol == symbol), ZERO)
         own_symbol = sum((lot.value for lot in self._lots(instance=inst.id, symbol=symbol)), ZERO)
         weight = _event_weight_of(side.get("weight"))
-        x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=s.share(inst.band) * E, limit_price=limit,
-                           E=E, sleeve_equity=E, sleeve_free_cash=max(ZERO, available), sleeve_symbol_value=own_symbol,
+        target = s.share(inst.band) * E
+        x = Z.SizingInputs(symbol=symbol, klass=config.STOCK, share=None, usd=target, limit_price=limit,
+                           E=walls, sleeve_equity=walls, sleeve_free_cash=max(ZERO, available),
+                           sleeve_symbol_value=own_symbol,
                            position_share=s.per_name, account_symbol_value=max(book_symbol, account_symbol) + all_buys_symbol,
-                           invested_now=invested(self.state.rows) + options_loss,
+                           invested_now=invested(self.state.rows) + options_loss + held_cash,
                            invested_share=Decimal(str(et.invested_share)), available_cash=available, cash=cash,
                            any_short=any_short, budget_room=budget_room, weight=weight,
                            min_order_usd=Decimal(str(et.min_order_usd)))
         sized = Z.size_entry(x)
         whole = sized.qty.to_integral_value(rounding=ROUND_DOWN)
         if whole >= 1:
-            return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}"
+            self._event_sized(intent, side, target, self._event_cut(x, sized, whole * limit < target), whole * limit)
+            return whole, f"{whole} shares at {inst.band} ({sized.binding}): {sized.reason}{held_note}"
         cap = s.one_share_cap(inst.band)
         if cap is not None and limit > cap * E:
+            self._event_sized(intent, side, target, None, ZERO)
             return ZERO, (f"no whole share fits: the {inst.band} target rounds to none and one share at ${limit} is above "
                           f"{cap} x E (${(cap * E).quantize(Decimal('0.01'))})")
         one = Z.size_entry(replace(x, usd=limit))
         if one.qty >= 1:
+            self._event_sized(intent, side, target, None, limit)
             return Decimal(1), (f"one share at {inst.band}: the target's whole shares round to none and one share fits "
-                                f"every wall ({one.reason})")
-        return ZERO, f"no whole share fits ({one.binding}): {one.reason}"
+                                f"every wall ({one.reason}){held_note}")
+        self._event_sized(intent, side, target, self._event_cut(replace(x, usd=limit), one, False), ZERO)
+        return ZERO, f"no whole share fits ({one.binding}): {one.reason}{held_note}"
+
+    def _event_reserve(self, inst: Instance, day: str, at: str, s: Any, E: Decimal) -> tuple[Decimal, Decimal, str]:
+        """THE NEXT AUCTION'S RESERVATION FOR A LEARNING BUY (the captain's A85, recorded before the first Probe auction;
+        PREREG-EVL-3 section 2's ROOM, which A83 (2)(b) read as holding inside one auction only): (cash, loss budget,
+        the note its sizing reason carries). The book is 1x cash and every buy holds its limit; a lot sold in an auction
+        still holds its cash in that auction; so a learning lot bought at this auction (`at` of `day`) holds cash at
+        the NEXT one, the other auction. For every live program at Probe or Sized whose entry is that other auction
+        (`book.reservation`): its room there, `max_open(band)` less what it holds and has on order, its lots whose sale
+        is planned or working at THIS auction not counted (they are sold before it; `_event_open_count` less
+        `_event_selling`); the counts of its real-money picks at its last `book.RESERVE_DECISIONS` decisions of that
+        auction (`eq_event_decisions` summaries, `picks`; a decision that did not read them, its room full, is passed
+        over) and the weights of its buys there. The reservation is n = min(room, median picks) x share(band) x E for
+        cash and invested room, and that x the median weight for the loss budget, LESS what this auction's event sales
+        give back by the next one (each lot sold here: its value, and its value x its own weight for the budget), never
+        below 0. (0, 0, "") for a Probe or Sized buy, a kind that is not the event kind, and while no program of the
+        other auction is at Probe or Sized: learning sizes exactly as it did. WITH R3'S BIRTHS (release 1019f's
+        integration; `book.BIRTH_ROOM`: a birth comes after every PREREG program whatever its band): the programs
+        reserved for are the PREREG programs at Sized or Probe only (`book.reserved_for`; a birth is learning at birth,
+        and a promoted birth keeps its own ROOM tier, after them all), and the buys that leave the reservation are a
+        PREREG learning program's and a birth's at any band (`book.leaves_room`: every tier after the PREREG Probe
+        tier)."""
+        if inst.kind != EVENT_KIND or inst.band not in EVENT_LIVE_BANDS:
+            return ZERO, ZERO, ""
+        adapter = self._event_adapter()
+        if adapter is None:
+            raise RuntimeError("the event adapter (league/events/book.py) cannot be imported")
+        if not adapter.leaves_room(inst.family, inst.band):
+            return ZERO, ZERO, ""
+        other = "close" if at == "open" else "open"
+        rows: list[dict[str, Any]] = []
+        names: list[str] = []
+        for o in self._instances(alive=True):
+            if o.kind != EVENT_KIND or not o.live or o.band not in adapter.PROBE_UP or \
+                    not adapter.reserved_for(o.family, o.band):
+                continue
+            program = adapter.program_of(o.family, o.version)
+            if program is None or program.entry_at != other:
+                continue
+            holds = self._event_open_count(o.id) - self._event_selling(o.id, day, at)
+            picks, weights = self._event_recent(o, other, adapter.RESERVE_DECISIONS)
+            rows.append({"program": o.family, "band": o.band, "room": s.max_open(o.band) - holds, "picks": picks,
+                         "weights": weights})
+            names.append(o.family)
+        if not rows:
+            return ZERO, ZERO, ""
+        cash, risk = adapter.reservation(rows, s, E)
+        back_cash, back_risk = self._event_given_back(day, at)
+        held_cash, held_risk = max(ZERO, cash - back_cash), max(ZERO, risk - back_risk)
+        if held_cash <= 0 and held_risk <= 0:
+            return ZERO, ZERO, ""
+        cent = Decimal("0.01")
+        note = (f"; A85 holds ${held_cash.quantize(cent)} of cash and invested room and ${held_risk.quantize(cent)} of "
+                f"the loss budget for the {other}'s Probe and Sized programs ({', '.join(names)[:160]}): their "
+                f"${cash.quantize(cent)} less ${back_cash.quantize(cent)} this auction's sales give back")
+        return held_cash, held_risk, note
+
+    def _event_selling(self, key: str, day: str, at: str) -> int:
+        """An event program's open lots whose sale is planned or working at this auction (`day`, `at`)."""
+        return int(self.state.rows(
+            "SELECT COUNT(DISTINCT l.lid) AS n FROM eq_lots l JOIN eq_event_intents e ON e.lid=l.lid JOIN eq_intents i ON "
+            "i.iid=e.iid WHERE l.instance=? AND l.status IN ('open', 'closing') AND e.side='sell' AND e.day=? AND e.at=? "
+            "AND i.status IN ('planned', 'sent')", (key, day, at))[0]["n"])
+
+    def _event_recent(self, inst: Instance, at: str, n: int) -> tuple[list[int], list[Decimal]]:
+        """(the counts of the program's real-money picks at its last `n` decisions of auction `at` that read them, the
+        latest first; the open-risk weights of its buys planned at those decisions), from `eq_event_decisions`' summaries
+        (`programs.<program>.picks`, written by `_event_decide`) and `eq_event_intents`."""
+        counts: list[int] = []
+        days: list[str] = []
+        for r in self.state.rows("SELECT day, summary FROM eq_event_decisions WHERE at=? AND status='done' ORDER BY day "
+                                 "DESC LIMIT 60", (at,)):
+            summary = loads(r["summary"], {})
+            programs = summary.get("programs") if isinstance(summary, Mapping) else None
+            mine = programs.get(inst.family) if isinstance(programs, Mapping) else None
+            got = mine.get("picks") if isinstance(mine, Mapping) else None
+            if isinstance(got, bool) or not isinstance(got, int):
+                continue
+            counts.append(int(got))
+            days.append(str(r["day"]))
+            if len(counts) >= n:
+                break
+        weights: list[Decimal] = []
+        if days:
+            marks = ", ".join("?" for _ in days)
+            for r in self.state.rows(f"SELECT weight FROM eq_event_intents WHERE program=? AND version=? AND side='buy' "
+                                     f"AND at=? AND day IN ({marks})", (inst.family, int(inst.version), at, *days)):
+                w = _event_weight_of(r["weight"])
+                if w > 0:
+                    weights.append(w)
+        return counts, weights
+
+    def _event_given_back(self, day: str, at: str) -> tuple[Decimal, Decimal]:
+        """What this auction's EVENT SALES give back by the next auction: (the value of every open event lot whose sale is
+        planned or working at `day`'s `at`, its open risk at its own weight), the cash and the loss budget the next
+        auction gets back from them (an auction-held lot holds its cash only until its own auction)."""
+        value = risk = ZERO
+        seen: set[int] = set()
+        for r in self.state.rows("SELECT DISTINCT e.lid FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE "
+                                 "e.side='sell' AND e.day=? AND e.at=? AND i.status IN ('planned', 'sent') AND e.lid IS NOT "
+                                 "NULL", (day, at)):
+            lot = self._lot(int(r["lid"]))
+            if lot is None or lot.lid in seen or lot.status == LOT_CLOSED or lot.lane != EVENT_LANE:
+                continue
+            seen.add(lot.lid)
+            value += lot.value
+            risk += lot.value * event_lot_weight(lot.row())
+        return value, risk
+
+    def _event_cut(self, x: Any, sized: Any, short: bool) -> str | None:
+        """RELEASE 1019f: the constraint that cut an event buy below its target, in the record's words
+        (league/events/book.py `binding_of`, `BINDINGS`), from `size_entry`'s answer `sized` for the facts `x`: its cap;
+        for a size under the minimum order (`min_order`), the cap `size_entry` finds with no minimum (the same function
+        asked again: what cut the dollars under it); "whole_shares" when no cap cut the dollars and `short` (the floor
+        to whole shares took the buy under its target); None otherwise."""
+        adapter = self._event_adapter()
+        found = sized.binding
+        if found == "min_order":
+            found = Z.size_entry(replace(x, min_order_usd=ZERO)).binding
+        named = adapter.binding_of(found)
+        if named is None and found == "intent" and short:
+            return "whole_shares"
+        return named
+
+    def _event_sized(self, intent: Intent, side: Mapping[str, Any], target: Decimal, binding: str | None,
+                     sized: Decimal) -> None:
+        """RELEASE 1019f, THE PROBE SIZE'S RECORD: an event buy's band target (`target_usd`, Decimal dollars: the band's
+        `position_share` x E at the previous close, as `size_entry` was asked it), the constraint that cut it
+        (`binding`, league/events/book.py `BINDINGS`; None when none did) and THE DOLLARS IT SENDS (`sized_usd`, Decimal:
+        the whole shares this sizing sends x the limit, 0 when it sends none; release 1019f's integration, the honesty
+        check: the Done reader's Probe size compares it with the target, never the fill's cost, which the open's gap
+        moves) on its side row in `eq_event_intents`, written at each sizing of its send when they changed (the last
+        sizing before the send is the one that sent; A80's one re-send is sized again, so its own). A state with no such
+        columns (an adapter that did not migrate) is left as it is; one with the first two only gets those."""
+        if "target_usd" not in side:
+            return
+        value, sent = text(target), text(sized)
+        has_sized = "sized_usd" in side
+        if side.get("target_usd") == value and side.get("binding") == binding and \
+                (not has_sized or side.get("sized_usd") == sent):
+            return
+        if has_sized:
+            self.state.execute("UPDATE eq_event_intents SET target_usd=?, binding=?, sized_usd=? WHERE iid=?",
+                               (value, binding, sent, int(intent.iid)))
+        else:
+            self.state.execute("UPDATE eq_event_intents SET target_usd=?, binding=? WHERE iid=?",
+                               (value, binding, int(intent.iid)))
 
     # ---------------------------------------------------------------- the fills handed back to the lane
+    def _event_size_record(self, lot: Lot) -> dict[str, Any]:
+        """RELEASE 1019f: {target_usd, binding, sized_usd} of an event lot's buy for the lane's `real_fills`, from its
+        side row (`_event_sized`): the band target in dollars (a float, as the lane's columns hold money), the
+        constraint that cut it, "venue" when none did, or only the whole shares did, and the venue filled less than one
+        of its orders asked (`_event_short_fill`), and the dollars its send asked (the shares sent x the limit); all
+        None when the side row holds no target (sized before the release), `sized_usd` None when it holds none."""
+        side = self._event_row(lot.iid) if lot.iid is not None else None
+        target = A.dec((side or {}).get("target_usd"))
+        if target is None:
+            return {"target_usd": None, "binding": None, "sized_usd": None}
+        binding = side.get("binding") if side.get("binding") in self._event_adapter().BINDINGS else None
+        if binding in (None, "whole_shares") and self._event_short_fill(lot):
+            binding = "venue"
+        sent = A.dec(side.get("sized_usd"))
+        return {"target_usd": float(target), "binding": binding, "sized_usd": None if sent is None else float(sent)}
+
+    def _event_short_fill(self, lot: Lot) -> bool:
+        """Whether an order of the lot's buy that filled at all filled less than it asked (a partial auction fill)."""
+        return lot.iid is not None and any(ZERO < o.filled_qty < o.qty for o in self._intent_orders(lot.iid))
+
     def _event_fills(self, adapter: Any, out: dict) -> None:
         """THE REAL FILLS HANDED BACK TO THE LANE (PREREG-EVL-3: the lane computes Sized, demotion and retirement from
         them; league/events/book.py `write_fills`): each real event lot's buy, once its buy has ended, and its sale, once
         the lot is closed (again when the broker's posted fees change it), one row a (program, version, event, side),
-        written every minute until the lane's store takes them (a lot's `info.evl_fills` keeps what was written)."""
+        written every minute until the lane's store takes them (a lot's `info.evl_fills` keeps what was written).
+        RELEASE 1019f: a buy's row carries its side row's `target_usd` and `binding` (the probe size's record,
+        `_event_sized`), "venue" for the binding when no cap cut it and the venue filled less than an order asked
+        (`_event_short_fill`); NULL in both for a lot whose buy was sized before the release."""
         rows: list[dict[str, Any]] = []
         marks: list[tuple[Lot, dict[str, Any]]] = []
         for r in self.state.rows("SELECT * FROM eq_lots WHERE lane=? AND substr(instance, -2)=? ORDER BY lid",
@@ -6031,7 +6311,7 @@ class EquityBook:
             buy = self._intent(lot.iid) if lot.iid is not None else None
             if not written.get("buy") and (lot.status != LOT_OPEN or buy is None or buy.status not in INTENT_LIVE):
                 rows.append({**base, "side": "buy", "qty": float(lot.opened_qty), "price": float(lot.entry_px), "fee": 0.0,
-                             "filled_at": _lane_iso(lot.opened_at)})
+                             "filled_at": _lane_iso(lot.opened_at), **self._event_size_record(lot)})
                 want["buy"] = True
             if lot.status == LOT_CLOSED and lot.exit_px is not None and written.get("sell") != text(lot.fees):
                 sold = D(lot.info.get("exit_qty"), lot.opened_qty)

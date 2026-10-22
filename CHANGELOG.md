@@ -38,6 +38,460 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (unreleased; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
+
+- **What it carries** (each branch's own entry below, as its branch wrote it; docs/operations.md **Release 1019f** for
+  the deploy): `fix/a84-fast-path-per-feed` `b0a62c6b` (#586), `fix/evl-alarms-entries-backfill` `a0cb8617` (#592),
+  `fix/backfill-robust` `00f66615` (#585), `fix/sail-spend-fields` `dfb0e197` (#587), `fix/screen-after-open`
+  `1544704d` (#591), `fix/probe-target-honesty` `1e90e7ae` (#590), `fix/a85-probe-cash-reservation` `be1af972` (#589),
+  `fix/a86-probe-more-smaller` `8b6840a0` (#588, ONLY in A86 REVISED's form) and `feat/done-reader` `dbb0f68d` (#584),
+  merged `--no-ff` in that order, rerere off. Every branch was cut from release 1019d; each conflict keeps both sides.
+- **Fixed at the integration** (each branch's independent check, and the integration's own findings; each with a test
+  that fails without it):
+  - the nine `evl_` causes in one order everywhere (`evl_final` after `evl_fills`, then `evl_entries`, `evl_backfill`,
+    `evl_handback`); `evl_final` judges a registered seatable birth too (the stall job loads the births read-only and
+    leaves its table as it was);
+  - the SEC holiday rule: a weekday in `SEC_HOLIDAYS` whose daily index read fails, whatever the status, is done "no
+    index: SEC holiday" (SEC answers 403 or 503 for a missing index, never 404); `evl_backfill` reads a retrying
+    backfill's done day by its last receipt; an 8-K whose filer is unlisted since its failed fetch leaves the failed set;
+  - the screen after the open changes no state while planning (a screen due in the plan `run` drops is run at the next
+    turn);
+  - `sized_usd` (the whole shares the send asked x the limit) beside `target_usd` and `binding`, on `eq_event_intents`
+    and the lane's `real_fills` buy row;
+  - A85 with R3's births: `room_key`'s tiers for the round-robin and the send order, the reservation held for PREREG
+    Probe/Sized programs only, a birth's buy at any band sizing less it (league/tests/test_events_1019f_births_a85.py);
+  - A86 REVISED: `max_open.probe` stays 6 and its bound [0, 6], `position_share.probe`'s bound stays [0, 0.05], the one
+    new row `one_share_max.probe` [0, 0.05] held under the name's wall;
+  - the Done reader's Probe size: `sized_usd` >= 0.8 x `target_usd` (`done.at_size`, `PROBE_SIZE_SHARE`;
+    DONE-RULE-EVL-2 item 1 amended in place before any promotion);
+  - `evl_score` waits for the next pass on an intent a decision wrote after the night's last score pass started (Oct
+    21's false alarm: PREREG-EVL-4's rows decided by themselves for an older close);
+  - the budget's arithmetic docstring names the fixed line as the House app's boxes but the Gym pool's.
+- **Fixed by the review's fix round** (the adversarial reviews' three majors; each with a test that fails without it):
+  - the daily report counts R3's births: the stall job's process never loads them, so a seatable birth's real round
+    trips were out of the account-shown profit, the program rows, the expected false passes and the Done line;
+    `daily_report.facts` loads them read-only for the whole report and leaves the table as it was (lens alarms;
+    league/tests/test_daily_report.py `TheBirths`);
+  - an SEC holiday's close waits for the index that holds its eve: EDGAR dates an 8-K accepted after 17:30 ET as filed
+    on the next day it is open, so Tue Nov 10, 2026's evening 8-Ks (events of Veterans Day's open decision) are in Thu
+    Nov 12's index; A69's (iii) and A66's reach read through `screen.index_through` (X, or the next weekday EDGAR is open
+    when X is an SEC holiday), so the holiday rule's done no longer lets the fast path make Nov 11 final at 09:40 ET
+    Nov 12, before Nov 12 is backfilled; `SEC_HOLIDAYS` moves behind the wall into league/events/screen.py (house.py
+    takes it); only delays; live before Nov 11 (lens judges; league/tests/test_events_1019f.py
+    `TheIndexAfterAnSecHoliday`);
+  - a co-registered 8-K is the listed filer's (older than 1019f): the live pass kept an 8-K under the first filer the
+    current feed listed and the backfill never moved its CIK, so one listed first under an unlisted co-registrant was
+    never the listed issuer's event; `edgar.poll_current(prefer=...)` and `edgar.record_filing(listed=...)`, in the
+    House's passes and the CLI's (lens judges; league/tests/test_events_house.py `ACoRegistered8K`; its own commit).
+- **The shadow record does not move.** The lane's decision, verdict and score code (programs.py, verdicts.py,
+  score.py, universe.py, news.py, calendar.py, births.py) is byte for byte release 1019e's, and run.py and edgar.py
+  differ only by the fix round's co-registered 8-K (the one change to the shadow record: such an 8-K becomes the listed
+  issuer's event, as A82 reads the daily index). The House's lane
+  driven through four sessions of invented 8-Ks and news on each tree writes the same 111 intents, 16 outcomes, 18
+  verdicts, 9 filings, 12 eligibility rows and 468 decision receipts; with one record pass failing all of SEC's feeds,
+  the shadow record is the same again and only the finality differs, as A84 states (Oct 20 on release 1019e, Oct 22
+  here); after the fix round the same driver writes the same record again on both heads. Real-money sizing moves only
+  as A85, A86 REVISED and the walls' equity state.
+- **Owner files** (behind league/ci.py's wall): CHANGELOG.md, docs/goals/DONE-RULE-EVL-2.md, gateway/lib/email.mjs and
+  its two tests, league/ci.py, league/constitution.py, league/equity/INTERFACES.md, league/equity/live.py,
+  league/events/bands.py, book.py, done.py, edgar.py, house.py, run.py, screen.py, store.py, league/ops/budget.py,
+  daily_report.py,
+  economics.py, evl_health.py, stall.py, league/project_economics.py.
+- **Rollback**: the House first, to release 1019e's head `c485dcfe` (the new columns stay NULL to it; done.json and the
+  new receipts are inert); the gateway after it or never. Constitution-only: `equity_money.event.enabled` False
+  (`fd9e90c0` / `005745e9`), or the Probe rows back (`055e5313` / `a8d4cbd9`).
+
+### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py joins the wall on this branch (`PENDING_GATEWAY`), beside its rule file under docs/goals/, which was behind it already; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
+
+- **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
+  `league/events/done.py` `RULE_SHA256` and a test (`8eb743e5` at this entry, after A84; `2f92a153` before it).
+- **The reader** (`league/events/done.py`, pure and read-only over the lane's store and the House's records): the
+  Probe+ events (buy band probe or sized, bought after the program's promotion, its EARLIEST move to probe), learning
+  events beside and a guard for a Probe+ buy with no promotion on record; checkpoints at 100, 200, 300, ... over
+  exactly the first c events, append-only in `<state>/events/done-history.jsonl` and `<state>/events/done.json`; each
+  item pass or fail with its number (events, programs, after promotion, P&L, the 95% issuer-block lower bound with
+  10,000 resamples and a fixed seed string, profit since the first promotion against the metered compute, fills within
+  15 bp of the shadow's auction prices per side, the last 100 with no captain step); the benchmark-net bound beside;
+  the pivot from 400 events and the $800 stop from the House's own loss figures.
+- **Its review's fix round (A84; rule re-pinned before any promotion: 0 rows in `bands` and `band_history` on the
+  House at 19:36Z Oct 21)**: (1) a demotion and a return to Probe drop nothing (the latest-stay count dropped the
+  demoted stay, losers by construction, and let Done hold on 300 winners); `after_promotion` fails on a guard event in
+  the span; the pivot reads the same events. (2) `league/events/done.py` joins the wall. (3) A Done record that cannot
+  be read (done.json at another schema or cut, a cut log line, a checkpoint a `done` receipt names that no file holds)
+  is never written over: `done.Unreadable`, the House warns, nothing is written. (4) `no_captain` is never a pass from
+  the House's records alone (no record covers a Sail exec, the ship scripts or the gateway's admin): it reads `fail`
+  when a step shows (every `.before` copy, swarm.json, ops.json, PAUSE and swarm.stop by stamp, mtime and ctime; a
+  stall run's owner step, pause or kill switch; a day with no stall run) and `unverifiable` otherwise, and Done at a
+  checkpoint whose other items pass waits on the captain's attestation of its exact span
+  (`<state>/events/done-attest.jsonl`, `steps` 0; a deploy's hand steps count, the ship script's own run does not).
+- **On the House**: the nightly screen task runs it after the band review (`league/events/house.py` `_screen`) and
+  keeps a `done` receipt; a failure is a warning, never the screen's.
+- **The daily report** (`league/ops/daily_report.py` `done_line`, the gateway's `composeReport`): one Done line, the
+  Probe+ events toward 300 by program, the next checkpoint and the bound (three short lines on a phone).
+- Docs: [docs/events.md](docs/events.md), "The Done reader (the goal V2)".
+
+### A86 REVISED, Probe smaller inside the trade-less envelope: the Probe band at 3.5% of equity with at most 6 open, on `fix/a86-probe-more-smaller` as release 1019f integrates it (unreleased; cut from `rel/1019d` `5a17bd25`; integrated ONLY in A86 REVISED's form; an owner deploy of the House: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (the Probe band's two rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no setting)
+
+- **Why.** The captain's A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event;
+  the audit's capacity lens and its two verifiers): cash at the auction binds first at Probe, so PREREG-EVL-3's Probe
+  band (PREREG-EVL-1 section 8: 5% of E, at most 6 open a program, one share up to the name's 10% wall) fits about 9-11
+  Probe buys an auction; smaller Probe lots raise the Probe events a session (the count Done needs: 300 from >= 3
+  programs with >= 50 each) at the same dollars while cash binds (the verifiers' rerun: Done at about session 18
+  instead of 22-23).
+- **The rows** (league/constitution.py `equity_money.event`, the one source the book reads): `position_share.probe`
+  0.05 -> 0.035 and a new `one_share_max.probe` 0.05 (when the 3.5% target buys no whole share, one share goes only
+  when one share at the limit is at most 5% of E, as at learning). `max_open.probe` STAYS 6. THE BOUNDS: only the new
+  row `event.one_share_max.probe` [0, 0.05], held under `per_name_share` by `equity_money_problems`;
+  `event.position_share.probe` stays [0, 0.05] (the pre-registered value is the loose end: 0.035 trades less inside
+  it) and `event.max_open.probe` stays [0, 6]. The branch as built set `max_open.probe` 8 and raised its bound to
+  [0, 8] and narrowed the share's bound to [0, 0.035]: both undone at integration (its independent check, a blocker and
+  a major; 8 outside [0, 6] would have made `equity_money_problems` non-empty and `book.settings()` FALLBACK, every
+  event buy stopped). A Probe program holds 6 x 0.035 = 0.21 x E at target (0.30 before), 6 x 0.05 = 0.30 x E of
+  one-share lots at worst (0.60 before). Learning (2%, 8, one share at most 5%) and Sized (10%, 8) do not move; no
+  program rule, judge, look, alpha, Done rule or wall moves; the screen's cost allowance keeps its frozen 5% notional
+  (league/events/score.py), so it understates the fixed CAT/TAF fees of a 3.5% Probe lot.
+- **Its costs, stated.** Probe events carry 30% fewer dollars each; total Probe dollars are unchanged while cash binds;
+  Done's "Probe size" is 3.5% from here; a name whose one share at the limit is above 5% of E (and inside the wall) is
+  skipped at Probe, where PREREG-EVL-1 bought one share (the shadow keeps the event).
+- **Tests.** league/tests/test_events_a86.py (through the real book and `size_entry`: a Probe buy at 3.5% of E, three
+  shares at a $20 limit where 5% bought five; one share at Probe at 4% of E bought, at 6% skipped, over the wall
+  skipped; at most six open at Probe; learning and Sized as before; the rows, their bounds (8 open and a share of 0.051
+  refused, a Probe one-share cap above the name's wall refused), the dollars' ceiling, the digests);
+  league/tests/equity_design.py `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86`);
+  test_events_book.py and test_events_1019c.py read the new Probe sizes; the design blocks' digest line rewritten.
+- **Identities** (the tree's own functions, 3.14 and 3.11): money `c2f0a478`, constitution `24f73f18`
+  (`PINNED_DIGEST`), options execution `b60410ad`, equity `78022ca6`, xs `2f0083bc`, gate `397b22b7`;
+  `equity_money_problems()` is `[]`; with `equity_money.event.enabled` False `fd9e90c0` / `005745e9` (release 1019e's
+  `1b7a5c22` / `50e951c9` with A86's rows set back).
+- **Deploy.** With release 1019f, by the captain's ship script with the new pair; verify the ids, the grant on
+  `c2f0a478` and the event line's Probe share "0.035". A program already at Probe keeps its open lots; its next buys
+  size at 3.5%.
+- **Rollback.** `equity_money.event.enabled` False (a constitution-only owner deploy: money `fd9e90c0`, constitution
+  `005745e9`), `position_share.probe` 0.05 with `one_share_max.probe` removed (rows inside the bounds: release 1019e's
+  pair), or the House release before it.
+
+### Cash at the auction binds Probe: the next auction's reservation and round-robin inside Probe and Sized (A85), on `fix/a85-probe-cash-reservation` (unreleased; joins release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy: league/equity/ is protected and league/events/book.py is behind league/ci.py's wall; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are release 1019d's, read with the tree's own functions on 3.14 and 3.11; no money row, no wall, no judge, no setting, no gateway file changes)
+
+- **The defect** (a read-only audit of the live House, two lenses): the book is 1x cash and every buy holds its limit
+  (1.25 x the previous close); a lot sold in an auction still holds its cash in that same auction; so learning lots
+  bought at one auction (the overnight rows' close buys) take the NEXT auction's cash from the Probe and Sized
+  programs, and ROOM's order (Sized > Probe > learning) held only inside one auction (A83 (2)(b)). Inside one auction
+  the buys went in the tables' order, so the last Probe row in the tables got the cash the earlier rows left: with
+  three open-entry programs at Probe, about 11 Probe buys a session would go instead of 17.
+- **The fix, the captain's A85** (recorded before the first Probe auction; the reading that gives evidence its room,
+  no wall moves). (1) THE NEXT AUCTION'S RESERVATION (league/equity/live.py `_event_reserve` beside `_size_event`,
+  league/events/book.py `reservation`): a LEARNING buy sizes on the cash, the invested room and the loss budget less
+  R, the sum over the live Probe and Sized programs whose entry is the other auction of min(room, median picks) x
+  share(band) x E, and that x the median open-risk weight of their buys (0.40 with none) for the budget: room is
+  `max_open` less what the program holds and has on order, its lots sold at this auction not counted; median picks is
+  the median of its real-money picks at its last 5 decisions of that auction (the `picks` of `eq_event_decisions`
+  summaries; its whole room with none yet); LESS WHAT THIS AUCTION'S EVENT SALES GIVE BACK by the next one (each lot
+  sold here: its value, and its value x its own weight), never below 0, so the open's Probe lots sold at the close do
+  not hold the overnight rows' cash twice. A buy it cut or skipped says "A85 holds $X ..." in its reason. R is 0 for a
+  Probe or Sized buy and while the other auction has no Probe or Sized program: learning sizes exactly as before.
+  (2) ROUND-ROBIN INSIDE SIZED AND INSIDE PROBE: `book.allocate` gives one pick a program a pass (the tables' order
+  inside a pass) and `_event_send` sends the auction's buys in the same passes (`book.send_key`); learning keeps the
+  tables' order.
+- **Tests.** `league/tests/test_events_a85.py`, through the real book and `size_entry` on invented rows: the two-auction
+  case (eight learning close buys of $40 leave NEXT's open Probe program its three whole $100 buys: five go, three are
+  cut; with the reservation switched off all eight go and the Probe program gets one whole buy and a cut one), R 0 and
+  today's sizes with no program at Probe (and a retired one), a Probe program of the same auction reserves nothing, a
+  Probe buy is never held, the median of five decisions with an unread one passed over, the room cap and the buys'
+  weights, the cash this auction's sales give back, the loss budget held by R x the weight, and round-robin at the
+  decision and at the send (two Probe programs with cash for two buys: one each). `test_events_1019c`'s forty
+  learning open buys beside a Probe close entry seed C1's last five close decisions at one pick each (with none on
+  record A85 holds its whole room, six $100 buys, and 34 of the forty go: the House has every program's decisions from
+  release 1019b on, so a Probe program always has them). Docs: docs/events.md,
+  docs/operations.md ("The event lane's real money on the House": the day's sends, the slots, ROOM, the reservation, the size),
+  league/equity/INTERFACES.md section 20.
+
+### The probe size's record and the walls' equity, on `fix/probe-target-honesty` (unreleased; cut from `rel/1019d` `5a17bd25` (#581); joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy of the House alone: `league/equity/` is protected and league/events/bands.py, book.py and store.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019d's, read with the tree's own functions on 3.14 and 3.11; no constitution row, no setting, no gateway change; the audit's capacity and probe lenses)
+
+- **The defects.** (a) A Probe or Sized buy that cash, the loss budget or a wall cut below its band's target was still
+  labelled `probe` in the lane's `real_fills`, and nothing kept the target, so a reader of "Probe size or above" (the
+  goal's Done) could not tell a full Probe event from a cut one. (b) The House sized the 10% a name on E (`last_equity`,
+  never above its sizing equity) while the gateway judges the account's CURRENT equity: on a day the account is down, a
+  one-share buy near 10% passed the House and met the gateway's final refusal (`stock_position`), an event lost.
+- **The fix, (a), a record only.** `eq_event_intents` (live.sqlite) and `real_fills` (the lane's store) gain two
+  nullable columns: `target_usd`, the dollars the band's target asked (`position_share` x E at the previous close, as
+  `size_entry` was asked them), and `binding`, which constraint cut the buy below it (league/events/bands.py `BINDINGS`:
+  `cash`, `budget`, `invested`, `name_wall`, `whole_shares`, `gateway` for the gateway's final refusal, `venue` for a
+  cross that filled short; NULL when none did). The House writes them at each sizing of an event buy's send
+  (`_event_sized`, from `size_entry`'s binding cap by `book.binding_of`), `gateway` at its final refusal, and hands both
+  to the lane with the buy's fill (`_event_fills`, `write_fills`, `record_fill`: written once, only the fee moves).
+  Additive and idempotent migrations: `book.SCHEMA_COLUMNS` through `EquityBook._add_columns` at the book's start;
+  `store.migrate_fills` at every lane `Store` open and from `write_fills` on a store the lane has not opened since. A
+  sale and every older row read NULL; the band rules count by the band label as before; the Done reader (another
+  branch) reads the record. The size is set at the limit (1.25 x the previous close): a full Probe buy's cost at a print
+  near the previous close is about 0.8 x its target, and the size the sizing gave is the fill's quantity x the limit.
+- **The fix, (b), the reading that trades less.** `wall_equity`: the lower of E and the account's current `equity` as
+  the House last read it. `_event_gate`'s name-wall skip reads it, and `_size_event` passes it to `size_entry` as `E`
+  and `sleeve_equity`, so the name's book-wide 10%, the program's own share of the name and the 100% book are judged on
+  it; the band's target and the one-share rule stay on E at the previous close. A current equity above E moves nothing;
+  one that cannot be read leaves E (the gateway, which reads the account itself, refuses what it cannot judge).
+- **Tests.** league/tests/test_events_probe_honesty.py (17, the real book, `size_entry`, money table and lane store on
+  invented figures): a Probe buy at its target (NULL binding on both rows, a sale NULL); each cut named beside its
+  target (cash, budget, invested, whole shares; the gateway's final refusal; a partial cross the venue's; a sizing
+  refusal's cap); a learning buy's target and one share above it; both tables migrated in place from release 1019d's
+  frozen schemas, again nothing, another process's add read as done, an older release's write still going; the
+  write-back migrating a store the lane had not opened; `record_fill` writing the target once and refusing what is not
+  a binding; the decision's name wall and the send's caps on the current equity (a one-share buy over 10% of the
+  current equity never sent; a Sized buy cut from 10 to 7 shares with its target still on the previous close); a
+  current equity above E moving nothing. Each fix disabled in turn fails its tests. The 63 test modules that import
+  the touched modules pass on 3.14 and 3.11 (1,864 tests each).
+
+### The screen after the open, the House's close re-read of the bands, the night by session, on `fix/screen-after-open` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, which the captain integrates on top of release 1019e; an owner deploy of the House alone: league/events/house.py and book.py are behind league/ci.py's wall, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO RULE AND NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the gate contract `397b22b7`, the same on 3.14 and 3.11)
+
+- **Why.** The read-only audit of the live House (lenses looks and probe), "BANDS MOVE A SESSION LATE": the judge
+  (league/events/screen.py `final_until`) makes a close X final at an OPEN decision (A69's fast path once the session
+  after X has had its open decision; A66's three sessions likewise move at an open), and the intents a look as of X
+  covers were settled by X's own 20:30 ET score; but the lane ran the screen only after the 20:30 ET score
+  (league/events/house.py nightly) and the House's event book read the bands once a session, at its first decision. So
+  the seven close-entry programs reached Probe a session after their look could be written (PREREG-EVL-3 section 2:
+  "Probe from the first decision after a passed look", which is that session's close), and open-entry programs a day
+  after that. A score that ran past midnight ET also left its session with no screen until the next evening: the night
+  was keyed on the calendar day.
+- **(1) The screen after the open** (league/events/house.py `_screen_open_due`, `_screen_open`; constants
+  `SCREEN_OPEN_AT` 09:40 ET, `SCREEN_OPEN_EVERY` 10 minutes, `SCREEN_OPEN_JOB` "screen-open", `SCREEN_CLEAR` 5
+  minutes): from 09:40 ET of a session whose open decision is made (its receipt `ok` or `pending`) until 5 minutes
+  before its close decision, the lane reads the final horizon of every seating version (`_horizons`: `final_until` of
+  each `programs.SEATING` version as of that session, about 0.15 s for the twelve on an invented store of 23,000
+  receipts) at most every 10 minutes; when any differs from the horizons the last screen receipt kept (`_last_horizons`:
+  the newest finished `screen` or `screen-open` receipt), it runs `screen.run` for the seating versions alone, receipted
+  `screen-open`. The band review of the real fills (demotion, Sized) stays nightly. A look is written once
+  (`write_look`, INSERT OR IGNORE; version 2 resumes after the last look on record) with its band move in its own
+  transaction, whichever run writes it, so the night's screen writes nothing the morning wrote and the same horizons are
+  never screened twice. The task comes after the nightly jobs and before the ticker snapshot, the early verdicts and the
+  backfill in the plan (decisions, their verdicts and the record pass first); no screen, morning or nightly, starts
+  within 5 minutes of the lane's next decision (`_clear_of_decision`: a screen has no bound, and the House's book waits
+  on the lane's own decision).
+- **(2) The House's event book reads the bands again at the close decision** (league/equity/live.py
+  `_event_bands_due`, kv `EVENT_BAND_MARK` = `eq_event_band_mark`; league/events/book.py `band_mark`, the newest
+  `band_history` id, 0 with no lane, table or row, None when unreadable): `_event_sync` keeps the mark it read before
+  the bands; the close decision syncs again when the lane's mark differs or cannot be read (fail closed: the sync then
+  says whether the bands can be read), and the decision's summary says why it synced (`band_sync` `first` | `moved`).
+  INTERFACES section 23.
+- **(3) The night is the session's** (`_night`): the nightly score, screen and report are those of today's session from
+  20:30 ET, else of the session before today. A score made `ok` at or after that session's 20:30 ET, and a nightly
+  `screen` receipt likewise, close it (a `screen-open` receipt never does); `_score` keeps its once-a-night set and its
+  receipt's `day` on the session, so a pass past midnight ET goes on with each intent tried once; the screen runs as of
+  that session (`screen.run(store, night)`), and a night finished after midnight writes that session's report
+  (`reports/<night>.txt`) when it is missing. A House down that evening makes the night's jobs the next morning.
+- **(4) The screen's receipts keep why each look waits**: `screen` (`run` "night") and `screen-open` (`run` "open")
+  receipts carry `waits` (program, version, k, why; why to 300 characters, at most 60), `looks` (program, version, k,
+  held, passed, band of each look written), `horizons` and `day` beside the counts (`written`, `waiting` stay
+  integers, so `lane.json`'s task brief is unchanged).
+- **Tests** (league/tests/test_events_1019f.py, each failing without its fix; 13): `ScreenAfterTheOpen` (EVL-INS-BUY-O1
+  v2, 80 invented events Oct 20-29 at +1%, every record pass clean: the night of Oct 29 waits, its receipt saying "look 1
+  falls due at 2026-10-29, not final yet: ... the session after it (2026-10-30) has not had its open decision"; at 09:41
+  ET Oct 30, after the open decision, `screen-open` writes look 1 as of Oct 29 and its Probe move (`written_at` 09:41
+  ET); no second one at 09:52, 10:03, 11:30 or 15:30 ET; the night of Oct 30 writes nothing; not before 09:40, not
+  without the open decision, not within 5 minutes of the close decision; the seating versions alone),
+  `TheNightIsTheSessions` (a score at 23:58 ET cut by its bound goes on at 00:03 ET as Tuesday's night, each intent once,
+  then Tuesday's screen and report, once; a missed night is made the next morning and its screen waits out the 09:15
+  decision) and `TheCloseDecisionReadsTheBandsAgain` with `TheBandMark` (the House's lane at 10:00 ET of Nov 4 writes
+  EVL-ERN-REACT-ON v2's look as of Oct 30, A66 making it final at Nov 4's open; the book's 15:46 ET close decision gives
+  ACME to REACT-ON at Probe's 5 shares, `band_sync` "moved", where without the fix the earlier row EVL-ERN-REACT-C1
+  takes it at learning's 2). league/tests/test_events_house.py's harness gains Monday night's score, screen and report
+  (as the House made them) and keeps the screen after the open to its own tests, as it does the hourly re-decision.
+- **Runs** (the modules touched and their neighbours, on 3.14 and 3.11 alike; the full suite is the integration's):
+  the event lane's 24 modules (test_events_*, test_evl_*, test_cost_day), 401 OK; the 48 modules that import the
+  equity book or its week fixtures, 1,857 OK (5 skipped); the six CHANGELOG and docs readers (test_ci,
+  test_e3_identities, test_done_a50, test_equity_rehearsal, test_elane_health, test_gen_universe), 282 OK;
+  `python -m league.ci --base origin/main --branch fix/screen-after-open --no-tests` passed; the identities by the
+  tree's own functions, as in the heading.
+- **Rollback**: the House to the release before (`floor_box.py rollback`); the looks and band moves written stay (the
+  judge's, whichever run wrote them), and that code goes back to the nightly screen and the first-decision band read.
+
+### Sail's spend response changed fields: the budget's fixed line and the close economics read the boxes' bill again, on `fix/sail-spend-fields` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, on top of release 1019e; owner files `league/ops/budget.py`, `league/ops/economics.py`, `league/project_economics.py`, and `league/sailbox.py`; an owner deploy of the House alone, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no setting, no money row, no gateway change)
+
+- **Why.** The audit of the live House (Oct 21, 2026, its cost lens): Sail's `GET /sailboxes/spend` no longer carries
+  `estimated_total_cost_usd_nanos` (nor the legacy split, `finalized_cost_usd_nanos` and
+  `estimated_active_cost_usd_nanos`); the response and each of its `sailboxes` rows carry one `cost_usd_nanos`. Every
+  reader of the old fields read every box as $0: budget rule 3's Sail fixed line (`_sail_fixed`, through
+  league/sailbox.py `usd`) fell to `guard.house_burn_usd_day` ($1.00), under what the boxes bill (the House box alone
+  about $1.2 a day), so the cost rule had more room than the owner's cap holds; and the close economics' box billing
+  (`ops/economics.box_totals`) read $0 in every window. The fixed line also read the House box and the data box alone,
+  never another box of the app that the swarm books nowhere.
+- **What.** league/sailbox.py `cost_nanos`: one reader of both shapes (the legacy total, else `cost_usd_nanos`, else
+  the legacy split summed; None, never $0, when there is no cost field); `usd` takes `total_usd` from it, names the
+  field (`total_field`) and reads `running_seconds` where `duration_seconds` was. Budget `_sail_fixed`: the House box's
+  app's billing (one `spend(app=...)` read), every box but the Gym pool's (`_pool_boxes`: the swarm store's `boxes`
+  table, any state: research, booked as `gym_box`), and a named box the rows leave out by its own billing; when the
+  app or the pool cannot be read, the House box and the data box alone with a House warning; then the configured burn,
+  as before. A box with no cost field is unknown and falls back. `ops/economics.box_totals` reads one `cost_usd_nanos` a
+  window as billed, none active, and a window with no cost field is a check of the summary; the Sail cost's basis no
+  longer says "finalized". `project_economics.box_cost` reads a new-shape row as its bill (no active estimate), and a
+  legacy row is still held to its own total. Docs: operations "The budget rule (D4)", design's cost rule.
+- **What it changes.** Sail's fixed line rises from the configured $1.00 to the app's measured non-research billing.
+  At the $5 cap with no profit, a line above $1.84 a day leaves the lane's part under $3 (room = $5 - the line -
+  Cloudflare's $0.16) and the old research roles nothing; `budget.json` `inputs.meters.sail.fixed_source` names the
+  reading. No judge, look, band, seat or money wall moves; the floor's `FLOOR_SAIL_FIXED_USD_DAY` ($1.50) is unchanged.
+- **Tests.** `ltcm/tests/test_sailbox.py` (`test_the_new_shape_carries_its_total_in_cost_usd_nanos`,
+  `test_cost_nanos_reads_both_shapes_and_never_reads_unknown_as_zero`), `test_ops_budget.SailFixed` (eight: both
+  shapes, a named box outside the rows, no app, an unreadable pool, no cost field, under the burn, the drill's call,
+  no client), the budget job's fake answers in Sail's new shape, `test_ops_economics.test_sails_one_cost_field_is_the_box_billing`,
+  `test_project_economics.test_sails_one_cost_field_is_the_app_scoped_bill`; the modules and their 53 neighbours (1,957
+  tests) on 3.14 and 3.11.
+
+### The daily-index backfill's failed fetches and SEC holidays, on `fix/backfill-robust` (unreleased; `league/events/house.py`, behind the wall; cut from `rel/1019d` `5a17bd25`, joins release 1019f on top of release 1019e; the captain records its amendment; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no judge, setting, money row or gateway file changes)
+
+- **The defects** (a read-only audit of the live House, after A82). (a) `EventLane._backfill` marked a filing seen
+  BEFORE fetching it, so a failed fetch counted as seen and its day was done at once with `failed` > 0. One transient
+  SEC error lost the filing for good: the record pass leaves a filing past its six tries to the backfill, and nothing
+  fetched it after that. (b) EDGAR is closed on a federal holiday and publishes no daily index for it, so the index URL
+  of such a weekday never exists (SEC answers 403 or 503 for it, never 404) and the backfill waited an hour at a time while the day was in reach. Wed
+  Nov 11, 2026 (Veterans Day) is a trading day, so every look across it would have waited on `evl:backfill:2026-11-11`
+  (A66's reach, A69's condition (iii)); Thanksgiving and Christmas would have done the same.
+- **The fix.** (a) A failed daily-index filing is not seen. It is tried again at the first pass 2, 4, 8, 16 and 32
+  minutes after its first failure, `FETCH_TRIES` (6) tries in all: the module's `FETCH_BACKOFF`, the record pass's
+  rule, with the backfill's own count (`_backfill_failed`, kept by the process). The day is complete only when every
+  filing is fetched, known or unlisted, or past its last try. While only retries are left, the day waits for the next
+  one (`_backfill_wait`) and a later day is backfilled meanwhile. The receipt is `partial` with `failed`, `retrying` and
+  `next_try`. After the last try the day is done: the receipt `done-failed` names each filing (`unfetched`: accession,
+  form, tries, error), and a filing the record pass fetched in the meantime is not named. (b) `SEC_HOLIDAYS`: OPM's
+  federal holidays of 2026 and 2027 (opm.gov's federal-holidays page, read Oct 21, 2026) and Fri Dec 31, 2027 (New
+  Year's Day 2028 observed, 5 U.S.C. 6103(b)). A weekday in the table whose index read FAILS, WHATEVER THE STATUS (SEC
+  answers a daily index that does not exist with 403 or 503, never 404: the branch's independent check, fixed at
+  release 1019f's integration), is done, `no index: SEC holiday` (receipt `ok`, with `why`, `holiday` and the
+  `status`; EDGAR accepts no filing that day, so done is right even when the read failed for another reason). A failed
+  read on any other weekday, whatever its status, waits as before, and a holiday's index that exists is read as any day's. The screen reads the same meta, so no judge
+  moves. A dead document past its last try stays `failed:` in the store, and A69's condition (ii) still waits on it
+  for the closes whose windows hold it (the judge's rule); A66's reach no longer does.
+- **Tests.** `test_events_house.TheBackfill`, four new ones: a failed fetch holds its day, a later day goes first, and
+  the retry at 2 minutes completes it `ok`; a dead document is read exactly six times, never before its step, then
+  named and its day done `done-failed`; an SEC holiday whose index answers 403 and one whose index answers 503 are
+  done, while a non-holiday answering 403 or 503 waits and a holiday with an index is read as any day; the table is OPM's (weekdays, 23 days, Good Friday not in
+  it). A82's tests pass unchanged. The lane's 407 tests pass on 3.14 and 3.11.
+
+### Alarms that did not exist: each auction's real buys, the daily-index backfill, PREREG-EVL-4's own decisions, the notice pace, the hand-back, on `fix/evl-alarms-entries-backfill` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: three new causes, an INFO notice's `waiting_owner`, the report's real buys and break-even edge), THEN THE HOUSE (`league/ops/` is protected); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no judge, no constitution row, no setting)
+
+- **Why.** A read-only audit of the live House (lens "stalls", Oct 21, 2026) found five things no alarm watched. (a) The
+  captain found by hand that the venue cancelled about a quarter of the lane's auction buys (A80): nothing said that a
+  planned real buy never became a fill, or never went at all. (b) The daily-index backfill answered `partial` for two
+  days without completing one (A82): nothing said so, while every look waits on it. (c) PREREG-EVL-4's rows of a close a
+  release without them decided wait for their own decision (`decide-close-evl4`): nothing watched it, and
+  `evl_verdicts` never read its tallies. (d) `stall.due_notice` returned at its owner branch: once an owner cause was
+  told, every new INFO cause (an event-lane decision missed, a feed down, a fill gap) waited up to 12 hours for the next
+  owner notice; and the direction lane's A4 would stand for good under the research switch. (e) Nothing set the book's
+  real fills beside the lane's `real_fills`, from which the lane computes Sized, demotion and retirement.
+- **(a) `evl_entries`** (league/ops/evl_health.py, INFO): each auction of the last 24 h, judged 15 minutes after its
+  cross, from the book's own rows in `live.sqlite` read-only (`eq_event_intents` buys joined with `eq_intents` and their
+  `eq_orders`, and the auction's `eq_event_decisions` summary); it stands when under 90% of the planned buys filled or one
+  was never sent. Its numbers: planned, filled, the venue's cancels at once (`venue_cancel_ms`: an auction buy ended
+  `canceled` within 60 s of its own `submitted_at`, nothing filled, no cancel of the House's own sent, the rule release
+  1019e's re-send reads), the re-sends after one and how many filled (A80's one re-send from release 1019e: an order of
+  the buy after its venue cancel that reached the venue), the never-sent by reason (`unsent_reason`, from the gateway's
+  cap on a refused order or the book's own words: the day order count, cash, the loss budget, the 10% a name, the
+  invested cap, the program's room, one share too dear, the gateway, a sale of the name at the same cross, ...), the sent
+  and not filled, and the constraint that bound the auction most (`bound`: cash, budget, room with the decision's picks
+  cut for room, order line, name wall with the decision's name-wall skips, invested, or none). No symbol, price or
+  order id leaves the House. Not judged with no `live.sqlite` or no event table in it; one that cannot be read leaves
+  only this cause and `evl_handback` unjudged.
+- **The daily report** (league/ops/daily_report.py; the captain's A80 (2)): `entries`, the day's real buys (the same
+  totals, the never-sent by reason, the room cut; per auction its filled of planned and its `bound`), and
+  `break_even`, THE BREAK-EVEN EDGE OF DONE'S COMPUTE CLAUSE once a Probe or Sized buy exists: the measured metered
+  compute per session since the first such buy over the dollars bought at Probe or Sized size per session, in basis
+  points of those dollars ("n/a until a Probe buy" before). The gateway prints three lines and, from the first Probe
+  buy, a fourth: "Real buys 7/9 filled; venue cancels 2 (re-sent 1, filled 1)", " never sent 1 (cash 1); not filled 0;
+  room cut 2", " By auction: open 4/6 bound cash; close 3/3 bound room", "Break-even edge +583.3 bp ($3.50 / $60.00
+  Probe, a session)" (the fixture's invented figures); the fixture's one screen grows from 44 lines to 47.
+- **(b) `evl_backfill`** (INFO): a weekday of the backfill's reach (league/events/house.py `BACKFILL_WEEKDAYS`, none
+  before the lane's registration) not `done` by 12:00 ET of the next weekday; a run of the day's `backfill` receipts with
+  no `ok` (`waiting`, `partial`) over 6 h; or a done day whose passes failed to fetch a filing (`failed` summed over its
+  receipts: the backfill does not try a filing it has seen again). The text names the day and its counts.
+- **(c) `evl_decide` and `evl_verdicts`**: `evl_decide` also stands for a close in the judge's own
+  `screen.made_without` (read only, no program run) for 2 h since the stall job first saw it there (kept in
+  `stall.json` `evl_kept`) and since its latest `decide-close` finished, whose latest `decide-close-evl4` is not `ok`
+  (never run, failed, cut, unfinished, pending) or is older than that close's latest decision (`stale`); not while the
+  House's PAUSE stands, and counted from a PAUSE's or STOP's end. `evl_verdicts` reads the `decide-close-evl4`
+  receipts' tallies too (each a backfill: read while its latest one started inside the last 24 h).
+- **(d) The notice** (league/ops/stall.py): after the owner branch, `due_notice` answers "info" when a standing cause
+  that needs nothing was told by no notice in the last 24 h (`told_lately`), so a new cause is mailed at once while a
+  told owner cause stands. `notice_causes` sends that notice with the causes needing nothing alone, so the gateway keys
+  it `stall:info:<those causes>` (the owner key it already sent inside 12 h would answer `duplicate` and mail nothing);
+  its facts name the owner causes still waiting (`waiting_owner`, ids only, never part of the key), and the mail opens
+  "Nothing new here needs you ... Still waiting on you, as mailed within the last 12 hours: <their words>". `mail.told`
+  records the causes a notice listed (no longer every cause standing), and a Done checkpoint is told only by a notice
+  that lists `done`. THE CLOSED LANE'S ROOM: the direction lane's A4 is not judged under the research switch
+  (`CLOSED_LANE_ALARMS`, named in `dlane`'s `not_judged` beside the research alarms): the House's report of Oct 21
+  carried it beside A1 and A2, and under the switch it would stand for good, an INFO notice due every day for nothing
+  new; with research on it stands as before, and K5, PL1, PT1, A5 and DC1 stand either way.
+- **(e) `evl_handback`** (INFO): every `eq_orders` row of a real event lot (`eq_lots.lane` "event", instance `:r`) with
+  `filled_qty` > 0, keyed (program, version, event, side) by its lot's `info.evl`, owed as the book hands it back
+  (league/equity/live.py `_event_fills`: a buy once its intent has ended or its lot is no longer open, a sale once its
+  lot is closed) and set beside the lane's `real_fills`: it stands on any fill owed over 1 h and not there.
+- **The gateway** (`gateway/lib/email.mjs`): `STALL_CAUSES` words `evl_entries`, `evl_backfill` and `evl_handback`;
+  the stall notice reads `waiting_owner`; `composeReport` prints the real buys and the break-even edge (`ENTRY_WORDS`:
+  only the House's own reason and constraint names are worded, anything else is left out or reads unknown).
+- **Docs.** The module docstrings of league/ops/evl_health.py, stall.py and daily_report.py; docs/events.md (the
+  alarms table and the notice's pace); docs/operations.md (the stall table's three rows, `evl_decide`'s and `dlane`'s,
+  the notice's pace and the report's real buys); league/equity/INTERFACES.md section 20 (the read-only readers of the
+  book's rows).
+- **Tests.** league/tests/test_evl_alarms_1019f.py (20): the venue's cancel at once read off its own stamps (5 ms; 60 s
+  inside, 60.001 s outside; a sale, a day order, a fill, the House's own cancel, a replaced order, a stamp missing or
+  zoneless are none), and the same verdicts as release 1019e's `live.venue_cancel_ms` on the same orders (skipped on a
+  tree without it; it passes on a trial merge with `rel/1019e` `c485dcfe`, beside its test_events_venue_cancel); the never-sent reasons from the book's own words and the gateway's caps; an auction 7 of 10 filled
+  with two venue cancels, one re-sent and filled, one stopped by the day order count and one sized out on cash, bound by
+  room; 9 of 10 filled is quiet but one never sent stands; no book, no event table and an unreadable book (only the two
+  causes unjudged); a weekday late at noon of the next weekday, a waiting streak over 6 h, a done day with failed
+  fetches, the Friday-to-Monday due; PREREG-EVL-4's close kept from first sight, standing after 2 h as never run,
+  failed, pending (with its tally read by `evl_verdicts`), clearing once decided, stale after a decision without the
+  rows, held by the PAUSE and counted from its end; the hand-back owed after an hour, quiet once written, nothing owed by
+  a buy at its auction or a part sold of an open lot, a sale owed once its lot closes; the notice pace pure and through
+  the job (an owner notice, then the new `evl_record` mailed 40 minutes later as `stall:info:evl_record` naming
+  `kill_on` as waiting, nothing more until the owner's 12 hours; an INFO notice sent while a told `done` stands leaves
+  its checkpoint untold); A4 under the switch and with research on; the three
+  causes through the job and worded by the gateway. league/tests/test_daily_report.py: the day's real buys per auction
+  and the break-even edge (and its synthetic lane gains the book, the backfill done and PREREG-EVL-4's own decisions,
+  so the causes stay quiet); the fixture `daily_report.json` gains `entries` and `break_even`. Changed:
+  test_evl_health (the eight causes; the harness's backfill done), test_elane_health (the morning replay's barren
+  passes, standing as INFO from 10:20, are now mailed then as `stall:info:elane_births`, before their owner notice at
+  13:20). The gateway: stall-notice (`waiting_owner`, the three causes) and report-notice (the real buys and the
+  break-even edge, their figures only; one screen up to 47 lines); 497 pass.
+- **Deploy.** The gateway first (an older one answers 400 to a notice naming a new cause, and nothing is mailed), then
+  the House; no money digest move, so the grant needs no new ratification. Verify on the first stall run: the receipt's
+  `checks` carry `evl_entries`, `evl_backfill` and `evl_handback`, and `stall.json` carries `evl_kept`.
+- **Rollback.** The previous House release (it ignores `evl_kept`); `ops.json` `stall.evl` false switches the eight
+  `evl_` causes off. Roll the gateway back only after the House: a House of this release mails the new causes.
+
+### A84: the fast path reads each feed by its own clean reads, and `evl_final`, on `fix/a84-fast-path-per-feed` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs` words `evl_final`), THEN THE HOUSE (`league/events/screen.py` is behind league/ci.py's wall, `league/ops/` is protected); before Oct 26 13:00Z, when the first looks' spans begin; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no setting, no money row)
+
+- **Why.** The audit of the live House (two lenses, independently): A69's fast path (league/events/screen.py
+  `_fast_passes`, A69 (i)) gave up on a close if ANY record pass of its ~48-hour span had a feed error. SEC's
+  getcurrent feed times out about four times a night (9 errored passes in 61 hours, 45-second timeouts between 22:25
+  and 00:50 ET, each followed by a clean pass within 2-4 minutes), so no span was ever whole and every look waited A66's
+  three sessions: the first looks would be written Mon Nov 2 / Tue Nov 3 instead of Thu Oct 29 / Fri Oct 30.
+- **THE JUDGE, A84 (the captain's reading, 19:58Z Oct 21, 2026, recorded before any look; the one judge change)**: "a
+  record pass whose read of a feed errored, was cut, or had no tickers copy is a MISSING read of that feed, not a broken
+  span; the span is whole when, for each of 8-K, Form 4 and news separately, clean reads of that feed are at most
+  FAST_RECORD_GAP (15 min) apart from before the span's start through its end." screen.py `_feed_problems` names, per
+  pass, the feeds it did not read cleanly (a pass `failed`, `running` or unreadable reads none; the 8-K read needs the
+  tickers copy; the news read must not be cut), and `_fast_passes` checks each of `RECORD_FEEDS` by its own clean reads;
+  the why names the feed, the gap and the first pass inside it that missed the feed, and how many did. Sound because
+  the feeds page back to the newest known accession and the news read restarts from the newest stored less 5 minutes.
+  (ii) and (iii) are unchanged, and so is A82's daily-index backfill, the completeness proof (iii) waits for.
+- **`evl_final`, an INFO stall cause** (league/ops/evl_health.py `final_lags`, `_final`, `FINAL_LAG_SESSIONS` 1;
+  league/ops/stall.py `CAUSES` after `evl_fills`; gateway/lib/email.mjs `STALL_CAUSES`: "event-lane looks wait longer
+  than the fast path allows"): a seatable program's final record (`screen.final_until` at the job's time) more than one
+  session behind what A69 allows (the session before the latest whose open decision has passed), the program lagging
+  most and the judge's own why named; read-only (league/ops/daily_report.py `ReadOnlyStore`, which gains `get_document`
+  for the tickers copy A69 (ii) reads); not judged for a retired program, one with every look written or one not yet
+  registered; quiet under `events/STOP`, judged through a `PAUSE`; its own reader (a failure is an entry of `errors`,
+  the other five stay judged).
+- **Tests** (league/tests/test_events_fast_path_a84.py, new; each fails on the base): the audit's replay (four
+  getcurrent timeouts a night on five nights, each followed by a clean pass 3 minutes later: whole, the look written one
+  session after its close), a feed with no clean read for 20 minutes (not whole, the feed named), the gap at exactly 15
+  minutes (whole) and 18 (not), a span's start, every pass missing one feed in turn (whole) and one feed's errors never
+  judging another, no tickers copy a missing 8-K read only, (ii), (iii) and A82's backfill unchanged, the House's own
+  record pass (a getcurrent timeout, then the filing accepted meanwhile fetched by the next clean pass, and 20 minutes
+  of timeouts not whole), and `evl_final` (standing with no fast path, clear on a whole record and on the replay, one
+  session tolerated, retired and unregistered programs left out, its failure isolated, nothing written, through the
+  stall job's mail). league/tests/test_events_1019c.py's A69 tests read A84: one bad pass among clean ones is now whole,
+  four in a row (no clean read of that feed for 40 minutes) keep A66. The gateway's stall-notice test words the cause.
+- **Deploy**: docs/operations.md, **A84** (the gateway first, then the House). **Rollback**: the House first, to the
+  release this one replaced; the gateway's word can stay.
+
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
 - **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET
@@ -2666,7 +3120,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `055e5313`, full digest `a8d4cbd9` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `8581de70` / `c9515d5f`.
+Money digest `c2f0a478`, full digest `24f73f18` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7709cadb` / `5e450ade`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

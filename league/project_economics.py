@@ -282,9 +282,13 @@ def box_cost(receipt: Mapping[str, Any] | None, app_id: str) -> dict:
         if not rows or len({r["sailbox_id"] for r in rows}) != len(rows):
             raise ValueError("missing project scope or duplicate box ids")
         finalized = active = ZERO
+        legacy = ("finalized_cost_usd_nanos", "estimated_active_cost_usd_nanos", "estimated_total_cost_usd_nanos")
         for row in rows:
-            f, a, total = [decimal(row.get(key)) for key in (
-                "finalized_cost_usd_nanos", "estimated_active_cost_usd_nanos", "estimated_total_cost_usd_nanos")]
+            f, a, total = [decimal(row.get(key)) for key in legacy]
+            if all(row.get(key) is None for key in legacy):
+                # Sail's response since Oct 2026: one `cost_usd_nanos` a box, its bill, with no active split.
+                f, a, total = decimal(row.get("cost_usd_nanos")), ZERO, decimal(row.get("cost_usd_nanos"))
+                out["basis"] = "provider app-scoped box billing (cost_usd_nanos: one figure a box, no active estimate)"
             if any(v is None or v < 0 for v in (f, a, total)) or f + a != total:
                 raise ValueError("incomplete or inconsistent box costs")
             finalized += f

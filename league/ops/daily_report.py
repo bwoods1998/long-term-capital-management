@@ -36,13 +36,31 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   against the shadow's own auction prints (positive when real money did worse; league/ops/evl_health.py `fill_gaps`,
   the goal's Done item "fills within 15 bp of replay").
 - `programs`: each program that may trade real money (`programs.SEATING`: version 2 of the nine, PREREG-EVL-3, then
-  version 1 of PREREG-EVL-4's three from release 1019d), in the tables' order: its
-  band, settled n (shadow TRADABLE, and real), account-shown and Net by band (metered compute shared over the settled
-  real events, so the programs' Nets add up to the lane's), its next look and the TRADABLE events to go, the
-  market-direction share and the benchmark's mean (shadow, PREREG-EVL-1 section 7's "beside every look"), and its
-  same-risk buy-and-hold: the event's benchmark bought and held continuously from its first real buy to its last real
-  sale at its average invested dollars (PREREG-EVL-1 section 9), "n/a until real fills".
+  version 1 of PREREG-EVL-4's three from release 1019d, then R3's seatable births in registration order, loaded from
+  the lane's store for the report: `facts`), in the tables' order: its band, settled n (shadow TRADABLE, and real),
+  account-shown and Net by band (metered compute shared over the settled real events, so the programs' Nets add up
+  to the lane's), its next look and the TRADABLE events to go, the market-direction share and the benchmark's mean
+  (shadow, PREREG-EVL-1 section 7's "beside every look"), and its same-risk buy-and-hold: the event's benchmark
+  bought and held continuously from its first real buy to its last real sale at its average invested dollars
+  (PREREG-EVL-1 section 9), "n/a until real fills".
 - the records and controls in one line, the `expected_false_passes`, and the `alarms` standing at this run.
+- `entries` (release 1019f; the captain's A80 (2): "the daily report counts venue cancels as a fill gap"): the day's
+  real event buys from the book's own rows in live.sqlite (league/ops/evl_health.py `entry_facts`, the numbers
+  `evl_entries` judges): planned and filled, the venue's cancels at once (A80) and the re-sends after one with how many
+  filled, the never-sent by reason (the day order count, cash, the loss budget, the name wall, the program's room, ...),
+  sent and not filled, the decisions' room cut; and per auction its planned, filled and the constraint that BOUND it
+  most (cash, budget, room, order line, name wall, invested, or none).
+- `break_even` (release 1019f): THE BREAK-EVEN EDGE OF DONE'S COMPUTE CLAUSE ("realized profit since the first promotion
+  >= metered compute over the same span"), once a Probe buy exists: the measured metered compute per session since the
+  first real Probe or Sized buy (metered.py `since`, as far as metered.json covers it) over the dollars bought at Probe
+  or Sized size per session, in basis points of those dollars: what each Probe dollar must earn after costs, on
+  average, for the clause to hold. "n/a until a Probe buy" before.
+- `done`: THE DONE READER'S LINE (the goal V2, docs/goals/DONE-RULE-EVL-2.md): from `<state>/events/done.json`, which the
+  House's nightly screen writes after the band review (league/events/done.py `run`), so it is the night's own reading:
+  the settled real-money events at Probe size or above counted toward 300 by program, the next checkpoint (100, 200,
+  ...), the 95% issuer-block lower bound of the per-event after-cost return (bp) and the benchmark-net one beside it,
+  the learning events beside (never counted), and whether Done holds at a checkpoint, the pivot or the $800 stop is
+  read. Every figure None while no done.json is read (a release before the reader, or its first night not yet run).
 Standard library only.
 """
 from __future__ import annotations
@@ -101,6 +119,14 @@ class ReadOnlyStore:
         row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return None if row is None else str(row[0])
 
+    def get_document(self, digest: str) -> bytes:
+        """A stored document's bytes, read as the store reads them (league/events/store.py `Store.get_document`: its
+        gzip file under `docs/`, checked against its digest), for the screen's readers (`evl_final`: the tickers copy
+        A69 (ii) reads)."""
+        from ..events.store import Store
+
+        return Store.get_document(self, digest)  # type: ignore[arg-type]
+
     def close(self) -> None:
         self.db.close()
 
@@ -151,6 +177,39 @@ def due(ctx: Any, root: str | Path, now: float, *, told: Any = None) -> dict[str
         if ran or now >= deadline:
             return {"day": key, "lane_report": ran}
     return None
+
+
+# ---------------------------------------------------------------------------------------------- the Done line
+def done_line(root: str | Path) -> dict[str, Any]:
+    """The `done` fact (the module docstring) from `<root>/events/done.json`, figures only; the same keys always."""
+    from ..events import done as DN
+    from ..events import programs as P
+
+    doc = DN.load(Path(root) / LANE / DN.FILE) or {}
+    current = doc.get("current") if isinstance(doc.get("current"), Mapping) else {}
+    fig = current.get("figures") if isinstance(current.get("figures"), Mapping) else {}
+    bound = fig.get("bound") if isinstance(fig.get("bound"), Mapping) else {}
+    a = fig.get("a") if isinstance(fig.get("a"), Mapping) else {}
+    a_bound = a.get("bound") if isinstance(a.get("bound"), Mapping) else {}
+    rows = {(str(r.get("id")), int(r.get("version") or 0)): r for r in (doc.get("programs") or [])
+            if isinstance(r, Mapping)} if isinstance(doc.get("programs"), list) else {}
+
+    def flag(name: str, key: str) -> bool | None:
+        block = doc.get(name)
+        return bool(block.get(key)) if isinstance(block, Mapping) and block.get(key) is not None else None
+
+    def bp(value: Any) -> float | None:
+        number = _num(value)
+        return None if number is None else round(number * 1e4, 1)
+    counted = doc.get("counted")
+    learning = doc.get("learning") if isinstance(doc.get("learning"), Mapping) else {}
+    return {"counted": counted if isinstance(counted, int) else None, "toward": DN.DONE_EVENTS,
+            "next_checkpoint": doc.get("next_checkpoint") if isinstance(doc.get("next_checkpoint"), int) else None,
+            "lower_bp": bp(bound.get("lower")), "lower_a_bp": bp(a_bound.get("lower")),
+            "learning": learning.get("n") if isinstance(learning.get("n"), int) else None,
+            "holds": flag("done", "holds"), "pivot": flag("pivot", "retire"), "stop": flag("stop", "spent"),
+            "by_program": [{"id": p.id, "version": p.version,
+                            "n": (rows.get((p.id, p.version)) or {}).get("n") if doc else None} for p in P.SEATING]}
 
 
 # ---------------------------------------------------------------------------------------------- the money
@@ -276,7 +335,29 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
           budget: Mapping[str, Any] | None = None, alarms: list[str] | None = None,
           lane_report: bool = True) -> dict[str, Any]:
     """The `report` notice's facts for New York day `day` (the module docstring): figures only. Raises when the lane's
-    store cannot be read (the stall job says so and tries again at its next run)."""
+    store cannot be read (the stall job says so and tries again at its next run).
+    WITH R3'S BIRTHS (release 1019f's review, lens alarms): a seatable birth trades real money at learning size from its
+    first event (A81), so its settled real round trips are in the account-shown profit (the day's and to date), it has
+    its row in `programs` with its buy-and-hold, its 0.10 in `expected_false_passes` and its line in the Done reader's
+    `done`. Every one of those reads `programs.SEATING`, and the stall job runs in its own process, where no lane has
+    loaded the registered births: so they are loaded here from the same read-only store (league/events/programs.py
+    `load_births`, as league/ops/evl_health.py `final_lags` does) for the whole of the report, and the table is left as
+    this process had it (unloaded again when it held none)."""
+    from ..events import programs as P
+
+    had = tuple(P.BIRTHS)
+    try:
+        return _facts(ctx, root, now, day, ledger=ledger, budget=budget, alarms=alarms, lane_report=lane_report,
+                      births=not had)
+    finally:
+        if not had:
+            P.load_births(None)
+
+
+def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[str, Any] | None,
+           budget: Mapping[str, Any] | None, alarms: list[str] | None, lane_report: bool,
+           births: bool) -> dict[str, Any]:
+    """`facts`, with the registered births loaded from the lane's store first when `births`."""
     from ..events import programs as P
     from ..events import report as RP
     from ..events import screen as SC
@@ -287,6 +368,8 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
     with guard.readonly():
         store = ReadOnlyStore(root / LANE)
         try:
+            if births:
+                P.load_births(store)
             ev, vd = RP.events(store, on), RP.verdicts(store, on)
             seating = {(p.id, p.version) for p in P.SEATING}
             statuses = {}
@@ -307,6 +390,7 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
                 first_fill = store.db.execute("SELECT MIN(filled_at) FROM real_fills").fetchone()[0]
             efp = SC.expected_false_passes(store)
             holds = {key: buy_and_hold(store, [e for e in real if (e["program"], e["version"]) == key]) for key in seating}
+            probe = probe_buys(store, hi)
         finally:
             store.close()
     from . import evl_health as EV
@@ -315,6 +399,7 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
         gap = EV.fill_gaps(EV.event_twins(root))
     except Exception:  # noqa: BLE001 - no twins read: no gap said
         gap = EV.fill_gaps([])
+    entries = day_entries(root, day)
     verdicts_usd = sum(_num(v.get("usd")) or 0.0 for v in vd.values() if isinstance(v, Mapping))
     costs = _costs(ledger, on, now, cost_verdicts, budget)
     # ACCOUNT-SHOWN FIRST, NET AFTER COSTS BESIDE IT: the day's realized real P&L against the day's measured spend, and to
@@ -391,7 +476,79 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
                      "why": None if hold_known else "n/a until real fills"},
         "expected_false_passes": _round(efp.get("expected"), 2), "seatable_versions": int(efp.get("versions") or 0),
         "alarms": sorted(str(a) for a in (alarms or [])),
+        "entries": entries,
+        "break_even": break_even(ledger, probe, on, now),
+        "done": done_line(root),
     }
 
 
-__all__ = ["due", "facts", "buy_and_hold", "ReadOnlyStore", "KIND", "REPORT_BY", "STALE_AFTER"]
+# ---------------------------------------------------------------------------------------------- release 1019f
+#: The counts the report carries (league/ops/evl_health.py `auction_entries`), figures only: each auction's, and the day's.
+AUCTION_FIELDS = ("planned", "filled")
+TOTAL_FIELDS = ("planned", "filled", "venue_cancels", "resent", "resent_filled", "never_sent", "unfilled", "room_cut")
+
+
+def day_entries(root: str | Path, day: str) -> dict[str, Any]:
+    """THE DAY'S REAL EVENT BUYS (the module docstring's `entries`): {auctions: [{at, planned, filled, bound}], totals:
+    {<TOTAL_FIELDS>, never: {reason: n} (every reason of evl_health `UNSENT`)}, why}; `why` says why there is none ("no
+    event table in live.sqlite", "not read (<error>)"). Every figure is the gateway's to word (gateway/lib/email.mjs
+    `composeReport`)."""
+    from . import evl_health as EV
+
+    try:
+        with guard.readonly():
+            found = EV.entry_facts(root, EV.auctions_of(day))
+    except Exception as exc:  # noqa: BLE001 - the report goes without them, saying so
+        return {"auctions": [], "totals": _totals([]), "why": f"not read ({type(exc).__name__})"}
+    if found is None:
+        return {"auctions": [], "totals": _totals([]), "why": "no event table in live.sqlite"}
+    rows = [{"at": a["at"], **{k: int(a.get(k) or 0) for k in AUCTION_FIELDS}, "bound": str(a.get("bound") or "none")}
+            for a in found]
+    return {"auctions": rows, "totals": _totals(found), "why": None}
+
+
+def _totals(found: list[Mapping[str, Any]]) -> dict[str, Any]:
+    from . import evl_health as EV
+
+    totals = EV.entry_totals(found)
+    return {**{k: int(totals.get(k) or 0) for k in TOTAL_FIELDS}, "never": dict(totals["never"])}
+
+
+def probe_buys(store: Any, before: str) -> dict[str, Any] | None:
+    """The lane's real buys at Probe or Sized size (`real_fills` side buy, band probe or sized) filled before `before`:
+    {first, usd, n}, None with none (or no `real_fills` table)."""
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone() is None:
+        return None
+    row = store.db.execute("SELECT MIN(filled_at), COALESCE(SUM(qty * price), 0), COUNT(*) FROM real_fills WHERE "
+                           "side='buy' AND band IN ('probe', 'sized') AND filled_at<?", (before,)).fetchone()
+    if row is None or not row[2]:
+        return None
+    return {"first": str(row[0]), "usd": float(row[1] or 0.0), "n": int(row[2])}
+
+
+def break_even(ledger: Mapping[str, Any], probe: Mapping[str, Any] | None, on: dt.date, now: float) -> dict[str, Any]:
+    """THE BREAK-EVEN EDGE OF DONE'S COMPUTE CLAUSE (the module docstring's `break_even`): {since (the first Probe or Sized
+    buy's New York day, None before one), compute_per_session, probe_per_session (dollars over the NYSE sessions from
+    that day through `on`), edge_bp (their ratio in basis points of the Probe dollars), partial (the meters cover the
+    span in part), why}; edge_bp None ("n/a until a Probe buy", or the meters not read since)."""
+    from . import evl_health as EV
+
+    out: dict[str, Any] = {"since": None, "compute_per_session": None, "probe_per_session": None, "edge_bp": None,
+                           "partial": False, "why": "n/a until a Probe buy"}
+    if not probe or not probe.get("usd"):
+        return out
+    first, first_utc = _ny_day_of(probe["first"]), _utc_day_of(probe["first"])
+    if first is None or first_utc is None:
+        return {**out, "why": "n/a: the first Probe buy has no readable time"}
+    sessions = len(EV.sessions(dt.date.fromisoformat(first), on)) or 1
+    span = MT.since(ledger, first_utc, now)
+    usd = _num(span.get("usd"))
+    out.update(since=first, probe_per_session=round(float(probe["usd"]) / sessions, 2), partial=bool(span.get("partial")))
+    if usd is None:
+        return {**out, "why": "n/a: the meters were not read since the first Probe buy"}
+    return {**out, "compute_per_session": round(usd / sessions, 2), "edge_bp": round(usd / float(probe["usd"]) * 1e4, 1),
+            "why": None}
+
+
+__all__ = ["due", "facts", "done_line", "buy_and_hold", "ReadOnlyStore", "KIND", "REPORT_BY", "STALE_AFTER",
+           "day_entries", "probe_buys", "break_even", "AUCTION_FIELDS", "TOTAL_FIELDS"]
