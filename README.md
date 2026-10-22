@@ -20,11 +20,11 @@ activity. The lane's page is [docs/events.md](docs/events.md).
 - **Judges**: each program is pre-registered before its first event ([docs/prereg/](docs/prereg/PREREG-EVL-1.md)) and
   screened after at least 60 shadow events over at least 10 sessions, at a false-positive rate of at most 15%, with the
   expected false passes stated (0.9 over the nine seatable programs registered on Oct 19).
-- **Births** (R3, built, not deployed): new programs born each night from outcome-free facts by the architect (Claude
-  Haiku 4.5, one call, at most $0.25 a night) or the captain, validated by code and registered as lines of
-  `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a seatable birth,
-  at most the lane's stated 3.0 in all, counted from every seatable version (1.2 before any birth), three a night (A81;
-  [docs/events.md](docs/events.md), "Births").
+- **Births** (R3, live since release 1019e, Oct 21, 2026): new programs born each night from outcome-free facts by the
+  architect (Claude Haiku 4.5, one call, at most $0.25 a night) or the captain, validated by code and registered as
+  lines of `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a
+  seatable birth, at most the lane's stated 3.0 in all, counted from every seatable version (1.5 before any birth: the
+  fifteen seatable versions of PREREG-EVL-1 to -5), three a night (A81; [docs/events.md](docs/events.md), "Births").
 - **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
   sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
 - **Cost follows profit**: metered compute at most $5 a day plus half the trailing week's realized net profit, never
@@ -140,8 +140,8 @@ withdrawals are never profit. The scoreboard reports Net daily (from the V3-A pa
 The plan put the inputs at about $565-740 a month at its steady-state budgets, an estimate made before Claude replaced
 OpenAI on Sept 29 and not yet re-derived ([design.md](docs/design.md)). The bar falls as the account grows, and compute
 drops to its floor whenever the forward record does not pay for it: in V3-A part 1 that is the budget rule, in code.
-A change that cannot say how it raises Net does not ship. Under the owner's goal of Oct 19, 2026 (release 1019c, on
-`rel/1019c`, not deployed) the budget rule's version 3 is the goal's cost rule: every metered compute dollar of a day
+A change that cannot say how it raises Net does not ship. Under the owner's goal of Oct 19, 2026 (release 1019c, live
+since 20:06Z Oct 21, 2026) the budget rule's version 3 is the goal's cost rule: every metered compute dollar of a day
 (Sail models and boxes, Claude, OpenAI, data, Cloudflare) at most $5 plus half the trailing week's realized net profit
 of every real book (the last 5 sessions' net, its half spread over the week's 7 days), never above $25, the fixed costs
 inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
@@ -256,7 +256,7 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A; a protected file) |
 | `league/events/` | the event lane (the owner's goal of Oct 19, 2026; [docs/events.md](docs/events.md)): the EDGAR and news recorders, the recorded verdicts, the pre-registered programs and their screen; `book.py` and `proof.py` (release R2, deployed 21:00Z Oct 19, 2026 in release 1019b) its real money through the equity book's event kind and the auction paper proof |
 | `league/ops/` | the House's jobs (V3-A; the whole tree is protected): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, the budget rule, the standing grant and the drills |
-| `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); `births.py` (R3, not deployed: the births' grammar, outcome-free facts, validator and budget, proposer and registration; `events.births`); its judges are protected |
+| `league/events/` | the event lane of the goal of Oct 19, 2026 ([docs/events.md](docs/events.md); rules in `docs/prereg/`): EDGAR and news recorders, the recorded Haiku verdicts, the pre-registered programs, the decisions, settlement, the screen, the daily report, and `house.py`, its scheduler on the House (release R1; `config.json` `events.enabled`); `births.py` (R3, live since release 1019e: the births' grammar, outcome-free facts, validator and budget, proposer and registration; `events.births`); its judges are protected |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |

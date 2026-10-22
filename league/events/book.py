@@ -1358,6 +1358,27 @@ def part_hold(lane: Lane | None, program: str, version: int, day: dt.date) -> tu
                      "failed or ran past its own bound): decided later by themselves, never traded (section 1.3)")
 
 
+def prereg_row(program: str, version: int) -> bool:
+    """Whether (program, version) is a PREREG ROW: a program of PREREG-EVL-1 to -5 as this process knows it, not one of
+    R3's births (whose rule is a registered spec) and not a program it does not know. Release 1019h (the captain's
+    decision on PREREG-EVL-5's money re-review, option 1): the book's post-close alert (league/equity/live.py
+    `_event_held_said`) is a warning when a later buy that ended unsent waiting for the room kept for PREREG-EVL-5's
+    waiting buys is one."""
+    prog = P.BY_KEY.get((str(program), int(version)))
+    return prog is not None and prog.spec is None
+
+
+def room_free_overdue(program: str, version: int) -> bool:
+    """PREREG-EVL-5 section 1.3's WAITING ROOM ONCE THE LANE'S CLOSE RECEIPT IS OVERDUE (THE CAPTAIN'S DECISION on the
+    money re-review of PREREG-EVL-5, its option 1; release 1019h; league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead`):
+    True for a row of PREREG-EVL-1 to -4 (version 1 or 2 of the earlier files' programs, PREREG-EVL-4's rows), whose buy
+    a waiting PREREG-EVL-5 buy no longer keeps its room from once the lane's close receipt is still unfinished one book
+    minute before the close window's cut-off; False for PREREG-EVL-5's own rows, R3's births (the room is still kept
+    from them) and a program this process does not know (the reading that keeps the room)."""
+    prog = P.BY_KEY.get((str(program), int(version)))
+    return prog is not None and prog.spec is None and prog.prereg in (1, 2, 3, 4)
+
+
 # ----------------------------------------------------------------------------------------------------------- sizes
 def limit_price(prev_close: Decimal, ratio: Decimal) -> Decimal:
     """The entry's limit: `ratio` x the previous SIP close, ROUNDED DOWN to the cent (never above the pre-registered
@@ -1428,7 +1449,7 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish", "band_mark", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader",
-           "part_hold", "PART_WAIT"]
+           "part_hold", "PART_WAIT", "prereg_row", "room_free_overdue"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)

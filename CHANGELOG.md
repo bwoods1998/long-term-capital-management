@@ -26,17 +26,74 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261019T205943Z-90834d01c78d` (release 1019b, main `3230a884`, PR #574, deployed 21:00Z
-Oct 19, 2026, below); before it, `20261019T034531Z-6583edd72b34` (release 1019a, main `c1c6fae7`, PR #568, 03:46Z Oct
-19) and `20261016T204140Z-99e7c39c780a` (release 1017r, main `4893d0f8`, deployed 20:41Z Oct 16 by the captain's record
-in `goal-2026-10-10/NEXT-AGENT.md`; its entry below was written before it shipped and still reads unreleased). The
-gateway is `29ed37e1` (20:13Z Oct 19, release 1019b's gateway G2 with `STOCK_EVENT_BUYS` on; before it `7456e73d`, 03:56Z
-Oct 19, gateway G1), and the box's updater is on. What is built and not deployed is on branches. The owner's goal of
-Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md),
-[PREREG-EVL-2.md](docs/prereg/PREREG-EVL-2.md) and [PREREG-EVL-3.md](docs/prereg/PREREG-EVL-3.md), its page is
-[docs/events.md](docs/events.md). It runs on the House since release 1019b (the desktop's store migrated there at 21:11Z
-Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
-programs trades real money at learning size.
+The running House release is `20261022T053527Z-05c3dc2f4422` (release 1019g, main `b374d862`, PR 595, promoted
+05:36:23Z Oct 22, 2026, below: release 1019f with PREREG-EVL-5's code and the births fix, A108); before it
+`20261021T211621Z-0ee98209e903` (release 1019e, main `c485dcfe`, 21:17Z Oct 21, A93), `20261021T200543Z-98b98e817ece`
+(releases 1019c and 1019d in one step, main `5a17bd25`, #581, 20:06Z Oct 21, A88) and `20261019T205943Z-90834d01c78d`
+(release 1019b, main `3230a884`, #574, 21:00Z Oct 19). The gateway is `354aeab2` (05:34:42Z Oct 22, release 1019g's;
+before it `68363043`, 21:15Z Oct 21, release 1019e's, and `fccaf9da`, 20:05Z Oct 21, release 1019d's), and the box's
+updater is on. The money digest in force is `c2f0a478` and the constitution `24f73f18` (release 1019f's pair, A86
+REVISED's two Probe rows). What is built and not deployed is on branches (release 1019h, below). The owner's goal of
+Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md)
+to [PREREG-EVL-5.md](docs/prereg/PREREG-EVL-5.md), its page is [docs/events.md](docs/events.md). It runs on the House
+since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and stays on the captain's workstation as the
+backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
+(their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
+
+### Release 1019h's minors: release 1019g's reviewed minors (the alarms, the births' facts, the lead, PREREG-EVL-5's waiting room, the docs), on `fix/1019h-minors` (unreleased; cut from `feat/done-speed` `88ecf37f`, so on top of release 1019g, which is live; it ships IN release 1019h, the same owner deploy: the gateway step and THE SAME PAIR `8e63ce64` / `c3026eba`; NO IDENTITY MOVES FROM `feat/done-speed`: the money digest `8e63ce64`, the constitution `c3026eba`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; the births prompt's sha `890806ff` and `births.PARSE_VERSION` 3 do not move; no money row, no setting, no judge's rule, no gateway file; docs/prereg/PREREG-EVL-5.md and docs/prereg/evl-5/ byte for byte the tag's)
+
+The open minors of release 1019g's two reviews (A108), and the captain's decision on PREREG-EVL-5's money re-review
+(its option 1), each with a test that fails without it (league/tests/test_events_1019h_minors.py):
+
+- **The tape's word is the score's own** (league/ops/evl_health.py `TAPE_LABELS`): `evl_score`'s "waiting on the tape"
+  excuse read every `marks` row with no price, whatever its label; PREREG-EVL-5's `_marks_0930` stores the gap's 09:30
+  minute with no price ('0930') when that minute had no trade, which excused an unrelated stuck intent of the name. It
+  now reads the score's own labels alone ('open', 'close', 'first', `score.tape_print`'s).
+- **The births' facts see PREREG-EVL-4's and -5's rows** (league/events/births.py `FILE_FAMILIES`, `Facts._file_windows`,
+  `facts_reaction`, `unread_gap`; PREREG-EVL-5 section 7, "births.py's facts for the new families"): release 1019g's
+  facts windowed none of their families, so all nine rows selected 0 in the architect's facts and every candidate's
+  Jaccard against them was 0. They are now windowed as their close decision reads them (`close_rows_4`,
+  `close_rows_5`), outcome-free: every price unread, so a count that reads one is an upper bound (EVL-8K-REACT-ON's
+  reaction as any react family's; PREREG-EVL-5's reaction passes each row's own band and its gap passes; TAKEN (a), (c)
+  and the <= 0.96 skip skip nothing, (b) reads the stored PROMPT-NEWS verdicts, no issuer waits; NO NEW INFORMATION (i)
+  names by the kept eligibility's ticker, since SEC's copy lives in `meta`, which the facts never read). On the
+  invented week of PREREG-EVL-5's tests each row's count covers its shadow's events and the rows that read no price
+  count exactly them; the trace shows no refused table read. The architect's family statistics are the grammar's
+  families' as before; the grammar, the rates and `PARSE_VERSION` do not move (more Jaccard targets can only refuse
+  more).
+- **The alarms reach `decide-close-evl5`** (league/ops/evl_health.py `FILE_WAITS`, `four_waiting(prereg=)`,
+  `four_decisions(prereg=)`): `evl_decide` stands on a close the judge's `made_without(prereg=5)` names (decided by a
+  release without PREREG-EVL-5's rows, or its part for them failed or ran past its bound) two hours after the stall job
+  first saw it, while its `decide-close-evl5` is not `ok` or is stale (first sight kept in stall.json `evl_kept`
+  `five`; numbers `five_*` beside `four_*`; the text names the file); `evl_verdicts` reads `decide-close-evl5`'s
+  tallies.
+- **The lead after a failed live run** (league/events/house.py `LEAD_ENDS`, `_live_next`, `_lead`, `_close_hold`,
+  `_deadline`, the turn loop): release 1019g's lead ended at ANY receipt of today's live close decision, so after one
+  failed run (an exception, a gateway 429) another decision could start with its whole DECIDE_BUDGET and the retry came
+  after the book's 15:49:00 cut-off (the review's probe: a re-decision at 15:47:23, the retry at 15:50:03). The lead now
+  ends only when a run has finished `ok` or `pending` (the book's own reading, `book.decided`, `part_hold`), or once the
+  decision is no longer live: a task that raises inside the lead never ends the turn, no other decision starts before
+  the failed run's retry (its start + DECIDE_RETRY), every other task is bounded to end DECISION_MARGIN before it, and
+  the held turn starts the retry at its time (a failure at 15:47:00 is retried at 15:48:00 in the same turn, before a
+  queued re-decision). test_events_evl5.py's `test_inside_the_lead_no_other_decision_is_due_whatever_its_rank` now
+  holds the new end (a run that has only started, or failed, keeps the others waiting).
+- **PREREG-EVL-5's waiting room once overdue, THE CAPTAIN'S DECISION (option 1 of its money re-review)**
+  (league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead.overdue`, `for_buy`, `_room_free`, `_prereg_row`;
+  league/events/book.py `room_free_overdue`, `prereg_row`): from one book minute before the close window's cut-off
+  (15:48:00 ET on a full day) while the lane's close receipt is still unfinished, a waiting PREREG-EVL-5 buy keeps no
+  room from a row of PREREG-EVL-1 to -4 after it in ROOM's order (cash, invested room, loss budget, name wall, line
+  slots); it still keeps it from R3's births and its own file's rows. So when its part runs late the cost never falls
+  on an earlier file's real money at that minute (the re-review's case: a Probe DROP row's wait left a learning
+  REACT-C1 row unsent at the cut-off). The post-close alert is a WARNING whenever a later buy that ended unsent waiting
+  for that room is a PREREG row (any file's, not a birth's: `room_waited_prereg` in the `equity.alert` record), else as
+  before. A buy can only go earlier than release 1019g sends it; no wall, money row or judge moves.
+- **The docs and the shipped files**: the deployed state (this paragraph's running release, the entries of releases
+  1019c to 1019g and their deploys, docs/operations.md's section headers, docs/events.md's and README.md's status
+  lines); the births budget after PREREG-EVL-5 (1.5 used, 0.10 a seatable birth, at most fifteen seatable births:
+  docs/events.md, README.md, the births.py docstring); and docs/prereg/evl-3/calibrate_events.py, the module
+  docs/prereg/evl-5/calib_evl5.py imports (`sys.path` ../evl-3, its `signflip_p`), shipped byte for byte from the tags
+  (`prereg-evl-3` and `prereg-evl-5` hold the same blob `c3c42371`), so the shipped script runs from the tree; the
+  script and PREREG-EVL-5.md are untouched (their sha256 pinned).
 
 ### Release 1019h: Done speed (the captain's A97 and A100): Probe+ buys at Done's size, promoted births in their band, the births' supply floor, the Done supply line, on `feat/done-speed` (unreleased; cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in; a draft PR with base `rel/1019g`; an owner deploy after release 1019g is live: THE GATEWAY (`gateway/lib/email.mjs`: the supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100), so the standing grant re-ratifies at the House's start; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`, the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; the births proposer's prompt sha moves `8294fe77` -> `890806ff` with `births.PARSE_VERSION` 2 -> 3; the Done rule `54241925` is untouched)
 
@@ -122,7 +179,25 @@ test_events_a86.py, test_events_births.py (`SeatableRate`; `Validation` sets a s
 test_daily_report.py (`DoneSupply`), league/tests/equity_design.py (`DIGESTS`, `DIGESTS_A86`, `before_1019h`),
 league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notice.test.mjs.
 
-### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
+### 05:36Z Oct 22, 2026: release 1019g (PR 595: release 1019f, `feat/evl-5`, `fix/births-names`, the fix and final rounds), House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`
+
+- The gateway first: version `354aeab2` deployed 05:34:42Z from the release head (its `gateway/` is release 1019f's;
+  rollback `68363043`), health ok, the kill switch off, nothing in flight.
+- The House: the captain's ship script at 05:35:13Z (CI 39720318083 green on the exact head: the gateway, 3.11, 3.14;
+  two reviews of the merged release "ship", minors only, A108), main fast-forwarded `eb5bedac` -> `b374d862`, promoted
+  05:36:23Z (previous `20261021T211621Z-0ee98209e903`), seven hours before A94's 12:55Z cut-off. Verified 05:46:36Z:
+  real money true, no failures, the options execution fingerprint `b60410ad`, the constitution `24f73f18`, the money
+  digest `c2f0a478` (release 1019f's pair, A86 REVISED's two Probe rows), the gate contract `397b22b7`, the equity
+  identity `78022ca6`.
+- What went live: release 1019f (A84's per-feed fast path and `evl_final`, A85's Probe cash reservation, A86 REVISED,
+  the probe size's record, the screen after the open, the backfill's retries, Sail's spend fields, the alarms, the Done
+  reader), PREREG-EVL-5's three rows and control (real money at learning size from the first close decision after the
+  release), the births fix (A95: canonical names, two examples, one re-run of an empty night before 12:55Z) and the held
+  turn for the live close decision. The open minors are release 1019h's (**Release 1019h's minors**, above).
+- Rollback: `scripts/floor_box.py rollback` to release 1019e's head and the gateway by `wrangler rollback 68363043`,
+  with no order in flight (operations.md, **Release 1019g**).
+
+### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (DEPLOYED 05:36Z Oct 22 in PR 595, the gateway first at 05:34Z; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
   reservation and round-robin, A86 REVISED, the Probe size's record, the screen after the open, the backfill's retries,
@@ -237,7 +312,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   to release 1019e's head `c485dcfe` (both parts at once), the gateway after it or never; constitution-only:
   `equity_money.event.enabled` False (`fd9e90c0` / `005745e9`).
 
-### R3 births: canonical names, one-role lists, two examples, one re-run of an empty night (A95), on `fix/births-names` (unreleased; cut from `rel/1019f` `b262a85f`; for release 1019g, on top of release 1019f; an owner deploy of the House alone: league/events/births.py and house.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `c2f0a478`, the constitution `24f73f18` (release 1019f's), the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; THE BIRTHS PROMPT'S SHA MOVES `2203fda3` -> `8294fe77`; no setting, no money row, no judge, no gateway change)
+### R3 births: canonical names, one-role lists, two examples, one re-run of an empty night (A95), on `fix/births-names` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019f` `b262a85f`; for release 1019g, on top of release 1019f; an owner deploy of the House alone: league/events/births.py and house.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `c2f0a478`, the constitution `24f73f18` (release 1019f's), the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; THE BIRTHS PROMPT'S SHA MOVES `2203fda3` -> `8294fe77`; no setting, no money row, no judge, no gateway change)
 
 - **Why** (A95, the captain's, 02:25Z Oct 22, 2026). R3's first births night (2026-10-21, births receipt 02:11:44Z Oct
   22) accepted none: one Haiku call ($0.0084), six specs, all six refused by the grammar. Every id lacked `EVL-B-` (the
@@ -316,7 +391,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   never re-runs; a birth a re-run registered stays registered (its stored spec has the canonical id and a string role,
   which release 1019f's grammar parses), and release 1019f's prompt asks under its own sha again.
 
-### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (unreleased; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
+### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (DEPLOYED 05:36Z Oct 22 in release 1019g; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
 
 - **What it carries** (each branch's own entry below, as its branch wrote it; docs/operations.md **Release 1019f** for
   the deploy): `fix/a84-fast-path-per-feed` `b0a62c6b` (#586), `fix/evl-alarms-entries-backfill` `a0cb8617` (#592),
@@ -379,7 +454,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   new receipts are inert); the gateway after it or never. Constitution-only: `equity_money.event.enabled` False
   (`fd9e90c0` / `005745e9`), or the Probe rows back (`055e5313` / `a8d4cbd9`).
 
-### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (unreleased; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py joins the wall on this branch (`PENDING_GATEWAY`), beside its rule file under docs/goals/, which was behind it already; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
+### The Done reader (the goal V2): every 100 settled Probe+ real-money events, on `feat/done-reader` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; an owner deploy of the House: the hook is in league/events/house.py, behind league/ci.py's wall since release 1019c, and league/events/done.py joins the wall on this branch (`PENDING_GATEWAY`), beside its rule file under docs/goals/, which was behind it already; the daily report's Done line needs the gateway's `composeReport` from this branch to be shown (an older gateway ignores the new `done` fact); NO IDENTITY MOVES: the money digest `055e5313` and the constitution `a8d4cbd9` are the base's, read with the tree's own functions; no setting, no money row, no judge changes)
 
 - **The rule**: `docs/goals/DONE-RULE-EVL-2.md`, the goal's Done verbatim and its reading, pinned by sha256 in
   `league/events/done.py` `RULE_SHA256` and a test (`8eb743e5` at this entry, after A84; `2f92a153` before it).
@@ -408,7 +483,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   Probe+ events toward 300 by program, the next checkpoint and the bound (three short lines on a phone).
 - Docs: [docs/events.md](docs/events.md), "The Done reader (the goal V2)".
 
-### A86 REVISED, Probe smaller inside the trade-less envelope: the Probe band at 3.5% of equity with at most 6 open, on `fix/a86-probe-more-smaller` as release 1019f integrates it (unreleased; cut from `rel/1019d` `5a17bd25`; integrated ONLY in A86 REVISED's form; an owner deploy of the House: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (the Probe band's two rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no setting)
+### A86 REVISED, Probe smaller inside the trade-less envelope: the Probe band at 3.5% of equity with at most 6 open, on `fix/a86-probe-more-smaller` as release 1019f integrates it (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; integrated ONLY in A86 REVISED's form; an owner deploy of the House: league/constitution.py and league/events/book.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (the Probe band's two rows), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; no setting)
 
 - **Why.** The captain's A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event;
   the audit's capacity lens and its two verifiers): cash at the auction binds first at Probe, so PREREG-EVL-3's Probe
@@ -448,7 +523,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   `005745e9`), `position_share.probe` 0.05 with `one_share_max.probe` removed (rows inside the bounds: release 1019e's
   pair), or the House release before it.
 
-### Cash at the auction binds Probe: the next auction's reservation and round-robin inside Probe and Sized (A85), on `fix/a85-probe-cash-reservation` (unreleased; joins release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy: league/equity/ is protected and league/events/book.py is behind league/ci.py's wall; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are release 1019d's, read with the tree's own functions on 3.14 and 3.11; no money row, no wall, no judge, no setting, no gateway file changes)
+### Cash at the auction binds Probe: the next auction's reservation and round-robin inside Probe and Sized (A85), on `fix/a85-probe-cash-reservation` (DEPLOYED 05:36Z Oct 22 in release 1019g; joins release 1019f on top of release 1019e; cut from `rel/1019d` `5a17bd25`; an owner deploy: league/equity/ is protected and league/events/book.py is behind league/ci.py's wall; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are release 1019d's, read with the tree's own functions on 3.14 and 3.11; no money row, no wall, no judge, no setting, no gateway file changes)
 
 - **The defect** (a read-only audit of the live House, two lenses): the book is 1x cash and every buy holds its limit
   (1.25 x the previous close); a lot sold in an auction still holds its cash in that same auction; so learning lots
@@ -483,7 +558,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   docs/operations.md ("The event lane's real money on the House": the day's sends, the slots, ROOM, the reservation, the size),
   league/equity/INTERFACES.md section 20.
 
-### The probe size's record and the walls' equity, on `fix/probe-target-honesty` (unreleased; cut from `rel/1019d` `5a17bd25` (#581); joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy of the House alone: `league/equity/` is protected and league/events/bands.py, book.py and store.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019d's, read with the tree's own functions on 3.14 and 3.11; no constitution row, no setting, no gateway change; the audit's capacity and probe lenses)
+### The probe size's record and the walls' equity, on `fix/probe-target-honesty` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25` (#581); joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy of the House alone: `league/equity/` is protected and league/events/bands.py, book.py and store.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019d's, read with the tree's own functions on 3.14 and 3.11; no constitution row, no setting, no gateway change; the audit's capacity and probe lenses)
 
 - **The defects.** (a) A Probe or Sized buy that cash, the loss budget or a wall cut below its band's target was still
   labelled `probe` in the lane's `real_fills`, and nothing kept the target, so a reader of "Probe size or above" (the
@@ -518,7 +593,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   current equity above E moving nothing. Each fix disabled in turn fails its tests. The 63 test modules that import
   the touched modules pass on 3.14 and 3.11 (1,864 tests each).
 
-### The screen after the open, the House's close re-read of the bands, the night by session, on `fix/screen-after-open` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, which the captain integrates on top of release 1019e; an owner deploy of the House alone: league/events/house.py and book.py are behind league/ci.py's wall, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO RULE AND NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the gate contract `397b22b7`, the same on 3.14 and 3.11)
+### The screen after the open, the House's close re-read of the bands, the night by session, on `fix/screen-after-open` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; joins release 1019f, which the captain integrates on top of release 1019e; an owner deploy of the House alone: league/events/house.py and book.py are behind league/ci.py's wall, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO RULE AND NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the gate contract `397b22b7`, the same on 3.14 and 3.11)
 
 - **Why.** The read-only audit of the live House (lenses looks and probe), "BANDS MOVE A SESSION LATE": the judge
   (league/events/screen.py `final_until`) makes a close X final at an OPEN decision (A69's fast path once the session
@@ -581,7 +656,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
 - **Rollback**: the House to the release before (`floor_box.py rollback`); the looks and band moves written stay (the
   judge's, whichever run wrote them), and that code goes back to the nightly screen and the first-decision band read.
 
-### Sail's spend response changed fields: the budget's fixed line and the close economics read the boxes' bill again, on `fix/sail-spend-fields` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, on top of release 1019e; owner files `league/ops/budget.py`, `league/ops/economics.py`, `league/project_economics.py`, and `league/sailbox.py`; an owner deploy of the House alone, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no setting, no money row, no gateway change)
+### Sail's spend response changed fields: the budget's fixed line and the close economics read the boxes' bill again, on `fix/sail-spend-fields` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; joins release 1019f, on top of release 1019e; owner files `league/ops/budget.py`, `league/ops/economics.py`, `league/project_economics.py`, and `league/sailbox.py`; an owner deploy of the House alone, never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no setting, no money row, no gateway change)
 
 - **Why.** The audit of the live House (Oct 21, 2026, its cost lens): Sail's `GET /sailboxes/spend` no longer carries
   `estimated_total_cost_usd_nanos` (nor the legacy split, `finalized_cost_usd_nanos` and
@@ -612,7 +687,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   `test_project_economics.test_sails_one_cost_field_is_the_app_scoped_bill`; the modules and their 53 neighbours (1,957
   tests) on 3.14 and 3.11.
 
-### The daily-index backfill's failed fetches and SEC holidays, on `fix/backfill-robust` (unreleased; `league/events/house.py`, behind the wall; cut from `rel/1019d` `5a17bd25`, joins release 1019f on top of release 1019e; the captain records its amendment; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no judge, setting, money row or gateway file changes)
+### The daily-index backfill's failed fetches and SEC holidays, on `fix/backfill-robust` (DEPLOYED 05:36Z Oct 22 in release 1019g; `league/events/house.py`, behind the wall; cut from `rel/1019d` `5a17bd25`, joins release 1019f on top of release 1019e; the captain records its amendment; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no judge, setting, money row or gateway file changes)
 
 - **The defects** (a read-only audit of the live House, after A82). (a) `EventLane._backfill` marked a filing seen
   BEFORE fetching it, so a failed fetch counted as seen and its day was done at once with `failed` > 0. One transient
@@ -642,7 +717,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   done, while a non-holiday answering 403 or 503 waits and a holiday with an index is read as any day; the table is OPM's (weekdays, 23 days, Good Friday not in
   it). A82's tests pass unchanged. The lane's 407 tests pass on 3.14 and 3.11.
 
-### Alarms that did not exist: each auction's real buys, the daily-index backfill, PREREG-EVL-4's own decisions, the notice pace, the hand-back, on `fix/evl-alarms-entries-backfill` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: three new causes, an INFO notice's `waiting_owner`, the report's real buys and break-even edge), THEN THE HOUSE (`league/ops/` is protected); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no judge, no constitution row, no setting)
+### Alarms that did not exist: each auction's real buys, the daily-index backfill, PREREG-EVL-4's own decisions, the notice pace, the hand-back, on `fix/evl-alarms-entries-backfill` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: three new causes, an INFO notice's `waiting_owner`, the report's real buys and break-even edge), THEN THE HOUSE (`league/ops/` is protected); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no judge, no constitution row, no setting)
 
 - **Why.** A read-only audit of the live House (lens "stalls", Oct 21, 2026) found five things no alarm watched. (a) The
   captain found by hand that the venue cancelled about a quarter of the lane's auction buys (A80): nothing said that a
@@ -733,7 +808,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
 - **Rollback.** The previous House release (it ignores `evl_kept`); `ops.json` `stall.evl` false switches the eight
   `evl_` causes off. Roll the gateway back only after the House: a House of this release mails the new causes.
 
-### A84: the fast path reads each feed by its own clean reads, and `evl_final`, on `fix/a84-fast-path-per-feed` (unreleased; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs` words `evl_final`), THEN THE HOUSE (`league/events/screen.py` is behind league/ci.py's wall, `league/ops/` is protected); before Oct 26 13:00Z, when the first looks' spans begin; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no setting, no money row)
+### A84: the fast path reads each feed by its own clean reads, and `evl_final`, on `fix/a84-fast-path-per-feed` (DEPLOYED 05:36Z Oct 22 in release 1019g; cut from `rel/1019d` `5a17bd25`; joins release 1019f, integrated by the captain on top of release 1019e; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs` words `evl_final`), THEN THE HOUSE (`league/events/screen.py` is behind league/ci.py's wall, `league/ops/` is protected); before Oct 26 13:00Z, when the first looks' spans begin; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; no setting, no money row)
 
 - **Why.** The audit of the live House (two lenses, independently): A69's fast path (league/events/screen.py
   `_fast_passes`, A69 (i)) gave up on a close if ANY record pass of its ~48-hour span had a feed error. SEC's
@@ -770,7 +845,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
 - **Deploy**: docs/operations.md, **A84** (the gateway first, then the House). **Rollback**: the House first, to the
   release this one replaced; the gateway's word can stay.
 
-### PREREG-EVL-5: three overnight and close programs (the captain's hand births), seatable at version 1 from birth, on `feat/evl-5` (unreleased; release 1019g on top of release 1019f, A92; cut from `rel/1019e` `c485dcfe`; an owner deploy of the House alone: league/events/'s judges, run.py, book.py and house.py are behind league/ci.py's wall and league/equity/ is protected; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row)
+### PREREG-EVL-5: three overnight and close programs (the captain's hand births), seatable at version 1 from birth, on `feat/evl-5` (DEPLOYED 05:36Z Oct 22 in release 1019g; release 1019g on top of release 1019f, A92; cut from `rel/1019e` `c485dcfe`; an owner deploy of the House alone: league/events/'s judges, run.py, book.py and house.py are behind league/ci.py's wall and league/equity/ is protected; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row)
 
 - **The rows** (league/events/programs.py): EVL-ERN-DROP-ON (`ern-drop`), EVL-ERN-UNDER-ON (`ern-under`, reads) and
   EVL-NEWS-NIGHT2-ON (`news-night2`), seatable, and EVL-CTRL-ERN-UNDER-ON (a control), each version 1, prereg 5, entering
@@ -895,7 +970,18 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   event-book and PREREG-EVL-4 tests passed, and the event-lane modules there failed only on the counts this branch
   updates.
 
-### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
+### 21:17Z Oct 21, 2026: release 1019e (#583: R3's births, A80's re-send, the site follows the lane, the cost fix), House `20261021T211621Z-0ee98209e903`, main `c485dcfe`; gateway `68363043`
+
+- The gateway first: version `68363043` deployed 21:15:31Z (the births' docs route; rollback `fccaf9da`).
+- The House: promoted 21:17:15Z (previous `20261021T200543Z-98b98e817ece`), main fast-forwarded `5a17bd25` ->
+  `c485dcfe`; the ids `b60410ad` / `a8d4cbd9` / `055e5313` (no identity moved from release 1019d). `events.births` on
+  (A90; the first births night 21:15 ET), A80's re-send live from Oct 22's open, the site's `lane_v1` published by the
+  House (A93). The first ship attempt stopped safely at the nightly stop (the collector A87 switched off holds no lock);
+  the captain's nightly helper now writes the stop when that collector is disabled and its lock is free.
+- The site: personal-site #25 merged and deployed 21:29:56Z; `lane_v1` confirmed on the public page (A93 addendum).
+- Rollback: `scripts/floor_box.py rollback` to release 1019d's head and the gateway by `wrangler rollback fccaf9da`.
+
+### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (DEPLOYED 21:17Z Oct 21, the gateway first at 21:15Z; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
 - **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET
   the night the release deploys (a night of births is a session of each birth's 8-block clock); `events.births` false
@@ -985,7 +1071,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   and its score settles their entries with no limit at entry (not undone); so prefer `events.births` false and the
   event-buy stop over a House rollback.
 
-### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (unreleased; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
+### A80: the House re-sends once an event entry the venue cancelled at once, on `fix/venue-cancel-retry` (DEPLOYED 21:17Z Oct 21 in release 1019e; cut from `rel/1019c` `b35c018f`, with its `bb3a1ee9` and `f85cc152` (A82) merged in; the captain's A80, action 1; ships in the next House release, which A80 names 1019e; an owner deploy of the House alone: `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; NO IDENTITY MOVES: money `055e5313`, constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are rel/1019c's; no constitution row, no setting, no gateway change)
 
 - **Why.** The captain's A80 (16:10Z Oct 21, 2026; the goal's item 5, fill the gaps): the venue cancels about a quarter
   of the event lane's auction buys (whole-share limit-on-open or limit-on-close orders) 5-6 ms after it accepted them,
@@ -1046,7 +1132,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
 - **Rollback.** The previous House release (a re-sent buy that filled is an ordinary event lot to it); or
   `equity_money.event.enabled` False, which stops every event buy, re-sends included.
 
-### The close economics stop charging the cancelled subscriptions, on `fix/subs-end-economics` (unreleased; owner files `league/project_economics.py`, `league/ops/economics.py`; joins a release after 1019d)
+### The close economics stop charging the cancelled subscriptions, on `fix/subs-end-economics` (DEPLOYED 21:17Z Oct 21 in release 1019e; owner files `league/project_economics.py`, `league/ops/economics.py`; joins a release after 1019d)
 
 - **Why.** The owner cancelled ThetaData and Alpaca Algo Trader Plus on Oct 18, 2026. The site's cost figure stopped
   accruing them at 2026-10-19T00:00:00Z in release 1019a (`publish.SUBSCRIPTIONS_ENDED_AT`), but the House's close
@@ -1060,7 +1146,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
 - **Tests.** `test_project_economics.test_cancelled_subscriptions_stop_accruing_at_their_end`,
   `test_ops_economics.test_a_cancelled_subscription_burns_nothing` (37 tests in the two modules, 3.14 and 3.11).
 
-### R3: births, the event lane's generator, on `feat/evl-births` (unreleased; built on `rel/1019b` `5cad27f2`; an owner deploy: THE GATEWAY FIRST, then the House with `events.births` switched on)
+### R3: births, the event lane's generator, on `feat/evl-births` (DEPLOYED 21:17Z Oct 21 in release 1019e, `events.births` on; built on `rel/1019b` `5cad27f2`; an owner deploy: THE GATEWAY FIRST, then the House with `events.births` switched on)
 
 - **Why.** The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts,
   rationed by an expected-false-pass budget you state" (goal-2026-10-19/R3-SPEC.md). PREREG-EVL-1/2/3 were hand births;
@@ -1103,7 +1189,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   no birth is registered and nothing else changes. Rollback: the release before it (the births tables are additive and
   ignored by it; a registered birth then stops deciding and trading, its open lots exit by their own plans).
 
-### WP4: the public site follows the event lane, on `feat/site-events` (unreleased; with personal-site branch `capital/event-lane`, either repository may deploy first; no identity, digest or money row moves)
+### WP4: the public site follows the event lane, on `feat/site-events` (DEPLOYED 21:17Z Oct 21 in release 1019e, the site at 21:29Z (personal-site #25); with personal-site branch `capital/event-lane`, either repository may deploy first; no identity, digest or money row moves)
 
 - **Why.** The owner's goal of Oct 19, 2026: "Website and repo docs stay current with every change: evolve the design,
   no redesign". The capital page keeps its five sections; its Agents board and Positions follow the lane.
@@ -1122,7 +1208,18 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   money" line under Learning; the lots among the positions; "0 / 100 events" beside the Agents heading. Read
   `...&window=1&lane=1`; every older read unchanged.
 
-### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (unreleased; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
+### 20:06Z Oct 21, 2026: releases 1019c and 1019d in one step (#581: release 1019c's head `f85cc152` and `feat/evl-4`), House `20261021T200543Z-98b98e817ece`, main `5a17bd25`; gateway `fccaf9da`
+
+- The gateway first: version `fccaf9da` deployed 20:05:32Z from the release 1019d head (its `gateway/` is release
+  1019c's; rollback `29ed37e1`).
+- The House: promoted 20:06:38Z, main fast-forwarded `306cadd1` -> `5a17bd25`; verified real money true, no failures,
+  the ids `b60410ad` / `a8d4cbd9` / `055e5313` (THE MONEY DIGEST MOVED `285fa7af` -> `055e5313` and the constitution
+  `fd38e4e1` -> `a8d4cbd9`: release 1019c's row, `equity_money.event.max_orders_day` 150), budget rule 3 (A88). Release
+  1019c's step 3 (`ops.json` `stall.research` false) and A87's cuts applied 20:17Z. That evening's close still ran on
+  release 1019b's 60-order line; the 150 line governs from Oct 22.
+- Rollback: the floor is release 1019b (`scripts/floor_box.py rollback`; the gateway by `wrangler rollback 29ed37e1`).
+
+### Release 1019d: PREREG-EVL-4's three programs, on `rel/1019d` (DEPLOYED 20:06Z Oct 21 with release 1019c in one step, #581, the gateway first at 20:05Z; release 1019c (`b35c018f`, then its head `f85cc152`) and the merge of `feat/evl-4` `699c5e69` (#579); an owner deploy of THE HOUSE ALONE, after release 1019c is live (its deploy 20:05Z Wed Oct 21) and before 12:55Z Thu Oct 22; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019c: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row changes)
 
 - **What it carries**: release 1019c (#580, its entry below, the House's previous release at this deploy: its head
   `b35c018f`, where `feat/evl-4` was merged, and then `f85cc152`, merged in after: main's two desk scoreboard pages, the
@@ -1192,7 +1289,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   `50e951c9`). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release 1019c
   seats none of them, and a later redeploy decides the closes it decided again for the new rows the same way.
 
-### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (unreleased; ships in release 1019d (A78), merged onto release 1019c at `b35c018f`; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's (release 1019b's; in release 1019d, release 1019c's `055e5313` / `a8d4cbd9`), read with the tree's own functions; no setting, no money row, no gateway change)
+### PREREG-EVL-4: three overnight event programs and two controls (the captain's births), seatable at version 1 from birth, on `feat/evl-4` (DEPLOYED 20:06Z Oct 21 in release 1019d; ships in release 1019d (A78), merged onto release 1019c at `b35c018f`; cut from `rel/1019b` `8458ab42`, with its round 4 `3230a884` merged in; an owner deploy: league/events/programs.py, run.py, screen.py, book.py and docs/prereg/ are behind league/ci.py's wall, and league/equity/ is protected; NO IDENTITY MOVES: the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the money digest `285fa7af`, the constitution digest `fd38e4e1` and the gate contract `397b22b7` are the base's (release 1019b's; in release 1019d, release 1019c's `055e5313` / `a8d4cbd9`), read with the tree's own functions; no setting, no money row, no gateway change)
 
 - **Why.** The owner's goal V2 (item 2: "Births come from your architect agents and from you ... rationed by an
   expected-false-pass budget you state") and the frozen [PREREG-EVL-4](docs/prereg/PREREG-EVL-4.md) (registered
@@ -1270,7 +1367,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   plans, and the old code seats none of them; on a later redeploy the closes the old code decided are decided again
   for the new rows the same way.
 
-### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (unreleased; `league/events/house.py`, behind the wall; in release 1019c's head `f85cc152`, so in release 1019d too; A82)
+### The daily-index backfill goes filing by filing, on `fix/backfill-filers` (DEPLOYED 20:06Z Oct 21 in release 1019d; `league/events/house.py`, behind the wall; in release 1019c's head `f85cc152`, so in release 1019d too; A82)
 
 - **The defect.** EDGAR's daily index lists a filing once per filer: a Form 4 under its issuer and its reporting owner,
   an 8-K under each co-registrant. The House's backfill (`EventLane._backfill`) marked a day done only when the
@@ -1288,7 +1385,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   Form 4-like owner row and an 8-K whose unlisted co-registrant comes first); a day cut by its deadline completes on
   the next pass.
 
-### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (unreleased; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+### Release 1019c: alarms and the daily report, the lane's fast finality and order line, on `rel/1019c` (DEPLOYED 20:06Z Oct 21 inside release 1019d; main `3230a884`, release 1019b as deployed, and two merges; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE, before 12:55Z Tue Oct 20; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the lane's one row, `equity_money.event.max_orders_day` 150), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **What it carries** (main `3230a884` and two merges, in this order, each `--no-ff`): `r3/lane-1019c` `6f53eeca`
   (#578: A69's fast path to a final record, A66's owed re-decision scope and the look-group freeze, the event kind's
@@ -1370,7 +1467,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   after the House, by `wrangler rollback 29ed37e1-896e-4d7a-b753-51a0c448af17` (or never: its composer still reads
   1019b's stall notices). A look the fast path wrote stands.
 
-### Release 1019c: the fast path to a final record (A69), the owed re-decision rule (A66), the event kind's own day order count, on `r3/lane-1019c` (unreleased; cut from `rel/1019b` `cd3d1505`, with release 1019b's final head `3230a884` (fix round 3, the proof's tightening `30558c43` and round 4, A72) merged in, and deployed after it, overnight Oct 19-20, before 12:55Z Tue; an owner deploy of the House alone, no gateway change; never 12:55-20:05Z on a trading day, never with an order in flight; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the one new row), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
+### Release 1019c: the fast path to a final record (A69), the owed re-decision rule (A66), the event kind's own day order count, on `r3/lane-1019c` (DEPLOYED 20:06Z Oct 21 in release 1019c; cut from `rel/1019b` `cd3d1505`, with release 1019b's final head `3230a884` (fix round 3, the proof's tightening `30558c43` and round 4, A72) merged in, and deployed after it, overnight Oct 19-20, before 12:55Z Tue; an owner deploy of the House alone, no gateway change; never 12:55-20:05Z on a trading day, never with an order in flight; THE MONEY DIGEST MOVES `285fa7af` -> `055e5313` and the constitution `fd38e4e1` -> `a8d4cbd9` (the one new row), the standing grant re-ratifies at the House's start; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move)
 
 - **Why.** The owner's goal of Oct 19, 2026 (speed is settled events and iterations, never calendar time) and the
   captain's amendments A66 and A69: a look waited three sessions for late data even when the
@@ -1447,7 +1544,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
   `50e951c9`), or the previous House release (release 1019b's: money `285fa7af`, constitution `fd38e4e1`; it knows an
   event lot's exit, so it may run with event lots open). A look the fast path wrote stands.
 
-### Release 1019c, alarms and costs: budget rule 3, the event lane's progress alarms, the cap breach, the daily one-screen report by mail, on `r2/alarms` (unreleased; ships in release 1019c on top of release 1019b; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE; never 12:55-20:05Z on a trading day, never with an order in flight; NO IDENTITY MOVES: money `285fa7af`, constitution `fd38e4e1`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b772b3`, release 1019b's)
+### Release 1019c, alarms and costs: budget rule 3, the event lane's progress alarms, the cap breach, the daily one-screen report by mail, on `r2/alarms` (DEPLOYED 20:06Z Oct 21 in release 1019c; ships in release 1019c on top of release 1019b; an owner deploy: THE GATEWAY FIRST, THEN THE HOUSE; never 12:55-20:05Z on a trading day, never with an order in flight; NO IDENTITY MOVES: money `285fa7af`, constitution `fd38e4e1`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b772b3`, release 1019b's)
 
 - **Why.** The owner's goal of Oct 19, 2026, items 4 and 5: "metered compute <= $5 a day plus half the trailing week's
   realized net profit, never above $25", "alarms on stalls, missed events, fill gaps and cap breaches; a daily

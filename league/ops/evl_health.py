@@ -26,7 +26,9 @@ inside `guard.readonly()`), on the House's NYSE calendar (`ltcm.data.us_equity_s
   the UTC day), which holds READ events over it by design: the alarm stands all the same, as their decisions wait.
 - `evl_score`: intents due by the latest session whose 23:00 ET has passed (`SCORE_BY`) still `planned` or `entered`:
   the night's score passes left them open. An intent whose exit print the tape showed absent (a `marks` row with no
-  price at or after its exit day: PREREG-EVL-1 section 5's ladder waits on a later session) is waiting by design and is
+  price, under one of the score's own labels `TAPE_LABELS`, 'open', 'close' or 'first', at or after its exit day:
+  PREREG-EVL-1 section 5's ladder waits on a later session; release 1019h: PREREG-EVL-5's '0930' minute with no trade
+  excuses nothing) is waiting by design and is
   counted apart, and so is one a decision WROTE AFTER the night's last score pass started (release 1019f; a catch-up
   decision of an older session, as PREREG-EVL-4's rows decided by themselves: `written_after`, from the decision
   receipts' own counts), which the next pass settles; with no pass after the close nothing is excused. A night with
@@ -74,7 +76,11 @@ RELEASE 1019f (the audit of the live House, lens "stalls": alarms that did not e
   `decide-close-evl4` receipt is not `ok` (none, failed, cut, running, pending), or is `ok` but older than that close's
   latest decision (decided again by a release without the rows). The first sight is kept in stall.json (`evl_kept`).
   `evl_verdicts` reads the `decide-close-evl4` receipts' tallies too (each such receipt is a backfill: read while its
-  latest one started inside the last 24 h).
+  latest one started inside the last 24 h). RELEASE 1019h (the review of release 1019g): THE SAME FOR PREREG-EVL-5'S
+  ROWS (`FILE_WAITS`): `evl_decide` stands on a close in `made_without(prereg=5)` (a release without its rows decided
+  it, or its part for them failed or ran past its own bound: PREREG-EVL-5 section 3) whose `decide-close-evl5` is not
+  `ok` or is stale, on the same clock (its first sight kept apart, `evl_kept` `five`; the numbers `five_*` beside
+  `four_*`, the text naming the file), and `evl_verdicts` reads the `decide-close-evl5` receipts' tallies.
 - `evl_handback`: every real event fill the book has made (`eq_orders` of an event lot with `filled_qty` > 0) set
   beside the lane's `real_fills` (the rows the book hands back, league/equity/live.py `_event_fills`: a buy once its
   intent has ended, a sale once its lot is closed): it stands on any fill due to the lane more than `HANDBACK_HOURS` (1)
@@ -123,6 +129,13 @@ RESUME_MINUTES = 30
 OPEN_DECIDE = dt.time(9, 15)
 CLOSE_DECIDE_BEFORE = dt.timedelta(minutes=14)
 SCORE_BY = dt.time(23, 0)
+#: THE TAPE'S OWN WORD OF NO PRINT (`evl_score`'s excuse, `_waiting_on_tape`): a `marks` row with no price under one of
+#: the score's own labels (league/events/score.py `tape_print`: the listing exchange's opening cross 'open', its closing
+#: cross 'close', the first trade on any venue 'first'). No other label is a print the score waits on: release 1019g's
+#: PREREG-EVL-5 stores its gap's 09:30 minute with no price ('0930', league/events/run.py `GAP_LABEL`) when the tape
+#: served the name and that minute had no trade, which says nothing of an exit print (release 1019h, the review of
+#: release 1019g: it excused an unrelated stuck intent of the name).
+TAPE_LABELS = ("open", "close", "first")
 #: THE FILL GAP (`evl_fills`): the priced event twins read, the most a side's signed mean may be worse than the shadow's
 #: auction prices (the goal's Done item: "fills within 15 bp of replay"), and the fewest that judge it.
 FILL_LOOK = 20
@@ -175,8 +188,15 @@ FOUR_REFILL_HOURS = 2.0
 #: THE HAND-BACK (`evl_handback`, release 1019f): a real fill due to the lane's `real_fills` this long and not there
 #: stands.
 HANDBACK_HOURS = 1.0
-#: What the stall job keeps for these causes in stall.json (`evl_kept`): {"four": {close day: first seen}}.
+#: What the stall job keeps for these causes in stall.json (`evl_kept`): {"four": {close day: first seen}, "five": the
+#: same for PREREG-EVL-5's rows (release 1019h)}.
 KEPT_FOUR = "four"
+KEPT_FIVE = "five"
+#: THE FILES WHOSE ROWS A CLOSE DECISION CAN LEAVE TO THEIR OWN DECISION (release 1019h, the review of release 1019g:
+#: release 1019f's two readers were PREREG-EVL-4's alone): {prereg: (its facts' key, its kept key, its words)}, each read
+#: by the judge's own `made_without(prereg=)` and its kind (league/events/screen.py `FILE_KINDS`: `decide-close-evl4`,
+#: `decide-close-evl5`).
+FILE_WAITS = {4: ("four", KEPT_FOUR, "PREREG-EVL-4"), 5: ("five", KEPT_FIVE, "PREREG-EVL-5")}
 DOING = {
     "not_judged": "Nothing: the cause is not judged while it reads so.",
     "evl_record": ("The House's tick runs a record pass every 2 minutes (EDGAR's current 8-K and Form 4 feeds, Alpaca's "
@@ -188,7 +208,9 @@ DOING = {
                    "failed while it is live, and decides a missed one later from what was knowable at its time (the "
                    "shadow rule). A decision not made in its window missed its auction: real money took none of its "
                    "events. PREREG-EVL-4's rows of a close a release without them decided are decided by themselves "
-                   "(decide-close-evl4, once, as a backfill) from the House's hourly refill; until then that close is not "
+                   "(decide-close-evl4, once, as a backfill) from the House's hourly refill, and PREREG-EVL-5's rows of "
+                   "such a close, or of one whose part for them failed or ran past its own bound, the same way "
+                   "(decide-close-evl5; that close's events of theirs are never traded); until then that close is not "
                    "final for them."),
     "evl_verdicts": ("The lane asks each verdict as soon as its event is recorded and eligible, and again before each "
                      "decision, at most 3 calls a pass; a call with no answer stores nothing and is asked again "
@@ -375,14 +397,15 @@ class _Db:
 def empty_facts() -> dict[str, Any]:
     """`facts` of a lane with no store yet."""
     return {"record": [], "decide": {}, "score": [], "open_due": [], "none_marks": set(), "backfill": [],
-            "backfill_meta": {}, "four": {}}
+            "backfill_meta": {}, "four": {}, "five": {}}
 
 
 def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]:
     """Every receipt the causes read, and the intents due by `score_day` still open, in one read-only transaction:
     {record: [...], decide: {job: [...]}, score: [...], open_due: [...], none_marks: {(symbol, day)}, backfill: [...],
-    backfill_meta: {day: value}, four: {close day: {stale, closed_at, status}}} (`four`: league/events/screen.py
-    `made_without` over the store, the judge's own reading of the closes PREREG-EVL-4's rows still wait on)."""
+    backfill_meta: {day: value}, four: {close day: {stale, closed_at, status}}, five: the same} (`four`:
+    league/events/screen.py `made_without` over the store, the judge's own reading of the closes PREREG-EVL-4's rows
+    still wait on; `five`, release 1019h: PREREG-EVL-5's, `made_without(prereg=5)`)."""
     since = S.iso(now - 5 * 86400)
     today = dt.datetime.fromtimestamp(now, NY).date()
 
@@ -404,6 +427,7 @@ def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]
         out["backfill_meta"] = {str(r["key"])[len("evl:backfill:"):]: str(r["value"]) for r in guard.rows(
             db, "SELECT key, value FROM meta WHERE key LIKE 'evl:backfill:%'")}
         out["four"] = four_waiting(db, today)
+        out["five"] = four_waiting(db, today, prereg=5)
         if score_day is not None:
             out["open_due"] = guard.rows(db, "SELECT i.program, i.version, i.event, i.symbol, i.entry_day, i.entry_at, "
                                              "i.exit_day, i.exit_at, (SELECT u.bench FROM universe u WHERE u.day=i.entry_day AND "
@@ -413,23 +437,28 @@ def facts(root: str | Path, now: float, score_day: str | None) -> dict[str, Any]
                                                                             if r["bench"]})
             if symbols:
                 first = min(str(r["entry_day"]) for r in out["open_due"])
-                marks = guard.batched(db, "SELECT symbol, day FROM marks WHERE px IS NULL AND day>=? AND symbol IN "
-                                          "({marks})", symbols, params=(first,))
+                # (release 1019h: the score's own auction labels only, `TAPE_LABELS`; PREREG-EVL-5's '0930' minute
+                # with no trade is no print the score waits on)
+                marks = guard.batched(db, "SELECT symbol, day FROM marks WHERE px IS NULL AND label IN ("
+                                          + ", ".join("?" * len(TAPE_LABELS)) + ") AND day>=? AND symbol IN ({marks})",
+                                      symbols, params=(*TAPE_LABELS, first))
                 out["none_marks"] = {(str(m["symbol"]), str(m["day"])) for m in marks}
         return out
     return guard.read(Path(root) / STORE, read)
 
 
-def four_waiting(db: Any, today: dt.date) -> dict[str, dict[str, Any]] | None:
+def four_waiting(db: Any, today: dt.date, *, prereg: int = 4) -> dict[str, dict[str, Any]] | None:
     """THE CLOSES PREREG-EVL-4'S ROWS STILL WAIT ON: league/events/screen.py `made_without` over the store (the judge's own
     reading, read only: no program is run), {close day: {stale, closed_at (the finish of the close's latest
     `decide-close` receipt, epoch), status (its latest `decide-close-evl4` receipt's, None when there is none)}}; None
-    when the judge's reading cannot be made (the cause says so)."""
+    when the judge's reading cannot be made (the cause says so). `prereg` 5 (release 1019h): PREREG-EVL-5's, by
+    `made_without(prereg=5)` and its own kind's receipts (`decide-close-evl5`: a close a release without its rows
+    decided, or whose part for them failed or ran past its own bound)."""
     try:
         from ..events import screen as SC
 
-        waiting = SC.made_without(_Db(db), today)
-        kind = SC.FOUR_KIND
+        waiting = SC.made_without(_Db(db), today, prereg=prereg)
+        kind = SC.FILE_KINDS[int(prereg)]
     except Exception:  # noqa: BLE001 - not read: said, never a stall by itself
         return None
     out: dict[str, dict[str, Any]] = {}
@@ -665,8 +694,8 @@ FOUR_WORDS = {"never": "was never run", "failed": "failed", "cut": "was cut by t
 
 def four_kept(kept: Any, four: Mapping[str, Any] | None, now: float) -> dict[str, str]:
     """The stall job's FIRST SIGHT of each close PREREG-EVL-4's rows still wait on (`four_waiting`), {day: ISO time}, kept
-    in stall.json (`evl_kept` `four`): a close seen now keeps its first sight (or takes now), one that no longer waits is
-    dropped; with nothing read (None) what was kept stays."""
+    in stall.json (`evl_kept` `four`; PREREG-EVL-5's under `five`, release 1019h): a close seen now keeps its first sight
+    (or takes now), one that no longer waits is dropped; with nothing read (None) what was kept stays."""
     seen = kept if isinstance(kept, Mapping) else {}
     if four is None:
         return {str(k): str(v) for k, v in seen.items() if S.epoch(v) is not None}
@@ -683,10 +712,10 @@ def _four_state(row: Mapping[str, Any]) -> str:
 
 
 def _four(now: float, four: Mapping[str, Any] | None, seen: Mapping[str, Any], idle: Mapping[str, list]) -> list:
-    """PREREG-EVL-4's rows still to decide by themselves (the module docstring): each close of `four` waiting
-    `FOUR_REFILL_HOURS` since the later of the stall job's first sight (`seen`), the finish of its latest `decide-close`
-    receipt and the end of the last STOP or PAUSE, oldest first. None while the House's PAUSE stands (no verdict is asked:
-    a decision waiting on them waits by design)."""
+    """PREREG-EVL-4's (or PREREG-EVL-5's: `FILE_WAITS`) rows still to decide by themselves (the module docstring): each
+    close of `four` waiting `FOUR_REFILL_HOURS` since the later of the stall job's first sight (`seen`), the finish of its
+    latest `decide-close` receipt and the end of the last STOP or PAUSE, oldest first. None while the House's PAUSE
+    stands (no verdict is asked: a decision waiting on them waits by design)."""
     if not four or _open(list(idle.get("pause") or [])):
         return []
     quiet = max([float(end) for start, end in (idle.get("stop") or []) + (idle.get("pause") or []) if end is not None],
@@ -720,8 +749,12 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                      else status if status in ("failed", "cut") else "failed")
         later = any(str(r.get("status") or "") in ("ok", "pending") and r.get("finished_at") for r in rows)
         missed.append({**d, "state": state, "later": later})
-    four = f.get("four")
-    waits = _four(now, four, seen or {}, idle if isinstance(idle, Mapping) else {"stop": stops})
+    windows = idle if isinstance(idle, Mapping) else {"stop": stops}
+    seen = seen or {}
+    # (release 1019h: PREREG-EVL-5's rows too, each file by its own kind, kept apart: `FILE_WAITS`)
+    by_file = {n: _four(now, f.get(key), seen.get(kept) if isinstance(seen.get(kept), Mapping) else {}, windows)
+               for n, (key, kept, _) in FILE_WAITS.items()}
+    waits = by_file[4]
     first = missed[0] if missed else None
     if first is None:
         what = (f"Every scheduled decision of the last {DECIDE_LOOKBACK_HOURS:g} h was made in its window ({len(due)})."
@@ -734,15 +767,21 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                 + ("; it was decided later, for the shadow record only" if first["later"] else "")
                 + (f". {len(missed)} decisions of the last {DECIDE_LOOKBACK_HOURS:g} h were missed in all." if len(missed) > 1
                    else "."))
-    if waits:
-        w = waits[0]
-        text = (f"PREREG-EVL-4's rows of the close of {w['day']} are still to decide by themselves "
-                f"{_hours_of(now - w['since'])} h after a release decided it without them: its decide-close-evl4 "
-                f"{FOUR_WORDS[w['state']]}" + (f" ({len(waits)} closes in all)" if len(waits) > 1 else "") + ".")
-        what = text if first is None else f"{what} {text}"
-    elif four is None:
-        what += " PREREG-EVL-4's closes could not be read (league/events/screen.py made_without)."
-    return {"stalled": bool(missed) or bool(waits), "judged": True, "what": what,
+    for n, (key, _, name) in FILE_WAITS.items():
+        found = by_file[n]
+        if found:
+            w = found[0]
+            how = ("a release decided it without them" if n == 4 else
+                   "a release decided it without them or their part of it failed")
+            text = (f"{name}'s rows of the close of {w['day']} are still to decide by themselves "
+                    f"{_hours_of(now - w['since'])} h after {how}: its decide-close-evl{n} "
+                    f"{FOUR_WORDS[w['state']]}" + (f" ({len(found)} closes in all)" if len(found) > 1 else "") + ".")
+            what = text if first is None and not any(by_file[m] for m in FILE_WAITS if m < n) else f"{what} {text}"
+        elif f.get(key) is None:
+            what += f" {name}'s closes could not be read (league/events/screen.py made_without)."
+    fives = by_file[5]
+    onsets = [w["since"] for found in by_file.values() for w in found[:1]]
+    return {"stalled": bool(missed) or any(by_file.values()), "judged": True, "what": what,
             "numbers": {"decisions_due": len(due), "missed": len(missed), "excused_stop": excused,
                         "first_missed": None if first is None else f"{first['kind']}:{first['day']}",
                         "first_missed_at": None if first is None else S.iso(first["at"]),
@@ -750,9 +789,12 @@ def _decide(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], stops: lis
                         "decided_later": sum(1 for m in missed if m["later"]),
                         "four_waiting": len(waits), "four_first": waits[0]["day"] if waits else None,
                         "four_state": waits[0]["state"] if waits else None,
-                        "four_hours": round((now - waits[0]["since"]) / 3600.0, 1) if waits else None},
+                        "four_hours": round((now - waits[0]["since"]) / 3600.0, 1) if waits else None,
+                        "five_waiting": len(fives), "five_first": fives[0]["day"] if fives else None,
+                        "five_state": fives[0]["state"] if fives else None,
+                        "five_hours": round((now - fives[0]["since"]) / 3600.0, 1) if fives else None},
             "doing": DOING["evl_decide"], "owner_step": None,
-            "onset": first["ends"] if first is not None else (waits[0]["since"] if waits else None)}
+            "onset": first["ends"] if first is not None else (min(onsets) if onsets else None)}
 
 
 def _hours_of(seconds: float) -> str:
@@ -777,14 +819,16 @@ def tally(row: Mapping[str, Any]) -> tuple[int | None, int] | None:
     return None
 
 
-def four_decisions(now: float, f: Mapping[str, Any]) -> list[dict[str, Any]]:
+def four_decisions(now: float, f: Mapping[str, Any], *, prereg: int = 4) -> list[dict[str, Any]]:
     """PREREG-EVL-4's own decisions (`decide-close-evl4:<day>`, each a backfill of its close: league/events/run.py
     `decide_close` with `evl4_only`) whose latest receipt started inside the last `DECIDE_LOOKBACK_HOURS`, as
-    `decisions` gives the scheduled ones: [{kind, day, at, ends}], `at` the close's decision time."""
+    `decisions` gives the scheduled ones: [{kind, day, at, ends}], `at` the close's decision time. `prereg` 5 (release
+    1019h): PREREG-EVL-5's (`decide-close-evl5:<day>`, `decide_close` with `evl5_only`)."""
     try:
-        from ..events.screen import FOUR_KIND
-    except Exception:  # noqa: BLE001 - the judge's name for it, as release 1019d ships it
-        FOUR_KIND = "close-evl4"
+        from ..events.screen import FILE_KINDS
+        FOUR_KIND = FILE_KINDS[int(prereg)]
+    except Exception:  # noqa: BLE001 - the judge's name for it, as releases 1019d and 1019g ship it
+        FOUR_KIND = f"close-evl{int(prereg)}"
     head = f"decide-{FOUR_KIND}:"
     out = []
     for job, rows in (f.get("decide") or {}).items():
@@ -808,7 +852,7 @@ def four_decisions(now: float, f: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def _verdicts(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], idle: Mapping[str, list],
               line: Mapping[str, Any] | None) -> dict[str, Any]:
-    due = decisions(now, kinds) + four_decisions(now, f)
+    due = decisions(now, kinds) + [d for n in FILE_WAITS for d in four_decisions(now, f, prereg=n)]
     held, needed_all, unanswered_all, read = [], 0, 0, 0
     quiet_until = max([float(end) for start, end in (idle.get("stop") or []) + (idle.get("pause") or [])
                        if end is not None], default=None)
@@ -844,8 +888,9 @@ def _verdicts(now: float, f: Mapping[str, Any], kinds: tuple[str, ...], idle: Ma
         what = (f"No verdict a decision of the last {DECIDE_LOOKBACK_HOURS:g} h needed is unanswered past it." if read
                 else f"No decision of the last {DECIDE_LOOKBACK_HOURS:g} h carries a verdict tally.")
     else:
-        kind = "close decision of PREREG-EVL-4's rows" if first["kind"] != "open" and first["kind"] != "close" \
-            else f"{first['kind']} decision"
+        own = {f"close-evl{n}": name for n, (_, _, name) in FILE_WAITS.items()}
+        kind = (f"close decision of {own.get(first['kind'], 'PREREG-EVL-4')}'s rows"
+                if first["kind"] != "open" and first["kind"] != "close" else f"{first['kind']} decision")
         what = (f"{first['missing']} verdicts the event lane's {kind} of {first['day']} needs have no "
                 f"answer {round((now - first['since']) / 60)} minutes past it"
                 + (f" ({len(held)} decisions in all)" if len(held) > 1 else "")
@@ -870,7 +915,8 @@ def score_session(now: float) -> dict[str, Any] | None:
 
 def _waiting_on_tape(row: Mapping[str, Any], marks: set) -> bool:
     """An open intent whose exit print, or its benchmark's print, the tape showed absent (a `marks` row with no price on
-    its entry day or at or after its exit day): PREREG-EVL-1 section 5's ladder waits on a later session by design."""
+    its entry day or at or after its exit day; `marks` holds only the score's own labels, `TAPE_LABELS`, as `facts`
+    reads them): PREREG-EVL-1 section 5's ladder waits on a later session by design."""
     for symbol in (str(row["symbol"]), str(row.get("bench") or "")):
         if not symbol:
             continue
@@ -1441,12 +1487,15 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
             with guard.readonly():
                 f = facts(root, now, None if latest is None else latest["day"].isoformat())
         kinds = entry_kinds()
-        seen = (kept or {}).get(KEPT_FOUR) if isinstance(kept, Mapping) else None
-        seen = seen if isinstance(seen, Mapping) else {}
+        seen = {}
+        for key, held, _ in FILE_WAITS.values():
+            got = (kept or {}).get(held) if isinstance(kept, Mapping) else None
+            seen[held] = got if isinstance(got, Mapping) else {}
         out = {"evl_record": _record(now, f),
                "evl_decide": _decide(now, f, kinds, stops, idle={"stop": stops, "pause": pauses}, seen=seen)}
         if kept is not None:
-            kept[KEPT_FOUR] = four_kept(seen, f.get("four"), now)
+            for key, held, _ in FILE_WAITS.values():
+                kept[held] = four_kept(seen[held], f.get(key), now)
         if _open(pauses):
             out["evl_verdicts"] = _not_judged("the House is paused (PAUSE): no verdict is asked while it stands")
         elif _ended_lately(pauses, now) is not None:
@@ -1519,6 +1568,7 @@ __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "swi
            "backfill_reach", "backfill_due", "handback_facts", "four_waiting", "four_kept", "four_decisions",
            "empty_facts", "LIVE_DB", "ENTRY_HOURS", "ENTRY_FILL_SHARE", "AUCTION_SETTLE_MINUTES", "VENUE_CANCEL_S",
            "BOUND", "UNSENT", "BACKFILL_DUE", "BACKFILL_STREAK_HOURS", "FOUR_REFILL_HOURS", "HANDBACK_HOURS", "KEPT_FOUR",
+           "KEPT_FIVE", "FILE_WAITS",
            "written_after", "DECIDE_JOB",
            "RECORD_MINUTES", "DECIDE_GRACE_MINUTES", "DECIDE_LOOKBACK_HOURS", "VERDICT_GRACE_MINUTES", "RESUME_MINUTES",
-           "SCORE_BY", "FEEDS"]
+           "SCORE_BY", "FEEDS", "TAPE_LABELS"]
