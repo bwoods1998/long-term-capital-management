@@ -213,6 +213,99 @@ _LOAD = threading.Lock()
 #: load of the SAME store keeps when its read fails (release 1019e's review).
 _LAST_READ: tuple[str | None, tuple[Program, ...]] = (None, ())
 
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
+#: PREREG-EVL-7's REGISTRATION TIME (its preamble, A92's method: the latest of its commit's time, the pushing client's
+#: clock after the push of the tag `prereg-evl-7` returned and GitHub's activity time for the branch `prereg/evl-7`),
+#: the ONE CONSTANT the freeze sets: A125 (the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the client's
+#: 20:14:13Z after the tag push returned; tag prereg-evl-7, commit 367a2970, docs/prereg/PREREG-EVL-7.md sha256
+#: ced186aa..., docs/prereg/evl-7/ 211 files). None refuses every decision of the learners: they are then in no registry
+#: (`learners`), so they neither decide nor trade nor are charged (E3), and nothing of the lane moves. Pinned, they
+#: start with the first release that carries this code (section 1.7: their judged clock starts at its first live
+#: decision; the decisions from this time to it are the catch-up's training state, never judged or traded).
+REGISTERED_AT_7: str | None = "2026-10-22T20:14:13Z"  # A125: tag prereg-evl-7, commit 367a2970
+#: PREREG-EVL-6's registration time as the captain's A116 records it (tag prereg-evl-6, commit 4ae9017a): PREREG-EVL-7
+#: registers anything only when it is EARLIER than REGISTERED_AT_7 (section 3.3, E3; `registers_7`). Kept here beside
+#: the learners so this file's rows read no other branch's constant; a test holds it equal to `REGISTERED_AT_6` wherever
+#: the tree carries PREREG-EVL-6's code.
+REGISTERED_AT_6_FOR_7 = "2026-10-22T12:24:50Z"
+#: The file that registers the learners, and their families (one each; league/events/learner.py decides them, never
+#: `select`): an open-to-close learner over the open pool, a close-to-next-open learner over the close pool.
+FILE_7 = 7
+LEARNER_FAMILIES = ("learner-o1", "learner-on")
+
+
+@dataclasses.dataclass(frozen=True)
+class Learner(Program):
+    """A PREREG-EVL-7 learner version (section 1.2): its own registration time, REGISTERED_AT_7 (never another file's),
+    and its seat only when this file registers anything (`registers_7`, E3). Its rule is league/events/learner.py's
+    pinned procedure, never `select`'s: `rule` "learner", no verdict read by the shadow rule (`reads` False)."""
+
+    @property
+    def registered_at(self) -> dt.datetime:
+        if REGISTERED_AT_7 is None:
+            raise RuntimeError("PREREG-EVL-7 is not pinned: none of its learners decides before its registration time")
+        return S.parse_iso(REGISTERED_AT_7)
+
+    @property
+    def can_seat(self) -> bool:
+        return self.seatable and registers_7()
+
+
+#: SECTION 1.2'S TWO PROGRAMS, VERSION 1 EACH, seatable at PREREG-EVL-3's learning band from birth, hold 1 (one session in
+#: the screen's sense), PREREG-EVL-2's limit at entry (score.py: prereg >= 2). This file registers no other version.
+LEARNER_ROWS: tuple[Learner, ...] = (
+    Learner("EVL-LRN-O1", 1, True, "learner-o1", "open", 1, False, rule="learner", prereg=FILE_7),
+    Learner("EVL-LRN-ON", 1, True, "learner-on", "close", 1, False, exit_at="open", rule="learner", prereg=FILE_7),
+)
+
+
+def registers_7() -> bool:
+    """Whether PREREG-EVL-7 registers anything (its preamble, section 3.3, E3): REGISTERED_AT_7 is pinned and
+    PREREG-EVL-6's registration time is earlier than it. Never True on an unreadable time (fail closed)."""
+    if REGISTERED_AT_7 is None:
+        return False
+    try:
+        return S.parse_iso(REGISTERED_AT_6_FOR_7) < S.parse_iso(REGISTERED_AT_7)
+    except (TypeError, ValueError):
+        return False
+
+
+def learners() -> tuple[Learner, ...]:
+    """The learner rows in force: both when this file registers anything (`registers_7`), else none."""
+    return LEARNER_ROWS if registers_7() else ()
+
+
+#: The registries without this file's rows (PREREG-EVL-1 to -6 as this tree holds them): `refresh_7` adds the learners
+#: AFTER every one of them, so ROOM's order (league/events/book.py `order_of`) puts them after every earlier file's row
+#: and before R3's births (A101), and no earlier row's place, rule or judge moves.
+_BEFORE_7 = (PROGRAMS, SEATING)
+
+
+def refresh_7() -> tuple[Learner, ...]:
+    """THE REGISTRIES WITH PREREG-EVL-7 AS PINNED (`learners`): PREREG_PROGRAMS and PREREG_SEATING are the earlier files'
+    rows then the learners; PROGRAMS, BY_KEY, BY_ID and SEATING are rebound with R3's births loaded last after them (as
+    `load_births` binds them). Run at import and by a test that pins REGISTERED_AT_7. Returns the learners in force."""
+    global PROGRAMS, BY_KEY, BY_ID, SEATING, PREREG_PROGRAMS, PREREG_SEATING
+    rows = learners()
+    with _LOAD:
+        PREREG_PROGRAMS = _BEFORE_7[0] + rows
+        PREREG_SEATING = _BEFORE_7[1] + tuple(p for p in rows if p.can_seat)
+        programs = PREREG_PROGRAMS + BIRTHS
+        PROGRAMS = programs
+        BY_KEY = {(p.id, p.version): p for p in programs}
+        BY_ID = {p.id: p for p in programs if p.version == 1}
+        SEATING = PREREG_SEATING + tuple(p for p in BIRTHS if p.can_seat)
+    return rows
+
+
+def is_learner(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-7's learners, pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid for p in LEARNER_ROWS)
+
+
+refresh_7()
+
 
 def _where(store: Any) -> str | None:
     """The store's root, resolved (the lane's `Store` and the book's read-only `Lane` of one store give the same), or

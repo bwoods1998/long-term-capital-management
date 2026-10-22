@@ -1,0 +1,2 @@
+=== pilot 17:10:50Z
+=== STOPPED 17:22Z by the fixer after the pool-300 pair had finished (1,000 programs each): the levels built from the issuer's own returns read 0.128 against 0.083 static (the picks' issuer effect +25.1 bp against +2.1 bp), so both levels are deleted from the learners (calib_w7r.py lev 'drop'); the pool-800 cells were left part-run (static 400 programs, own levels none) and are cited only as such

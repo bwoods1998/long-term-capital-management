@@ -1020,6 +1020,22 @@ def wall_equity(E: Decimal, account: Mapping[str, Any] | None) -> Decimal:
     return E if now is None else min(E, now)
 
 
+def _max_open(s: Any, band: str, program: Any) -> int:
+    """`Settings.max_open` of `band` for `program` where the book's settings read a program's own row (release 1019i's
+    PREREG-EVL-6 section 6: its versions' 14 Probe slots), else the band's."""
+    try:
+        return int(s.max_open(band, program))
+    except TypeError:
+        return int(s.max_open(band))
+
+
+def _learner(adapter: Any, inst: Any) -> bool:
+    """Whether an event instance is a PREREG-EVL-7 learner's (league/events/book.py `is_learner`; an adapter without it
+    has none): its auction's picks are its own decision's, after every other row's (`EquityBook._event_decide_lrn`)."""
+    test = getattr(adapter, "is_learner", None)
+    return bool(test is not None and getattr(inst, "kind", None) == EVENT_KIND and test(inst.family))
+
+
 @dataclass
 class HeldAhead:
     """PREREG-EVL-5 section 1.3's ROOM WHILE A BUY WAITS FOR THE LANE'S CLOSE DECISION (league/events/book.py
@@ -1897,7 +1913,8 @@ class EquityBook:
                 return f"one order a symbol: a working order on {symbol} that is not the equity book's"
         return None
 
-    def _count_refusal(self, day: str, *, exit_: bool, event_line: int | None = None, held: int = 0) -> str | None:
+    def _count_refusal(self, day: str, *, exit_: bool, event_line: int | None = None, held: int = 0,
+                       keep: int = 0) -> str | None:
         """THE ONE DAY ORDER COUNT (A8.3): None when one more order (and its cancel) fits. AN ENTRY must fit ITS LANE'S
         own count with room left for the exits of that lane's lots held (`_exit_reserve`: an old lane's lot's exit and
         one cancel of it; an event lot's one auction sale, none once sent): an old lane's entry the old lanes' orders
@@ -1919,10 +1936,13 @@ class EquityBook:
         cancels, exits' included, leave too little room. (Under release 1019b's one count of 60 for both, the event
         kind's entries stopped at about 30 open-entry lots sold the same day.) `held` (PREREG-EVL-5 section 1.3, an event
         entry only): the buys ahead of this one in ROOM's order that wait for the lane's close decision (`HeldAhead`),
-        each keeping its send and its own exit on both lines, so a later row never takes a slot ROOM gives them."""
+        each keeping its send and its own exit on both lines, so a later row never takes a slot ROOM gives them. `keep`
+        (PREREG-EVL-7 section 1.9, an event entry of a learner only, `_event_line_keep`): the orders the earlier PREREG
+        rows may still send on `day` after it (this auction's buys not yet sent and A80's re-sends, and at the open the
+        close's entries), kept on both lines, so the line refuses this file's entries after every earlier row's."""
         mine = orders_today(self.state.rows, day)
         own = 0
-        kept_ahead = 2 * max(0, int(held)) if not exit_ else 0
+        kept_ahead = 2 * max(0, int(held)) + max(0, int(keep)) if not exit_ else 0
         if not exit_:
             events = event_orders_today(self.state.rows, day)
             if event_line is not None:
@@ -1931,7 +1951,10 @@ class EquityBook:
                 if events + 1 + own + reserve + kept_ahead > cap:
                     return (f"the event kind's day order count: {events} of {cap} sent, {reserve + own} kept for "
                             "exiting its lots and buys held and this one" + (
-                                f", {kept_ahead} for the {held} buys ahead of it that {HELD_AHEAD}" if kept_ahead else ""))
+                                f", {2 * max(0, int(held))} for the {held} buys ahead of it that {HELD_AHEAD}"
+                                if held else "") + (
+                                f", {keep} for the earlier PREREG rows' orders still to come today (PREREG-EVL-7 "
+                                "section 1.9's day order line)" if keep else ""))
             else:
                 et = self._et()
                 cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
@@ -5214,6 +5237,10 @@ class EquityBook:
                     self._event_decide(now, em, at, s, adapter, out)
                 except Exception as exc:  # noqa: BLE001 - its exits were planned first; decided again next minute
                     self._error(f"event decide {at}", exc, out)
+                try:    # (PREREG-EVL-7: the learners' own decision of the auction, after it: `_event_decide_lrn`)
+                    self._event_decide_lrn(now, em, at, s, adapter, out)
+                except Exception as exc:  # noqa: BLE001 - decided again next minute; no earlier row waits on it
+                    self._error(f"event decide {at} learners", exc, out)
                 if sending:
                     self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",))
         try:
@@ -5353,7 +5380,17 @@ class EquityBook:
             wanted: dict[str, list[Any]] = {}
             rooms: dict[str, int] = {}
             insts = {}
+            # PREREG-EVL-7 SECTION 1.9's ROOM: the learners of this auction that may take a name (live, with room, their
+            # real-money gate open) and their ROOM key (`book.learner_cut`). Every PREREG-EVL-1 to -6 row is given its
+            # names here, whatever its band (a learner's pick waits for its own live receipt and keeps no room from an
+            # earlier row); an R3 BIRTH AFTER THAT KEY (`book.after_learners`) has its picks read now, as of this
+            # decision, and its names given only by the learners' own decision of the auction (`_event_decide_lrn`),
+            # after the learners in ROOM's place (A113's birth behind a waiting buy). No learner: no cut, as before.
+            cut = self._event_learner_cut(at, s, adapter, lane)
+            deferred: dict[str, dict[str, Any]] = {}
             for inst in self._instances(alive=True):
+                if _learner(adapter, inst):
+                    continue        # (PREREG-EVL-7's learners: their own decision after this one, `_event_decide_lrn`)
                 program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
                 if program is None or not inst.live or program.entry_at != at:
                     continue
@@ -5372,9 +5409,16 @@ class EquityBook:
                     self._error(f"event picks {inst.family}", exc, out)
                     summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
                     continue
+                if cut is not None and adapter.after_learners(inst.family, inst.band, cut):
+                    deferred[inst.family] = {"version": int(inst.version), "band": inst.band, "room": room,
+                                             "picks": [adapter.pick_record(p) for p in got]}
+                    summary["programs"][inst.family] = {"picks": len(got), "room": room, "after": "learners"}
+                    continue
                 wanted[inst.family], rooms[inst.family] = list(got), room
                 insts[inst.family] = (inst, program)
                 summary["programs"][inst.family] = {"picks": len(got), "room": room}
+            if cut is not None:
+                summary["learners"] = {"cut": list(cut), "deferred": deferred}
             gate, unreadable = self._event_gate(day, at, s, adapter) if any(wanted.values()) else (None, "")
             if unread:
                 # (Release 1019b's third review: A T29 BATCH FAILURE DROPS ONLY THE REACT ROWS' PICKS. A name whose T29
@@ -5465,6 +5509,221 @@ class EquityBook:
             "exit_at": exit_at, "lid": None, "rung": 0,
             "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None, "created_at": now},
             "iid")
+
+    def _event_learners(self, at: str, adapter: Any) -> list[tuple[Instance, Any]]:
+        """The live PREREG-EVL-7 learner instances whose entry is this auction, with their program rows."""
+        is_learner = getattr(adapter, "is_learner", None)
+        if is_learner is None:
+            return []
+        out = []
+        for inst in self._instances(alive=True):
+            program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
+            if program is not None and is_learner(program) and inst.live and program.entry_at == at:
+                out.append((inst, program))
+        return out
+
+    def _event_learner_cut(self, at: str, s: Any, adapter: Any, lane: Any) -> tuple[int, int] | None:
+        """PREREG-EVL-7 section 1.9: the ROOM key from which this auction's names wait for the learners' own decision
+        (`book.learner_cut` over the learners that MAY TAKE A NAME here: live, with room, their real-money gate open,
+        `book.learner_gate`), None when no learner may (every name is given by the auction's own decision, as without
+        them). A gate that cannot be read is closed: that learner takes nothing, and holds no name back."""
+        cut_of = getattr(adapter, "learner_cut", None)
+        if cut_of is None or lane is None:
+            return None
+        may = []
+        for inst, program in self._event_learners(at, adapter):
+            if _max_open(s, inst.band, program) - self._event_open_count(inst.id) <= 0:
+                continue
+            try:
+                if adapter.learner_gate(lane, program) is not None:
+                    continue
+            except Exception:  # noqa: BLE001 - closed: it takes nothing at this auction
+                continue
+            may.append((inst.family, inst.band))
+        return cut_of(may) if may else None
+
+    def _event_line_keep(self, intent: Intent, inst: Instance, day: str, at: str, s: Any, adapter: Any) -> int:
+        """PREREG-EVL-7 SECTION 1.9's DAY ORDER LINE for a LEARNER'S ENTRY (`book.is_learner`; 0 for every other row): the
+        orders of the event kind's line `day` keeps for the EARLIER PREREG ROWS (every event instance that is no
+        learner and no birth: R3's births come after the learners in ROOM) that they may still send on `day` after this
+        entry, so the line refuses this file's entries after every earlier row's, ACROSS THE DAY'S AUCTIONS (the money
+        review: a fixed keep let an open entry of EVL-LRN-O1, with its same-day exit, refuse an earlier row's entry at
+        that day's close; section 1.11 (10), the reading that trades less):
+        - THIS AUCTION: each earlier row's buy not yet sent (`planned`) keeps its send, its one A80 re-send and, at the
+          open, its exit at that day's close (3; 2 at the close, whose exits are a later day's); each sent and not
+          finished with no re-send yet keeps that re-send (1);
+        - AT THE OPEN, THE DAY'S CLOSE, while `book.LINE_ACROSS_AUCTIONS` holds (its comment: with release 1019h's ten
+          close-entry rows at learning this alone is 160 of the line's 150, so EVL-LRN-O1 buys nothing in real money,
+          a stated effect for the captain's amendment): every live earlier row whose entry is the close keeps, for each
+          position its band may still open there (`max_open` less what it holds and has on order, its lots whose sale is
+          planned or working today given back), a send and its one re-send (2 each);
+        - plus one for the last entry's own exit as `_count_refusal` counts it (a close entry's exit is a later day's).
+        An exit is never stopped by the line; a later day's line is not this one's (EVL-LRN-ON's sales at D+1's open
+        are exits there, which the line never stops: section 1.9)."""
+        test = getattr(adapter, "is_learner", None)
+        if test is None or not test(inst.family):
+            return 0
+
+        def earlier(o: Instance) -> bool:
+            if o.kind != EVENT_KIND or test(o.family) or not o.live:
+                return False
+            program = adapter.program_of(o.family, o.version)
+            return program is not None and getattr(program, "spec", None) is None
+        mine = {o.id: o for o in self._instances(alive=True) if earlier(o)}
+        keep = 1
+        per_planned = 3 if at == "open" else 2
+        for r in self.state.rows("SELECT i.iid, i.status, i.instance FROM eq_event_intents e JOIN eq_intents i ON "
+                                 "i.iid=e.iid WHERE e.side='buy' AND e.day=? AND e.at=? AND i.iid!=? AND i.status IN "
+                                 f"({', '.join('?' * len(INTENT_LIVE))})", (day, at, intent.iid, *INTENT_LIVE)):
+            if str(r["instance"]) not in mine:
+                continue
+            if r["status"] == "planned":
+                keep += per_planned
+            elif len(self._intent_orders(int(r["iid"]))) < 2:
+                keep += 1
+        if at == "open" and getattr(adapter, "LINE_ACROSS_AUCTIONS", True):
+            for o in mine.values():
+                program = adapter.program_of(o.family, o.version)
+                if program is None or program.entry_at != "close":
+                    continue
+                held = self._event_open_count(o.id) - self._event_selling(o.id, day, "open") - \
+                    self._event_selling(o.id, day, "close")
+                top = _max_open(s, o.band, program)
+                keep += 2 * max(0, min(top, top - held))
+        return keep
+
+    def _event_summary(self, day: str, at: str) -> dict[str, Any]:
+        rows = self.state.rows("SELECT summary FROM eq_event_decisions WHERE day=? AND at=?", (day, at))
+        got = loads(rows[0]["summary"], {}) if rows else {}
+        return got if isinstance(got, dict) else {}
+
+    def _event_decide_lrn(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
+        """PREREG-EVL-7 SECTION 1.9: THE LEARNERS' DECISION OF THE AUCTION (`eq_event_decisions` row (day, "<at>-lrn")),
+        once a session and auction, AFTER the auction's own decision (`_event_decide`, which gave every PREREG-EVL-1 to
+        -6 row its names whatever its band, so none ever waits on a learner) and ONLY ONCE EACH LEARNER'S OWN LIVE
+        RECEIPT OF THE AUCTION HAS FINISHED (`book.learner_pending`; league/events/learner.py `live_state`): while one
+        has not, this is tried again each minute of the window, with no other bound, and the births held back for the
+        learners (`learners.deferred` of the auction's summary, read as of its decision time: R3's births after the
+        learners in ROOM, `book.after_learners`) wait with it (A113's reading: a waiting pick keeps room from the
+        births only). A learner whose first finished live receipt names it is asked for its picks (`book.picks`: its
+        LIVE decision's intents in its rank order, less its real-money gate, the ERN and 8-K guards and one position per
+        issuer); one whose receipt does not name it takes nothing at the auction. Those births and the learners are
+        given their names together by `book.allocate` in ROOM's order (a learner before R3's births; in Probe and Sized
+        the learner before its band's births in each pass, A85), passing over every name the auction's own decision
+        gave and the picks `_event_gate` skips; then planned as buys with their side rows and sent in ROOM's order
+        (`send_key`). Their summaries go into the auction's own decision row too (`programs`, `sale_to_later`), so
+        A85's reservation (`_event_recent`), the daily report and the alarms read them where they read every program's.
+        Nothing while the lane holds no learner and the auction held nothing back."""
+        day = em.day.isoformat()
+        key = f"{at}-lrn"
+        if getattr(adapter, "is_learner", None) is None or not self._event_decided(day, at) or \
+                self._event_decided(day, key):
+            return
+        lane = self._event_lane_store()
+        if lane is None or not s.enabled:
+            return
+        learners = self._event_learners(at, adapter)
+        main = self._event_summary(day, at)
+        held_back = main.get("learners") if isinstance(main.get("learners"), Mapping) else {}
+        deferred = held_back.get("deferred") if isinstance(held_back.get("deferred"), Mapping) else {}
+        if not learners and not deferred:
+            return
+        decided_at = em.open_decide if at == "open" else em.close_decide
+        waiting = [p.id for _, p in learners if adapter.learner_pending(lane, p, em.day)]
+        if waiting:
+            out["event_decide_lrn"] = f"waiting for the live receipt of {', '.join(waiting)} ({at} {day})"
+            return
+        moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
+        given_names = {str(r["symbol"]).upper() for r in self.state.rows(
+            "SELECT symbol FROM eq_event_intents WHERE side='buy' AND day=? AND at=?", (day, at))}
+        summary: dict[str, Any] = {"programs": {}, "after": at}
+        wanted: dict[str, list[Any]] = {}
+        rooms: dict[str, int] = {}
+        bands: dict[str, str] = {}
+        insts: dict[str, tuple[Instance, Any]] = {}
+        by_key = {(i.family, int(i.version)): i for i in self._instances(alive=True) if i.kind == EVENT_KIND}
+        for family, d in deferred.items():
+            # (read by the auction's own decision as of its decision time; given here, in ROOM's place)
+            inst = by_key.get((str(family), int(d.get("version") or 0)))
+            program = adapter.program_of(family, int(d.get("version") or 0)) if inst is not None else None
+            if inst is None or program is None or not inst.live:
+                summary["programs"][family] = {"picks": len(d.get("picks") or ()), "room": d.get("room"),
+                                               "error": "its instance is no longer live"}
+                continue
+            wanted[family] = [adapter.pick_of(x) for x in d.get("picks") or ()]
+            rooms[family], bands[family], insts[family] = int(d.get("room") or 0), str(d.get("band")), (inst, program)
+            summary["programs"][family] = {"picks": len(wanted[family]), "room": rooms[family], "after": "learners"}
+        for inst, program in learners:
+            room = _max_open(s, inst.band, program) - self._event_open_count(inst.id)
+            insts[inst.family], bands[inst.family] = (inst, program), inst.band
+            if room <= 0:
+                wanted[inst.family], rooms[inst.family] = [], 0
+                summary["programs"][inst.family] = {"picks": None, "room": 0}
+                continue
+            held = self._event_held(inst, em.day, adapter)
+            try:
+                got = adapter.picks(lane, program, em.day, decided_at=moment, held=lambda cik, held=held: cik in held)
+            except Exception as exc:  # noqa: BLE001 - that learner plans nothing this auction
+                self._error(f"event picks {inst.family}", exc, out)
+                summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+                continue
+            wanted[inst.family], rooms[inst.family] = list(got), room
+            summary["programs"][inst.family] = {"picks": len(got), "room": room}
+        planned: list[tuple[Any, Any, Any]] = []
+        sigmas: dict[str, float | None] = {}
+        taken: dict[str, dict[str, int]] = {}
+        if any(wanted.values()):
+            gate, unreadable = self._event_gate(day, at, s, adapter)
+            if unreadable:
+                summary["errors"] = [unreadable]
+                with self.state.transaction():
+                    self.state.upsert("eq_event_decisions", {"day": day, "at": key, "decided_at": _iso(decided_at),
+                                                             "status": "failed", "summary": dumps(summary),
+                                                             "created_at": now}, "day, at")
+                return
+            lost: list[tuple[str, str]] = []
+
+            def skip(family: str, pick: Any) -> str | None:
+                if str(pick.symbol).upper() in given_names:
+                    return "name_given"
+                why = gate(bands[family], pick) if gate else None
+                if why == "sale":
+                    lost.append((family, str(pick.symbol).upper()))
+                return why
+            given, passed = adapter.allocate(wanted, rooms, bands, skip)
+            symbols = sorted({p.symbol for picks in given.values() for p in picks})
+            sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
+            for family, picks in given.items():     # (ROOM's order: the sends go in it)
+                inst, program = insts[family]
+                for pick in picks:
+                    planned.append((inst, program, pick))
+                summary["programs"][family]["planned"] = len(picks)
+                if passed.get(family):
+                    summary["programs"][family]["skipped"] = dict(passed[family])
+            taken = self._event_sale_takers(day, at, lost, adapter) if lost else {}
+            if taken:
+                summary["sale_to_later"] = taken
+        merged = dict(main)
+        merged["programs"] = dict(main.get("programs") or {}) | summary["programs"]
+        if taken:
+            later = dict(main.get("sale_to_later") or {})
+            for family, row in taken.items():
+                later[family] = dict(later.get(family) or {}) | row
+            merged["sale_to_later"] = later
+        merged["learners"] = dict(held_back) | {"decided": True}
+        with self.state.transaction():
+            for inst, program, pick in planned:
+                self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
+            self.state.upsert("eq_event_decisions", {"day": day, "at": key, "decided_at": _iso(decided_at),
+                                                     "status": "done", "summary": dumps(summary), "created_at": now},
+                              "day, at")
+            self.state.execute("UPDATE eq_event_decisions SET summary=? WHERE day=? AND at=?", (dumps(merged), day, at))
+        out["event_decide_lrn"] = f"{at} {day}: {len(planned)} buys planned with and after the learners"
+        if planned:
+            self._event_publish(em.day, adapter, lane, out)
+        self.record("equity.event_decide", {"day": day, "at": key, "exits": 0, "buys": len(planned),
+                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()},
+                                            **({"sale_to_later": taken} if taken else {})})
 
     def _event_decided(self, day: str, at: str) -> bool:
         """Whether the decision of this session and auction is made (`eq_event_decisions` status `done`)."""
@@ -6138,6 +6397,9 @@ class EquityBook:
         # PREREG-EVL-1 to -4 is sized and counted without the room the waiting PREREG-EVL-5 buys keep; a birth's buy,
         # and a PREREG-EVL-5 row's, still keep out of it)
         room = ahead.for_buy(ahead.overdue and inst is not None and _room_free(adapter, inst.family, inst.version))
+        # (PREREG-EVL-7 section 1.9: a learner's entry leaves the earlier PREREG rows every order they may still send on
+        # this day's line, so the line refuses this file's entries after every earlier row's; an exit is never stopped)
+        keep = self._event_line_keep(intent, inst, day, at, s, adapter) if inst is not None else 0
         why = self._open_block(real_block, inst, killed)
         hold = None
         if why is None:
@@ -6153,6 +6415,10 @@ class EquityBook:
                     return
         if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
+        if why is None and keep:
+            # (PREREG-EVL-7 section 1.9: a learner's entry meets the day's line with `keep` more orders kept on it for
+            # the earlier PREREG rows; tighter than the count below, which every other entry meets as before)
+            why = self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders, keep=keep)
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
                 self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders)

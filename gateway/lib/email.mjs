@@ -217,6 +217,11 @@ export const STALL_CAUSES = {
   evl_entries: 'event-lane real buys went unfilled or unsent',
   evl_backfill: 'the event lane\'s daily-index backfill is late or failing',
   evl_handback: 'real event fills are missing from the lane\'s record',
+  // PREREG-EVL-7 (release 1019i): the learners' own stalls (league/ops/evl_learner.py, judged only once the freeze pins
+  // REGISTERED_AT_7): a live part that failed or ran past its own bound (never traded at that auction), a decision owed,
+  // a training lagging the evening score, a nightly recompute mismatch, a warm-up unmet. Deploy the gateway first, as
+  // above: an older gateway refuses a notice naming a cause it does not word.
+  evl_learner: 'the event lane\'s learners failed, lagged or mismatched',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

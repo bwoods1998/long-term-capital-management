@@ -1,0 +1,34 @@
+per learner, 120 sessions; $ = abnormal after real cost; Probe events = real buys at Probe size (Done's kind)
+scenario                                             screen           by40   by60  by120  $ F_L .25  $ F_L .50  Probe ev  E-cum 50
+A-ic03-base-n800-lag2-D57                            COST-7 run 1    0.020  0.021  0.021       19.9       38.2        12      None
+A-ic03-base-n800-lag2-D57                            COST-7 v<=120   0.020  0.021  0.049       20.6       38.7        17      None
+A-ic03-base-n800-lag2-D57                            replay run 1    0.023  0.024  0.025       20.1       38.4        14      None
+A-ic03-base-n800-lag2-D57                            replay v<=120   0.023  0.024  0.062       21.0       39.0        21      None
+   picks' true replay a (bp) by decade: 3.3 6.3 8.7 10.8 12.2 13.6 14.7 15.4 16.2 16.7 17.4 17.6 | COST-7 / replay on the picks 25.3 / 21.4 bp
+A-ic05-base-n300-lag2-D57                            COST-7 run 1    0.048  0.052  0.053       41.6       76.1        28      None
+A-ic05-base-n300-lag2-D57                            COST-7 v<=120   0.048  0.052  0.154       45.4       78.9        45      None
+A-ic05-base-n300-lag2-D57                            replay run 1    0.053  0.057  0.058       42.2       76.5        31      None
+A-ic05-base-n300-lag2-D57                            replay v<=120   0.053  0.057  0.168       46.3       79.6        50      None
+   picks' true replay a (bp) by decade: 20.8 23.3 26.4 29.8 31.2 32.9 34.4 35.5 36.3 37.2 38.1 38.4 | COST-7 / replay on the picks 24.5 / 21.4 bp
+A-ic05-base-n800-lag1-D57                            COST-7 run 1    0.088  0.095  0.098       67.7      115.6        54       113
+A-ic05-base-n800-lag1-D57                            COST-7 v<=120   0.088  0.095  0.254       77.6      122.8        86        96
+A-ic05-base-n800-lag1-D57                            replay run 1    0.099  0.108  0.112       69.8      117.1        61       104
+A-ic05-base-n800-lag1-D57                            replay v<=120   0.099  0.108  0.286       80.8      125.1        97        93
+   picks' true replay a (bp) by decade: 31.5 38.4 43.1 46.8 49.6 51.5 53.1 54.8 55.8 56.8 58.2 58.6 | COST-7 / replay on the picks 26.0 / 21.9 bp
+A-ic05-base-n800-lag2-D57                            COST-7 run 1    0.077  0.090  0.094       66.4      114.3        50       120
+A-ic05-base-n800-lag2-D57                            COST-7 v<=120   0.077  0.090  0.230       74.5      120.3        76       101
+A-ic05-base-n800-lag2-D57                            replay run 1    0.091  0.103  0.111       68.9      116.2        59       107
+A-ic05-base-n800-lag2-D57                            replay v<=120   0.091  0.103  0.262       78.0      122.8        88        96
+   picks' true replay a (bp) by decade: 30.0 37.5 42.9 46.4 49.4 51.7 53.0 54.8 56.1 57.0 57.9 58.5 | COST-7 / replay on the picks 26.0 / 21.9 bp
+A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D57 COST-7 run 1    0.108  0.118  0.123       55.6       92.2        66        98
+A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D57 COST-7 v<=120   0.108  0.118  0.278       63.0       97.6        97        92
+A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D57 replay run 1    0.119  0.127  0.132       56.8       93.0        72        93
+A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D57 replay v<=120   0.119  0.127  0.292       64.5       98.7       103        89
+   picks' true replay a (bp) by decade: 22.2 28.1 32.9 35.2 36.8 37.9 39.5 40.3 42.4 42.7 43.5 44.1 | COST-7 / replay on the picks 23.0 / 20.0 bp
+A-ic08-base-n800-lag2-D57                            COST-7 run 1    0.358  0.393  0.431      242.6      313.7       229        49
+A-ic08-base-n800-lag2-D57                            COST-7 v<=120   0.358  0.393  0.745      280.9      341.7       291        49
+A-ic08-base-n800-lag2-D57                            replay run 1    0.381  0.414  0.455      250.0      319.1       241        48
+A-ic08-base-n800-lag2-D57                            replay v<=120   0.381  0.414  0.771      288.5      347.3       304        48
+   picks' true replay a (bp) by decade: 80.5 93.4 103.0 108.8 112.3 115.4 118.0 118.9 120.2 121.4 122.1 122.4 | COST-7 / replay on the picks 26.5 / 22.3 bp
+NULL (IC 0, the pool's gross mean 0), replay round trip 14.2 bp: a pick earns -6.2 bp; $ over 120 sessions per learner at learning: -5.5 (F_L .25) to -11.1 (F_L .50), plus a false promotion's Probe lots at the same rate, all inside the loss budget
+NULL (IC 0, the pool's gross mean 0), replay round trip 24.2 bp: a pick earns -16.2 bp; $ over 120 sessions per learner at learning: -14.5 (F_L .25) to -29.1 (F_L .50), plus a false promotion's Probe lots at the same rate, all inside the loss budget

@@ -1,0 +1,44 @@
+== W7's cells: fresh, search, life (run 1 within 120 sessions is the same test at T = 200)
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58           fresh 0.0890 (4000) search 0.1000 (400) | fresh+search 0.0900 (se 0.0043, 4400) | fresh+life 0.0882 (se 0.0040, 5000)
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52         fresh 0.0845 (4000) search 0.0950 (400) | fresh+search 0.0855 (se 0.0042, 4400) | fresh+life 0.0844 (se 0.0039, 5000)
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58     fresh 0.0820 (4000) search 0.1275 (400) | fresh+search 0.0861 (se 0.0042, 4400)
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52         fresh 0.0820 (4000) search 0.1150 (400) | fresh+search 0.0850 (se 0.0042, 4400)
+ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58         fresh 0.0810 (4000) search 0.1000 (400) | fresh+search 0.0827 (se 0.0042, 4400)
+== the share of PASSING run-1 records whose true conditional mean a7 is <= 0 / <= 10 bp
+fresh  ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58                 run1 0.0890 v120 0.1683 | of passes: <=0 0.230, <=10bp 0.441
+fresh  O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52               run1 0.0845 v120 0.1585 | of passes: <=0 0.249, <=10bp 0.438
+fresh  ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58           run1 0.0820 v120 0.1497 | of passes: <=0 0.256, <=10bp 0.448
+fresh  O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52               run1 0.0820 v120 0.1545 | of passes: <=0 0.308, <=10bp 0.564
+fresh  ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58               run1 0.0810 v120 0.1540 | of passes: <=0 0.210, <=10bp 0.420
+life   ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58-T200            run1 0.0850 v120 0.1650 | of passes: <=0 0.141, <=10bp 0.412
+life   O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52-T200          run1 0.0840 v120 0.1640 | of passes: <=0 0.286, <=10bp 0.488
+fam    O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52-famdrift20    run1 0.1290 v120 0.2330 | of passes: <=0 0.155, <=10bp 0.256
+fam    ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58-famdrift20    run1 0.1250 v120 0.2330 | of passes: <=0 0.056, <=10bp 0.160
+fam    O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52-famdrift20    run1 0.1100 v120 0.2140 | of passes: <=0 0.091, <=10bp 0.182
+fam    ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58-famdrift20    run1 0.1090 v120 0.2130 | of passes: <=0 0.165, <=10bp 0.275
+stress ON-N1-crash-skew-rho30-phi40-dr20-tau1-n300-lag2-D58                   run1 0.1180 v120 0.2200 | of passes: <=0 0.288, <=10bp 0.492
+stress ON-N1-crasht3cl-skew-rho15-phi25-dr20-tau1-n300-lag2-D58               run1 0.1120 v120 0.1980 | of passes: <=0 0.250, <=10bp 0.411
+stress O1-N1-crasht3cl-skew-rho15-phi25-dr20-tau1-n300-lag1-D52               run1 0.1000 v120 0.1780 | of passes: <=0 0.280, <=10bp 0.460
+stress ON-N1-crash-skew-rho30-phi25-dr20-tau1-n300-lag2-D58                   run1 0.0960 v120 0.1760 | of passes: <=0 0.250, <=10bp 0.500
+stress O1-N1-crash-skew-rho15-phi10-dr20-tau0-n300-lag1-D52-famdrift20        run1 0.0940 v120 0.1900 | of passes: <=0 0.149, <=10bp 0.277
+stress O1-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag1-D52-secdrift20        run1 0.0920 v120 0.1860 | of passes: <=0 0.152, <=10bp 0.261
+stress ON-N1-crash-skew-rho15-phi10-dr20-tau0-n300-lag2-D58-famdrift20        run1 0.0920 v120 0.1660 | of passes: <=0 0.109, <=10bp 0.283
+stress ON-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag2-D58-loadcorr7-fac25   run1 0.0760 v120 0.1300 | of passes: <=0 0.237, <=10bp 0.395
+stress ON-N1-crasht3cl-skew-rho15-phi20-dr30-tau1-n300-lag2-D58               run1 0.0740 v120 0.1480 | of passes: <=0 0.189, <=10bp 0.297
+stress ON-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag2-D58-secdrift20        run1 0.0720 v120 0.1320 | of passes: <=0 0.139, <=10bp 0.472
+stress ON-N1-crash-skew-rho30-phi10-dr20-tau1-n300-lag2-D58                   run1 0.0660 v120 0.1260 | of passes: <=0 0.303, <=10bp 0.455
+learnable drifts (8 cells): of passes, true mean <= 0 0.056-0.165; <= 10 bp 0.160-0.472
+== the picks' sigma and COST-7 minus the replay (bp a round trip)
+null fresh cells: sigma 0.046-0.059; COST-7 19.5-21.8 bp, replay 17.9-19.7 bp; COST-7 - replay 1.2-2.1 bp
+power cells (alternative): sigma 0.068-0.082; COST-7 23.6-26.3 bp, replay 20.7-22.3 bp; COST-7 - replay 2.9-4.1 bp
+== power: COST-7 (a7) against the replay (arep), run 1 by 120 sessions, points
+replay minus COST-7, run 1: 0.2-3.4 points
+== the picks' mean issuer effect (bp), no-information cells with 1% issuer effects (search + fresh)
+O1 pool 300: 14 cells, +1.0 to +2.2 bp
+O1 pool 800: 4 cells, +1.3 to +1.5 bp
+ON pool 300: 15 cells, +1.4 to +3.1 bp
+ON pool 800: 5 cells, +5.4 to +5.9 bp
+== search
+40 cells; max 0.1275; median 0.0788; min 0.0325; at or above 0.10: 4
+base model O1-N1-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-D52: run1 0.0245 (se 0.0035, 2000) v120 0.0470
+base model ON-N1-t3-sym-rho05-phi10-dr00-tau0-n300-lag2-D58: run1 0.0255 (se 0.0035, 2000) v120 0.0480
