@@ -518,6 +518,9 @@ verdict reads), `run.py` (which program gets which rows, the shadow's 15:30 reac
 schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can ship through the updater. R3 adds
 `births.py` behind the wall (the grammar a seated birth's rule is read by, the validator's budget, the facts' wall); the
 registered lines under `docs/births/` are data the House appends, never read back from the tree, and stay outside.
+Release 1019i adds `scheduler.py` (the decision scheduler's timing table, `Slot`, `Part`, `register`, `check`,
+`worst_case`; [SCHEDULER.md](SCHEDULER.md)) behind the wall, as calendar.py's decision times are: when a file's
+real-money buys go is a rule input.
 
 ## Where it runs (shadow)
 
@@ -554,6 +557,46 @@ turn, the most urgent due first.
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
+| 1 | THE DECISION SCHEDULER'S SLOTS (release 1019i, below): a file's live slot (`slot-<auction>-<file>`) at its pre-registered start of the timing table, in the same turn as the main decision's receipt when it follows it | each auction, each registered file, inside its window; never inside the main decision | the slot's own bound from its own start; a slot before the main decision ends 5 s before it |
+| - | a file's catch-up (`catchup-<auction>-<file>`): its rows of an auction whose live slot was not made, decided by themselves | after the record pass, oldest first, once each | 150 s |
+| 8 | a file's pre-pass (`prepass-<auction>-<file>`): its reads ahead of its decision | last of all, inside the row's window | the row's bound (at most 120 s); before any decision |
+
+THE DECISION SCHEDULER (release 1019i, A120; league/events/scheduler.py, [SCHEDULER.md](SCHEDULER.md)): the House
+made ONE open decision and ONE close decision, and every new file added its isolated part inside it (PREREG-EVL-5's
+45 s; PREREG-EVL-7's 90 / 120 s; PREREG-EVL-8's 60 and 30 s; PREREG-EVL-9's warm part), so the parts could not all
+fit before the send line and a late part cost the rows behind it. Now each file's part runs in ITS OWN RUN at its own
+pre-registered slot of THE TIMING TABLE (one pinned constant per auction, sha256 `scheduler.digest()`, in force
+`40a08163`): its start (a wall time of the session, or the finish of the slots it follows), its bound from its own
+start, the book's send window for its buys, its receipts (`decide-<kind>:<day>` live, `decide-<catchup>:<day>` by
+itself). THE MAIN SLOT, every row of PREREG-EVL-1 to -6 and the births, keeps EXACTLY today's timing (its rows are
+read from the House's and the book's own constants and pinned by a test; run.py's decisions, PREREG-EVL-5's part,
+`part_hold` and `HeldAhead` are untouched; the simulation test shows its receipt and its rows' intents byte-identical
+with and without a file's part). A slot that starts before the main decision is bounded to end 5 s before it; one after
+it starts when the main receipt is finished and cannot touch the main rows. A live run that failed, was cut at its
+bound or never started by the row's `never_past` is FINAL for that auction (no retry): a `missed` receipt and a
+House warning (`decision slot <file> <auction>`, the alarm; the health page's `slots`), and the file's rows of that
+auction are decided later by themselves by the catch-up, shadow only, never traded. The book plans a file's buys in
+ITS OWN PASS (`eq_event_decisions` row `(day, "<at>-<file>")`) once the main pass is done and the file's live receipt
+is made, inside the file's own window, after every main row; nothing of a file goes at or after its own line. A row
+with no registered part is inert, so the table may hold a file's row before its code ships. The table in force:
+
+**The open auction** (times ET on a full day; an early close moves every close-side row with the session):
+
+| file | starts | never past | bound | sends | receipt | catch-up | after |
+|---|---|---|---|---|---|---|---|
+| main | 09:15:00 | - | 150 s | 09:16:00-09:27:00 | `decide-open:<day>` | - | - |
+
+**The close auction**:
+
+| file | starts | never past | bound | sends | receipt | catch-up | after |
+|---|---|---|---|---|---|---|---|
+| main | 15:47:00 | - | 150 s | 15:47:00-15:49:00 | `decide-close:<day>` | - | - |
+
+The rows PREREG-EVL-7's, -8's and -9's texts imply, their adoption (a row and a `register` call each) and their
+worst case when every part runs to its bound are in [SCHEDULER.md](SCHEDULER.md): at the open every slot fits; at the
+close the main decision at its own full bound already ends after the 15:49:00 line (as today), so a follower can miss
+its window on a bad day, and the scheduler's promise is that its cost is its own (missed with a receipt and an alarm,
+decided later by itself) and never the main rows'.
 
 THE BACKFILL GOES FILING BY FILING (A82, release 1019c): EDGAR's daily index lists a filing once per filer (a Form 4
 under its issuer and its reporting owner, an 8-K under each co-registrant: Oct 19, 2026's index had 1,189 rows and 665

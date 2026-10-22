@@ -40,6 +40,57 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
+### Release 1019i, the decision scheduler: one pre-registered slot per file at each auction (the captain's A120), on `feat/scheduler` (unreleased; cut from `rel/1019h` `59663f06`; base `rel/1019h`)
+
+THE PROBLEM: the House made ONE open decision and ONE close decision (its first tick at or after 15:47:00 ET, orders
+sent by 15:49:00), and every new file added its isolated part INSIDE it (PREREG-EVL-5's 45 s; PREREG-EVL-7's
+learners 90 / 120 s; PREREG-EVL-8's PX 60 s and META 30 s; PREREG-EVL-9's warm part); both PREREG-EVL-7's and -8's
+re-checks found the parts cannot all fit before the send line, that a part's bound is measured from its own start,
+and that a late part delays or loses real money for the rows behind it. THE SWING: `league/events/scheduler.py`
+(stdlib only; behind the wall, `ci.PENDING_GATEWAY`), [docs/SCHEDULER.md](docs/SCHEDULER.md), the timing table in
+[docs/events.md](docs/events.md):
+
+- **The timing table, one pinned constant per auction** (`scheduler.TABLE`, sha256 `40a08163`, pinned by a test):
+  each file's slot (`Slot`: its start as a wall time of the session or the finish of the slots it follows, its bound
+  from its own start, `never_past`, the book's send window for its buys, its live and catch-up receipt kinds). THE
+  MAIN SLOT (every row of PREREG-EVL-1 to -6 and the births) is read from the House's and the book's own constants
+  (`main_rows`: 09:15:00 / 150 s / sends 09:16-09:27; 15:47:00 / 150 s / sends 15:47-15:49; an early close moves
+  every close-side row) and pinned to them, so its timing cannot move; run.py's decisions, PREREG-EVL-5's part,
+  `part_hold`, `HeldAhead` and ROOM are untouched. `check` holds the invariants (a slot before the main decision
+  ends 5 s before it whatever happens; a send window inside the auction's; a follower names only earlier rows);
+  `worst_case` states each slot's latest start and finish when every part runs to its bound (the docs' honest line:
+  at the open everything fits; at the close the main decision at its full bound already ends after the line, as
+  today, so a follower can miss its window on a bad day and pays for it alone).
+- **The House** (house.py `SLOT_TASK`'s comment): a file's live slot is a task of its own (`slot-<auction>-<file>`)
+  with the slot's bound from its own start, its own receipt (`decide-<kind>:<day>`), run IN THE SAME TURN as the main
+  decision's receipt when it follows it (the turn goes on into a due slot as it goes on into the owed close
+  decision), bounded to end `DECISION_MARGIN` before the main decision when it starts before it; a run that failed or
+  was cut is FINAL for the auction (no retry); a window closed with no run gets a `missed` receipt and a warning (the
+  alarm; the health page's `slots` and `timing_table`); the CATCH-UP (`catchup-<auction>-<file>`, after the record
+  pass, oldest first, once each, under `Slot.catchup`'s receipt) decides the file's rows by themselves, shadow only;
+  PRE-PASSES (`prepass-<auction>-<file>`, the plan's last task, inside their window). A slot whose part is not
+  registered (`scheduler.register(Part)`) is inert. A file's `pending` slot receipt is never a verdict pass's kind.
+- **The book** (league/equity/live.py, league/events/book.py): the main pass plans only main programs
+  (`book.slot_of`); each file gets its own pass (`_event_decide_slot`, the row `(day, "<at>-<file>")` of
+  `eq_event_decisions`) once the main pass is done and its live receipt is `ok` or `pending` (`book.slot_receipt`),
+  inside its own send window (`book.send_window`), its buys after every main row in ROOM's order and never at or
+  after its own line (`_event_send`); a receipt final without being made, or a window that closed first, decides the
+  file with no buy and says why. A file's buy keeps no room from a main row.
+- **The simulation test** (league/tests/test_events_scheduler.py, 18 tests): on an invented session a slot before
+  the main decision and a follower each sleep their WHOLE bound; the main decision starts at 15:47:00 as today, its
+  receipt byte-identical to a lane with no part, the follower starts on the receipt's finish with its own 20 s and
+  finishes before the line; the book's main rows' intents byte-identical with and without a file's part, the file's
+  buy sent inside its window after the main rows and nothing at or after any line; a part that fails is final and
+  caught up later; a closed window is `missed` with an alarm and caught up; a second file follows the first whatever
+  its status; the open slot; the pre-pass; an early-close day.
+- Adoption by feat/evl-7, feat/evl-8 and PREREG-EVL-9's code: a row and a `register` call each (docs/SCHEDULER.md);
+  feat/evl-6 has nothing to adopt (its versions are main rows).
+
+Identities, the tree's own functions on 3.14 and 3.11: money `8e63ce64`, constitution `c3026eba` (release 1019h's
+pair: unchanged), timing table `40a08163`. Tests: the events, equity, live and ci modules on both Pythons and the
+full 3.14 suite sharded (the PR's description has the counts); `python -m league.ci --base origin/main --branch
+feat/scheduler --no-tests` clean.
+
 ### Release 1019h: Done speed, release 1019g's minors, the births architect on Opus 5.5 (the captain's A97, A100, A113 and A109), on `rel/1019h` (unreleased; cut from `fix/1019h-minors` `8e83ad1b` (PR 598, reviewed ship), which was cut from `feat/done-speed` `88ecf37f` (PR 597, reviewed ship: cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in), then A109 on top and origin/main merged with rerere off (`b374d862`, already in: main fast-forwards to the release); a draft PR with base main; an owner deploy after release 1019g, which is live: THE GATEWAY FIRST (`gateway/lib/email.mjs`, feat/done-speed's report composer: the Done supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR `8e63ce64` / `c3026eba`; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100; the minors and A109 move neither), so the standing grant re-ratifies at the House's start; S2's instant rollback is the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; THE BIRTHS PROMPT'S SHA MOVES `8294fe77` -> `0cae215b` WITH `births.PARSE_VERSION` 2 -> 4 (SUP-3's `890806ff` at 3, A109's architect at 4; 3 was never live); the Done rule `54241925` is untouched; the full rollback is to release 1019g, `b374d862`)
 
 Three parts in one owner deploy, each held by tests that fail without it. Parts 1 and 2 are their reviewed branches'

@@ -1323,6 +1323,50 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
     return gap
 
 
+# ----------------------------------------------------------------------------------- the decision scheduler (1019i)
+def slot_of(program: Any) -> str:
+    """Which file's slot of the timing table decides `program` (a Program or an id; league/events/scheduler.py
+    `file_of`): "main" for every row of PREREG-EVL-1 to -6 and the births, a later file's key once its part is
+    registered. The book's main pass plans buys only of main programs; a file's buys are planned by its own pass
+    (league/equity/live.py `_event_decide_slot`), once its live receipt is made, inside its own send window."""
+    from . import scheduler as X
+
+    return X.file_of(program)
+
+
+def slot_files(at: str) -> list[str]:
+    """The files with a live slot at auction `at` whose part is registered (table order): the book's per-file passes."""
+    from . import scheduler as X
+
+    return [s.file for s in X.live_files(at)]
+
+
+def send_window(file: str, at: str, open_at: float, close_at: float) -> tuple[float, float] | None:
+    """The file's send window at auction `at` of a session (epoch seconds: [from, until)), from the timing table;
+    None for a file with no slot there (the book sends nothing of it at that auction)."""
+    from . import scheduler as X
+
+    s = X.slot(file, at)
+    return None if s is None else X.send_window(s, open_at, close_at)
+
+
+def slot_receipt(lane: Lane | None, file: str, at: str, day: dt.date) -> str | None:
+    """The status of the file's LATEST live receipt of (`at`, `day`) (`decide-<kind>:<day>` of its slot): "ok" or
+    "pending" (made: the book plans its buys), "failed" / "cut" / "missed" (final, never traded at that auction),
+    "running", or None while there is none (the book waits inside the file's window). Unreadable reads as None."""
+    from . import scheduler as X
+
+    s = X.slot(file, at)
+    if s is None or lane is None:
+        return None
+    try:
+        row = lane.db.execute("SELECT status FROM receipts WHERE job=? ORDER BY id DESC LIMIT 1",
+                              (s.receipt(day),)).fetchone()
+    except sqlite3.Error:
+        return None
+    return None if row is None else str(row["status"] or "")
+
+
 #: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the
 #: book counts the buys that end unsent so (league/equity/live.py `_event_held_said`), and so does the lane's report
 #: (league/events/report.py `HELD_UNSENT`, the same words).
@@ -1449,7 +1493,8 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish", "band_mark", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader",
-           "part_hold", "PART_WAIT", "prereg_row", "room_free_overdue"]
+           "part_hold", "PART_WAIT", "prereg_row", "room_free_overdue", "slot_of", "slot_files", "send_window",
+           "slot_receipt"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)

@@ -257,6 +257,12 @@ PENDING_GATEWAY += ("league/events/births.py",)
 #: deploy; its pin `RULE_SHA256` ties only the constant to the rule file, never the reading to it. It ships in the same
 #: owner deploy as its hook in house.py. It waits here for the gateway's merge-list follow-up.
 PENDING_GATEWAY += ("league/events/done.py",)
+#: THE DECISION SCHEDULER'S TIMING TABLE (release 1019i, A120): league/events/scheduler.py holds the pre-registered
+#: slot of every file at each auction (its start, its bound, the book's send window for its buys: when real money's
+#: buys of a file go and when they do not), a rule input like calendar.py's decision times, so no main commit the
+#: in-box updater would ship can move a file's slot without the owner's deploy. It waits here for the gateway's
+#: merge-list follow-up, as the lane's rule inputs do.
+PENDING_GATEWAY += ("league/events/scheduler.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
