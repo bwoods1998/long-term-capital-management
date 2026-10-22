@@ -1025,19 +1025,26 @@ route. The switch stops new births only; registered births trade whatever it say
 fallback after two failing nights of Haiku proposals (moot since A109's Opus architect), and a ranking of learning
 room by look statistics (a later, pre-registered version).
 
-## PREREG-EVL-7: two online learners (built for release 1019i; nothing runs until the freeze pins `REGISTERED_AT_7`)
+## PREREG-EVL-7: two online learners (built for release 1019i; FROZEN 20:14:13Z Oct 22, A125; the release starts them)
 
-PREREG-EVL-7 (the design: `goal-2026-10-19/evl7/PREREG-EVL-7.draft.md` as the captain's decisions E1-E11 change it;
-`docs/prereg/PREREG-EVL-7.md` once frozen, which wins) registers two seatable programs whose rule is a fixed LEARNING
+PREREG-EVL-7 (FROZEN: `docs/prereg/PREREG-EVL-7.md`, byte for byte the tag `prereg-evl-7`'s, commit 367a2970, sha256
+ced186aa, with its calibration record `docs/prereg/evl-7/`, 211 files, every one its `SHA256SUMS` lists; its sections
+1-3, 6, 7 and 10, the ones this code builds, are word for word the final fix round's text it was built to) registers two seatable programs whose rule is a fixed LEARNING
 ALGORITHM: EVL-LRN-O1 (open of D to close of D, its pool EVL-CTRL-NEWS-ALL-O1, EVL-CTRL-8K-ALL-O1, EVL-CTRL-ERN-ALL-O1,
 EVL-INS-BUY-O1) and EVL-LRN-ON (close of D to the next open, its pool EVL-CTRL-NEWS-DAY-ON, EVL-CTRL-NEWSPM-ON,
 EVL-CTRL-8K-ON, EVL-ERN-REACT-ON, EVL-ERN-DROP-ON, EVL-CTRL-ERN-UNDER-ON), version 1 each at PREREG-EVL-3's learning
 band from birth, hold 1, PREREG-EVL-2's limit at entry. The code is `league/events/learner.py` and
 `league/events/costs7.py` (both behind league/ci.py's wall with the lane's other judges: a program's rule and a judge's
 cost basis), with `league/ops/evl_learner.py` (the alarms, outside it); league/events/programs.py `REGISTERED_AT_7` is
-None until the freeze's amendment sets it,
-and while it is None the learners are in no registry: nothing decides, trades or is charged (E3: nor when it is not
-after PREREG-EVL-6's registration time, `REGISTERED_AT_6_FOR_7`).
+A125's 2026-10-22T20:14:13Z (the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the client's 20:14:13Z),
+so the release that carries this code starts them: their judged clock starts at its first live decision, and the
+decisions from REGISTERED_AT_7 to it are the catch-up's training state (section 1.7). None would put the learners in no
+registry, so nothing decides, trades or is charged (E3: nor when it is not after PREREG-EVL-6's registration time,
+`REGISTERED_AT_6_FOR_7`). EVERY REPORT'S EXPECTED FALSE PASSES (section 4): each learner charge (its run 1, each fresh
+run started) at c7 0.13, the base model 0.03 and the stresses' worst 0.13, with each learner's per-version (0.1585 O1,
+0.1683 ON) and per-id (0.235, 0.233) figures beside, in the report's learner lines (`judge7.false_passes`). PREREG-EVL-6's
+lane line (`screen.expected_false_passes` on release 1019i) counts every charge at its stresses' 0.17; at the merge
+its `stress` counts these charges at 0.13 (`judge7.false_passes(store)["charges"]`).
 
 **A decision** (`learner.decide`), for entry session D at its tau (09:15 ET for O1, the close less 14 minutes for ON),
 reads only the store, every cut-off from stored times as of tau:

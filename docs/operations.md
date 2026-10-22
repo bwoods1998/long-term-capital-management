@@ -469,7 +469,7 @@ order in flight; CI green on the exact head; before Oct 26 13:00Z, when the firs
 first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
 `evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
 
-## PREREG-EVL-7's two learners and COST-7: `feat/evl-7`, for release 1019i, not deployed (nothing of it runs until the freeze pins `REGISTERED_AT_7`)
+## PREREG-EVL-7's two learners and COST-7: `feat/evl-7`, for release 1019i, not deployed (FROZEN, A125: `REGISTERED_AT_7` is pinned, so the release starts them)
 
 Cut from `rel/1019h` (`59663f06`); release 1019i joins it with `feat/evl-6` (PREREG-EVL-6's code) and `feat/infra-1019i`
 (the batched score, the price-lane data, the attempt ledger). IDENTITIES (the tree's own functions, 3.14 and 3.11):
@@ -479,7 +479,9 @@ row, no setting, no wall weakened. ONE GATEWAY FILE, DEPLOYED FIRST: `gateway/li
 stall can send). The rules and the code are in [events.md](events.md), **PREREG-EVL-7**.
 
 **Switching it on is the freeze, not a deploy step.** The captain's amendment that registers PREREG-EVL-7 (A92's three
-times) sets `league/events/programs.py` `REGISTERED_AT_7` in a commit on the release branch. While it is None, no
+times) sets `league/events/programs.py` `REGISTERED_AT_7`: A125's 2026-10-22T20:14:13Z, pinned on this branch, so the
+first House release that carries it decides, trades at learning and charges the learners (to keep them off, a commit
+on the release branch sets it back to None; nothing else changes). While it is None, no
 learner is in `PROGRAMS`, `BY_KEY` or `SEATING`: no decision, no trade, no charge, no table read by any earlier path
 (the House plans no learner or cost-basis task; the book's learner pass finds no learner). With it pinned AFTER
 PREREG-EVL-6's registration (`REGISTERED_AT_6_FOR_7`, A116's 12:24:50Z; E3), the two learners seat at learning after
@@ -499,7 +501,10 @@ every earlier file's row and before R3's births.
    release's first live one (kind `catchup`), the late decisions, each under its receipt `decide-open-lrn:<D>` /
    `decide-close-lrn:<D>`; then, once the night's score is in, the recompute (meta `evl7:recompute:<day>`).
 3. The nightly `cost-basis` step after the score and before the screen (`costs7.nightly`: one `cost_basis` row a night,
-   the `costs7` rows of newly settled outcomes); one that fails waits its back-off and never holds the screen.
+   the `costs7` rows of newly settled outcomes); one that fails waits its back-off and never holds the screen. It is
+   owed only while that night's screen is (a night a release before the learners screened owes none: the first morning
+   after the deploy computes nothing), and like the screen it never starts within `SCREEN_CLEAR` of a decision, so a
+   row owed in the morning never holds that morning's verdicts or decisions.
 4. The book's learner decision of each auction (`EquityBook._event_decide_lrn`, row `"<at>-lrn"` of
    `eq_event_decisions`), after the auction's own decision, which gives every PREREG-EVL-1 to -6 row its names at once
    whatever its band and holds back only R3's births after the learners in ROOM: it is tried each minute of the window

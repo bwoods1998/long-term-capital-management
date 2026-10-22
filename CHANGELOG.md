@@ -290,7 +290,7 @@ functions on 3.14 and 3.11, are the release's: money `8e63ce64`, constitution `c
 S2's instant rollback, the `reach_bar` rows to "0", one money-digest move the grant re-ratifies; the full rollback,
 the House to release 1019g's deployed head `b374d862`, then the gateway).
 
-### PREREG-EVL-7's two online learners and COST-7, on `feat/evl-7` (unreleased; cut from `rel/1019h` `59663f06`; joins release 1019i with `feat/evl-6` and `feat/infra-1019i`; an owner deploy, THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_learner`'s words; an older gateway refuses a notice naming it, which only a pinned learner's stall can send), then the House: league/events/learner.py and costs7.py join league/ci.py's wall beside the lane's other judges, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES, pinned or not: the money digest `8e63ce64` and the constitution `c3026eba` are release 1019h's, read with the tree's own functions on 3.14 and 3.11; no money row, no setting; NOTHING RUNS UNTIL THE FREEZE SETS `programs.REGISTERED_AT_7`)
+### PREREG-EVL-7's two online learners and COST-7, on `feat/evl-7` (unreleased; cut from `rel/1019h` `59663f06`; joins release 1019i with `feat/evl-6` and `feat/infra-1019i`; an owner deploy, THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_learner`'s words; an older gateway refuses a notice naming it, which only a pinned learner's stall can send), then the House: league/events/learner.py and costs7.py join league/ci.py's wall beside the lane's other judges, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES, pinned or not: the money digest `8e63ce64` and the constitution `c3026eba` are release 1019h's, read with the tree's own functions on 3.14 and 3.11; no money row, no setting; FROZEN 20:14:13Z Oct 22 (A125): `programs.REGISTERED_AT_7` IS PINNED, SO THIS RELEASE STARTS THE LEARNERS)
 
 PREREG-EVL-7's design (the draft as the captain's decisions E1-E11 change it; the frozen text wins) built ahead of its
 freeze (A117), each part held by tests that fail without it (league/tests/test_events_evl7.py, invented data only):
@@ -356,6 +356,18 @@ fix):
   empty day, so EVL-LRN-O1 buys nothing in real money; `book.LINE_ACROSS_AUCTIONS` False (one constant) is the
   in-auction reading. The refusal now names the learner's keep apart from the held buys' (it read "161 for the 0 buys
   ahead of it").
+- **THE FREEZE (A125)**: `docs/prereg/PREREG-EVL-7.md` (sha256 ced186aa) and `docs/prereg/evl-7/` (211 files) byte for
+  byte from the tag `prereg-evl-7` (commit 367a2970); `REGISTERED_AT_7 = 2026-10-22T20:14:13Z`. The frozen sections
+  1-3, 6, 7 and 10 are word for word the text this code was built to; sections 0, 4, 5, 8 and 9 restate the
+  calibration on the registered columns (W7 0.0890, so c7 stays 0.13; base 0.03, stresses' worst 0.13). Every report's
+  learner lines carry their expected false passes three ways with the per-version and per-id figures beside
+  (`judge7.false_passes`); the tests that read the unpinned registries unpin themselves.
+- **Found by the pin** (the suite run with the learners registered): the House's `cost-basis` task preempted the
+  morning's early verdicts when a night's row was owed (it now waits outside a decision's lead, as the screen does,
+  and is owed only while that night's screen is); the site listed both learners as "Event rule" with a PREREG-EVL-3
+  next look (each now has its name, `NAMES`, and no look, as PREREG-EVL-6's versions). The tests of earlier
+  mechanisms that read the registries without the learners run so (league/tests/evl7_fakes.py, as `evl6_fakes.py`'s
+  `on_1019h`); the rest of the suite runs pinned, as the House does.
 - **Merges with release 1019i's other branches**: the learners' `__all__` line in book.py and their line check in
   live.py moved off feat/evl-6's lines (its merge now conflicts in INTERFACES.md alone: keep section 27, then 28); two
   ledger tests drop feat/infra-1019i's `real_attempts` before making their own.
