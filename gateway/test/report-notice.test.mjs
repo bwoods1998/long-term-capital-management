@@ -31,9 +31,10 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   const text = message.text.split('\n');
   for (const line of text) assert.ok(line.length <= REPORT_WIDTH, `${line.length}: ${line}`);
   // One screen: 44 lines before release 1019f; the day's real buys add three (A80 (2)), the break-even edge a fourth once a
-  // Probe buy exists, and the Done line (the goal V2) three.
-  assert.ok(text.length <= 51, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3; the fixture has no Probe buy: 50)
-  assert.equal(text.length, 50);
+  // Probe buy exists, and the Done line (the goal V2) three; release 1019h's Done supply line its head, a line or two
+  // of Probe+ rows and its reach (four for the fixture's two rows).
+  assert.ok(text.length <= 55, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4; no Probe buy here: 54)
+  assert.equal(text.length, 54);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -166,7 +167,9 @@ test('the composer reads every fact the House writes', () => {
   // Each program in two bands, so its by_band lines are read too.
   // (Release 1019f: and a Probe buy on record, so the break-even edge is read too.)
   const twoBands = { ...REPORT, programs: REPORT.programs.map(p => ({ ...p, by_band: [...p.by_band, { ...p.by_band[0], band: 'sized' }] })),
-    break_even: { ...REPORT.break_even, since: '2026-10-22', compute_per_session: 3.5, probe_per_session: 60, edge_bp: 583.3 } };
+    break_even: { ...REPORT.break_even, since: '2026-10-22', compute_per_session: 3.5, probe_per_session: 60, edge_bp: 583.3 },
+    // (Release 1019h: and a checkpoint not within the projection's horizon, so the horizon is read too.)
+    supply: { ...REPORT.supply, checkpoint_in: null } };
   composeReport(spy(twoBands, ''));
   const want = new Set();
   const walk = (value, prefix) => {
@@ -181,8 +184,9 @@ test('the composer reads every fact the House writes', () => {
   // Read by the router, not the composer (`kind`, `notice_id`), or kept for the House's own record (a program's
   // `intents`, its `buy_hold_why` and the total's `why`: the gateway words n/a itself and echoes no House text).
   // (Release 1019f: `entries.why` and `break_even.why` likewise: the gateway words "none" and "n/a" itself.)
+  // (Release 1019h: `supply.why` likewise: the gateway words "no Probe+ row yet" itself.)
   const unread = ['kind', 'notice_id', 'programs.*.intents', 'programs.*.buy_hold_why', 'buy_hold.why', 'costs.allowance.cap_usd',
-    'entries.why', 'break_even.why'];
+    'entries.why', 'break_even.why', 'supply.why'];
   const missed = [...want].filter(key => !seen.has(key) && !unread.includes(key));
   assert.deepEqual(missed, [], 'every fact the House writes is read');
 });
@@ -242,4 +246,28 @@ test('the Done line: Probe+ events toward 300 by program, the next checkpoint an
   for (const words of ['DONE at a checkpoint', 'PIVOT: retire the lane', '$800 SPENT: stop all spend']) assert.ok(flags.includes(words), words);
   const before = lines({ ...REPORT, done: undefined });
   assert.ok(!before.some(line => line.startsWith('Done,')), 'a House before the reader sends no done block: no line');
+});
+
+test('the Done supply line (release 1019h, SUP-4): each Probe+ row\'s counted events, its measured picks a session, its projected session to 50 at the stated seasons, and a flag under 3 rows', () => {
+  const text = lines(REPORT);
+  for (const line of ['Done supply, Probe+ (seasons stated, not measured):',
+    ' INS-BUY-O1 50, 1.4/session, 50 reached, under 2 (cash);', ' NEWS-READ-O1 0, 4.2/session, 50 in 14 (2026-11-09)',
+    ' FLAG: 2 of 2 reach 50 by 300 (in 38 sessions); needs 3']) {
+    assert.ok(text.includes(line), `${line} | ${text.join('|')}`);
+  }
+  const three = lines({ ...REPORT, supply: { ...REPORT.supply, reach: 3, flag: false, checkpoint_in: null,
+    rows: [...REPORT.supply.rows, { ...REPORT.supply.rows[1], id: 'EVL-ERN-READ-O1', band: 'sized', decisions: 2, to_50: null }] } });
+  assert.ok(three.includes('   ERN-READ-O1 sized 0, 4.2/session (2 read), 50 not in reach') ||
+    three.some(line => line.includes('ERN-READ-O1 sized 0, 4.2/session (2 read), 50 not in reach')), three.join('|'));
+  assert.ok(three.includes(' 3 of 3 reach 50 by 300 (not within 250 sessions)'), three.join('|'));
+  assert.ok(!three.some(line => line.includes('FLAG')));
+  const none = lines({ ...REPORT, supply: { ...REPORT.supply, rows: [], reach: 0, flag: true, why: 'no Probe+ row yet <b>' } });
+  assert.ok(none.includes('Done supply: no Probe+ row yet (Done needs 3 x 50)'));
+  assert.ok(!none.join('\n').includes('<b>'), 'the House\'s words are never echoed');
+  const bad = lines({ ...REPORT, supply: { ...REPORT.supply, rows: [{ ...REPORT.supply.rows[0], id: 'ACME SURGES' },
+    { ...REPORT.supply.rows[0], under_bound: '<script>' }] } });
+  assert.ok(!bad.join('\n').includes('ACME') && !bad.join('\n').includes('<script>'), bad.join('|'));
+  for (const line of [...text, ...three, ...none, ...bad]) assert.ok(line.length <= REPORT_WIDTH, line);
+  const before = lines((({ supply: _s, ...rest }) => rest)(REPORT));
+  assert.ok(!before.some(line => line.startsWith('Done supply')), 'a House before release 1019h: no line');
 });
