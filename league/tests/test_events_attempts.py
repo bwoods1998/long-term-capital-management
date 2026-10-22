@@ -21,12 +21,16 @@ from league.events import book as BK
 from league.events import store as S
 from league.tests import test_events_venue_cancel as VC
 from league.tests.test_events_book import DAY, NEXT
+from league.tests.evl6_fakes import on_1019h
 
 
 def ledger(h) -> list[dict]:
     return [dict(r) for r in h.lane.st.db.execute("SELECT * FROM real_attempts ORDER BY sent_at, client_id")]
 
 
+# (release 1019j's assembly: a mechanism test written on release 1019h's seats; PREREG-EVL-6 moved every seat to a new
+# version, so it runs on that table, as league/tests/test_events_book.py's do)
+@on_1019h
 class TheLedgerThroughTheBook(VC.VenueCancelTest):
     def session(self, h, *, day=DAY):
         for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 18), (9, 31), (9, 33), (15, 46), (15, 47), (15, 48), (16, 1),

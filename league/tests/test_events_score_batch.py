@@ -27,6 +27,7 @@ from league.events import house as H
 from league.events import score as SC
 from league.events import store as S
 from league.events.gw import GatewayError
+from league.tests.evl6_fakes import on_1019h
 
 UTC = dt.timezone.utc
 NY = C.NY
@@ -279,6 +280,9 @@ class TheGoldenTape(GoldenCase):
         self.assertEqual(self.record(new)["outcomes"], first["outcomes"], "INSERT OR IGNORE: the first outcome stands")
 
 
+# (release 1019j's assembly: a mechanism test written on release 1019h's seats; PREREG-EVL-6 moved every seat to a new
+# version, so it runs on that table, as league/tests/test_events_book.py's do)
+@on_1019h
 class TheOrderAndTheRequests(GoldenCase):
     def test_seating_versions_and_their_controls_settle_first(self):
         rows = [{"program": "EVL-ERN-READ-O1", "version": 1, "event": "a"},
