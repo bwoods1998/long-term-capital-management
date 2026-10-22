@@ -488,10 +488,12 @@ every earlier file's row and before R3's births.
 **What the House does with it pinned** (league/events/run.py, house.py, league/equity/live.py):
 
 1. After the House's own `decide-open:<D>` / `decide-close:<D>` receipt is FINISHED (so no earlier row's shadow or real
-   money waits), the learner part of that auction (`run.learner_part` -> `learner.live_part`): only the session's first
-   finished receipt, only a live run; 90 s at the open, 120 s at the close, never past the task's bound less 15 s. A
-   failure or an expiry writes meta `evl7:part:<id>:<version>:<day>` and nothing else: that auction is decided later
-   by the learner by itself (kind `late`), never traded.
+   money waits), in the same turn, the learner part of that auction AS ITS OWN RECEIPT `decide-open-lrnlive:<D>` /
+   `decide-close-lrnlive:<D>` (`run.learner_part` -> `learner.live_part`): only the session's first finished House
+   receipt, only a live run; 90 s at the open, 120 s at the close, never past the task's bound less `EVL5_FINISH`
+   (15 s). Its one write is committed only when it completes, and the receipt then finishes `ok` naming the learner. A
+   failure or an expiry writes none of it, finishes the receipt `error` with why and meta `evl7:part:<id>:<version>:<day>`:
+   that auction is decided later by the learner by itself (kind `late`), never traded.
 2. The learner task (`learner`, after every other task of the plan, never within 5 minutes of a decision, bound 120 s):
    the reconstruction of the sessions before `REGISTERED_AT_7` (once), the catch-up of the decisions from it to the
    release's first live one (kind `catchup`), the late decisions, each under its receipt `decide-open-lrn:<D>` /
@@ -499,12 +501,12 @@ every earlier file's row and before R3's births.
 3. The nightly `cost-basis` step after the score and before the screen (`costs7.nightly`: one `cost_basis` row a night,
    the `costs7` rows of newly settled outcomes); one that fails waits its back-off and never holds the screen.
 4. The book's learner decision of each auction (`EquityBook._event_decide_lrn`, row `"<at>-lrn"` of
-   `eq_event_decisions`), after the auction's own decision, which gives every name before the learners' ROOM place at
-   once and holds back the names from it on (R3's births at learning; with a learner at Probe or Sized its whole tier
-   and every later one): it waits for a running part until 240 s after 09:15 ET or 150 s after the close decision time,
-   then gives the learners' LIVE picks (their gate, the ERN and 8-K guards) and the held-back programs' picks their
-   names together in ROOM's order, the summaries written into the auction's own row too. A learner entry keeps the day
-   line's room for every earlier row's later orders that day (`_event_line_keep`).
+   `eq_event_decisions`), after the auction's own decision, which gives every PREREG-EVL-1 to -6 row its names at once
+   whatever its band and holds back only R3's births after the learners in ROOM: it is tried each minute of the window
+   until the learner's own live receipt has finished (no other bound), then gives the learner's LIVE picks (only when
+   that receipt names it; its gate, the ERN and 8-K guards) and the held-back births' picks their names together in
+   ROOM's order, the summaries written into the auction's own row too. A learner entry keeps the day line's room for
+   every earlier row's later orders that day (`_event_line_keep`).
 5. The screen's learner step (`judge7.run`, inside the nightly `screen` task after every earlier file's looks; its
    receipt's `learners`): with the night's `cost_basis` row, each learner's looks (22 ... 60 blocks, PREREG-EVL-6's
    schedule, through `costs7.judge_record`), its band move with the look (PASS probe, RETIRE retired), its run's end at
@@ -514,11 +516,11 @@ every earlier file's row and before R3's births.
 
 **Timing** (one decision, invented data, this machine; the PR body has the table): the part's work is its candidates
 (each pool program's real-money reading), its features, the training sums (cached per session: only a session settled
-since is summed again) and a 57- or 63-column Cholesky. Its own bound is what holds it, never the earlier rows' shadow
-decision. In the book, the PREREG-EVL-1 to -6 rows' names at learning never wait; R3's births at learning wait for the
-learners' decision of the auction (at most to 09:19 ET at the open and 15:48:30 ET at the close on a full day, the
-close's buys then having until the 15:49 cut-off); a promoted learner (not before its 22nd live block, and while
-PREREG-EVL-6 section 3's stays for COST-7 are not built it buys nothing at Probe) would hold its band's whole tier.
+since is summed again) and a 52- or 58-column Cholesky. Its own bound is what holds it, never the earlier rows' shadow
+decision. In the book, no PREREG-EVL-1 to -6 row's names or room ever wait on a learner; R3's births after the learners
+in ROOM wait for the learner's own live receipt (the open's: the House decision from 09:15 ET plus at most 90 s; the
+close's: from 15:46 ET at most 150 s for the House decision plus 120 s for ON's part, so at the close ON's picks and the
+births behind them can miss the 15:49 ET cut-off, a stated effect).
 
 **The gate and what it says**: a learner's real money stops (its shadow goes on) when it is retired, at Probe or Sized
 (no stay judge for COST-7's versions in this tree), between runs or refused a run, or when its run's next look (or the

@@ -298,13 +298,15 @@ freeze (A117), each part held by tests that fail without it (league/tests/test_e
 - **The learners** (league/events/learner.py): EVL-LRN-O1 (open to close, a pool of four controls and INS-BUY) and
   EVL-LRN-ON (close to next open, a pool of six), version 1 at learning from birth. Candidates through each pool
   program's real-money reading with live eligibility TIME-BOUND by the House's own decision (E5); one a CIK; KEPT and
-  ELIGIBLE TO BE PICKED; section 1.4's 57 and 63 features with the reader lens's frozen headline spec; pool outcomes
+  ELIGIBLE TO BE PICKED; section 1.4's 52 and 58 features (the final text's: none built from the issuer's own past
+  returns or prices but sig20 and dmove) with the reader lens's frozen headline spec; pool outcomes
   settled before tau, the GROSS label (E7); weights 2^(-age/40), within-session demeaning, ridge lambda 8,000 on
   standardized columns by a float64 Cholesky (standard library), nested fsums; the top 8 by ahat above the replay
   hurdle; the per-session sums cached by the training keys' sha256 and the code sha; a nightly recompute that compares
   beta and the picks only where the inputs are unchanged.
-- **Isolation and the record** (league/events/run.py, house.py): the learner part runs after the House's receipt is
-  finished, under 90 s / 120 s, and never raises; a failed or expired part and the decisions before the release are
+- **Isolation and the record** (league/events/run.py, house.py): the learner part runs as ITS OWN live receipt
+  (`decide-open-lrnlive:<D>` / `decide-close-lrnlive:<D>`) once the House's receipt is finished, under 90 s / 120 s,
+  its write one transaction, and never raises (a failure finishes that receipt `error`); a failed or expired part and the decisions before the release are
   decided later by themselves (`decide-open-lrn:<D>`, `decide-close-lrn:<D>`; shadow only, never traded, never
   judged); the reconstruction once; the code sha on every fits row.
 - **Real money** (league/events/book.py, league/equity/live.py): the learners' decision of each auction in ROOM's
@@ -339,10 +341,15 @@ fix):
 - **COST-7's selection population**: the first SEND of a buy only (release 1019i's `sent`: `unsent:<iid>` picks and
   refused orders are no attempt), its shadow intent on record and not skipped (a shadow skip no longer stops G at its
   checkpoints forever).
-- **ROOM** (section 1.9): the auction's names from the learners' ROOM place on are held for the learners' decision of
-  the auction and given with theirs in ROOM's order (a learner at learning before R3's births at learning; at Probe or
-  Sized the last program of each pass), the summaries in the auction's own row (A85's reservation reads a learner's
-  picks); with no learner able to take a name, nothing changes.
+- **ROOM** (section 1.9 of the final text): every PREREG-EVL-1 to -6 row is given its names at the auction's own
+  decision whatever its band; R3's births after the learners in ROOM are held for the learners' decision of the
+  auction and given with theirs in ROOM's order (a learner before the births), the summaries in the auction's own row
+  (A85's reservation reads a learner's picks); with no learner able to take a name, nothing changes.
+- **The final text's rewrite (its 17:26Z final fix round), followed where newer**: a learner pick is bought only once
+  the learner's own live receipt has finished `ok` naming it, tried each minute of the window with no other bound,
+  keeping no room from any earlier row; COST-7's sigma, ADV20 and E_prev are the decision's stored values (fixed at
+  entry; `learner_fits.e_prev`); the judged record and the POOL control read only decisions under an `ok` live
+  receipt; the features lose r1, r5, r20 and the ADV and price levels (52 and 58 columns).
 - **The day order line**: a learner entry keeps every order the earlier PREREG rows may still send that day, across the
   day's auctions (the fixed 32 slots held inside one auction only); the reading that trades less (section 1.11 (10)).
 

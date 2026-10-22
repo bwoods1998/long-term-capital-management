@@ -1049,15 +1049,15 @@ reads only the store, every cut-off from stored times as of tau:
   TRADABLE at decision (1.25 x prev_close <= 10% of E_prev); ELIGIBLE TO BE PICKED when also knowable after
   REGISTERED_AT_7 and not held in the five sessions either way (`learner.held_7`: the learner's own intents of D
   itself never count, so a re-decision reads its picks as they were).
-- FEATURES (`learner.FEATURES`, 57 for O1 and 63 for ON, section 1.4's order): the pool dummies, the best `ok`
+- FEATURES (`learner.FEATURES`, 52 for O1 and 58 for ON, section 1.4's order): the pool dummies, the best `ok`
   verdict answered before tau, guidance, items, the source, the article counts of the primary family's window and of the
-  20 sessions before it, first20, the week's first and last session, ADV, price, sig20 (the sample sd of 19 log changes
-  of the 20 latest stored raw closes before D, 0.005-0.25; 0.03 with fewer), the benchmark, four SIC groups, r1/r5/r20,
-  the reader lens's 16 frozen headline flags and dup72 (its `KEYWORDS`, `STOP`, `words` and `jaccard` copied verbatim,
+  20 sessions before it, first20, the week's first and last session, sig20 (the sample sd of 19 log changes of the 20
+  latest stored raw closes before D, 0.005-0.25; 0.03 with fewer), the benchmark, four SIC groups, the reader lens's 16 frozen headline flags and dup72 (its `KEYWORDS`, `STOP`, `words` and `jaccard` copied verbatim,
   sha256 `b2f3aaaa...` held by a test), O1's knowable-hour buckets (overnight 20:00-04:00 ET or any hour of a day that is
   not a session, pre, late) and insider value, ON's morning/before buckets and dmove from D's '1530' mark read BY ITS
   BAR TIME, whatever its fetch time (E6; the live close part fetches its candidates' marks in the batched requests
-  first).
+  first). NO COLUMN IS BUILT FROM THE ISSUER'S OWN PAST RETURNS OR PRICES but sig20 and ON's dmove (the final text's
+  item 11 deleted r1, r5, r20 and the ADV and price levels; a test pins it).
 - TRAINING ROWS: every kept candidate of an earlier session of the learner (at most 250 back) with a POOL OUTCOME (the
   first pool program in pool order holding an intent of the issuer at the learner's auctions, settled, tradable, settled
   before tau, its raw entry print at most 1.25 x the previous close), its features as written at its own tau, the GROSS
@@ -1072,10 +1072,13 @@ reads only the store, every cut-off from stored times as of tau:
   No pick before 2,000 training rows from 3 sessions; no E_prev, a non-finite fit or a failed Cholesky picks nothing.
 
 **One decision, written once** (`learner_cands`, `learner_fits` with its kind, receipt, code sha and the training keys'
-sha, and the picks as intents, in one transaction), never decided again. KINDS: `live` (the House's own decision of the
-auction: league/events/run.py `learner_part` runs AFTER that decision's receipt is finished, only for the session's first
-such receipt and only when it was live, under 90 s at the open and 120 s at the close, never past the task's bound less
-15 s; it never raises: a failure or an expiry writes only meta `evl7:part:...`); `catchup` (the decisions from
+sha, E_prev, and the picks as intents, in one transaction), never decided again. KINDS: `live` (THE LEARNER'S OWN LIVE
+RECEIPT of the auction, `decide-open-lrnlive:<D>` / `decide-close-lrnlive:<D>`: league/events/run.py `learner_part`
+starts it in the House's turn once the House's own `decide-<at>:<D>` has finished, only for the session's first such
+receipt and only when it was live, under 90 s at the open and 120 s at the close, never past the task's bound less
+`EVL5_FINISH`; its one write committed only when it completes, the receipt then finished `ok` NAMING the learner; it
+never raises: a failure or an expiry writes none of the decision, finishes the receipt `error` with why and meta
+`evl7:part:...`; so no earlier row's receipt, `part_hold` wait or `EVENT_DECIDE_WAIT_S` wait includes it); `catchup` (the decisions from
 REGISTERED_AT_7 to the release's first live one, E4) and `late` (a part that failed or expired), both decided later by
 the learner by itself exactly as of tau under receipts `decide-open-lrn:<D>` / `decide-close-lrn:<D>`, shadow only, never
 traded, never judged; `reconstruct` (the candidate sets of the sessions from Oct 19 whose tau is at or before
@@ -1085,35 +1088,37 @@ within 5 minutes of a decision) runs them oldest first, then the night's RECOMPU
 the decision read are unchanged since it, `learner.inputs_sha`, kept at the decision; a mismatch is an alarm, a change
 is said; nothing is rewritten).
 
-**Real money** (section 1.9): ROOM's order with the learners in their place. The book's own decision of an auction
-(league/equity/live.py `_event_decide`) gives every name BEFORE the learners' ROOM place and reads, as of its own
-decision time, the picks of every program FROM that place on (`book.learner_cut` over the learners that may take a
-name there: live, with room, their real-money gate open): at learning that is R3's births at learning (every
-PREREG-EVL-1 to -6 row of the tier comes first and never waits); with a learner at Probe or Sized its whole tier and
-every tier after it (the learner is the LAST program of each A85 pass, after the band's PREREG rows and before its
-births). The learners' own decision of the auction (`_event_decide_lrn`, row `"<at>-lrn"` of `eq_event_decisions`),
-once their parts are on record or waited out, asks each learner for its picks (book.py `learner_picks`: its LIVE
-decision's intents in rank order; a catch-up's or a late decision's are never traded) and gives those programs and the
-learners their names together by `book.allocate` in ROOM's order, passing over every name the auction's own decision
-gave; their summaries go into the auction's own row too, so A85's reservation (`_event_recent`), the daily report and
-the alarms read a learner's picks where they read every program's. No learner that may take a name: no cut, every name
-given at once, exactly as before. The skips: the gate's, EVL-LRN-O1's ERN guard (E8: no buy of an issuer with an item
-2.02 8-K knowable in D's close window and stored by tau), EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable
-from 09:00 ET of D and stored by tau, whatever the primary event; barred on an `ok` score >= 2, an `ok` score >= 1
-with guidance raised, or no answer by tau), one position per issuer on its earlier intents and real lots, and THE
-LEARNER'S GATE (league/events/judge7.py `gate`, below). Sized at learning (2% of E, A85's reservation), sent in ROOM's
-order (`send_key`: the learners after every earlier file's row, before R3's births). THE DAY ORDER LINE: each learner
-entry keeps, on its day's event line, every order the earlier PREREG rows may still send that day after it
+**Real money** (section 1.9): A LEARNER PICK IS BOUGHT ONLY ONCE THE LEARNER'S OWN LIVE RECEIPT OF THE AUCTION HAS
+FINISHED `ok` AND NAMES IT (learner.py `live_state`, `live_picks`), and while it waits it keeps no room from any earlier
+row, in every band. The book's own decision of an auction (league/equity/live.py `_event_decide`) gives every
+PREREG-EVL-1 to -6 row its names, whatever its band, exactly as without the learners; only R3's BIRTHS AFTER THE
+LEARNERS IN ROOM (`book.learner_cut` over the learners that may take a name there: live, with room, their real-money
+gate open; `book.after_learners`: at learning every birth at learning, with a Probe learner its band's births and every
+birth at learning) have their picks read as of that decision and their names held back (A113's birth behind a waiting
+buy). The learners' own decision of the auction (`_event_decide_lrn`, row `"<at>-lrn"` of `eq_event_decisions`) is
+tried each minute of the window, with no other bound, until each learner's live receipt has finished: a learner it names
+is asked for its picks (book.py `learner_picks`: its LIVE decision's intents in rank order; a catch-up's or a late
+decision's are never traded), one it does not name takes nothing at the auction; those births and the learners are
+given their names together by `book.allocate` in ROOM's order (the learner before R3's births; in Probe and Sized before
+its band's births in each pass), passing over every name the auction's own decision gave; their summaries go into the
+auction's own row too, so A85's reservation (`_event_recent`), the daily report and the alarms read a learner's picks
+where they read every program's. No learner that may take a name: nothing is held back. The skips: the gate's,
+EVL-LRN-O1's ERN guard (E8: no buy of an issuer with an item 2.02 8-K knowable in D's close window and stored by tau),
+EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable from 09:00 ET of D and stored by tau, whatever the primary
+event; barred on an `ok` score >= 2, an `ok` score >= 1 with guidance raised, or no answer by tau), one position per
+issuer on its earlier intents and real lots, and THE LEARNER'S GATE (league/events/judge7.py `gate`, below). Sized at
+learning (2% of E, A85's reservation), sent in ROOM's order (`send_key`). THE DAY ORDER LINE: each learner entry keeps,
+on its day's event line, every order the earlier PREREG rows may still send that day after it
 (`EquityBook._event_line_keep`, `_count_refusal`'s `keep`): this auction's earlier buys not yet sent (their send, their
 A80 re-send and, at the open, their exit at the close) and those sent with no re-send yet (that re-send), and AT THE
-OPEN every live earlier close-entry row's remaining room at the close (a send and a re-send a position), plus one; so
-the line refuses this file's entries after every earlier row's ACROSS THE DAY'S AUCTIONS (the reading that trades less,
-section 1.11 (10): while the close rows' room is near their bands' 8 a program, EVL-LRN-O1's open entries rarely fit
-the line at learning). The learners' decision waits for a running part up to 240 s after the open decision time and
-150 s after the close's (15:48:30 ET on a full day): R3's births at learning wait with it (ROOM puts them after the
-learners). STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close takes the name from an earlier
-close row by the sale gate, ON's sale at the next open the same; their lots hold cash at the auction they are sold in;
-ON's sales at D+1's open are exits on D+1's line, which no line stops.
+OPEN every live earlier close-entry row's remaining room at the close (a send and a re-send a position, each row's own
+band slots), plus one; so the line refuses this file's entries after every earlier row's ACROSS THE DAY'S AUCTIONS (the
+reading that trades less, section 1.11 (10): while the close rows' room is near their bands' 8 a program, EVL-LRN-O1's
+open entries rarely fit the line at learning). STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close
+takes the name from an earlier close row by the sale gate, ON's sale at the next open the same; their lots hold cash
+at the auction they are sold in; ON's sales at D+1's open are exits on D+1's line, which no line stops; at the close
+the House's decision (up to 150 s from 15:46 ET) and ON's part (up to 120 s after it) can finish after the 15:49 ET
+cut-off, so some ON picks, and the births behind them, miss the auction.
 
 **The judge** (league/events/judge7.py, sections 1.10 and 3.1), each night in the House's screen step after the earlier
 files' looks (house.py `_screen`, its receipt's `learners`): with no `cost_basis` row for the night every look of these
@@ -1143,7 +1148,10 @@ the universe's `sigma60`, never written, is never read); FEE the larger of the p
 selection charge from non-filled attempts at the checkpoints 100, 200, 400, ...) and Fbar only ever rise, one
 `cost_basis` row a night after the score and before the screen (house.py's `cost-basis` step; one that fails never holds
 the screen). With no attempt ledger (`real_attempts`, release 1019i's infrastructure) every session with a real buy is
-incomplete: the floors stand (2.5 bp, 0) and the row says why. `costs7.record7` (live decisions only, a = a7, r = r7)
+incomplete: the floors stand (2.5 bp, 0) and the row says why. FIXED AT ENTRY (section 2.1): an event's sigma, ADV20
+and E_prev are the values the learner's decision stored at tau (`costs7.stored_for`: the pick's, or the POOL
+candidate's, `learner_cands` row and the decision's `learner_fits.e_prev`), never a bar or an equity row stored later.
+`costs7.record7` (live decisions only: kind `live` under the learner's own live receipt finished `ok`; a = a7, r = r7)
 and `costs7.control7` (the POOL control of those decisions on a7) are the learners' judged record; `costs7.judge_record`
 is the ONE call into PREREG-EVL-6's frozen screen (`screen.v6_judge` over `screen.blocks6`, PREREG-EVL-6's code); with no
 such screen in the tree no look is judged. THE SELECTION POPULATION (section 2.2 (b), `costs7.attempts`) is each FIRST
