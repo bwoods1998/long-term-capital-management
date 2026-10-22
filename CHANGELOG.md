@@ -38,14 +38,17 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
-### Release 1019g: release 1019f + PREREG-EVL-5 (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`; on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`)
+### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
   reservation and round-robin, A86 REVISED, the Probe size's record, the screen after the open, the backfill's retries,
   Sail's spend fields, the alarms, the Done reader) and PREREG-EVL-5's code (its entry below: EVL-ERN-DROP-ON,
   EVL-ERN-UNDER-ON and EVL-NEWS-NIGHT2-ON seatable at learning from birth, the control EVL-CTRL-ERN-UNDER-ON, `rows_5`,
   `RAISED_GUARD`, `part_hold`, the gap reader, the pre-pass, the isolated last part of a close decision and
-  `decide-close-evl5`), merged `--no-ff`, rerere off, each merge committed before the next. The conflicts (CHANGELOG.md,
+  `decide-close-evl5`) and R3's births fix (`fix/births-names` `4b565668`, PR 596, its entry below: the House names an
+  id that lacks `EVL-B-`, a one-role list reads as its role, two valid examples in the prompt, and ONE re-run of a night
+  that accepted and registered nothing under an older reading, never from 12:55Z of the session day after it),
+  merged `--no-ff`, rerere off, each merge committed before the next. The conflicts (CHANGELOG.md,
   docs/events.md, docs/operations.md, league/equity/INTERFACES.md, league/events/book.py's `__all__`) kept both sides.
   Then release 1019f's fix round (`b262a85f`: its review's three majors, the births' real money in the daily report, an
   SEC holiday's close final only after the index that holds its eve, a co-registered 8-K the listed filer's, live and
@@ -100,14 +103,52 @@ programs trades real money at learning size.
   the merged tree (the old `_marks_0930`; `_close_hold` and `_hold_from` None; `_event_keep_room` keeping nothing).
   Left as the check found it (minor, trades less): a waiting close buy keeps two orders of D's lines though its exit is
   on D+1's.
+- **The final round** (`rel/1019g` on `8f5ee6aa`): the merges of release 1019f's head `b262a85f` and feat/evl-5's head
+  `ef6832bb` were already in (no-ops), then `fix/births-names` `4b565668` (conflicts in CHANGELOG.md and
+  docs/events.md's task table, both sides kept; league/events/house.py and births.py merged clean), then origin/main
+  `eb5bedac` (already in). THE BIRTHS FIX WITH THE NEW ROWS (league/tests/test_events_1019g.py
+  `TheBirthsRerunWithTheNewRows`): the re-run of Oct 21's empty night asks with the budget SEATING sums with
+  PREREG-EVL-5's three (1.5 of 3.0 used, three seatable births left that night), charges its births on top (1.7), names
+  none as a PREREG row, and seats them after PREREG-EVL-5's rows at `BIRTH_ROOM` whatever their bands; `ScoreWaits` adds
+  the births' own catch-ups (`decide-open-births`, `decide-close-births`) to evl_score's wait for the next pass. THE OCT
+  21 NIGHT'S RE-RUN: with this release live before 12:55Z Thu Oct 22, the House's first turns re-run that night's births
+  once (its receipt predates `PARSE_VERSION` 2; one new Haiku call under the new prompt inside the night's $0.25 and the
+  lane's line, or none when the stored answer's sha is the running one), its births registered at the later of GitHub's
+  commit time and the House's receipt, counting only events knowable after; live from 12:55Z, no re-run (Thursday's own
+  night at 21:15 ET is the first under this code).
+  THE OPEN MAJOR OF PREREG-EVL-5's MONEY RE-REVIEW (wf_03d60ddf-1c3; league/events/house.py `_lead`, `_close_owed`): the
+  held turn ended WITHOUT the live close decision whenever a task of the lead returned at or after 15:47:00 ET
+  (`_close_hold` is None once the time has come, so the loop broke and the decision waited for the next publish, 60 s,
+  or for a whole backfill decision of up to 150 s), so PREREG-EVL-5's buys and, through `HeldAhead`, the births behind
+  them could end unsent. Two ordinary paths: every decision task runs with the whole `DECIDE_BUDGET` (`_deadline` bounds
+  none), and a bounded task's last network read (the gateway's 45 s timeout) can return after its bound. NOW: (1) from
+  `HOLD_LEAD` before the live close decision until it has a receipt, no other decision starts (a missed, cut, pending or
+  failed decision of another session, the hourly re-decision, `decide-close-evl4`, `decide-close-evl5` and the births'
+  own wait, then run whole: none is cut by the hold); (2) a task that returns at or after the decision's time never ends
+  the turn while the live decision has no receipt and is still live: the turn starts it at once. The HOLD_LEAD comment,
+  the module docstring and docs/events.md say so (they said every task ended 5 s before the decision; false for
+  decisions). Tests (league/tests/test_events_evl5.py; each fails on `8f5ee6aa`): `TheLanesTurnForItsCloseDecision`: a
+  record pass due at 15:46:40 whose last read returns at 15:47:05 still starts `decide-close` at 15:47:05 in the same
+  turn; a re-decision started at 15:44:29 (before the lead, the whole budget) that returns at 15:47:10 is followed by
+  the live decision at once; a re-decision queued at 15:46:30 runs only after the live decision (started 15:47:00); a
+  missed, a cut and a `decide-close-evl5` decision are not due inside the lead, are due before it, after the live one
+  has started and with no PREREG-EVL-5 rows; HOLD_LEAD >= DECIDE_BUDGET. `TheHeldTurnInTheWeek`: the invented week with
+  Tuesday's and Wednesday's live close decisions made by the House's lane through such a turn (decision at 15:47:05,
+  finished before 15:49:00, the queued re-decision after it) gives every program, PREREG-EVL-1 to -4, the births and
+  PREREG-EVL-5, the same intents, the earlier programs the same real-money picks and PREREG-EVL-5 the same `part_hold`
+  (may go) as the decisions made at 15:47:00. Each half of the fix alone fails its own tests (the lead undone: the
+  re-decision and the ranks; the same-turn start undone: the two late returns). Left for the captain (the re-review's
+  minor): a PREREG-EVL-5 row at Probe or Sized whose part runs to its bound keeps its room from the earlier files'
+  learning rows after it until the receipt; cannot happen before a passed look puts a row at Probe.
 - **THE PROOF of both branches on the merged tree** (invented weeks only): league/tests/evl5_world.py's week gives every
   earlier program (PREREG-EVL-1, -2, -4 and the two births) the same 126 shadow intents and the same real-money picks
   (28 program-sessions, 19 with picks) on rel/1019e's, rel/1019f's and rel/1019g's trees, and `TheProof` (with and
   without the new rows) passes on rel/1019g; release 1019f's own proof, the House's lane through four sessions of
   invented 8-Ks and news, writes the same 111 intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows and 468
   decision receipts, and the same final records of the twelve earlier seatable programs, on rel/1019f and rel/1019g.
-- **Owner files** (behind league/ci.py's wall or protected): release 1019f's and PREREG-EVL-5's lists; the integration
-  adds league/equity/live.py, league/equity/INTERFACES.md and league/ops/evl_health.py.
+- **Owner files** (behind league/ci.py's wall or protected): release 1019f's, PREREG-EVL-5's and the births fix's lists
+  (league/events/births.py, league/events/house.py); the integration adds league/equity/live.py,
+  league/equity/INTERFACES.md and league/ops/evl_health.py; the final round league/events/house.py.
 - **Deploy**: docs/operations.md, **Release 1019g** (the gateway first, then the House). **Rollback**: the House first,
   to release 1019e's head `c485dcfe` (both parts at once), the gateway after it or never; constitution-only:
   `equity_money.event.enabled` False (`fd9e90c0` / `005745e9`).

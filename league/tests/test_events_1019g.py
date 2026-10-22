@@ -19,11 +19,15 @@ says how).
 3. The alarms: evl_score waits for the next pass on a `decide-close-evl5` catch-up's intents; evl_final judges the three
    rows and reads a close decided without them until their own decision names them; evl_entries names a buy
    `part_hold` held as held by a gate of real opens (`book.PART_WAIT`'s words, the review round's, and a receipt that
-   cannot be read), a buy waiting for the room kept by its own sizing's binding.
+   cannot be read), a buy waiting for the room kept by its own sizing's binding; R3's births' own catch-ups
+   (`decide-open-births`, `decide-close-births`) wait for the next pass as well.
 4. The event kind's 150-order line refuses in ROOM's order with the new rows (PREREG-EVL-5 section 1.3 (a)), whatever the
    minute each buy goes; A80's one re-send carries a PREREG-EVL-5 buy the venue cancelled at once.
 5. A86 REVISED's Probe rows leave PREREG-EVL-5's learning rows as frozen (2%, one share at most 5%, eight open); at Probe
    the rows trade A86's smaller size inside PREREG-EVL-1 section 8's envelope, as section 2 states.
+6. fix/births-names (PR 596, A95): the one re-run of an empty night asks with the budget SEATING sums with
+   PREREG-EVL-5's three (1.5 of 3.0 used), charges its births on top of them and seats them after PREREG-EVL-5's rows
+   (BIRTH_ROOM), whatever their bands.
 
 Through the REAL book (league/equity/live.py), the REAL `size_entry`, the money table in force and the lane's REAL store
 (league/tests/test_events_book.py's harness). Every figure is invented; no market price is read."""
@@ -51,6 +55,8 @@ from league.events import store as S
 from league.ops import evl_health as EV
 from league.tests import evl5_world as W
 from league.tests import test_events_1019c as T19C
+from league.tests import test_events_births as TEB
+from league.tests import test_events_births_names as BN
 from league.tests import test_events_book as TB
 from league.tests import test_events_review_1019b as R19B
 from league.tests import test_events_venue_cancel as VC
@@ -567,6 +573,21 @@ class ScoreWaits(TE.Lane):
             {"started_at": TE.iso(TE.et(self.FRI, "21:05")), "summary": json.dumps({DROP: {"planned": 1}})}]}},
             TE.et(self.FRI, "20:30")), {(DROP, "close", self.THU.isoformat())})
 
+    def test_the_births_own_catch_ups_wait_for_the_next_pass_too(self):
+        """R3's births decided by themselves (`decide-open-births:<day>`, `decide-close-births:<day>`: a decision made
+        without the registered births, A95's re-run of an empty night among them) are the same kind of catch-up: what
+        they wrote after the night's pass waits for the next one; what they wrote before it stands."""
+        since = TE.et(self.FRI, "20:30")
+        after, before = TE.iso(TE.et(self.FRI, "21:20")), TE.iso(TE.et(self.FRI, "20:00"))
+        got = EV.written_after({"decide": {
+            f"decide-open-births:{self.FRI.isoformat()}": [
+                {"started_at": after, "summary": json.dumps({"EVL-B-8K-502": {"planned": 2, "known": 0}})}],
+            f"decide-close-births:{self.THU.isoformat()}": [
+                {"started_at": after, "summary": json.dumps({"EVL-B-ERNREACT-DIP": {"planned": 1}})},
+                {"started_at": before, "summary": json.dumps({"EVL-B-OLD": {"planned": 1}})}]}}, since)
+        self.assertEqual(got, {("EVL-B-8K-502", "open", self.FRI.isoformat()),
+                               ("EVL-B-ERNREACT-DIP", "close", self.THU.isoformat())})
+
     def test_a_catch_up_before_the_pass_stands(self):
         self.intent5(DROP, "8k:old")
         self.receipt(f"decide-{SC.FIVE_KIND}:{self.THU.isoformat()}", TE.et(self.FRI, "20:00"),
@@ -766,6 +787,44 @@ class TheResend(VC.VenueCancelTest):
 
     def buys(self, h):
         return h.event_intents("buy")
+
+
+class TheBirthsRerunWithTheNewRows(BN.Replay):
+    """fix/births-names (A95) on the merged tree: the one re-run of Oct 21's empty night (release 1019e's receipt, its
+    six refused specs) asks under the new prompt with the budget as SEATING sums it WITH PREREG-EVL-5's three (1.5 of
+    3.0 used, three seatable births left that night), charges its births on top of them, names none as a PREREG row,
+    and seats them in ROOM after PREREG-EVL-5's rows whatever their bands (BIRTH_ROOM). (Fails on fix/births-names
+    alone: 1.2 used there; and on rel/1019g before the merge: no re-run.)"""
+
+    docs = BN.TheRerunOfAnEmptyNight.docs
+    first_night = BN.TheRerunOfAnEmptyNight.first_night
+
+    def test_the_rerun_charges_on_top_of_preregevl5_and_its_births_come_after_its_rows(self):
+        from league.events import verdicts as V
+
+        st = self.s.st
+        self.first_night()
+        self.assertEqual(SC.expected_false_passes(st)["expected"], 1.5, "PREREG-EVL-1 to -5: fifteen seatable versions")
+        now = dt.datetime(2026, 10, 22, 11, 30, 5, tzinfo=UTC)
+        due = BI.rerun_due(st, now)
+        self.assertEqual(due["night"], "2026-10-21")
+        route, _ = self.docs("2026-10-22T11:30:09Z")
+        gw = TEB.FakeArchitect(json.dumps({"specs": BN.SIX}), docs=route)
+        out = BI.night(st, gw, today=BN.NIGHT, now=lambda: now, rerun=due)
+        self.assertEqual(out["_status"], "ok", out)
+        [(_, body, _)] = [c for c in gw.calls if c[0] == V.PATH]
+        self.assertIn("1.5 of 3.0 used", body["messages"][0]["content"])
+        self.assertEqual(out["accepted"], ["EVL-B-ERN-NEGATIVE-O1", "EVL-B-NEWS-EARLY-MORNING-O1"])
+        self.assertEqual(SC.expected_false_passes(st)["expected"], 1.7, "0.10 each, on top of PREREG-EVL-5's 0.3")
+        self.assertEqual(BI.budget(st, BN.NIGHT)["seatable_left_tonight"], 1, "the night's three")
+        prereg = {p.id for p in P.PROGRAMS if p.spec is None}
+        self.assertFalse(set(out["accepted"]) & prereg)
+        self.assertEqual({BI.canonical_name(i) for i in FIVE} & prereg, set(), "a PREREG-EVL-5 id named is a new name")
+        for born in out["accepted"]:
+            for band in ("learning", "probe", "sized"):
+                self.assertGreater(EB.room_key(born, band), max(EB.room_key(f, "sized") for f in FIVE), (born, band))
+                self.assertEqual(EB.room_key(born, band)[0], EB.BIRTH_ROOM)
+            self.assertGreater(EB.order_of(born), max(EB.order_of(f) for f in FIVE))
 
 
 class TheHeldTurn(unittest.TestCase):

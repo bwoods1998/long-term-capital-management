@@ -32,10 +32,10 @@ they are and how the code runs them. When this page and a pre-registration disag
   versions: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three) of the lane's stated lifetime
   budget of 3.0 (PREREG-EVL-4 section 3, PREREG-EVL-5 section 3; 1.5 left for later births with none registered
   before PREREG-EVL-5, each seatable birth 0.10, as SEATING sums them).
-- [R3's births](#births-r3-not-yet-deployed) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free facts by
-  the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`, judged
-  by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable birth,
-  3.0 in all counted from the 1.2 above, at most 3 a night: at most 18 seatable births).
+- [R3's births](#births-r3-live-since-release-1019e) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free
+  facts by the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`,
+  judged by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable
+  birth, 3.0 in all counted from the 1.2 above, at most 3 a night: at most 18 seatable births).
 
 ## The programs
 
@@ -407,7 +407,13 @@ after 21:26:21Z Oct 21):
   minute: a buy the lane's decision names, or never will, keeps nothing the next. THE LANE STARTS THAT DECISION AT ITS
   TIME (league/events/house.py `HOLD_LEAD`): a turn from 150 s before the live close decision (the close decision + a
   minute, 15:47:00 ET) keeps going, running what falls due and waiting between, and starts the decision at 15:47:00, not
-  at the next House publish; `due()` looks again no later than the lead's start.
+  at the next House publish; `due()` looks again no later than the lead's start. INSIDE THE LEAD NO OTHER DECISION
+  STARTS (release 1019g, PREREG-EVL-5's money re-review; `_lead`): a decision runs with the whole 150 s budget, never
+  bounded by the next decision as the other tasks are, so a missed, cut, pending or failed decision of another
+  session, the hourly re-decision and the rows' own backfill decisions (`decide-close-evl4`, `decide-close-evl5`, the
+  births') wait until the live one has a receipt, and then run whole. A bound is checked before each network read, so a
+  task's last read (the gateway's timeout is 45 s) can return after it: a task that returns at or after 15:47:00 never
+  ends the turn while the live decision is owed (no receipt, still live): the turn starts it at once (`_close_owed`).
 - THE PRE-PASS (section 1.3): EVL-NEWS-NIGHT2-ON's heavy reads (its attention articles of P, (ii) and (iii) so far, the
   eligibility of the issuers that survive them by the live rule, and their 09:30 minutes, `_marks_0930`, batched: A
   BATCH STORES ONLY A PRICE, so an empty or partial answer stores nothing and removes nothing, PREREG-EVL-1 section 3;
@@ -504,7 +510,7 @@ turn, the most urgent due first.
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
 | - | PREREG-EVL-5's rows decided by themselves (`decide-close-evl5`) for each close a release without them decided, or whose part for them failed or ran past its own bound | from the first turn after the record pass, once each, oldest first | 150 s |
 | 2/6 | PREREG-EVL-5's pre-pass: today's close verdict pass, for EVL-NEWS-NIGHT2-ON's heavy reads | from 09:47 ET (D's 09:30 minute on the tape) until meta `evl5:pre:<day>` is stored; once more inside the last 30 minutes once the earlier rows' verdicts are stored | 90 s (the part's own 60 s inside it) |
-| 1 | PREREG-EVL-5's hold for the live close decision: a turn from `HOLD_LEAD` (150 s) before it keeps going, runs what falls due (each ending 5 s before the decision), waits between, and starts the decision at 15:47:00 ET | each session, while PREREG-EVL-5 has programs | at most 40 tasks a turn; the House closing, STOP or a clock that does not move ends it |
+| 1 | PREREG-EVL-5's hold for the live close decision: a turn from `HOLD_LEAD` (150 s) before it keeps going, runs what falls due but another decision (none starts in the lead; every other task is bounded to end 5 s before the decision), waits between, and starts the decision at 15:47:00 ET, or at once when a task's last read returns after that | each session, while PREREG-EVL-5 has programs | at most 40 tasks a turn; the House closing, STOP or a clock that does not move ends it |
 | 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once, and once more for a night an older reading of the grammar left empty, before 12:55Z of the session day after it (A95) | the score 120 s, resumable; births 240 s |
 | - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
@@ -600,7 +606,7 @@ market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a u
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
-## On the public site (WP4, Oct 19, 2026; branch `feat/site-events`, not yet deployed)
+## On the public site (WP4, Oct 19, 2026; live since Oct 21, 2026: release 1019e publishes `lane_v1`)
 
 The House publishes the lane under one versioned key, `lane_v1` (`league/site_lane.py` reads it read-only;
 `league/publish.py` `site_lane` allowlists it; the contract is `league/tests/fixtures/site_contract.md`): each program
@@ -802,7 +808,7 @@ release 1019b's one count of 60, entries stopped at about 30 open-entry lots sol
 learning lots left that day's close entries no room (league/tests/test_events_1019c.py sends all 40 and a Probe close
 entry). The row moves the money digest (`285fa7af` -> `055e5313`) and the constitution's (`fd38e4e1` -> `a8d4cbd9`).
 
-## Births (R3; not yet deployed)
+## Births (R3; live since release 1019e)
 
 The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts, rationed by
 an expected-false-pass budget you state". The spec is `goal-2026-10-19/R3-SPEC.md`; the code is

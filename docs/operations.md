@@ -8,7 +8,7 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5, the pre-open deploy (A94): `rel/1019g`, not deployed
+## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5 + the births fix, the pre-open deploy (A94): `rel/1019g`, not deployed
 
 Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
 **PREREG-EVL-5's three event programs**, below) merged in, then origin/main `eb5bedac` (the House's scoreboard of Oct 21)
@@ -19,6 +19,13 @@ decision, never the 09:47 ET pre-pass, reads each unmarked survivor alone, so an
 EVL-NEWS-NIGHT2-ON event; the money major, `HeldAhead`; the wait's cost, the lane's held turn `HOLD_LEAD` that starts
 the live close decision at 15:47:00 ET, and its alarm); `--no-ff`, rerere off, each merge committed before the next;
 every conflict kept both sides. Both parts were cut from release 1019e (`c485dcfe`, live since 21:17Z Oct 21: A93).
+THE FINAL ROUND: `fix/births-names` `4b565668` (PR 596, A95, cut from release 1019f: the House names an id that lacks
+`EVL-B-`, a one-role list reads as its role, two valid examples in the prompt, the prompt's sha `2203fda3` ->
+`8294fe77`, and ONE re-run of a night that accepted and registered nothing under an older reading, never from 12:55Z of
+the session day after it) merged in, and the fix of the open major of PREREG-EVL-5's money re-review: from `HOLD_LEAD`
+before the live close decision until it has a receipt no other decision starts (league/events/house.py `_lead`), and a
+task that returns at or after 15:47:00 ET (a network read past its bound) never ends the held turn while the live
+decision is owed: the turn starts it at once (`_close_owed`).
 ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS for the lane's own close decision to name its program (`book.part_hold`;
 the book's close decision waits only 60 s for the lane's) is feat/evl-5's `HeldAhead` alone (league/equity/live.py:
 the waiting buy, once every other gate lets it go, keeps its dry-sized worst case, A85's reservation and A86's Probe
@@ -55,18 +62,26 @@ into `rel/1019g` first when it moved, and CI green on the exact head):
    (`decide-close-evl5:<day>` receipts: none is owed when the House is live before Oct 22's close decision, since the
    only close after 21:26:21Z Oct 21 a release without the rows decided, Oct 21's, was decided before it; meta
    `evl5:pre:<day>` from 09:47 ET; a close decision's summary with `evl5` and no `evl5_error`; at the first event
-   decision `eq_event_programs` with fifteen PREREG rows and the seatable births).
+   decision `eq_event_programs` with fifteen PREREG rows and the seatable births), then the births fix's: THE OCT 21
+   NIGHT'S ONE RE-RUN when the House is live before 12:55Z (a `births` receipt whose summary has `parse_version` 2 and
+   `rerun` {night 2026-10-21, until 2026-10-22T12:55:00Z}, at most one new `birth_calls` row under prompt `8294fe77`,
+   the night's spend at most $0.25; any births registered to `docs/births/2026-10-21.jsonl` with `registered_at` the
+   later of GitHub's commit time and the receipt; `screen.expected_false_passes` 1.5 + 0.10 for each); none when it
+   is live from 12:55Z, and Thursday's own night at 21:15 ET asks under the new prompt.
 4. Real money for the new rows from the first close decision after the House is live (Oct 22's close when it ships
    before the open), and at each close only once the lane's own close decision names them. THE FIRST CLOSE AFTER THE
    DEPLOY (read-only, the captain's): the lane's `decide-close` seconds in `/workspace/state/events/lane.json`
    (`tasks`) and the `started_at` / `finished_at` of the day's `decide-close:<day>` receipt: started at about 15:47:00
-   ET (the held turn, `HOLD_LEAD`) and finished before 15:49:00 ET with a book minute to spare (the book's cut-off is
-   the close - 11 minutes). A close whose PREREG-EVL-5 buys ended unsent waiting for it is an `equity.alert` (info)
-   after the close, a WARNING when it recurs within five sessions, and the lane's report counts it (`room_effects`:
-   `held_unsent`, `room_waited`).
+   ET (the held turn, `HOLD_LEAD`; later only by a lead task's last read, at once after it) and finished before
+   15:49:00 ET with a book minute to spare (the book's cut-off is the close - 11 minutes); no other `decide-*` receipt
+   started between 15:44:30 and the live one's start (the lead). A close whose PREREG-EVL-5 buys ended unsent waiting
+   for it is an `equity.alert` (info) after the close, a WARNING when it recurs within five sessions, and the lane's
+   report counts it (`room_effects`: `held_unsent`, `room_waited`).
 
 **Rollback**: the House first, by `floor_box.py rollback` and repoint release 1019e's deployed head (`c485dcfe`): it
-undoes both parts at once, as **Release 1019f**'s rollback and PREREG-EVL-5's say (the new columns stay NULL; Probe at
+undoes every part at once, as **Release 1019f**'s rollback, PREREG-EVL-5's and the births fix's say (a birth a re-run
+registered stays registered: its stored spec has the canonical id and a string role, which release 1019e's grammar
+parses) (the new columns stay NULL; Probe at
 5% again, money `055e5313`; the new rows' intents and lots stay in the stores and their lots exit by their own plans;
 the old code seats none of them, so a later redeploy decides those closes for them by themselves). The gateway after it,
 by `wrangler rollback` to `68363043`, or never. Constitution-only: `equity_money.event.enabled` False (`fd9e90c0` /
