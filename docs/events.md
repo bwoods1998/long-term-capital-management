@@ -1113,8 +1113,13 @@ on its day's event line, every order the earlier PREREG rows may still send that
 A80 re-send and, at the open, their exit at the close) and those sent with no re-send yet (that re-send), and AT THE
 OPEN every live earlier close-entry row's remaining room at the close (a send and a re-send a position, each row's own
 band slots), plus one; so the line refuses this file's entries after every earlier row's ACROSS THE DAY'S AUCTIONS (the
-reading that trades less, section 1.11 (10): while the close rows' room is near their bands' 8 a program, EVL-LRN-O1's
-open entries rarely fit the line at learning). STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close
+reading that trades less, section 1.11 (10), `book.LINE_ACROSS_AUCTIONS` True). ITS STATED EFFECT, FOR THE CAPTAIN'S
+AMENDMENT BEFORE THE RELEASE: release 1019h's ten close-entry rows at learning (8 positions each) keep 1 + 10 x 2 x 8 =
+161 orders of the 150 line on an EMPTY day, so EVL-LRN-O1 BUYS NOTHING IN REAL MONEY while they hold room (its shadow,
+the record that alone promotes, is unchanged; EVL-LRN-ON's close keep is its own auction's and is unaffected). The
+amendment's alternative is one constant: `LINE_ACROSS_AUCTIONS` False keeps the line inside the learner's own auction
+only, and an O1 entry with its exit at the close can then take a slot an earlier close entry needs once the day's line
+is nearly full (about 134 of 150 orders; a session sends about 24 buys today). STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close
 takes the name from an earlier close row by the sale gate, ON's sale at the next open the same; their lots hold cash
 at the auction they are sold in; ON's sales at D+1's open are exits on D+1's line, which no line stops; at the close
 the House's decision (up to 150 s from 15:46 ET) and ON's part (up to 120 s after it) can finish after the 15:49 ET

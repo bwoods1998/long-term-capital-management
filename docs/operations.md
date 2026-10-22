@@ -506,7 +506,10 @@ every earlier file's row and before R3's births.
    until the learner's own live receipt has finished (no other bound), then gives the learner's LIVE picks (only when
    that receipt names it; its gate, the ERN and 8-K guards) and the held-back births' picks their names together in
    ROOM's order, the summaries written into the auction's own row too. A learner entry keeps the day line's room for
-   every earlier row's later orders that day (`_event_line_keep`).
+   every earlier row's later orders that day (`_event_line_keep`; with `book.LINE_ACROSS_AUCTIONS` True, as built,
+   EVL-LRN-O1's open entries never fit while the ten close-entry rows at learning hold room: its buys stay `planned`
+   with "161 for the earlier PREREG rows' orders still to come today" in their why and end unsent at the window's end,
+   one `unsent` row each in release 1019i's attempts ledger; not an alarm).
 5. The screen's learner step (`judge7.run`, inside the nightly `screen` task after every earlier file's looks; its
    receipt's `learners`): with the night's `cost_basis` row, each learner's looks (22 ... 60 blocks, PREREG-EVL-6's
    schedule, through `costs7.judge_record`), its band move with the look (PASS probe, RETIRE retired), its run's end at

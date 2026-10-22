@@ -1901,5 +1901,6 @@ is None) trade through the event kind's own path with these additions, each addi
   `send_key`'s order; the summaries merged into the auction's own row (`programs`, `sale_to_later`, `learners.decided`),
   so `_event_recent` (A85), the daily report and the alarms read them as every program's. `_event_work_entry` passes a
   learner entry's `_event_line_keep` (the orders the earlier PREREG rows may still send that day: this auction's buys not
-  sent and A80's re-sends, at the open the close's remaining room x 2, plus one) to `_count_refusal(..., keep=)`, kept on
-  the event line and the House-wide line; an exit never meets it. Nothing here changes for any other program.
+  sent and A80's re-sends, at the open the close's remaining room x 2 while `book.LINE_ACROSS_AUCTIONS` holds, plus one)
+  to a `_count_refusal(..., keep=)` of its own, before the count every entry meets (whose call is release 1019h's), kept
+  on the event line and the House-wide line; an exit never meets it. Nothing here changes for any other program.
