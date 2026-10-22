@@ -21,59 +21,77 @@ money row, no constitution row, no judge's rule. IDENTITIES (the tree's own func
 `78022ca6`, the xs identity `2f0083bc`, the gate contract `397b22b7`, the Done rule `54241925`, the births prompt
 `0cae215b` at `PARSE_VERSION` 4, `equity_money_problems()` []: THE STANDING GRANT IS NOT RE-RATIFIED. Four parts, three
 commits (docs/events.md, **Release 1019i**; CHANGELOG.md):
-1. H1, THE BATCHED SCORE (`d9129a32`, its own commit: it may ship alone on top of release 1019h): league/events/score.py
-   (`prefetch`, `order_due`, `fresh`, `check_parity`) and league/events/house.py `_score`. The night's score reads every
-   due intent's daily bars and both benchmarks' once, 200 symbols a request (400 intents a prefetch on the House),
-   seating versions and their controls first; an intent settles with no bar request of its own (about 2 requests
-   for 200 symbols instead of 2 an intent). Byte-identical outcome rows (the golden tape). THE FIRST BATCHED NIGHT is
-   the parity night: 5% of its settled intents are settled again by the per-intent path and only an equality flag
-   is kept (`score_parity`).
+1. H1, THE BATCHED SCORE (`d9129a32`, with its fix round): league/events/score.py (`prefetch`, `Prefetch`,
+   `order_due`, `parity_window`, `check_parity`, `latched`, `unlatch`) and league/events/house.py `_score`. The night's
+   score reads every due intent's daily bars and both benchmarks' once, 200 symbols a request (400 intents a prefetch
+   on the House), into a cache that lives only for the pass, seating versions and their controls first; an intent
+   settles with no bar request of its own (about 2 requests for 200 symbols instead of 2 an intent) and writes to
+   `bars` exactly the rows its own two fetches would have written, so `bars` ends each pass as under release 1019h
+   (the review's first major: Done's fill gaps read those rows). Byte-identical outcome and `bars` rows (the golden
+   tape, both directions, and two nights with a split between them). THE FIRST BATCHED NIGHT is the parity night:
+   5% of each prefetch's intents are settled twice in memory, by the cache and by the per-intent path, before any of
+   them is written, and only an equality flag is kept (`score_parity`). A FLAG 0 FAILS CLOSED (the review's second
+   major): the parity latch turns the batched score off for that pass and every later one, `evl_score_parity` mails
+   it, and the captain clears it with `python3 -m league.events --state /workspace/state/events score-unlatch` once
+   the difference is explained.
 2. H3, THE ATTEMPTS LEDGER (`real_attempts`, league/events/attempts.py; league/equity/live.py `_event_attempts`,
    league/events/book.py `attempt_rows`, `write_attempts`): every event order with the venue's own states, and every
    planned buy that ended unsent; read-only of the orders (the bodies sent are byte-identical with it on and off).
-3. H4, THE FILL-RATE LINES AND TWO ALARMS: the daily report (the lane's and the mail's) gains the fill rates by
-   auction over 3 and 20 sessions and the settle pace; the stall job gains `evl_fill_rate` and `evl_attempts`
-   (league/ops/evl_health.py, league/ops/stall.py `CAUSES`), worded in gateway/lib/email.mjs, whose report composer
-   prints the new lines.
+3. H4, THE FILL-RATE LINES AND THE ALARMS: the daily report (the lane's and the mail's) gains the fill rates by
+   auction over 3 and 20 sessions, the settle pace (with the parity latch) and the PX line; the stall job gains
+   `evl_fill_rate`, `evl_attempts`, and from the review `evl_score_parity` and `evl_px_store` (league/ops/evl_health.py,
+   league/ops/stall.py `CAUSES`), worded in gateway/lib/email.mjs, whose report composer prints the new lines.
 4. H2, THE PRICE LANE'S DATA LAYER (league/events/pxstore.py, pxdata.py; house.py `_px_due`; universe.py's pure core
-   `eligible_row`), behind `events.px_data`, SHIPPED OFF.
+   `eligible_row`), behind `events.px_data`, SHIPPED OFF; with THE STORE'S ROOM (the review's third major,
+   `pxstore.room`): px.sqlite under 2 GiB and the state disk above 5 GiB free (the swarm guard's 3 GB and 2 GB more),
+   checked before every PX run and every request of one; a run without room is `disk` and writes nothing.
 
 THE FLAGS (league/config.json `events`; each a deploy of config like any, no money-digest move):
 - `score_batch` (true; a missing key is on): false restores release 1019h's per-intent score path exactly (`due`'s
   order, two bar fetches an intent). THE INSTANT ROLLBACK OF H1.
-- `score_parity` (missing: the first batched night only; true every night; false never): the parity flags.
+- `score_parity` (missing: the first batched night only; true every night; false never): the parity flags. A flag 0
+  latches the batched score off (meta `evl:score:batch:latched`) whatever `score_batch` says, until `score-unlatch`.
 - `px_data` (false; a missing key is off): true runs the PX recorders into `<state>/events/px.sqlite`. They only warm
   it: no decision reads px.sqlite before PREREG-EVL-8's programs (H3) ship. The first nights on: the 270-session
   backfill (about 120-372 requests, at night, resumable chunk by chunk) and the operating-company cache (SEC reads at
   SEC's pace, bounded passes, at night); then each session: the universe from 07:40 ET, FLAGGED from 09:00 ET (refused
   earlier), the premarket marks from 09:35 ET, the 15:30 marks from 16:05 ET, the night's bars after the score. Its
-  size: about 2 MB a session (`PxStore.size_bytes`).
+  size: the review measured 224 bytes a stored daily bar on invented data, so the first night's backfill of about
+  7,000 tickers x 270 sessions x 2 adjustments is about 800 MiB, then about 3-5 MB a session; the store's room stops
+  every recorder at 2 GiB or under 5 GiB free on the state disk (a run `disk`, nothing written; every PX run then
+  waits 10 minutes; `evl_px_store` stands; the mail's PX line and lane.json `px_store` show the size and free space).
 
 **Deploy, in order** (an owner deploy, after release 1019h is live; never 12:55-20:05Z on a trading day (12:55-21:05Z
 from Nov 2), never with an order in flight, CI green on the exact head; merge origin/main first when it moved, rerere
 off):
 1. THE GATEWAY FIRST (`gateway/lib/email.mjs`: the two new causes' words and the report's new lines): `cd gateway &&
    npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces. An older
-   gateway refuses a stall notice naming `evl_fill_rate` or `evl_attempts` (a 400: nothing mailed) and ignores the
-   report's `settle` and `fill_rates` facts, so the House must not run before it.
+   gateway refuses a stall notice naming `evl_fill_rate`, `evl_attempts`, `evl_score_parity` or `evl_px_store` (a 400:
+   nothing mailed) and ignores the report's `settle`, `fill_rates` and `px_store` facts, so the House must not run
+   before it.
 2. THE HOUSE from the same head by the captain's ship script with release 1019h's pair, unchanged: `ship_house.sh
    <head> <PR> r1019i 8e63ce64 c3026eba` (or merged into release 1019i's head, the pair that release states). Verify
    (read-only): promoted, `real_money` true, failures []; the grant NOT re-ratified (the pair did not move).
 3. THEN, as each first happens (read-only): the first night's score receipt (`score`, its summary `batched` true,
-   `prefetch` {requests, rows, windows, done}, `requests` {bars, trades}, `parity` {checked, equal} with checked =
-   equal; a flag 0 is the captain's to read before the second batched night: `score_batch` false until it is
-   explained); the daily report's "Score:" line (settled, passes, minutes, a minute) against A95's 15-25 a minute; the
+   `prefetch` {requests, rows, windows, done, served}, `requests` {bars, trades}, `parity` {sampled, checked, equal}
+   with checked = equal and no `latched`; a flag 0 latches by itself: the pass and every later one settle by the
+   per-intent path, the receipt says `latched` true, `evl_score_parity` is mailed and the report's Score lines say
+   "BATCHED SCORE OFF"; the captain reads why (`SELECT * FROM score_parity WHERE equal=0`, read-only: identifiers and
+   a time, never a value) and either clears it on the box (`python3 -m league.events --state
+   /workspace/state/events score-unlatch`) or deploys `score_batch` false); the daily report's "Score:" line (settled, passes, minutes, a minute) against A95's 15-25 a minute; the
    lane's store holding `real_attempts` rows for every event order of the day after the first book minute (the first
    write carries every event order on record: `SELECT count(*) FROM real_attempts` against the book's event orders in
    live.sqlite) and the report's "Fills open/close" lines; the stall job's `evl_fill_rate` and `evl_attempts` judged
    (not "Not judged") from the first stall run after the lane opened its store. With `px_data` turned on (a later
    config deploy, the captain's call): `px.sqlite` made at the first night's backfill, `px_runs` rows `ok` or
-   `partial` (never `failed` twice running), `px:backfill:done` once it ends, and no decision receipt's start later
-   than before (the PX tasks run last and never within 10 minutes of a decision).
+   `partial` (never `failed` twice running, never `disk`; each with `free_bytes` and `size_bytes`), `px:backfill:done`
+   once it ends, the mail's "PX store:" line under 2048 MB, `evl_px_store` judged and quiet, and no decision receipt's
+   start later than before (the PX tasks run last and never within 10 minutes of a decision).
 
 **Rollback**: H1 alone, instantly: `events.score_batch` false (a config deploy; nothing is migrated back:
-`score_parity` rows stay, read by nothing). The PX recorders: `events.px_data` false (px.sqlite stays, read by nothing;
-delete it at leisure). THE WHOLE RELEASE: the House to release 1019h's deployed head by `floor_box.py rollback` (the pair
+`score_parity` rows and any parity latch stay, read by nothing but the stall job; the latch already holds the
+per-intent path by itself, with no deploy). The PX recorders: `events.px_data` false (px.sqlite stays, read by
+nothing; delete it at leisure; `evl_px_store` is then judged only on px.sqlite's size). THE WHOLE RELEASE: the House to release 1019h's deployed head by `floor_box.py rollback` (the pair
 does not move, nothing to re-ratify; `real_attempts` and `score_parity` stay in the lane's store, additive tables an
 older release never reads), then the gateway by `wrangler rollback` to the version recorded (an older House names
 neither new cause).

@@ -142,8 +142,9 @@ CREATE TABLE IF NOT EXISTS birth_candidates(night TEXT NOT NULL, seq INTEGER NOT
 #:   league/events/book.py `write_attempts`), which only reads its orders and never sends, changes or cancels one. Its
 #:   fill prices are outcome-derived: league/events/births.py `FACTS_DENY` refuses it.
 #: - `score_parity` (PREREG-EVL-8's harness plan H1, league/events/score.py `check_parity`): the batched score's parity
-#:   night, one EQUALITY FLAG per sampled intent (1 when the per-intent path settles it identically, else 0), never a
-#:   value.
+#:   night, one EQUALITY FLAG per sampled intent the pass's cache served (1 when the per-intent path settles it
+#:   identically, in memory, before either is written, else 0), never a value; a 0 sets the parity latch (meta
+#:   `evl:score:batch:latched`, score.py `latched`).
 SCHEMA_1019I = """
 CREATE TABLE IF NOT EXISTS real_attempts(client_id TEXT PRIMARY KEY, venue_id TEXT, program TEXT NOT NULL,
   version INTEGER NOT NULL, event TEXT NOT NULL, side TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, at TEXT,

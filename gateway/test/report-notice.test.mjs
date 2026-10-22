@@ -33,9 +33,10 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   // One screen: 44 lines before release 1019f; the day's real buys add three (A80 (2)), the break-even edge a fourth once a
   // Probe buy exists, and the Done line (the goal V2) three; release 1019h's Done supply line its head, a line or two
   // of Probe+ rows and its reach (four for the fixture's two rows).
-  // Release 1019i: the attempts ledger's fill rates (two lines an auction) and the batched score's settle pace (two).
-  assert.ok(text.length <= 61, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2; no Probe buy: 60)
-  assert.equal(text.length, 60);
+  // Release 1019i: the attempts ledger's fill rates (two lines an auction), the batched score's settle pace (two) and,
+  // its review, the PX line (one).
+  assert.ok(text.length <= 62, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2 + 1; no Probe buy: 61)
+  assert.equal(text.length, 61);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -297,4 +298,26 @@ test('release 1019i: the fill rates by auction over 3 and 20 sessions (the attem
   const odd = lines({ ...REPORT, settle: { ...REPORT.settle, settled: 'ACME rallied' }, fill_rates: { ...REPORT.fill_rates,
     open: { ...REPORT.fill_rates.open, last3: { ...REPORT.fill_rates.open.last3, buys_filled: 'ACME' } } } });
   assert.ok(!odd.join('\n').includes('ACME'));
+});
+
+test('release 1019i\'s review: the parity latch on the Score lines and the PX line (sizes and counts only)', () => {
+  const text = lines(REPORT);
+  assert.ok(text.includes('PX store: 812/2048 MB, 41.2 GB free; runs 12 ok, 1 partial'), text.join('\n'));
+  assert.ok(!text.some(line => line.includes('BATCHED SCORE OFF')), 'no latch: nothing said');
+  const latched = lines({ ...REPORT, settle: { ...REPORT.settle, latched: true } });
+  assert.ok(latched.includes(' BATCHED SCORE OFF: a parity difference latched it'), latched.join('\n'));
+  // No room: said, with the floor; the recorders off but px.sqlite on disk: "(off)".
+  const full = lines({ ...REPORT, px_store: { ...REPORT.px_store, ok: false, free_gb: 3.2,
+    runs: { ...REPORT.px_store.runs, disk: 4 } } });
+  const said = full.join(' ').replace(/\s+/g, ' ');     // (the line wraps at the phone's width)
+  assert.ok(said.includes('3.2 GB free; runs 12 ok, 1 partial, 4 disk; NO ROOM (floor 5.0 GB): nothing written'), said);
+  const off = lines({ ...REPORT, px_store: { ...REPORT.px_store, on: false } });
+  assert.ok(off.some(line => line.startsWith('PX store (off): 812/2048 MB')), off.join('\n'));
+  // The recorders off and no px.sqlite (every figure null): no line at all.
+  const none = lines({ ...REPORT, px_store: { on: false, size_mb: null, line_mb: null, free_gb: null, floor_gb: null,
+    ok: null, runs: null } });
+  assert.ok(!none.some(line => line.startsWith('PX store')), none.join('\n'));
+  // Figures only: a word where a figure goes is never echoed.
+  const odd = lines({ ...REPORT, px_store: { ...REPORT.px_store, size_mb: 'ACME', runs: { ok: 'ACME', ACME: 3 } } });
+  assert.ok(!odd.join('\n').includes('ACME'), odd.join('\n'));
 });

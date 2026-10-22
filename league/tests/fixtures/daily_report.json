@@ -1,5 +1,5 @@
 {
- "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f; `supply`, the Done supply line, since release 1019h; `settle`, the batched score's settle pace, and `fill_rates`, the attempts ledger's fill rates, since release 1019i), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
+ "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f; `supply`, the Done supply line, since release 1019h; `settle`, the batched score's settle pace, and `fill_rates`, the attempts ledger's fill rates, and `px_store`, the PX line, since release 1019i), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
  "kind": "report",
  "notice_id": "report:2026-10-20",
  "day": "2026-10-20",
@@ -292,7 +292,8 @@
   "parity": {
    "checked": 20,
    "equal": 20
-  }
+  },
+  "latched": false
  },
  "fill_rates": {
   "open": {
@@ -334,6 +335,22 @@
     "resent": 1,
     "unsent": 2
    }
+  }
+ },
+ "px_store": {
+  "on": true,
+  "size_mb": 812.4,
+  "line_mb": 2048.0,
+  "free_gb": 41.2,
+  "floor_gb": 5.0,
+  "ok": true,
+  "runs": {
+   "ok": 12,
+   "partial": 1,
+   "waiting": 0,
+   "cut": 0,
+   "failed": 0,
+   "disk": 0
   }
  }
 }

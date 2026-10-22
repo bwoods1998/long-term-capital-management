@@ -389,8 +389,12 @@ class TheMinutes(PxCase):
         self.assertEqual(self.px.minute("ACME", early, "v1530")["value"], 2.0 * 180, "09:30 to the bar ending 12:30")
 
 
-class TheHouse(unittest.TestCase):
-    """The House's scheduling of the recorders (league/events/house.py `_px_due`)."""
+GB = 2 ** 30
+
+
+class HouseCase(unittest.TestCase):
+    """A lane on an invented calendar; the state disk's free space is invented too (100 GB, `PS.disk_free`), so no
+    test reads the build machine's own disk."""
 
     def lane(self, root, **settings):
         from league.tests.test_events_score_batch import FakeHouse, Mono
@@ -411,9 +415,17 @@ class TheHouse(unittest.TestCase):
                 for d in weekdays(dt.date(2025, 6, 1), dt.date(2026, 12, 31)):
                     db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
                                (d.isoformat(), S.iso(wall(d, "09:30")), S.iso(wall(d, "16:00"))))
+        self.free = 100 * GB
+        patch = mock.patch.object(PS, "disk_free", lambda root: self.free)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def at(self, lane, when):
         lane.house.at = when.timestamp()
+
+
+class TheHouse(HouseCase):
+    """The House's scheduling of the recorders (league/events/house.py `_px_due`)."""
 
     def test_off_by_default_and_no_bucket(self):
         lane = self.lane(self.root)
@@ -481,6 +493,116 @@ class TheHouse(unittest.TestCase):
         self.assertEqual(lane._bucket.taken["lane"], 1)
         off = self.lane(self.root)
         off.throttle()       # (no bucket: the lane's spacing alone, as before)
+
+
+class TheRoom(HouseCase):
+    """THE STORE'S ROOM (release 1019i's review; PREREG-EVL-8's harness plan H2, its risk list: "a size line and a 2 GB
+    alarm"; league/events/pxstore.py `room`): px.sqlite under 2 GiB and the state disk above the PX floor (the swarm
+    guard's 3 GB and 2 GB more), checked before every PX run and every request of one; without room nothing is
+    written, every PX run waits FAIL_BACKOFF, and lane.json says so."""
+
+    def ctx(self, lane, st, gateway=None):
+        return H.LaneContext(lane, st, H.LaneGateway(gateway or Market(), lane, None, cut=False), lambda url: b"",
+                             lane.now)
+
+    def lane_on(self):
+        from league.tests.test_events_score_batch import FakeHouse, Mono
+
+        lane = H.EventLane(FakeHouse(wall(D, "22:00")), self.root, settings={"px_data": True}, monotonic=Mono(),
+                           sleep=lambda s: None)
+        lane.gateway = lambda: Market()
+        return lane
+
+    def test_the_lines(self):
+        ok = PS.room(self.root)
+        self.assertEqual((ok["ok"], ok["over"], ok["low"], ok["why"]), (True, False, False, None))
+        self.assertEqual((PS.MAX_BYTES, PS.FREE_FLOOR_BYTES), (2 * GB, 5 * GB))
+        self.free = 5 * GB - 1
+        low = PS.room(self.root)
+        self.assertFalse(low["ok"])
+        self.assertIn("under the PX floor of 5.0 GB", low["why"])
+        self.free = None
+        self.assertIn("could not be read", PS.room(self.root)["why"], "unread is no room")
+        self.free = 100 * GB
+        with PS.PxStore(self.root) as px:
+            px.set_meta("x", "y")
+            self.assertEqual(px.size_bytes(), PS.stored_bytes(self.root))
+        with mock.patch.object(PS, "MAX_BYTES", PS.stored_bytes(self.root)):
+            over = PS.room(self.root)
+        self.assertEqual((over["ok"], over["over"]), (False, True))
+        self.assertIn("at or over its", over["why"])
+
+    def test_a_run_without_room_opens_nothing_and_every_px_run_waits(self):
+        lane = self.lane_on()
+        self.free = 4 * GB
+        called = []
+        with S.Store(self.root) as st:
+            out = lane._px(self.ctx(lane, st), None, "backfill", lambda *a: called.append(a) or {"rows": 1})
+            self.assertEqual(out["_status"], "disk")
+            self.assertEqual(called, [], "the recorder never ran")
+            self.assertFalse(PS.path_of(self.root).exists(), "px.sqlite not even made")
+            said = lane.health()["px_store"]
+            self.assertEqual((said["ok"], said["free_bytes"]), (False, 4 * GB))
+            self.assertIn("under the PX floor", said["why"])
+            self.assertEqual(lane._warnings, 1, "warned (at most once an hour)")
+            s = C.session(st, D)
+            soon: list = []
+            later = wall(D, "22:00") + H.PX_EVERY
+            self.free = 100 * GB
+            self.assertIsNone(lane._px_due(st, later, D, s, soon), "no PX run within FAIL_BACKOFF of a run with no room")
+            self.assertIn(wall(D, "22:00") + H.FAIL_BACKOFF, soon)
+            task = lane._px_due(st, wall(D, "22:00") + H.FAIL_BACKOFF, D, s, [])
+            self.assertEqual(task.name, "px-backfill", "with room again the recorders go on")
+
+    def test_a_store_at_its_line_writes_nothing(self):
+        lane = self.lane_on()
+        with PS.PxStore(self.root) as px:
+            run = px.start_run("daily", now=wall(P, "22:00"))
+            px.finish_run(run, "ok", now=wall(P, "22:01"))
+        size = PS.stored_bytes(self.root)
+        with S.Store(self.root) as st, mock.patch.object(PS, "MAX_BYTES", size):
+            out = lane._px(self.ctx(lane, st), None, "daily", lambda *a: {"rows": 1})
+        self.assertEqual(out["_status"], "disk")
+        self.assertEqual(PS.stored_bytes(self.root), size, "not a byte written")
+        with PS.PxStore(self.root) as px:
+            self.assertEqual(px.db.execute("SELECT COUNT(*) FROM px_runs").fetchone()[0], 1, "no run row either")
+
+    def test_a_run_stops_before_the_page_that_would_cross_the_line(self):
+        lane = self.lane_on()
+        market = Market()
+        for sym in ("AAA", "BBB"):
+            for d in (P, D):
+                market.daily[(sym, d)] = (10.0, 1e6)
+        lane.gateway = lambda: market
+
+        def two_chunks(ctx, px, gw, run, deadline):
+            PX.daily_bars(px, gw, ["AAA"], P, D, adj="raw", now=wall(D, "22:00"), run=run)
+            self.free = 4 * GB        # the disk fills between two pages (invented)
+            PX.daily_bars(px, gw, ["BBB"], P, D, adj="raw", now=wall(D, "22:00"), run=run)
+            return {"rows": 99}
+        with S.Store(self.root) as st:
+            out = lane._px(self.ctx(lane, st, market), None, "daily", two_chunks)
+        self.assertEqual(out["_status"], "disk")
+        self.assertEqual(len(market.requests("1Day")), 1, "the second request never went")
+        with PS.PxStore(self.root) as px:
+            self.assertEqual(px.bars("AAA", [P, D]).keys(), {P.isoformat(), D.isoformat()})
+            self.assertEqual(px.bars("BBB", [P, D]), {}, "nothing of the page that would have crossed")
+            row = px.last_run("daily")
+        self.assertEqual(row["status"], "disk")
+        self.assertEqual(row["free_bytes"], 100 * GB, "the free space at its start")
+        self.assertGreater(row["size_bytes"], 0, "px.sqlite's size at its end")
+        self.assertIsNotNone(lane._px_disk, "every PX run then waits FAIL_BACKOFF")
+
+    def test_an_ok_run_records_its_room(self):
+        lane = self.lane_on()
+        with S.Store(self.root) as st:
+            out = lane._px(self.ctx(lane, st), None, "daily", lambda *a: {"rows": 0})
+        self.assertEqual(out["_status"], "ok")
+        with PS.PxStore(self.root) as px:
+            row = px.last_run("daily")
+        self.assertEqual((row["status"], row["free_bytes"]), ("ok", 100 * GB))
+        self.assertGreater(row["size_bytes"], 0)
+        self.assertTrue(lane.health()["px_store"]["ok"])
 
 
 class OnlyWarming(unittest.TestCase):

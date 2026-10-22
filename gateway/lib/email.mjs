@@ -223,6 +223,11 @@ export const STALL_CAUSES = {
   // gateway first, as above.
   evl_fill_rate: 'event-lane real buys filled less often than they did',
   evl_attempts: 'event-lane orders have no final state on record',
+  // Release 1019i's review (PREREG-EVL-8's H1 and H2): the batched score's parity check found a difference, so the
+  // score is latched to the per-intent path until the captain clears it (league/events/score.py `latched`); and the
+  // price lane's store at its 2 GB line or the state disk under the PX floor (league/events/pxstore.py `room`).
+  evl_score_parity: 'the batched score disagreed with the per-intent path and is switched off',
+  evl_px_store: 'the price lane\'s store has no room left on the disk',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
@@ -589,6 +594,22 @@ export function composeReport(facts = {}) {
       + `${count(asked.bars)}, prints ${count(asked.trades)}`
       + (Number.isInteger(parity.checked) && parity.checked > 0
         ? `; parity ${count(parity.equal)}/${count(parity.checked)}` : ''), '   ');
+    // (release 1019i's review: a parity flag 0 latches the score to the per-intent path until the captain clears it)
+    if (pace.latched === true) add(' BATCHED SCORE OFF: a parity difference latched it', '   ');
+  }
+  // RELEASE 1019i's review: THE PX LINE (PREREG-EVL-8's H2, "a size line and a 2 GB alarm"; league/ops/daily_report.py
+  // `px_line`): px.sqlite's size against its line, the state disk's free space against the PX floor and the day's PX
+  // runs by status, while the recorders run or px.sqlite exists. Sizes and counts only.
+  const px = plain(facts.px_store), runs = plain(px.runs);
+  if (px.on === true || real(px.size_mb) !== null) {
+    const gb = value => (real(value) === null ? 'unknown' : real(value).toFixed(1));
+    const done = ['ok', 'partial', 'waiting', 'cut', 'failed', 'disk']
+      .filter(k => Number.isInteger(runs[k]) && runs[k] > 0).map(k => `${count(runs[k])} ${k}`);
+    const mb = value => (real(value) === null ? 'unknown' : String(Math.round(real(value))));
+    const floor = gb(px.floor_gb);
+    add(`PX store${px.on === true ? '' : ' (off)'}: ${mb(px.size_mb)}/${mb(px.line_mb)} MB, ${gb(px.free_gb)} GB free; `
+      + `runs ${done.length ? done.join(', ') : 'none'}`
+      + (px.ok === false ? `; NO ROOM (floor ${floor} GB): nothing written` : ''));
   }
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);

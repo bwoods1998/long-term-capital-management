@@ -1,8 +1,10 @@
-"""RELEASE 1019i'S REPORT LINES AND ALARMS (PREREG-EVL-7's harness change H4, PREREG-EVL-8's harness plan H1):
-`evl_fill_rate` and `evl_attempts` (league/ops/evl_health.py, raised by the stall job, worded by the gateway), the lane
-report's settle-pace and fill-rate lines (league/events/report.py), the mail's facts (league/ops/daily_report.py
-`settle_line`, `fill_lines`), and the births' facts wall over the new tables (league/events/births.py `FACTS_DENY`).
-Every row here is invented; no figure is a market's.
+"""RELEASE 1019i'S REPORT LINES AND ALARMS (PREREG-EVL-7's harness change H4, PREREG-EVL-8's harness plan H1 and H2):
+`evl_fill_rate` and `evl_attempts` (league/ops/evl_health.py, raised by the stall job, worded by the gateway), and,
+from its review, `evl_score_parity` (the batched score's parity latch: a flag 0 fails closed) and `evl_px_store` (the
+price lane's store at its 2 GB line or the disk under the PX floor), the lane report's settle-pace and fill-rate lines
+(league/events/report.py), the mail's facts (league/ops/daily_report.py `settle_line`, `fill_lines`, `px_line`), and
+the births' facts wall over the new tables (league/events/births.py `FACTS_DENY`). Every row here is invented; no
+figure is a market's.
 """
 
 from __future__ import annotations
@@ -13,10 +15,13 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from league.events import attempts as AT
 from league.events import births as BI
+from league.events import pxstore as PXS
 from league.events import report as RP
+from league.events import score as SCO
 from league.events import store as S
 from league.ops import daily_report as DR
 from league.ops import evl_health as EV
@@ -24,6 +29,8 @@ from league.ops import stall as ST
 
 UTC = dt.timezone.utc
 CTX = {"config": {"events": {"enabled": True}}, "settings": {}}
+PX_ON = {"config": {"events": {"enabled": True, "px_data": True}}, "settings": {}}
+GB = 2 ** 30
 
 
 def at(day: dt.date, hh: int, mm: int) -> dt.datetime:
@@ -66,8 +73,8 @@ class LaneCase(unittest.TestCase):
                              "filled_at": None, "canceled_at": None, "expired_at": None, "binding": None,
                              "updated_at": S.iso(at(day, 14, 0))}])
 
-    def check(self, cause, now):
-        return EV.checks(CTX, self.root, now.timestamp())[cause]
+    def check(self, cause, now, ctx=CTX):
+        return EV.checks(ctx, self.root, now.timestamp())[cause]
 
 
 class TheFillRateAlarm(LaneCase):
@@ -99,7 +106,7 @@ class TheFillRateAlarm(LaneCase):
     def test_the_stall_job_names_both_and_the_gateway_words_them(self):
         self.assertIn("evl_fill_rate", ST.CAUSES)
         self.assertIn("evl_attempts", ST.CAUSES)
-        self.assertEqual(ST.CAUSES[-6:-4], ("evl_fill_rate", "evl_attempts"))
+        self.assertEqual(ST.CAUSES[-8:-4], ("evl_fill_rate", "evl_attempts", "evl_score_parity", "evl_px_store"))
         source = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "email.mjs").read_text()
         for cause in ("evl_fill_rate", "evl_attempts"):
             self.assertIn(f"\n  {cause}: '", source)
@@ -151,6 +158,78 @@ def _rows(path, sql, params):
         db.close()
 
 
+class TheParityAlarm(LaneCase):
+    """`evl_score_parity`: the batched score's parity latch stands (league/events/score.py `latched`)."""
+
+    def test_the_latch_stands_until_the_captain_clears_it(self):
+        now = at(dt.date(2026, 10, 30), 2, 0)
+        quiet = self.check("evl_score_parity", now)
+        self.assertEqual((quiet["stalled"], quiet["judged"]), (False, True), quiet["what"])
+        night = dt.date(2026, 10, 29)
+        with self.st.tx() as db:
+            for i, equal in enumerate((1, 1, 0)):
+                db.execute("INSERT INTO score_parity(program, version, event, night, equal, checked_at) VALUES("
+                           "'EVL-ERN-READ-O1', 2, ?, ?, ?, ?)", (f"8k:{i}", night.isoformat(), equal, S.iso(now)))
+        SCO.latch(self.st, night, {"program": "EVL-ERN-READ-O1", "version": 2, "event": "8k:2"}, at(night, 1, 0))
+        check = self.check("evl_score_parity", now)
+        self.assertTrue(check["stalled"], check["what"])
+        self.assertIn("the batched score is OFF", check["what"])
+        self.assertIn("score-unlatch", check["what"])
+        self.assertIn("2 of 3 sampled intents equal", check["what"])
+        self.assertEqual((check["numbers"]["checked"], check["numbers"]["equal"], check["numbers"]["night"]),
+                         (3, 2, night.isoformat()))
+        self.assertEqual(check["onset"], at(night, 1, 0).timestamp())
+        self.assertIsNone(check["owner_step"], "the House's and the captain's, never the owner's")
+        SCO.unlatch(self.st)
+        self.assertFalse(self.check("evl_score_parity", now)["stalled"])
+
+
+class ThePxStoreAlarm(LaneCase):
+    """`evl_px_store`: px.sqlite at or over its 2 GB line, or (the recorders on) the state disk under the PX floor."""
+
+    def room(self, free):
+        patch = mock.patch.object(PXS, "disk_free", return_value=free)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_not_judged_while_off_with_no_store(self):
+        self.room(100 * GB)
+        got = self.check("evl_px_store", at(dt.date(2026, 10, 30), 2, 0))
+        self.assertFalse(got["judged"])
+        self.assertIn("events.px_data", got["what"])
+
+    def test_room_on_the_floor_and_over_the_line(self):
+        now = at(dt.date(2026, 10, 30), 2, 0)
+        self.room(100 * GB)
+        quiet = self.check("evl_px_store", now, PX_ON)
+        self.assertEqual((quiet["stalled"], quiet["judged"]), (False, True), quiet["what"])
+        self.assertEqual(quiet["numbers"]["floor_gb"], 5.0, "the swarm guard's 3 GB and 2 GB more")
+        self.room(int(4.5 * GB))
+        low = self.check("evl_px_store", now, PX_ON)
+        self.assertTrue(low["stalled"])
+        self.assertIn("the state disk has 4.5 GB free, under the PX floor of 5.0 GB", low["what"])
+        self.assertFalse(self.check("evl_px_store", now)["judged"], "the recorders off and no px.sqlite: nothing writes")
+        self.room(None)
+        self.assertIn("could not be read", self.check("evl_px_store", now, PX_ON)["what"])
+        self.room(100 * GB)
+        with PXS.PxStore(self.root / "events") as px:
+            px.set_meta("x", "y")
+        size = PXS.stored_bytes(self.root / "events")
+        with mock.patch.object(PXS, "MAX_BYTES", size):
+            over = self.check("evl_px_store", now)
+            self.assertTrue(over["stalled"], "over its line, recorders on or off")
+            self.assertIn("at or over its", over["what"])
+        self.assertFalse(self.check("evl_px_store", now)["stalled"])
+
+    def test_the_stall_job_names_both_new_causes_and_the_gateway_words_them(self):
+        source = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "email.mjs").read_text()
+        for cause in ("evl_score_parity", "evl_px_store"):
+            self.assertIn(cause, ST.CAUSES)
+            self.assertIn(cause, EV.CAUSES)
+            self.assertIn(f"\n  {cause}: '", source)
+            self.assertIn(cause, EV.DOING)
+
+
 class TheReportLines(LaneCase):
     def score(self, night, status, **summary):
         rid = self.st.start_receipt("score", now=at(night, 1, 0) + dt.timedelta(days=1))
@@ -174,6 +253,12 @@ class TheReportLines(LaneCase):
         line = DR.settle_line(pace)
         self.assertEqual(set(line), set(DR.SETTLE_FIELDS) | {"requests", "parity"})
         self.assertEqual(DR.settle_line(None)["passes"], 0)
+        self.assertFalse(line["latched"])
+        SCO.latch(self.st, night, {"program": "EVL-ERN-READ-O1", "version": 2, "event": "8k:x"}, at(night, 1, 0))
+        self.assertTrue(DR.settle_line(RP.settle_pace(self.st, night))["latched"], "the latch in the mail's facts")
+        self.assertIn("THE BATCHED SCORE IS OFF: a parity flag 0 latched it", RP.render(RP.build(
+            self.st, night, now=at(night, 23, 0) + dt.timedelta(days=1))))
+        SCO.unlatch(self.st)
         rep = RP.build(self.st, night, now=at(night, 23, 0) + dt.timedelta(days=1))
         text = RP.render(rep)
         self.assertIn("Score: 320 settled, 10 skipped, 10 waiting of 340 tried in 2 passes (2 batched), 150 s, 128.0 a "
@@ -195,6 +280,33 @@ class TheReportLines(LaneCase):
         text = RP.render(RP.build(self.st, last, now=at(last, 23, 0)))
         self.assertIn("Fills (attempts ledger): open 3/3 100% (3) / 20/20 100% (20)", text)
         self.assertIn("close 2/3 67% (3) / 19/20 95% (20)", text)
+
+
+class ThePxLine(LaneCase):
+    def test_the_px_line_sizes_free_space_and_the_days_runs(self):
+        day = dt.date(2026, 10, 30)
+        with mock.patch.object(PXS, "disk_free", return_value=int(41.2 * GB)):
+            off = DR.px_line(CTX, self.root, day)
+            self.assertEqual(off, {"on": False, "size_mb": None, "line_mb": None, "free_gb": None, "floor_gb": None,
+                                   "ok": None, "runs": None}, "off and no px.sqlite: nothing")
+            with PXS.PxStore(self.root / "events") as px:
+                for status in ("ok", "ok", "partial", "disk"):
+                    run = px.start_run("daily", now=at(day, 14, 0), free_bytes=int(41.2 * GB))
+                    px.finish_run(run, status, now=at(day, 14, 1))
+                run = px.start_run("daily", now=at(day, 2, 0))     # 22:00 ET of the day before: another New York day
+                px.finish_run(run, "failed", now=at(day, 2, 1))
+            line = DR.px_line(PX_ON, self.root, day)
+        self.assertTrue(line["on"])
+        self.assertEqual((line["line_mb"], line["free_gb"], line["floor_gb"], line["ok"]), (2048.0, 41.2, 5.0, True))
+        self.assertGreater(line["size_mb"], 0)
+        self.assertEqual(line["runs"], {"ok": 2, "partial": 1, "waiting": 0, "cut": 0, "failed": 0, "disk": 1})
+        with PXS.PxStore(self.root / "events") as px:
+            row = dict(px.db.execute("SELECT * FROM px_runs WHERE status='disk'").fetchone())
+        self.assertEqual(row["free_bytes"], int(41.2 * GB), "px_runs carries the free space at the run's start")
+        self.assertGreater(row["size_bytes"], 0, "... and px.sqlite's size at its end")
+        fixture = json.loads((Path(__file__).resolve().parent / "fixtures" / "daily_report.json").read_text())
+        self.assertEqual(set(fixture["px_store"]), set(line), "the gateway's fixture is the House's shape")
+        self.assertEqual(set(fixture["px_store"]["runs"]), set(DR.PX_STATUSES))
 
 
 class TheFactsWall(unittest.TestCase):

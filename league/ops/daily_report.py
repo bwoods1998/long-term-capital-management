@@ -74,11 +74,17 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   are projected to reach 50 by then (or within `SUPPLY_HORIZON` sessions when the total never reaches it).
 - `settle` (release 1019i, PREREG-EVL-8's harness plan H1, the batched score): THE SETTLE-PACE LINE, the night's score
   passes added up (league/events/report.py `settle_pace`): passes, settled, skipped, waiting, their seconds and the
-  settlements a minute, the batched passes, the gateway requests by kind and the parity night's flags (counts only).
+  settlements a minute, the batched passes, the gateway requests by kind, the parity night's flags (counts only) and
+  whether the parity latch stands (`latched`: a flag 0 turned the batched score off until the captain clears it).
 - `fill_rates` (release 1019i, PREREG-EVL-7's harness change H4): THE FILL-RATE LINES from the attempts ledger
   (league/events/attempts.py `fill_rates`, `real_attempts`): by auction over the trailing 3 and 20 sessions, the buys
   sent and filled and the fill rate, the venue's cancels at once over the buy orders sent, the re-sends and the picks
   that ended unsent (`FILL_FIELDS`); every figure None before the lane holds the ledger.
+- `px_store` (release 1019i's review, PREREG-EVL-8's harness plan H2: "a size line and a 2 GB alarm"): THE PX LINE
+  (`px_line`): whether the price lane's recorders run (`events.px_data`), px.sqlite's size against its 2 GB line, the
+  state disk's free space against the PX floor (league/events/pxstore.py `room`) and the New York day's PX runs by
+  status (`px_runs`, read-only; `disk` a run that found no room); `on` false and every figure None while the recorders
+  are off and px.sqlite does not exist.
 Standard library only.
 """
 from __future__ import annotations
@@ -506,6 +512,7 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
                                                for key in seating}, under),
         "settle": settle_line(settle),
         "fill_rates": fill_lines(rates),
+        "px_store": px_line(ctx, root, on),
     }
 
 
@@ -516,7 +523,45 @@ FILL_FIELDS = ("buys_sent", "buys_filled", "fill_rate", "buy_orders", "venue_can
 
 
 #: ... and the settle-pace line's (league/events/report.py `settle_pace`).
-SETTLE_FIELDS = ("passes", "complete", "batched", "due", "settled", "skipped", "waiting", "errors", "seconds", "pace")
+SETTLE_FIELDS = ("passes", "complete", "batched", "due", "settled", "skipped", "waiting", "errors", "seconds", "pace",
+                 "latched")
+
+
+#: ... and the PX line's (`px_line`): the run statuses it counts.
+PX_STATUSES = ("ok", "partial", "waiting", "cut", "failed", "disk")
+
+
+def px_line(ctx: Any, root: str | Path, on: dt.date) -> dict[str, Any]:
+    """THE PX LINE (the module docstring), always in one shape: {on, size_mb, line_mb, free_gb, floor_gb, ok, runs:
+    {status: n} of the New York day `on`}; read by `stat`, the disk's usage and px.sqlite opened read-only (a store
+    that cannot be read leaves `runs` None). Counts and sizes only."""
+    from ..events import pxstore as PXS
+    from ..events import report as RP
+
+    config = _get(ctx, "config")
+    block = config.get("events") if isinstance(config, Mapping) else None
+    running = isinstance(block, Mapping) and block.get("px_data") is True
+    events = Path(root) / LANE
+    out: dict[str, Any] = {"on": running, "size_mb": None, "line_mb": None, "free_gb": None, "floor_gb": None,
+                           "ok": None, "runs": None}
+    path = PXS.path_of(events)
+    if not running and not path.exists():
+        return out
+    room = PXS.room(events)
+    out.update(size_mb=round(room["size_bytes"] / 2 ** 20, 1), line_mb=round(room["line_bytes"] / 2 ** 20, 1),
+               free_gb=None if room["free_bytes"] is None else round(room["free_bytes"] / 2 ** 30, 1),
+               floor_gb=round(room["floor_bytes"] / 2 ** 30, 1), ok=bool(room["ok"]))
+    if path.exists():
+        lo, hi = RP.day_bounds(on)
+        try:
+            with guard.readonly():
+                got = guard.read(path, lambda db: [tuple(r) for r in db.execute(
+                    "SELECT status, COUNT(*) FROM px_runs WHERE started_at>=? AND started_at<? GROUP BY status",
+                    (lo, hi))])
+            out["runs"] = {k: 0 for k in PX_STATUSES} | {str(k): int(n) for k, n in got if str(k) in PX_STATUSES}
+        except Exception:  # noqa: BLE001 - the line's figures without the runs
+            out["runs"] = None
+    return out
 
 
 def fill_lines(rates: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -536,6 +581,7 @@ def settle_line(pace: Mapping[str, Any] | None) -> dict[str, Any]:
     pace = pace if isinstance(pace, Mapping) else {}
     out: dict[str, Any] = {k: pace.get(k) for k in SETTLE_FIELDS}
     out["passes"] = int(pace.get("passes") or 0)
+    out["latched"] = pace.get("latched") is True
     out["requests"] = {k: int((pace.get("requests") or {}).get(k) or 0) for k in ("bars", "trades")}
     out["parity"] = {k: int((pace.get("parity") or {}).get(k) or 0) for k in ("checked", "equal")}
     return out

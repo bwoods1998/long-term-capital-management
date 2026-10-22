@@ -38,23 +38,32 @@ THE BATCHED SCORE (release 1019i, PREREG-EVL-8's harness plan H1, the flywheel's
 events a minute, A95, while every intent paid two daily-bar requests of its own). A pass first PREFETCHES the daily bars
 (raw and `adjustment=all`) of every due intent's symbol and of both benchmarks ONCE over the union window (`prefetch`:
 from the earliest due entry session to the pass's own day, `SYMBOLS_PER_REQUEST` (200) symbols a request, page by page,
-as `universe.fetch_daily_bars` reads them), and then `settle_one(prefetched=...)` skips its own two fetches when every
-bar its settlement reads (the symbol's and the benchmark's, raw and adjusted, at entry and at exit) was fetched by this
-pass (`fresh`); a bar the vendor did not send (a missing bar) falls back to the intent's own two fetches, exactly as
-before, so the batched pass can only save requests, never read a bar the old path would not have read. Alpaca adjusts
-every bar to today's basis whatever the window, so the bars a wider window stores are the bars a narrower one stores and
-every outcome row is the same, byte for byte (league/tests/test_events_score_batch.py's golden tape, with a missing
-bar and a split). Prints stay read once per (symbol, day, label) (`tape_print`, `marks`). THE ORDER (`order_due`): the
-seating versions (programs.SEATING) and their controls (screen.control_of) settle first, then every other record, each
-group in `due`'s order, so a pass its bound cuts has settled what the looks of real money wait for. THE SWITCH:
+the very requests `universe.fetch_daily_bars` makes) INTO A CACHE THAT LIVES ONLY FOR THE PASS (`Prefetch`; release
+1019i's review: never into `bars`), and then `settle_one(prefetched=...)` skips its own two fetches when the cache holds
+every bar its settlement reads (`Prefetch.serves`: the symbol's and the benchmark's, raw and adjusted, at entry and at
+exit), reads its ratios from the cache, and writes to `bars` EXACTLY THE ROWS ITS TWO FETCHES WOULD HAVE WRITTEN
+(`Prefetch.store_window`: {symbol, benchmark} x {raw, all} x [entry day, exit day], at the pass's time), so `bars` ends
+every pass as under release 1019h: no bar of a skipped or waiting intent, none outside an intent's own window, no older
+day re-based to today's basis (league/events/done.py `_ratio`, Done's fill gaps, reads those rows). A bar the vendor did
+not send (a missing bar), or a chunk that failed, falls back to the intent's own two fetches, exactly as before. Alpaca
+adjusts every bar to today's basis whatever the window, so every outcome row and every `bars` row is the same, byte for
+byte (league/tests/test_events_score_batch.py's golden tape, with a missing bar and a split, and two nights with a
+split between them). Prints stay read once per (symbol, day, label) (`tape_print`, `marks`). THE ORDER (`order_due`):
+the seating versions (programs.SEATING) and their controls (screen.control_of) settle first, then every other record,
+each group in `due`'s order, so a pass its bound cuts has settled what the looks of real money wait for. THE SWITCH:
 league/config.json `events.score_batch` (`batch_on`; a missing key is ON, false restores the per-intent path of release
-1019h exactly: `due`'s order and the two fetches an intent). THE PARITY NIGHT (`parity_due`, `check_parity`): on the
-first night the batched score settles anything (meta `PARITY_FIRST`), a sample of `PARITY_SHARE` (5%) of the intents it
-settles (`parity_sampled`, by sha256 of the intent's key) is settled again by the per-intent path into memory and only
-an EQUALITY FLAG is written (`score_parity`: 1 when every outcome field is identical, else 0; never a value), so the
-first live night shows the two paths agree before anyone relies on them; `events.score_parity` true runs it every night,
-false never. Each pass's counts (requests by kind, seconds, the parity flags) go into its receipt for the daily report's
-settle-pace line (league/ops/daily_report.py `settle_pace`).
+1019h exactly: `due`'s order and the two fetches an intent). THE PARITY NIGHT (`parity_due`, `parity_window`,
+`check_parity`): on the first night the batched score settles anything (meta `PARITY_FIRST`), a sample of
+`PARITY_SHARE` (5%) of each prefetch's intents (`parity_sampled`, by sha256 of the intent's key) is settled TWICE IN
+MEMORY BEFORE ANY OF THEM IS WRITTEN, by the batched path (the cache) and by the per-intent path (`Narrow`: the intent's
+own two requests, read and never stored), and only an EQUALITY FLAG is written (`score_parity`: 1 when every outcome
+field and the late exit are identical, else 0; never a value); an intent the cache does not serve is no test of the
+batched path and gets no flag. A FLAG 0 FAILS CLOSED: it sets THE PARITY LATCH (meta `PARITY_LATCH`, `latch`), and that
+pass and every later one settle every intent by the per-intent path, whatever `events.score_batch` says, until the
+captain clears it (`unlatch`; `python3 -m league.events --state DIR score-unlatch`), while league/ops/evl_health.py
+raises `evl_score_parity`, which the gateway mails. `events.score_parity` true runs the check every night, false never.
+Each pass's counts (requests by kind, seconds, the parity flags, the latch) go into its receipt for the daily report's
+settle-pace line (league/ops/daily_report.py `settle_line`).
 """
 
 from __future__ import annotations
@@ -100,6 +109,10 @@ BATCH_DEFAULT = True
 BENCHMARKS = ("SPY", "IWM")
 PARITY_SHARE = 0.05
 PARITY_FIRST = "evl:score:batch:first_night"
+#: THE PARITY LATCH (release 1019i's review: a flag 0 FAILS CLOSED): set by the first parity flag 0, it turns the
+#: batched score off for every later pass, whatever `events.score_batch` says, until the captain clears it (`unlatch`);
+#: league/ops/evl_health.py raises `evl_score_parity` while it stands.
+PARITY_LATCH = "evl:score:batch:latched"
 PARITY_FIELDS = ("entry_px", "exit_px", "bench", "bench_entry", "bench_exit", "cost_entry_bp", "cost_exit_bp", "r", "b",
                  "a", "tradable", "status")
 BARS_PATH = "/v1/alpaca/v2/stocks/bars"
@@ -336,11 +349,13 @@ def _skip(store: S.Store, intent: Mapping[str, Any], why: str) -> str:
 
 
 def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.datetime,
-               prefetched: "bool | Prefetch" = False) -> str:
+               prefetched: "Prefetch | bool | None" = False) -> str:
     """Settle one due intent. Returns 'settled', 'skipped:<why>' or 'waiting:<why>' (then nothing is written but the
-    tape prints read so far). `prefetched` (release 1019i, the batched score): this pass prefetched the daily bars
-    (`prefetch`, or True for bars fetched at `now`), so the settlement's own two fetches are skipped when every bar it
-    reads was fetched by this pass (`fresh`); else they are made as before."""
+    tape prints read so far). `prefetched` (release 1019i, the batched score): the pass's prefetch (`prefetch`), A CACHE
+    THAT LIVES ONLY FOR THE PASS: when it holds every bar the settlement reads (`Prefetch.serves`) the settlement's own
+    two fetches are skipped, its ratios are read from the cache, and exactly the rows those two fetches would have
+    stored are written to `bars` (`Prefetch.store_window`); else (or with anything but a `Prefetch`) the two fetches
+    are made as before."""
     try:
         got = _compute(store, gw, intent, now, prefetched)
     except Waiting as wait:
@@ -364,11 +379,15 @@ def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.da
     return "settled"
 
 
-def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime, prefetched: Any = False
-             ) -> str | tuple[dict[str, Any], dict[str, str] | None]:
+def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime, source: Any = None, *,
+             dry: bool = False) -> str | tuple[dict[str, Any], dict[str, str] | None]:
     """The settlement of one intent, computed and not written: the skip's why (a str), or (the outcome row's fields,
-    the late exit's meta {day, kind, planned} or None). Raises Waiting. Prints read are kept in `marks` and bars in
-    `bars`, as they are read (the tape is read once)."""
+    the late exit's meta {day, kind, planned} or None). Raises Waiting. Prints read are kept in `marks` as they are
+    read (the tape is read once). THE DAILY BARS by `source` (release 1019i): a `Prefetch` that serves the intent
+    (the pass's cache: ratios from it, and, unless `dry`, the per-intent path's rows written to `bars`); a `Narrow`
+    (the parity's per-intent path in memory: the intent's own two requests, never written); else release 1019h's two
+    fetches into `bars`, read back. `dry` (the parity check, `check_parity`) writes no bar: a `Prefetch` that does not
+    serve the intent raises `_Missed` instead of fetching."""
     entry_day, exit_day = dt.date.fromisoformat(intent["entry_day"]), dt.date.fromisoformat(intent["exit_day"])
     symbol = str(intent["symbol"]).upper()
     uni = _universe(store, intent["entry_day"], symbol)
@@ -413,16 +432,29 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
     bench_kind = {"open": "open", "close": "close", "first": "open", "zero": "close"}[exit_kind]
     bench_out = bench_print(store, gw, bench, exit_s, bench_kind, now)
 
-    # One fetch of the window's daily bars, raw and adjusted, so entry and exit share one adjustment; skipped when this
-    # pass prefetched every bar read below (release 1019i: the batched score; a bar it did not get is fetched here).
-    at = prefetched.at if isinstance(prefetched, Prefetch) else S.iso(now)
-    if not (prefetched and fresh(store, (symbol, bench), (entry_day, exit_s.day), at)):
+    # One fetch of the window's daily bars, raw and adjusted, so entry and exit share one adjustment. Release 1019i
+    # (the batched score): from the pass's cache when it holds every bar read below (and then exactly the rows the two
+    # fetches would have stored are written: `bars` ends the pass as under release 1019h), else the two fetches.
+    ratio: Callable[[str, dt.date], float]
+    if isinstance(source, Prefetch) and source.serves((symbol, bench), entry_day, exit_s.day):
+        ratio = source.ratio
+        source.hits.add(_key(intent))
+        if not dry:
+            source.store_window(store, (symbol, bench), entry_day, exit_s.day, now)
+    elif isinstance(source, Narrow):
+        ratio = source.read(store, gw, (symbol, bench), entry_day, exit_s.day, now)
+    elif dry:
+        raise _Missed(f"{symbol}: the pass's cache does not hold every bar")
+    else:
         for adj in ("raw", "all"):
             U.fetch_daily_bars(store, gw, [symbol, bench], entry_day, exit_s.day, adj=adj, now=now)
-    entry_px = stock_in * _ratio(store, symbol, entry_day)
-    exit_px = stock_out * _ratio(store, symbol, exit_s.day) if stock_out else 0.0
-    b_in = bench_in * _ratio(store, bench, entry_day)
-    b_out = bench_out * _ratio(store, bench, exit_s.day)
+
+        def ratio(sym: str, day: dt.date) -> float:
+            return _ratio(store, sym, day)
+    entry_px = stock_in * ratio(symbol, entry_day)
+    exit_px = stock_out * ratio(symbol, exit_s.day) if stock_out else 0.0
+    b_in = bench_in * ratio(bench, entry_day)
+    b_out = bench_out * ratio(bench, exit_s.day)
 
     prev = C.previous(store, entry_day, 1)
     equity = equity_on(store, prev[0].day) if prev else None
@@ -442,11 +474,66 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
 
 
 # -------------------------------------------------------------------------------------------- the batched score
+#: The upsert of a daily bar, exactly as league/events/universe.py `fetch_daily_bars` writes one (the batched score
+#: writes the rows the per-intent path's two fetches would have written, `Prefetch.store_window`).
+_BAR_UPSERT = ("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
+               "ON CONFLICT(symbol, day, adj) DO UPDATE SET o=excluded.o, h=excluded.h, l=excluded.l, c=excluded.c, "
+               "v=excluded.v, fetched_at=excluded.fetched_at")
+#: One bar as the cache keeps it: (o, h, l, c, v), the vendor's values as sent.
+Bar = tuple[Any, Any, Any, Any, Any]
+CLOSE = 3
+
+
+class _Missed(Exception):
+    """A dry settlement (the parity check) whose pass's cache does not hold every bar it reads: nothing batched to test."""
+
+
+def _key(intent: Mapping[str, Any]) -> tuple[str, int, str]:
+    return (str(intent["program"]), int(intent["version"]), str(intent["event"]))
+
+
+def _read_bars(gw: Any, symbols: Sequence[str], first: dt.date, last: dt.date, adj: str, now: dt.datetime
+               ) -> list[tuple[str, str, Bar]]:
+    """SIP 1Day bars of `symbols` from `first` to `last` (adjustment `adj`), READ AND NOT STORED: the very requests
+    league/events/universe.py `fetch_daily_bars` makes (the same parameters, `sip_end`'s clamp, 200 symbols a request,
+    page by page), as [(symbol, New York day, (o, h, l, c, v))] in the order the vendor sent them."""
+    names = sorted({s.upper() for s in symbols if s})
+    out: list[tuple[str, str, Bar]] = []
+    for i in range(0, len(names), U.SYMBOLS_PER_REQUEST):
+        chunk = names[i:i + U.SYMBOLS_PER_REQUEST]
+        token = None
+        for _ in range(200):
+            page = gw.get_json(BARS_PATH, {
+                "symbols": ",".join(chunk), "timeframe": "1Day", "start": first.isoformat(), "end": U.sip_end(last, now),
+                "feed": "sip", "adjustment": adj, "limit": 10000, "page_token": token})
+            for sym, rows in ((page or {}).get("bars") or {}).items():
+                for b in rows or []:
+                    day = S.parse_iso(str(b["t"])).astimezone(C.NY).date().isoformat()
+                    out.append((sym.upper(), day, (b.get("o"), b.get("h"), b.get("l"), b.get("c"), b.get("v"))))
+            token = (page or {}).get("next_page_token")
+            if not token:
+                break
+    return out
+
+
+def _close_ratio(raw: Bar | Mapping[str, Any] | None, adj: Bar | Mapping[str, Any] | None) -> float:
+    """`_ratio`'s rule on two bars however kept (a cached tuple or a stored row): adjusted / raw close, 1.0 when either
+    is missing or not a positive number."""
+    def close(bar: Any) -> float | None:
+        if bar is None:
+            return None
+        return _positive(bar.get("c") if isinstance(bar, Mapping) else bar[CLOSE])
+    rc, ac = close(raw), close(adj)
+    return ac / rc if rc and ac else 1.0
+
+
 @dataclasses.dataclass
 class Prefetch:
-    """One pass's prefetch of daily bars (`prefetch`): its time as the store writes `fetched_at` (`at`), the union
-    window, the symbols, the requests and rows, whether every chunk was fetched (`done`) and the failures. Always
-    truthy: `settle_one(prefetched=...)` then checks each intent's bars (`fresh`)."""
+    """ONE PASS'S CACHE OF DAILY BARS (`prefetch`), never written to the store by itself: its time (`at`), the union
+    window (`first`, `last`), the symbols, the requests and the rows kept, whether every chunk was read whole (`done`)
+    and the failures; the bars by (symbol, adjustment) for each symbol whose chunk was read whole (`bars`; a symbol
+    absent here was not), each symbol's earliest entry day (`since`: no bar before it is kept), and the intents it
+    served (`hits`). Always truthy."""
 
     at: str
     first: dt.date | None = None
@@ -456,14 +543,82 @@ class Prefetch:
     rows: int = 0
     done: bool = True
     errors: list[str] = dataclasses.field(default_factory=list)
+    bars: dict[tuple[str, str], dict[str, Bar]] = dataclasses.field(default_factory=dict, repr=False)
+    since: dict[str, dt.date] = dataclasses.field(default_factory=dict, repr=False)
+    hits: set[tuple[str, int, str]] = dataclasses.field(default_factory=set, repr=False)
 
     def __bool__(self) -> bool:
         return True
+
+    def bar(self, symbol: str, day: dt.date, adj: str) -> Bar | None:
+        return (self.bars.get((symbol.upper(), adj)) or {}).get(day.isoformat())
+
+    def serves(self, symbols: Iterable[str], first: dt.date, last: dt.date) -> bool:
+        """Whether the cache holds every bar a settlement of the window [first, last] reads: each symbol's chunk read
+        whole in both adjustments, the window inside the union window and after the symbol's earliest entry, and the
+        symbol's raw and adjusted bars on both days (the 8 bars of a symbol and its benchmark). A bar the vendor did
+        not send (a missing bar) is a miss: that intent fetches its own two, as before."""
+        if self.first is None or self.last is None or first < self.first or last > self.last:
+            return False
+        for symbol in {str(s).upper() for s in symbols}:
+            start = self.since.get(symbol)
+            if start is None or first < start:
+                return False
+            for adj in ("raw", "all"):
+                if (symbol, adj) not in self.bars:
+                    return False
+                if self.bar(symbol, first, adj) is None or self.bar(symbol, last, adj) is None:
+                    return False
+        return True
+
+    def ratio(self, symbol: str, day: dt.date) -> float:
+        """`_ratio` read from the cache."""
+        return _close_ratio(self.bar(symbol, day, "raw"), self.bar(symbol, day, "all"))
+
+    def store_window(self, store: S.Store, symbols: Iterable[str], first: dt.date, last: dt.date,
+                     now: dt.datetime) -> int:
+        """THE PER-INTENT PATH'S WRITES, FROM THE CACHE: every cached bar of `symbols` (raw and adjusted) on the days
+        [first, last], upserted into `bars` at `now` as its two fetches would have (one transaction): the bars of
+        other days and of the intents that never reach the bar step are never written, so `bars` ends the pass as under
+        release 1019h. Returns the rows written."""
+        lo, hi = first.isoformat(), last.isoformat()
+        rows = [(symbol, day, adj, *bar, S.iso(now))
+                for symbol in sorted({str(s).upper() for s in symbols}) for adj in ("raw", "all")
+                for day, bar in sorted((self.bars.get((symbol, adj)) or {}).items()) if lo <= day <= hi]
+        with store.tx() as db:
+            db.executemany(_BAR_UPSERT, rows)
+        return len(rows)
 
     def summary(self) -> dict[str, Any]:
         return {"first": None if self.first is None else self.first.isoformat(),
                 "last": None if self.last is None else self.last.isoformat(), "symbols": self.symbols,
                 "requests": self.requests, "rows": self.rows, "done": self.done, "errors": self.errors[:3]}
+
+
+class Narrow:
+    """THE PARITY'S PER-INTENT PATH, IN MEMORY (`check_parity`): the intent's own two requests (raw and adjusted over
+    its window, as release 1019h's path makes them, `_read_bars`) read into a cache of its own and NEVER written to
+    `bars`; a bar they did not get is read from `bars` as it stands, which is what release 1019h's path reads after
+    its upsert. Counts its requests."""
+
+    def __init__(self) -> None:
+        self.requests = 0
+
+    def read(self, store: S.Store, gw: Any, symbols: Iterable[str], first: dt.date, last: dt.date,
+             now: dt.datetime) -> Callable[[str, dt.date], float]:
+        names = sorted({str(s).upper() for s in symbols})
+        got: dict[tuple[str, str, str], Bar] = {}
+        counted = Counted(gw)
+        for adj in ("raw", "all"):
+            for symbol, day, bar in _read_bars(counted, names, first, last, adj, now):
+                got[(symbol, day, adj)] = bar
+        self.requests += counted.counts["bars"]
+
+        def ratio(symbol: str, day: dt.date) -> float:
+            sym, d = symbol.upper(), day.isoformat()
+            pair = [got.get((sym, d, adj)) or _bar(store, sym, day, adj) for adj in ("raw", "all")]
+            return _close_ratio(pair[0], pair[1])
+        return ratio
 
 
 class Counted:
@@ -491,22 +646,9 @@ class Counted:
 
 def batch_on(settings: Mapping[str, Any] | None) -> bool:
     """league/config.json `events.score_batch` (the module docstring): a missing key is ON (`BATCH_DEFAULT`); only false
-    turns it off."""
+    turns it off. (The parity latch, `latched`, turns it off too, from the store.)"""
     value = (settings or {}).get("score_batch", BATCH_DEFAULT)
     return value is not False
-
-
-def fresh(store: S.Store, symbols: Iterable[str], days: Iterable[dt.date], at: str) -> bool:
-    """Whether every daily bar of `symbols` on `days`, raw and adjusted, is in `bars` as fetched at or after `at` (this
-    pass's prefetch): the settlement's own two fetches would store nothing newer."""
-    for symbol in {str(s).upper() for s in symbols}:
-        for day in {d.isoformat() for d in days}:
-            for adj in ("raw", "all"):
-                row = store.db.execute("SELECT fetched_at FROM bars WHERE symbol=? AND day=? AND adj=?",
-                                       (symbol, day, adj)).fetchone()
-                if row is None or str(row["fetched_at"]) < at:
-                    return False
-    return True
 
 
 def order_due(intents: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -525,14 +667,15 @@ def order_due(intents: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
 
 def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, now: dt.datetime,
              late: Callable[[], bool] | None = None) -> Prefetch:
-    """THE BATCHED SCORE'S ONE READ OF DAILY BARS (the module docstring): the raw and adjusted SIP daily bars of every
-    symbol of `intents` that has its universe row (one without is skipped by the settlement before any bar is read)
-    and of both benchmarks, over the union window (the earliest entry session to the day 16 minutes ago), 200 symbols a
-    request (`universe.fetch_daily_bars`). Stops between chunks once `late()` says so; a chunk that fails is counted
-    and skipped: either way the intents it left out fetch their own bars, as before. Never raises."""
+    """THE BATCHED SCORE'S ONE READ OF DAILY BARS (the module docstring), INTO THE PASS'S CACHE AND NEVER THE STORE: the
+    raw and adjusted SIP daily bars of every symbol of `intents` that has its universe row (one without is skipped by
+    the settlement before any bar is read) and of both benchmarks, over the union window (the earliest entry session to
+    the day 16 minutes ago), 200 symbols a request (`_read_bars`, the requests `universe.fetch_daily_bars` makes); a
+    symbol's bars before its own earliest entry are not kept. Stops between chunks once `late()` says so; a chunk that
+    fails is counted and left out whole: either way the intents it left out fetch their own bars, as before. Never
+    raises."""
     out = Prefetch(at=S.iso(now))
-    symbols: set[str] = set()
-    first: dt.date | None = None
+    since: dict[str, dt.date] = {}
     for intent in intents:
         symbol, entry_day = str(intent.get("symbol") or "").upper(), intent.get("entry_day")
         if not symbol or not entry_day:
@@ -540,14 +683,16 @@ def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, n
         uni = _universe(store, str(entry_day), symbol)
         if uni is None or not uni.get("bench") or uni.get("adv20") is None:
             continue
-        symbols.add(symbol)
         entry = dt.date.fromisoformat(str(entry_day))
-        first = entry if first is None or entry < first else first
-    if first is None:
+        since[symbol] = min(since.get(symbol, entry), entry)
+    if not since:
         return out
-    names = sorted(symbols | set(BENCHMARKS))
+    first = min(since.values())
+    for bench in BENCHMARKS:
+        since[bench] = first
+    names = sorted(since)
     last = (now - TAPE_DELAY).astimezone(C.NY).date()
-    out.first, out.last, out.symbols = first, max(first, last), len(names)
+    out.first, out.last, out.symbols, out.since = first, max(first, last), len(names), since
     counted = Counted(gw)
     for adj in ("raw", "all"):
         for i in range(0, len(names), U.SYMBOLS_PER_REQUEST):
@@ -556,10 +701,18 @@ def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, n
                 break
             chunk = names[i:i + U.SYMBOLS_PER_REQUEST]
             try:
-                out.rows += U.fetch_daily_bars(store, counted, chunk, out.first, out.last, adj=adj, now=now)
+                got = _read_bars(counted, chunk, out.first, out.last, adj, now)
             except Exception as exc:  # noqa: BLE001 - its intents fetch their own bars
                 out.done = False
                 out.errors.append(f"{adj} {chunk[0]}..{chunk[-1]}: {type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            for symbol in chunk:
+                out.bars[(symbol, adj)] = {}
+            for symbol, day, bar in got:
+                held = out.bars.get((symbol, adj))
+                if held is not None and day >= since[symbol].isoformat():
+                    held[day] = bar
+            out.rows += sum(len(out.bars[(symbol, adj)]) for symbol in chunk)
     out.requests = counted.counts["bars"]
     return out
 
@@ -587,28 +740,102 @@ def note_first_night(store: S.Store, night: dt.date) -> None:
     store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)", (PARITY_FIRST, night.isoformat()))
 
 
-def check_parity(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, *, now: dt.datetime) -> int | None:
-    """THE PARITY CHECK of one intent the batched pass settled: settled again by the per-intent path (its own two fetches,
-    the prints as stored), in memory, and compared field by field with its stored outcome row; ONLY THE FLAG is written
-    (`score_parity`: 1 equal, 0 not; never a value). Returns the flag, or None when there is nothing to compare (no
-    outcome row, or the recomputation waited or skipped)."""
-    stored = store.db.execute("SELECT * FROM outcomes WHERE program=? AND version=? AND event=?",
-                              (intent["program"], intent["version"], intent["event"])).fetchone()
-    if stored is None:
+def latched(store: Any) -> dict[str, Any] | None:
+    """THE PARITY LATCH (meta `PARITY_LATCH`): {night, program, version, event, at} of the first parity flag 0 (never a
+    value), or None. While it stands the batched score is OFF whatever `events.score_batch` says: every pass settles by
+    release 1019h's per-intent path, until the captain clears it (`unlatch`)."""
+    row = store.db.execute("SELECT value FROM meta WHERE key=?", (PARITY_LATCH,)).fetchone()
+    if row is None:
         return None
     try:
-        got = _compute(store, gw, intent, now, False)
+        got = json.loads(str(row[0]))
+    except ValueError:
+        got = None
+    return got if isinstance(got, dict) else {"value": str(row[0])[:80]}
+
+
+def latch(store: S.Store, night: dt.date, intent: Mapping[str, Any], now: dt.datetime) -> None:
+    """Set THE PARITY LATCH (once: the first flag 0 stands until it is cleared)."""
+    program, version, event = _key(intent)
+    store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
+                     (PARITY_LATCH, json.dumps({"night": night.isoformat(), "program": program, "version": version,
+                                                "event": event, "at": S.iso(now)}, sort_keys=True)))
+
+
+def unlatch(store: S.Store) -> dict[str, Any] | None:
+    """THE CAPTAIN'S CLEARING OF THE PARITY LATCH (`python3 -m league.events --state DIR score-unlatch`, once the flag 0
+    is explained): the latch removed, and what it held returned (None when none stood). The next pass is batched again
+    while `events.score_batch` is not false; nothing else is touched."""
+    held = latched(store)
+    store.db.execute("DELETE FROM meta WHERE key=?", (PARITY_LATCH,))
+    return held
+
+
+def _check(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, now: dt.datetime,
+           prefetched: Prefetch) -> tuple[int | None, str | None]:
+    """`check_parity`'s work: (the flag or None, the why of a wait or None)."""
+    try:
+        mine = _compute(store, gw, intent, now, prefetched, dry=True)
+    except Waiting as wait:
+        return None, str(wait)
+    except _Missed:
+        return None, None
+    if isinstance(mine, str):
+        return None, None
+    try:
+        theirs: Any = _compute(store, gw, intent, now, Narrow(), dry=True)
     except Waiting:
-        return None
-    if isinstance(got, str):
-        equal = 0
+        theirs = None
+    if isinstance(theirs, tuple):
+        equal = int(all(_same(mine[0][f], theirs[0][f]) for f in PARITY_FIELDS) and mine[1] == theirs[1])
     else:
-        row, _ = got
-        equal = int(all(_same(row[f], stored[f]) for f in PARITY_FIELDS))
+        equal = 0
     store.db.execute("INSERT OR REPLACE INTO score_parity(program, version, event, night, equal, checked_at) VALUES(?, ?, ?, "
                      "?, ?, ?)", (intent["program"], int(intent["version"]), intent["event"], night.isoformat(), equal,
                                   S.iso(now)))
-    return equal
+    if not equal:
+        latch(store, night, intent, now)
+    return equal, None
+
+
+def check_parity(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, *, now: dt.datetime,
+                 prefetched: Prefetch) -> int | None:
+    """THE PARITY CHECK of one sampled intent, BEFORE ANYTHING OF IT IS WRITTEN: settled twice, dry, in memory, by the
+    batched path (the pass's cache `prefetched`) and by the per-intent path (`Narrow`: its own two requests, never
+    written to `bars`), both from the same prints (read once, kept in `marks`), and compared field by field (and the
+    late exit). ONLY THE FLAG is written (`score_parity`: 1 equal, 0 not; never a value), and a 0 sets THE PARITY LATCH
+    (`latch`): the batched score is off from that intent on. Returns the flag, or None when there is nothing batched
+    to compare: the intent waits, is skipped before any bar, or the cache does not serve it (it settles by its own
+    fetches, the per-intent path itself). A per-intent path that waits or skips where the batched one settles is a 0."""
+    return _check(store, gw, intent, night, now, prefetched)[0]
+
+
+def parity_window(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], prefetched: Prefetch,
+                  night: dt.date, *, now: dt.datetime, late: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """THE PARITY CHECK OF ONE PREFETCH'S INTENTS, BEFORE ANY OF THEM SETTLES: each sampled one (`parity_sampled`) is
+    checked (`check_parity`) until `late()` or a flag 0 (the latch: the caller settles the rest by the per-intent
+    path). Returns {sampled, checked, equal, waits}: `waits` the sampled intents that waited ({key: why}), which the
+    caller leaves waiting without computing them again (a tape window is read once a pass)."""
+    out: dict[str, Any] = {"sampled": 0, "checked": 0, "equal": 0, "waits": {}}
+    for intent in intents:
+        if not parity_sampled(intent):
+            continue
+        if late is not None and late():
+            break
+        out["sampled"] += 1
+        try:
+            flag, waited = _check(store, gw, intent, night, now, prefetched)
+        except Exception:  # noqa: BLE001 - a flag not written is a flag not counted; the intent settles as any
+            continue
+        if waited is not None:
+            out["waits"][_key(intent)] = waited
+        if flag is None:
+            continue
+        out["checked"] += 1
+        out["equal"] += flag
+        if not flag:
+            break
+    return out
 
 
 def _same(a: Any, b: Any) -> bool:
@@ -633,9 +860,11 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bo
     """The score job: every due intent settled, skipped (no entry print) or left waiting. Returns counts and the
     failures (an intent's failure is its own; the job goes on). `batch` (release 1019i; None: `BATCH_DEFAULT`): the
     batched score (`order_due`, `prefetch`, `settle_one(prefetched=...)`); False: the per-intent path of release 1019h.
-    `parity` (None: `parity_due`): the parity check of the sampled intents a batched pass settles."""
+    THE PARITY LATCH (`latched`) makes it False whatever is asked. `parity` (None: `parity_due`): the parity check of the
+    sampled intents (`parity_window`), before any of them settles; a flag 0 latches and the whole pass settles by the
+    per-intent path."""
     now = now or S.utc_now()
-    batch = BATCH_DEFAULT if batch is None else bool(batch)
+    batch = (BATCH_DEFAULT if batch is None else bool(batch)) and latched(store) is None
     began = time.monotonic()
     night = now.astimezone(C.NY).date()
     counted = Counted(gw)
@@ -646,11 +875,19 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bo
         intents = order_due(intents)
         pre = prefetch(store, counted, intents, now=now)
     check = batch and (parity_due(store, night) if parity is None else bool(parity))
-    flags = {"checked": 0, "equal": 0}
+    flags: dict[str, Any] = {"sampled": 0, "checked": 0, "equal": 0, "waits": {}}
+    if check and pre is not None and pre.symbols:
+        flags = parity_window(store, counted, intents, pre, night, now=now)
+    use = pre if pre is not None and pre.symbols and latched(store) is None else None
+    served = 0
     for intent in intents:
         summary["due"] += 1
         try:
-            status = settle_one(store, counted, intent, now=now, prefetched=pre if pre is not None and pre.symbols else False)
+            waited = flags["waits"].get(_key(intent))
+            if waited is not None:
+                status = f"waiting:{waited}"
+            else:
+                status = settle_one(store, counted, intent, now=now, prefetched=use if use is not None else False)
         except Exception as exc:  # noqa: BLE001 - one intent's failure is reported, never the job's
             summary["errors"].append(f"{intent['program']}:{intent['event']}: {type(exc).__name__}: {str(exc)[:160]}")
             summary["waiting"] += 1
@@ -659,30 +896,21 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bo
         summary[key] += 1
         if key == "waiting":
             summary["waits"].append(f"{intent['program']}:{intent['event']}: {status[len('waiting:'):]}")
-        if key == "settled" and batch:
+        if key == "settled" and use is not None:
             note_first_night(store, night)
-            if check and parity_sampled(intent):
-                flag = _parity(store, counted, intent, night, now)
-                if flag is not None:
-                    flags["checked"] += 1
-                    flags["equal"] += flag
+            served += int(_key(intent) in use.hits)
     summary.update(batched=batch, requests=dict(counted.counts), seconds=round(time.monotonic() - began, 3))
     if pre is not None:
-        summary["prefetch"] = pre.summary()
+        summary["prefetch"] = {**pre.summary(), "served": served}
     if check:
-        summary["parity"] = flags
+        summary["parity"] = {k: flags[k] for k in ("sampled", "checked", "equal")}
+    if latched(store) is not None:
+        summary["latched"] = True
     return summary
 
 
-def _parity(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, now: dt.datetime) -> int | None:
-    """`check_parity`, whose failure is never the settlement's (it is written already)."""
-    try:
-        return check_parity(store, gw, intent, night, now=now)
-    except Exception:  # noqa: BLE001 - a flag not written is a flag not counted
-        return None
-
-
 __all__ = ["cost_bp", "impact_bp", "after_cost_return", "equity_on", "equity_key", "record_equity", "tape_print",
-           "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting", "Prefetch", "Counted", "prefetch",
-           "fresh", "order_due", "batch_on", "parity_sampled", "parity_due", "note_first_night", "check_parity",
-           "parity_counts", "BATCH_DEFAULT", "BENCHMARKS", "PARITY_SHARE", "PARITY_FIRST", "PARITY_FIELDS"]
+           "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting", "Prefetch", "Narrow", "Counted",
+           "prefetch", "order_due", "batch_on", "parity_sampled", "parity_due", "note_first_night", "check_parity",
+           "parity_window", "parity_counts", "latched", "latch", "unlatch", "BATCH_DEFAULT", "BENCHMARKS",
+           "PARITY_SHARE", "PARITY_FIRST", "PARITY_LATCH", "PARITY_FIELDS"]

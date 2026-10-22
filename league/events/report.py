@@ -436,7 +436,8 @@ def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
     (receipts `score` whose summary's `day` is the session `night`, league/events/house.py `_score`) added up: passes,
     whether the last finished the night (`complete`), intents tried, settled, skipped, waiting and failed, the passes'
     seconds and the settlements a minute over them (`pace`), the batched passes, the gateway requests by kind (bars,
-    trades, other) and the parity night's flags (checked, equal: counts only). None when no pass of the night is on
+    trades, other), the parity night's flags (checked, equal: counts only) and whether THE PARITY LATCH stands
+    (league/events/score.py `latched`: a flag 0 turned the batched score off). None when no pass of the night is on
     record."""
     passes = []
     for r in store.db.execute("SELECT status, summary FROM receipts WHERE job='score' ORDER BY id"):
@@ -463,6 +464,9 @@ def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
             out["parity"][kind] += int((x.get("parity") or {}).get(kind) or 0)
     out["seconds"] = round(out["seconds"], 1)
     out["pace"] = round(out["settled"] / (out["seconds"] / 60.0), 1) if out["seconds"] > 0 else None
+    from . import score as SCO
+
+    out["latched"] = SCO.latched(store) is not None
     return out
 
 
@@ -590,6 +594,8 @@ def render(report: Mapping[str, Any]) -> str:
         par = pace.get("parity") or {}
         if par.get("checked"):
             line += f"; parity {par['equal']} of {par['checked']} equal"
+        if pace.get("latched"):
+            line += "; THE BATCHED SCORE IS OFF: a parity flag 0 latched it (score-unlatch once explained)"
         lines.append(line)
     fr = report.get("fill_rates")
     if fr and fr.get("auctions"):

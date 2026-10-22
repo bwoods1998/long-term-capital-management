@@ -1606,7 +1606,10 @@ path.
   program, version, event, side, kind, day, at, band, rung, resend, replaces, sent, accepted, state, final,
   venue_status, qty, filled_qty, avg_px, limit_px, cancel_ms, sent_at, submitted_at, filled_at, canceled_at,
   expired_at, binding, first_seen, updated_at)` (`store.SCHEMA_1019I`, made by the lane's `Store`; additive, schema
-  version 1; refused to the births' facts). league/tests/test_events_book.py `TheRealLane` runs
+  version 1; refused to the births' facts). The lane's `bars`, which `reaction_reader` reads for a base close (and
+  league/events/run.py for its missing bars), are written by the lane's score exactly as under release 1019h whatever
+  `events.score_batch` says (release 1019i's review: the batched score's prefetch is a cache of its pass, and an intent
+  writes only the rows its own two fetches would have). league/tests/test_events_book.py `TheRealLane` runs
   the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
