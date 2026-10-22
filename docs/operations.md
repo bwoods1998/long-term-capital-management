@@ -13,13 +13,22 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
 **PREREG-EVL-5's three event programs**, below) merged in, then origin/main `eb5bedac` (the House's scoreboard of Oct 21)
 so that main fast-forwards to the release, then release 1019f's fix round `b262a85f` (its three review majors; the SEC
-holiday's index rule applies to PREREG-EVL-5's span too); `--no-ff`, rerere off, each merge committed before the next; the five
-conflicts kept both sides. Both parts were cut from release 1019e (`c485dcfe`, live since 21:17Z Oct 21: A93). THE
-INTEGRATION'S ONE CHANGE (league/equity/live.py): ROOM's order holds while a PREREG-EVL-5 buy waits for the lane's own
-close decision to name its program (`book.part_hold`; the book's close decision waits only 60 s for the lane's): every
-buy after it in ROOM's order is sent leaving it what it will ask of the cash, the invested room, the loss budget and the
-day's order lines, and waits for it when that leaves no whole share ("waits for the PREREG-EVL-5 buys ahead of it in
-ROOM's order"); and `evl_entries` names such a held buy "a gate of real opens". league/tests/test_events_1019g.py holds
+holiday's index rule applies to PREREG-EVL-5's span too), then THE FIX ROUND: `feat/evl-5`'s review round to its head
+`ef6832bb` (`82d05be6`, `c3a700a7`: the judges' major, a batch of the gap's 09:30 minute stores only a price and a
+decision, never the 09:47 ET pre-pass, reads each unmarked survivor alone, so an empty or partial answer removes no
+EVL-NEWS-NIGHT2-ON event; the money major, `HeldAhead`; the wait's cost, the lane's held turn `HOLD_LEAD` that starts
+the live close decision at 15:47:00 ET, and its alarm); `--no-ff`, rerere off, each merge committed before the next;
+every conflict kept both sides. Both parts were cut from release 1019e (`c485dcfe`, live since 21:17Z Oct 21: A93).
+ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS for the lane's own close decision to name its program (`book.part_hold`;
+the book's close decision waits only 60 s for the lane's) is feat/evl-5's `HeldAhead` alone (league/equity/live.py:
+the waiting buy, once every other gate lets it go, keeps its dry-sized worst case, A85's reservation and A86's Probe
+size included, out of the cash, invested room, loss budget and name wall of every buy after it in A85's send order,
+and its send and exit out of both day order lines; a later buy that fits only without that room waits, "waits for the
+room kept for the buys ahead of it in ROOM's order"). Release 1019g's first build had its own form (`ahead`,
+`_event_part_waits`, `_event_ahead`, `AHEAD_HELD`); the fix round dropped it (kept both, the room would be reserved
+twice and the alarm's words would not match). THE INTEGRATION'S CHANGES: a dry sizing writes no release 1019f record
+(`_event_sized` only when `dry` is False), and `evl_entries` names a buy `part_hold` held "a gate of real opens" by the
+review round's words (`book.PART_WAIT`). league/tests/test_events_1019g.py holds
 every place the two parts meet (CHANGELOG.md, **Release 1019g**). IDENTITIES (the tree's own functions, 3.14 and 3.11,
 equal on `rel/1019f` and `rel/1019g`): money `c2f0a478`, constitution `24f73f18` (release 1019f's pair: A86 REVISED;
 PREREG-EVL-5 moves none), rollback pair (`equity_money.event.enabled` False) `fd9e90c0` / `005745e9`, the options
@@ -48,7 +57,13 @@ into `rel/1019g` first when it moved, and CI green on the exact head):
    `evl5:pre:<day>` from 09:47 ET; a close decision's summary with `evl5` and no `evl5_error`; at the first event
    decision `eq_event_programs` with fifteen PREREG rows and the seatable births).
 4. Real money for the new rows from the first close decision after the House is live (Oct 22's close when it ships
-   before the open), and at each close only once the lane's own close decision names them.
+   before the open), and at each close only once the lane's own close decision names them. THE FIRST CLOSE AFTER THE
+   DEPLOY (read-only, the captain's): the lane's `decide-close` seconds in `/workspace/state/events/lane.json`
+   (`tasks`) and the `started_at` / `finished_at` of the day's `decide-close:<day>` receipt: started at about 15:47:00
+   ET (the held turn, `HOLD_LEAD`) and finished before 15:49:00 ET with a book minute to spare (the book's cut-off is
+   the close - 11 minutes). A close whose PREREG-EVL-5 buys ended unsent waiting for it is an `equity.alert` (info)
+   after the close, a WARNING when it recurs within five sessions, and the lane's report counts it (`room_effects`:
+   `held_unsent`, `room_waited`).
 
 **Rollback**: the House first, by `floor_box.py rollback` and repoint release 1019e's deployed head (`c485dcfe`): it
 undoes both parts at once, as **Release 1019f**'s rollback and PREREG-EVL-5's say (the new columns stay NULL; Probe at

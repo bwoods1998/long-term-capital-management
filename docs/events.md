@@ -382,14 +382,12 @@ after 21:26:21Z Oct 21):
   each pass in the tables' order); a learning buy of theirs at D's close leaves the next open's PREREG Probe and Sized
   programs A85's reservation, and at Probe or Sized they are reserved for by the open's learning buys; A86 REVISED
   moves only Probe (3.5% of E, one share up to 5%, six open): their learning rows are as frozen (2%, one share up to 5%,
-  eight open). ROOM'S ORDER WHILE THEIR BUYS WAIT (release 1019g's integration, league/equity/live.py `_event_send`):
-  the book's close decision waits only 60 s for the lane's, so a buy of these rows can wait for `part_hold` while the
-  buys after it in ROOM's order go (a learning buy behind one at Probe, a birth behind one at any band); each such buy
-  is sent leaving the waiting buys ahead of it what they will ask (their band's target in whole shares at their limit,
-  the loss budget at their weight: `_event_ahead`) and two orders each of the day's lines, and one that leaves it no
-  whole share WAITS for them ("waits for the PREREG-EVL-5 buys ahead of it in ROOM's order"), never refused for it; so
-  cash, room, budget and the 150-order line go in ROOM's order whatever the minute each buy is sent (the reading that
-  trades less: a buy behind them can only be smaller or later).
+  eight open). ROOM'S ORDER WHILE THEIR BUYS WAIT (release 1019g; the next item): the
+  book's close decision waits only 60 s for the lane's, so a buy of these rows can wait for `part_hold` while the buys
+  after it in A85's send order go (a learning buy behind one at Probe, a birth behind one at any band); the waiting buy
+  keeps its room from them (`HeldAhead`), sized dry with A85's reservation and A86's Probe size in it, and a dry sizing
+  writes no release 1019f record (`target_usd`, `binding`, `sized_usd` stay the sizing a send reads). (Release 1019g's
+  first build had its own form of this, `ahead`; its fix round kept `HeldAhead` alone.)
 - THE EARLIER ROWS' DECISION COMES FIRST (section 1.3; league/events/run.py `decide_close`): the part that decides these
   rows runs LAST, after every earlier row and PREREG-EVL-4's part, under its own time bound (`EVL5_BUDGET` 45 s, never
   past the close task's own bound less `EVL5_FINISH` 15 s: `part_until`, `bounded`, `PartDeadline`, which is not the

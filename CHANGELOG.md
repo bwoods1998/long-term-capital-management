@@ -38,7 +38,7 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
-### Release 1019g: release 1019f + PREREG-EVL-5 (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in; on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`)
+### Release 1019g: release 1019f + PREREG-EVL-5 (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`; on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`)
 
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
   reservation and round-robin, A86 REVISED, the Probe size's record, the screen after the open, the backfill's retries,
@@ -59,26 +59,47 @@ programs trades real money at learning size.
     tiers, the round-robin and the send order (at Probe or Sized they round-robin with the earlier files' rows); a
     learning DROP buy at D's close (2% of E, two shares at the $20.00 limit of the invented case) leaves the next open's
     Probe program A85's reservation (its three buys whole; without A85 it gets two);
-  - THE INTEGRATION'S CHANGE, ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS (league/equity/live.py `_event_send`
-    `ahead`, `_event_ahead`, `_count_refusal(ahead=)`, `AHEAD_HELD`): the book's close decision waits only 60 s for the
-    lane's, so a buy of the new rows waiting for `part_hold` let the buys after it in ROOM's order (a learning buy
-    behind one at Probe, a birth behind one at any band) take its cash, invested room, loss budget and day orders. Each
-    buy is now sent leaving the waiting buys ahead of it what they will ask and two orders each of the lines, and one
-    left no whole share waits for them (never refused for it). No wall, no money row and no judge moves; a buy behind
-    them can only be smaller or later;
+  - ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS for `part_hold` (the book's close decision waits only 60 s for the
+    lane's): feat/evl-5's `HeldAhead` with A85 and A86 (league/equity/live.py `_event_keep_room`, `HELD_ROOM`,
+    `HELD_AHEAD`, `_count_refusal(held=)`): the waiting buy keeps its dry-sized worst case (A86's Probe size, net of
+    A85's reservation and of the buys before it) out of the cash, invested room, loss budget and name wall of every buy
+    after it in A85's send order, and its send and exit out of both lines; a later buy that fits only without it waits
+    (never refused for it). In the invented cases: a learning buy behind a waiting Probe DROP buy leaves it three shares
+    ($60 at 3.5%) and sends one; a birth behind a waiting learning DROP buy waits, then is refused on the cash there
+    is; eight waiting learning DROP buys keep $240 (six buys) of the $450 above the reserve after A85's $210, so the
+    birth behind them waits and the next open's Probe program still gets its three whole buys; each undone
+    (`_event_keep_room` keeping nothing) gives the cash to the later buy. No wall, no money row and no judge moves; a
+    buy behind them can only be smaller or later;
+  - a dry sizing (`_size_event(dry=True)`: `_event_keep_room`'s, and a later buy's free one) writes no release 1019f
+    record on the side row (`target_usd`, `binding`, `sized_usd`): without that, a waiting buy never sent read $40 sized;
+  - the lane's held turn for the live close decision (`house.HOLD_LEAD`, 150 s) never meets release 1019f's screen
+    after the open (unbounded, never started within `SCREEN_CLEAR`, 5 minutes, of a decision);
   - the final record: PREREG-EVL-5 section 2's span (from P''s close decision) is judged by A84's per-feed clean reads
     (one missed read of a feed with clean reads around it within 15 minutes is no break; a 20-minute news gap in the
     early span holds the new rows alone, the why naming the feed);
   - the alarms: `evl_score` waits for the next pass on a `decide-close-evl5` catch-up's intents (one written before the
     pass still stands); `evl_final` judges the three and reads a close decided without them as not made for them until
     `decide-close-evl5` names them; `evl_entries` names a buy `part_hold` held "a gate of real opens" (was "another
-    reason");
+    reason"), by the review round's words (`book.PART_WAIT`, and a receipt that cannot be read), and a buy waiting for
+    the room kept for them by its own sizing's binding;
   - the 150-order line refuses in ROOM's order with the new rows (PREREG-EVL-5 section 1.3 (a): EVL-NEWS-READ-ON takes
     the last room, DROP is refused; with DROP waiting, a birth behind it keeps DROP's two orders), an exit never stopped
     by it; each overnight lot keeps one order of the next session's line; A80's one re-send carries a DROP buy the venue
     cancelled at once (both orders on the line);
   - A86 REVISED leaves the new rows' learning band as frozen (2%, one share up to 5%, eight open); at Probe they trade
     3.5% with one share up to 5%, inside PREREG-EVL-1 section 8's envelope as section 2 states.
+- **The fix round** (the interaction check of `31e9311f`): (1) BLOCKER, the release lacked feat/evl-5's review round
+  (`82d05be6`, `c3a700a7`, `ef6832bb`, pushed 03:18Z Oct 22): merged. It carries (2) the judges' major (BLOCKER here: at
+  the 09:47 ET pre-pass an answer without a name's 09:30 bar stored "no trade" for good, so an outage lost every
+  EVL-NEWS-NIGHT2-ON event of the day in the shadow and in real money; now a batch stores only a price and a decision
+  reads each unmarked survivor alone over 09:30-09:35 ET, `ThePrePass`), and (3) the wait's cost (major: the lane's
+  close decision started at the first House publish after 15:47:00 ET, so PREREG-EVL-5 buys waited to the 15:49:00
+  cut-off; now the held turn starts it at 15:47:00, `TheLanesTurnForItsCloseDecision`, with the alarm and the report's
+  counts). (4) The money major fixed twice (the first build's `ahead` and the review round's `HeldAhead`): one form
+  kept, `HeldAhead`; the first build's tests ported to its names (above). Each of (2)-(4) fails with its fix undone on
+  the merged tree (the old `_marks_0930`; `_close_hold` and `_hold_from` None; `_event_keep_room` keeping nothing).
+  Left as the check found it (minor, trades less): a waiting close buy keeps two orders of D's lines though its exit is
+  on D+1's.
 - **THE PROOF of both branches on the merged tree** (invented weeks only): league/tests/evl5_world.py's week gives every
   earlier program (PREREG-EVL-1, -2, -4 and the two births) the same 126 shadow intents and the same real-money picks
   (28 program-sessions, 19 with picks) on rel/1019e's, rel/1019f's and rel/1019g's trees, and `TheProof` (with and
