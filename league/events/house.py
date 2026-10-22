@@ -217,11 +217,14 @@ SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 #: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
 #: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
-#: starts only with its whole `CALL_LIMIT` (150 s) and one `STREAM_GAP` (60 s) left before the bound (`LaneGateway`
-#: `post_stream`, `room`), so its last read returns before it; a whole Haiku night took about 10 s on the House (A95,
-#: A109), so the facts before the call leave it its 210 s.
+#: starts only with its whole `CALL_LIMIT` (150 s) and TWO `STREAM_GAP`s (60 s each: the stream's last read may start
+#: just inside the limit and wait a whole gap, and the answer's own last read another) left before the bound
+#: (`LaneGateway` `post_stream`, `room`; release 1019h's re-review, a minor fixed in release 1019i: one gap left a read
+#: that could end past the bound), so its last read returns before it; a whole Haiku night took about 10 s on the House
+#: (A95, A109), the facts before the call leave it its 270 s inside 300 s, and the reconciliation of an earlier night's
+#: registrations runs AFTER the call (league/events/births.py `night`), so its network reads never eat the call's room.
 BIRTHS_AT = dt.time(21, 15)
-BIRTHS_BUDGET = 240.0
+BIRTHS_BUDGET = 300.0
 #: THE SCREEN AFTER THE OPEN (release 1019f; the audit's "bands move a session late"). The judge makes a close X final
 #: (league/events/screen.py `final_until`: A66's three sessions, A69's fast path once the session after X has had its
 #: open decision), and the intents a look as of X covers were settled by X's own score, so the look can be written the
@@ -362,12 +365,14 @@ class LaneGateway:
     def post_stream(self, path: str, body: Any, headers: Mapping[str, str] | None = None, *, limit: float,
                     gap: float) -> tuple[int, Any]:
         """A STREAMED Claude call (R3's births call, release 1019h's fix round; league/events/gw.py `post_stream`):
-        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and one `gap` (a read that
-        returns at the gap's end) are left before the task's bound, so it never runs past the bound. A stream lost
-        after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`), and
-        the next task's `_spend_today` reads it from the store."""
+        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and TWO `gap`s (a read that
+        starts just inside the limit and returns at its gap's end, then the answer's last read; release 1019h's
+        re-review, fixed in release 1019i) are left before the task's bound, so it never runs past the bound. A stream
+        lost after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`),
+        and the next task's `_spend_today` reads it from the store."""
         why = self.lane.claude_refusal(self.deadline)
-        if why is None and self.deadline is not None and self.deadline - self.lane._mono() < float(limit) + float(gap):
+        if why is None and self.deadline is not None and \
+                self.deadline - self.lane._mono() < float(limit) + 2 * float(gap):
             why = "room"
         if why:
             self.counts[f"cut_{why}"] += 1
