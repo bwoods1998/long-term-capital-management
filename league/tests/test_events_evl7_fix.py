@@ -705,7 +705,9 @@ class TheSite(T7.WorldCase):
         self.assertEqual((rows["lrn-o1"]["band"], rows["lrn-o1"]["look"]), ("learning", None))
         self.assertIsNone(rows["lrn-on"]["look"])
         self.assertEqual(rows["lrn-o1"]["name"], "Learner, open to close")
-        self.assertIsNotNone(rows["ern-read-o1"]["look"], "an earlier row's look is PREREG-EVL-3's, as before")
+        seat = next(p for p in P.SEATING if p.id == "EVL-ERN-READ-O1")
+        if not getattr(seat, "evl6", False):        # (a PREREG-EVL-6 version's look is null too, on release 1019i)
+            self.assertIsNotNone(rows["ern-read-o1"]["look"], "an earlier row's look is PREREG-EVL-3's, as before")
 
 
 # ----------------------------------------------------------------------------------------------- the House's night
