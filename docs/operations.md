@@ -45,8 +45,29 @@ fixed at the integration:
 - `evl_score` no longer stands on an intent a decision wrote after the night's last score pass started (a catch-up
   decision, Oct 21's false alarm): the next pass settles it, counted apart (`after_last_pass`).
 
-THE SHADOW RECORD DOES NOT MOVE (proved on the merged tree): run.py, programs.py, verdicts.py, score.py, universe.py,
-edgar.py, news.py, calendar.py and births.py are byte for byte release 1019e's, and the House's lane driven through
+FIXED BY THE REVIEW'S FIX ROUND (the adversarial reviews' majors; each with a test that fails without it):
+- THE DAILY REPORT COUNTS THE BIRTHS (lens alarms): the stall job's process never loads R3's registered births, so the
+  report left a seatable birth's real round trips out of the account-shown profit, the program rows, the expected
+  false passes and the Done line. `daily_report.facts` loads them read-only for the whole report and leaves the table
+  as it was (league/tests/test_daily_report.py `TheBirths`).
+- AN SEC HOLIDAY'S CLOSE WAITS FOR THE INDEX THAT HOLDS ITS EVE (lens judges): EDGAR dates an 8-K accepted after 17:30
+  ET as filed on the next day it is open, so the 8-Ks of Tue Nov 10, 2026's evening, events of Veterans Day's open
+  decision, are in Thu Nov 12's index. A69's (iii) and A66's reach now read through `screen.index_through(X)` (X, or
+  the next weekday EDGAR is open when X is an SEC holiday), so with the holiday rule marking Nov 11 done its close is
+  final only once Nov 12 is backfilled (05:00 ET Nov 13), not at 09:40 ET Nov 12. `SEC_HOLIDAYS` moves behind the wall
+  into league/events/screen.py (house.py takes it; the judge reads the House's copy too). Only delays. Live before Nov
+  11, 2026 (league/tests/test_events_1019f.py `TheIndexAfterAnSecHoliday`).
+- A CO-REGISTERED 8-K IS THE LISTED FILER'S (lens judges, older than 1019f): the live pass kept an 8-K under the first
+  filer the current feed listed, so one listed first under an unlisted co-registrant (a subsidiary, an operating
+  partnership) was never fetched live and never moved by the backfill. `edgar.poll_current(prefer=...)` keeps it under a
+  listed filer, and `edgar.record_filing(listed=...)` moves one stored under an unlisted filer to the listed filer's CIK
+  before the backfill fetches it (the House's passes and the CLI's; league/tests/test_events_house.py
+  `ACoRegistered8K`). This is the one change to the shadow record: such an 8-K becomes the listed issuer's event, as
+  A82 reads the daily index (its own commit, separable).
+
+THE SHADOW RECORD DOES NOT MOVE (proved on the merged tree, and again after the fix round): programs.py, verdicts.py,
+score.py, universe.py, news.py, calendar.py and births.py are byte for byte release 1019e's, and run.py and edgar.py
+differ only by the fix round's co-registered 8-K (above), and the House's lane driven through
 four sessions of invented 8-Ks and news (every due task run at each instant, each tree with its own code and fakes)
 writes the same 111 intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows and 468 decision receipts on
 release 1019e and on this head; with one record pass failing all of SEC's feeds at 23:00 ET (a getcurrent timeout),
@@ -184,7 +205,8 @@ LIMIT 5`. A day waiting on retries is `partial` with `retrying` and `next_try`; 
 `done-failed` with `unfetched` (accession, form, tries, error), and that filing stays `failed:` in `filings`; Wed Nov 11,
 2026 is `ok` with `why` `no index: SEC holiday`. The retry counts live in the House's process: a restart reads the day's
 index again and gives each failed filing six fresh tries. **Before a closure by executive order** (a Christmas Eve) or
-**before Jan 2028**, add the day(s) to `SEC_HOLIDAYS`: otherwise the day's backfill waits an hour at a time while it is
+**before Jan 2028**, add the day(s) to `SEC_HOLIDAYS` (league/events/screen.py from release 1019f's fix round, which
+house.py takes): otherwise the day's backfill waits an hour at a time while it is
 in reach, as every holiday did before this fix. **Rollback**: the release before it; a day this fix marked done stays
 done.
 

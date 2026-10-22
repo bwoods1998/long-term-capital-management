@@ -131,7 +131,9 @@ each and a clean pass 2-4 minutes later, so no span was ever whole and every loo
 `screen._fast_passes`, `_feed_problems`); (ii) no filing knowable in those windows that the lane would fetch is still
 `listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a filer in X's tickers copy; an unlisted filer's
 8-K is never fetched and never an event of X); (iii) the daily-index backfill of every weekday from the session before X
-through X has run; and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
+through X has run, and, when X is an SEC holiday NYSE trades (Columbus Day, Veterans Day), through the next weekday EDGAR
+is open: EDGAR dates an 8-K accepted after 17:30 ET as filed on the next day it is open, so the 8-Ks of the holiday's
+eve are in that day's index (`screen.index_through`; release 1019f's review: A66's reach reads it the same way); and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
 another program's verdicts) and the next session's open decision is made. Otherwise A66's rules apply unchanged, and
 finality stays contiguous: X is final by the fast path only when every session before it is final. The record receipts
 the House already writes prove (i) (league/events/house.py `_record`: a failed feed read is an `error` in its part of
@@ -356,7 +358,10 @@ turn, the most urgent due first.
 THE BACKFILL GOES FILING BY FILING (A82, release 1019c): EDGAR's daily index lists a filing once per filer (a Form 4
 under its issuer and its reporting owner, an 8-K under each co-registrant: Oct 19, 2026's index had 1,189 rows and 665
 filings), so a day is complete when every filing is seen, and an 8-K is a listed filer's when any of its filers is
-listed. Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
+listed. The current feed lists a co-registered 8-K once per filer too: the live pass keeps it under a listed filer
+whichever the feed lists first (`edgar.poll_current`'s `prefer`), and the backfill moves one stored under an unlisted
+co-registrant to the listed filer's CIK before it fetches it (`edgar.record_filing`'s `listed`; release 1019f's review:
+kept under the first filer seen, such an 8-K was never an event of the listed issuer). Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
 never ran.
 
 A FAILED FETCH HOLDS ITS DAY, ONE DEAD DOCUMENT NEVER HOLDS IT FOR GOOD (`fix/backfill-robust`, release 1019f): a
@@ -370,12 +375,12 @@ still waits on it for the closes whose windows hold it, and A66's reach does not
 counted as seen and the day was done at once: one transient SEC error lost the filing. SEC HOLIDAYS: EDGAR is closed on
 a federal holiday and publishes no daily index for it (Wed Nov 11, 2026, Veterans Day, is a trading day), so its index
 is never there; SEC answers a daily index that does not exist with 403 or 503, never 404 (the branch's independent
-check). A weekday in `house.py` `SEC_HOLIDAYS` (OPM's 2026 and 2027 federal holidays, and Fri Dec 31, 2027, New Year's
-Day 2028 observed) whose index read FAILS, WHATEVER THE STATUS, is done as `no index: SEC holiday` (receipt `ok`, `why`,
+check). A weekday in `SEC_HOLIDAYS` (league/events/screen.py, behind the wall, which house.py takes: OPM's 2026 and
+2027 federal holidays, and Fri Dec 31, 2027, New Year's Day 2028 observed) whose index read FAILS, WHATEVER THE STATUS, is done as `no index: SEC holiday` (receipt `ok`, `why`,
 `holiday`, `status`: EDGAR accepts no filing that day, so done is right even when the read failed for another reason).
 A failed read on any other weekday, 403, 503 or any status, waits an hour as before, and a holiday's index that
 exists is read as any day's. A closure by executive order is not in the table: add its day
-before it falls.
+before it falls. A holiday NYSE trades is final only once the index after it is backfilled too (A69 (iii), above).
 
 A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
 first record pass 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, then left to the daily-index
@@ -432,7 +437,9 @@ THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after
 metered costs beside it, by program and band (to date as far as `metered.json` covers it: "since <day>, partly
 measured" when it began after the first fill); the measured costs of the UTC day of the same date against its cap with
 its lines labelled the allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
-fees, the fill gap against the auction prints); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+fees, the fill gap against the auction prints); for each program that may trade real money (version 2 of the nine, version 1
+of PREREG-EVL-4's three, then each seatable birth of R3, which the report loads from the lane's store: release 1019f's
+review) its band, settled n (shadow TRADABLE and real), next look and events to go, its
 market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.

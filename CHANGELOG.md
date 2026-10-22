@@ -67,15 +67,35 @@ programs trades real money at learning size.
   - `evl_score` waits for the next pass on an intent a decision wrote after the night's last score pass started (Oct
     21's false alarm: PREREG-EVL-4's rows decided by themselves for an older close);
   - the budget's arithmetic docstring names the fixed line as the House app's boxes but the Gym pool's.
-- **The shadow record does not move.** The lane's decision, verdict and score code (run.py, programs.py, verdicts.py,
-  score.py, universe.py, edgar.py, news.py, calendar.py, births.py) is byte for byte release 1019e's. The House's lane
+- **Fixed by the review's fix round** (the adversarial reviews' three majors; each with a test that fails without it):
+  - the daily report counts R3's births: the stall job's process never loads them, so a seatable birth's real round
+    trips were out of the account-shown profit, the program rows, the expected false passes and the Done line;
+    `daily_report.facts` loads them read-only for the whole report and leaves the table as it was (lens alarms;
+    league/tests/test_daily_report.py `TheBirths`);
+  - an SEC holiday's close waits for the index that holds its eve: EDGAR dates an 8-K accepted after 17:30 ET as filed
+    on the next day it is open, so Tue Nov 10, 2026's evening 8-Ks (events of Veterans Day's open decision) are in Thu
+    Nov 12's index; A69's (iii) and A66's reach read through `screen.index_through` (X, or the next weekday EDGAR is open
+    when X is an SEC holiday), so the holiday rule's done no longer lets the fast path make Nov 11 final at 09:40 ET
+    Nov 12, before Nov 12 is backfilled; `SEC_HOLIDAYS` moves behind the wall into league/events/screen.py (house.py
+    takes it); only delays; live before Nov 11 (lens judges; league/tests/test_events_1019f.py
+    `TheIndexAfterAnSecHoliday`);
+  - a co-registered 8-K is the listed filer's (older than 1019f): the live pass kept an 8-K under the first filer the
+    current feed listed and the backfill never moved its CIK, so one listed first under an unlisted co-registrant was
+    never the listed issuer's event; `edgar.poll_current(prefer=...)` and `edgar.record_filing(listed=...)`, in the
+    House's passes and the CLI's (lens judges; league/tests/test_events_house.py `ACoRegistered8K`; its own commit).
+- **The shadow record does not move.** The lane's decision, verdict and score code (programs.py, verdicts.py,
+  score.py, universe.py, news.py, calendar.py, births.py) is byte for byte release 1019e's, and run.py and edgar.py
+  differ only by the fix round's co-registered 8-K (the one change to the shadow record: such an 8-K becomes the listed
+  issuer's event, as A82 reads the daily index). The House's lane
   driven through four sessions of invented 8-Ks and news on each tree writes the same 111 intents, 16 outcomes, 18
   verdicts, 9 filings, 12 eligibility rows and 468 decision receipts; with one record pass failing all of SEC's feeds,
   the shadow record is the same again and only the finality differs, as A84 states (Oct 20 on release 1019e, Oct 22
-  here). Real-money sizing moves only as A85, A86 REVISED and the walls' equity state.
+  here); after the fix round the same driver writes the same record again on both heads. Real-money sizing moves only
+  as A85, A86 REVISED and the walls' equity state.
 - **Owner files** (behind league/ci.py's wall): CHANGELOG.md, docs/goals/DONE-RULE-EVL-2.md, gateway/lib/email.mjs and
   its two tests, league/ci.py, league/constitution.py, league/equity/INTERFACES.md, league/equity/live.py,
-  league/events/bands.py, book.py, done.py, house.py, screen.py, store.py, league/ops/budget.py, daily_report.py,
+  league/events/bands.py, book.py, done.py, edgar.py, house.py, run.py, screen.py, store.py, league/ops/budget.py,
+  daily_report.py,
   economics.py, evl_health.py, stall.py, league/project_economics.py.
 - **Rollback**: the House first, to release 1019e's head `c485dcfe` (the new columns stay NULL to it; done.json and the
   new receipts are inert); the gateway after it or never. Constitution-only: `equity_money.event.enabled` False
