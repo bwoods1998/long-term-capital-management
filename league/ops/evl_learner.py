@@ -111,6 +111,27 @@ def facts(root: str | Path, now: float) -> dict[str, Any] | None:
                 mine["recompute"].append({"day": s.day.isoformat(), "status": got.get("status"),
                                           "cause": str(got.get("cause") or "")[:200]})
             out["learners"][learner.id] = mine
+        # COST-7 (section 2.2 (c) and (d)): the latest night's row, its incomplete sessions, and whether a night whose
+        # score is in has none (every look of these versions then waits)
+        basis = None
+        if "cost_basis" in tables:
+            got = db.execute("SELECT night, incomplete, why FROM cost_basis ORDER BY id DESC LIMIT 1").fetchone()
+            basis = None if got is None else dict(got)
+        score = db.execute("SELECT MAX(started_at) FROM receipts WHERE job='score' AND status='ok'").fetchone()[0]
+        night = None
+        if score is not None:
+            night = S.parse_iso(str(score)).astimezone(C.NY).date()
+            if S.parse_iso(str(score)).astimezone(C.NY).time() < dt.time(12, 0):
+                prior = C.previous(view, night, 1)
+                night = prior[0].day if prior else night
+        try:
+            incomplete = json.loads((basis or {}).get("incomplete") or "[]")
+        except ValueError:
+            incomplete = ["unreadable"]
+        out["cost_basis"] = {"night": None if basis is None else basis["night"], "incomplete": len(incomplete),
+                             "why": None if basis is None else basis.get("why"),
+                             "missing": night is not None and (basis is None or str(basis["night"]) < night.isoformat()),
+                             "scored_night": None if night is None else night.isoformat()}
         return out
     with guard.readonly():
         return guard.read(path, read)
@@ -145,11 +166,29 @@ def judge(now: float, f: dict[str, Any] | None) -> dict[str, Any]:
         numbers[pid] = {"parts_failed": len(m["parts"]), "parts_open": len(open_parts), "owed": len(m["owed"]),
                         "lagging": bool(lag.get("lagging")), "warmup": warm,
                         "mismatch": sum(1 for r in m["recompute"] if r["status"] == "mismatch")}
+    cb = f.get("cost_basis") or {}
+    if cb.get("missing") and moment_after(now, cb.get("scored_night")):
+        said.append(f"COST-7 has no cost_basis row for the night of {cb.get('scored_night')} after its score (every "
+                    "look of the learners waits: section 2.2 (d))")
+    if cb.get("incomplete"):
+        said.append(f"COST-7's attempt record is incomplete for {cb['incomplete']} sessions, left out of its measured "
+                    "terms (section 2.2 (c))" + (f": {str(cb.get('why'))[:160]}" if cb.get("why") else ""))
+    numbers["cost_basis"] = {"missing": bool(cb.get("missing")), "incomplete": int(cb.get("incomplete") or 0)}
     stalled = bool(said)
     what = ("PREREG-EVL-7's learners: " + "; ".join(said) + ".") if stalled else \
         "PREREG-EVL-7's learners decided every auction they owe, on fresh training rows, with no recompute mismatch."
     return {"stalled": stalled, "judged": True, "what": what[:1200], "numbers": numbers, "doing": DOING,
             "owner_step": None, "onset": None}
+
+
+def moment_after(now: float, night: str | None) -> bool:
+    """Whether `now` is past the 00:30 ET after the night `night` (the cost basis step runs right after its score)."""
+    if not night:
+        return False
+    from ..events import calendar as C
+
+    day = dt.date.fromisoformat(str(night)) + dt.timedelta(days=1)
+    return now >= dt.datetime.combine(day, dt.time(0, 30), tzinfo=C.NY).timestamp()
 
 
 def check(root: str | Path, now: float) -> dict[str, Any]:

@@ -346,6 +346,8 @@ class TheRows(unittest.TestCase):
         self.assertEqual((LR.K, LR.LAMBDA, LR.HALF_LIFE, LR.LOOKBACK, LR.WARM_ROWS, LR.WARM_SESSIONS),
                          (8, 8000.0, 40.0, 250, 2000, 3))
         self.assertEqual(LR.BOUND_S, {"open": 90.0, "close": 120.0})
+        self.assertEqual((LR.CHARGE7_HUNDREDTHS, LR.BASE7_HUNDREDTHS, LR.STRESS7_HUNDREDTHS, LR.RUNS_MAX), (13, 3, 13, 3),
+                         "section 4: c7 = max(0.13, W7 0.087 rounded up) = 0.13 a run, three runs an id at most")
         self.assertEqual(LR.RECEIPT, {"open": "decide-open-lrn", "close": "decide-close-lrn"})
 
     def test_the_headline_features_are_the_reader_lens_frozen_spec_verbatim(self):
@@ -967,6 +969,21 @@ class TheAlarms(WorldCase):
         self.assertIn("trained through no row", cause["what"], "no training row at all: the lag alarm")
         self.assertNotIn("ahat", json.dumps(cause), "counts and dates only")
 
+    def test_cost7s_incomplete_record_and_a_missing_row_are_alarmed(self):
+        day = self.days(1)[0]
+        rid = self.st.start_receipt("score", now=et(day, 20, 31))
+        self.st.finish_receipt(rid, "ok", {}, now=et(day, 20, 40))
+        late = et(day + dt.timedelta(days=1), 2, 0).timestamp()
+        cause = EL.judge(late, EL.facts(self.w.root, late))
+        self.assertIn("no cost_basis row for the night", cause["what"])
+        self.st.db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) "
+                           "VALUES('EVL-NEWS-READ-O1', 3, 'news:x', 'buy', 1, 20, 0, ?, 'learning')",
+                           (S.iso(et(day, 9, 31)),))
+        C7.nightly(self.st, day, et(day, 20, 45))
+        cause = EL.judge(late, EL.facts(self.w.root, late))
+        self.assertNotIn("no cost_basis row", cause["what"])
+        self.assertIn("attempt record is incomplete for 1 sessions", cause["what"])
+
     def test_the_cause_is_the_stall_jobs_and_the_gateway_words_it(self):
         from league.ops import evl_health as EV
         from league.ops import stall as ST
@@ -1205,11 +1222,13 @@ class TheProof(unittest.TestCase):
     R3 among its programs): decided by the House's own code with the learners pinned (and made to pick) and without
     them, every earlier program's shadow intents and real-money picks are the same, and so are the House's receipts."""
 
-    def week(self, root: Path, pinned: bool) -> dict:
+    def week(self, root: Path, pinned: bool, *, raising: bool = False) -> dict:
         from league.tests import evl5_world as W5
 
         patches = [mock.patch.object(P, "REGISTERED_AT_7", REG7 if pinned else None)]
-        if pinned:      # (the learners pick from their first decision: a warm, invented fit)
+        if raising:     # (a learner whose every decision raises: its part fails alone)
+            patches.append(mock.patch.object(LR, "compute", side_effect=RuntimeError("an invented failure")))
+        elif pinned:    # (the learners pick from their first decision: a warm, invented fit)
             patches += [mock.patch.object(LR, "training", lambda store, lrn, day, tau, **kw: {
                 "stats": [], "rows": 5000, "sessions": 10, "keys_sha": "x", "by_day": {}}),
                 mock.patch.object(LR, "fit", lambda stats, width: {"beta": [5.0] * width, "d": [1.0] * width,
@@ -1232,9 +1251,10 @@ class TheProof(unittest.TestCase):
                 if pinned:
                     mine = w.st.db.execute("SELECT COUNT(*) FROM intents WHERE program IN (?, ?)",
                                            tuple(sorted(learners))).fetchone()[0]
+                parts = [str(r[0]) for r in w.st.db.execute("SELECT key FROM meta WHERE key LIKE 'evl7:part:%'")]
                 return {"intents": intents, "receipts": receipts, "picks": picks, "learner_intents": mine,
                         "fits": [tuple(r) for r in w.st.db.execute("SELECT program, day, kind FROM learner_fits")]
-                        if pinned else []}
+                        if pinned else [], "parts": parts}
             finally:
                 P.load_births(None)
                 w.close()
@@ -1250,6 +1270,40 @@ class TheProof(unittest.TestCase):
         self.assertEqual(with_["intents"], without["intents"])
         self.assertEqual(with_["picks"], without["picks"])
         self.assertEqual(with_["receipts"], without["receipts"], "the House's receipts: the same, naming no learner")
+
+    def test_a_raising_learner_leaves_every_earlier_rows_intents_and_receipts_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            without = self.week(Path(tmp) / "without", False)
+            raising = self.week(Path(tmp) / "raising", True, raising=True)
+        P.refresh_7()
+        self.assertTrue(raising["parts"], "the learners' parts failed and said so")
+        self.assertEqual((raising["fits"], raising["learner_intents"]), ([], 0), "and wrote nothing")
+        self.assertEqual(raising["intents"], without["intents"])
+        self.assertEqual(raising["receipts"], without["receipts"])
+        self.assertEqual(raising["picks"], without["picks"])
+
+
+class TheJudgeIsNeverEdited(unittest.TestCase):
+    def test_the_learner_and_cost7_never_assign_into_the_screen_or_any_other_module(self):
+        """Section 10: "the learner never edits screen.py": no assignment, setattr or delete on an imported module's
+        attribute in league/events/learner.py or costs7.py (the screen is read through `judge_record` alone)."""
+        import ast
+
+        for path in (Path(LR.__file__), Path(C7.__file__)):
+            tree = ast.parse(path.read_text())
+            modules = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
+                       for a in n.names}
+            for node in ast.walk(tree):
+                targets = []
+                if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+                    targets = node.targets if isinstance(node, (ast.Assign, ast.Delete)) else [node.target]
+                for t in targets:
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name):
+                        self.assertNotIn(t.value.id, modules, f"{path.name}:{node.lineno} assigns into {t.value.id}")
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) in ("setattr", "delattr"):
+                    first = node.args[0] if node.args else None
+                    self.assertFalse(isinstance(first, ast.Name) and first.id in modules, f"{path.name}:{node.lineno}")
+        self.assertIn("judge_record", C7.__all__)
 
 
 # --------------------------------------------------------------------------------------------------------- COST-7

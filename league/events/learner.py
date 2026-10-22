@@ -100,6 +100,14 @@ FINISH_S = 15.0
 #: Section 1.11 item 9: the receipts of a decision made by the learners by themselves (the catch-up, a failed part's).
 RECEIPT = {"open": "decide-open-lrn", "close": "decide-close-lrn"}
 KINDS = ("live", "catchup", "late", "reconstruct")
+#: Section 4 (E1, E2): each learner RUN is charged c7 = max(PREREG-EVL-6's 0.13, W7 rounded up) = 0.13 when it starts (W7
+#: measured 0.0870 at the worst plausible cell on fresh seeds), at most THREE runs an id over its life (so this file
+#: draws at most 6 x c7); the report's three ways of the count: c7, the base model 0.03 and the stresses' worst 0.13. In
+#: hundredths, as PREREG-EVL-6's own count is kept (league/events/screen.py on release 1019i).
+CHARGE7_HUNDREDTHS = 13
+BASE7_HUNDREDTHS = 3
+STRESS7_HUNDREDTHS = 13
+RUNS_MAX = 3
 #: A catch-up decision that raised is tried again this many times, then written closed (it picks nothing).
 CATCHUP_TRIES = 3
 #: The live part's own record when it did not write a decision (meta `PART_KEY`): failed or expired, why, when.
@@ -1435,4 +1443,5 @@ __all__ = ["POOLS", "K", "LAMBDA", "HALF_LIFE", "LOOKBACK", "WARM_ROWS", "WARM_S
            "tradable", "pool_programs", "candidates", "sig20_of", "features", "held_7", "pool_outcomes", "gross", "label",
            "training", "session_stats", "cholesky", "solve", "fit", "replay_cost", "predict", "choose", "decided",
            "compute", "decide", "live_part", "due", "catchup", "first_live", "recompute", "inputs_sha",
-           "remember_inputs", "live_picks", "report_lines", "render_lines", "PART_KEY", "RECOMPUTE_KEY", "INPUTS_KEY"]
+           "remember_inputs", "live_picks", "report_lines", "render_lines", "PART_KEY", "RECOMPUTE_KEY", "INPUTS_KEY",
+           "CHARGE7_HUNDREDTHS", "BASE7_HUNDREDTHS", "STRESS7_HUNDREDTHS", "RUNS_MAX"]
