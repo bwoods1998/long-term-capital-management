@@ -1420,6 +1420,40 @@ class TheCost7(unittest.TestCase):
                                                                                              [{"a": 0}]))
 
 
+class TheLedger(WorldCase):
+    """COST-7 section 2.2 (b) and (c) with an attempt ledger in the store (invented rows in section 2.3's shape)."""
+
+    def test_the_attempt_population_its_fills_and_an_incomplete_session(self):
+        day1, day2 = self.days(2)
+        self.st.db.execute("CREATE TABLE real_attempts(program TEXT, version INTEGER, event TEXT, side TEXT, tif TEXT, "
+                           "auction TEXT, day TEXT, decided_at TEXT, sent_at TEXT, client_id TEXT, resend INTEGER, "
+                           "status TEXT)")
+        for k, (day, filled, resend) in enumerate(((day1, True, 0), (day1, False, 0), (day1, False, 1), (day2, True, 0))):
+            ev = f"news:led-{k if k != 2 else 1}"
+            cik, sym = self.w.issuer()
+            if k != 2:
+                self.w.universe(day, sym, cik)
+                self.w.outcome("EVL-CTRL-NEWS-ALL-O1", ev, sym, cik, day, a_g=0.01 * (k + 1), settled=et(day, 20, 30))
+                self.st.db.execute("UPDATE outcomes SET program='EVL-NEWS-READ-O1', version=3 WHERE event=?", (ev,))
+            self.st.db.execute("INSERT INTO real_attempts VALUES('EVL-NEWS-READ-O1', 3, ?, 'buy', 'opg', 'open', ?, 'x', ?, "
+                               "?, ?, 'sent')", (ev, day.isoformat(), S.iso(et(day, 9, 16, k)), f"c{k}", resend))
+            if filled:
+                self.st.db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) "
+                                   "VALUES('EVL-NEWS-READ-O1', 3, ?, 'buy', 1, 20, 0, ?, 'learning')",
+                                   (ev, S.iso(et(day, 9, 31))))
+        pop = C7.attempts(self.st, set())
+        self.assertEqual([(a["event"], a["filled"]) for a in pop],
+                         [("news:led-0", True), ("news:led-1", False), ("news:led-3", True)],
+                         "A80's re-send is the same attempt; filled when real_fills holds its buy")
+        self.assertEqual(C7.incomplete_sessions(self.st), set(), "every real buy fill has its ledger row")
+        self.st.db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) VALUES("
+                           "'EVL-NEWS-READ-O1', 3, 'news:unledgered', 'buy', 1, 20, 0, ?, 'learning')",
+                           (S.iso(et(day2, 9, 31)),))
+        self.assertEqual(C7.incomplete_sessions(self.st), {day2.isoformat()})
+        self.assertEqual([a["event"] for a in C7.attempts(self.st, {day2.isoformat()})], ["news:led-0", "news:led-1"],
+                         "an incomplete session is left out of the selection term")
+
+
 class TheRecord(WorldCase):
     def test_record7_reads_live_decisions_only_valued_on_a7_and_waits_without_a_basis(self):
         days = self.days(3)
