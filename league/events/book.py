@@ -355,10 +355,45 @@ def under_bar(band: str | None, target: Decimal, limit: Decimal, walls: Decimal,
     cap = envelope_share(band)
     if cap is None:
         return False
+    return _fewest(target, limit, share) * limit > cap * walls
+
+
+def _fewest(target: Decimal, limit: Decimal, share: Decimal) -> Decimal:
+    """The fewest whole shares n >= 1 whose dollars n x `limit` reach `share` x `target` by the Done reader's own float
+    comparison (`at_size`), for positive figures and a share above 0."""
     n = max(Decimal(1), (share * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
     while not at_size(target, n * limit, share):
         n += 1
-    return n * limit > cap * walls
+    return n
+
+
+def at_size_count(band: str | None, target: Decimal, limit: Decimal, walls: Decimal, *,
+                  bar: Decimal | str | None = None) -> Decimal | None:
+    """PREREG-EVL-6 SECTION 6, CLAUSE 2 (A99), THE COUNT OF A PROBE OR SIZED BUY of a version it judges: "a Probe or
+    Sized buy takes the FEWEST whole shares whose value at the limit reaches 0.8 of its band's target ... never above 5%
+    of equity at Probe, nor above the name's 10% wall at Sized, and that ask is judged again by every cap". The fewest
+    whole shares n >= 1 whose dollars at `limit` reach `bar` x `target` (the Done reader's own `at_size` at the row in
+    force; `bar` None: the band's `reach_bar` row), when n x limit is at most `envelope_share(band)` x `walls` (Probe 5%,
+    Sized 10%, the walls' equity: so n <= floor(5% E / limit) at Probe, PREREG-EVL-1 section 8's own count); None when
+    no such count fits (`under_bar`: the pick is skipped before it takes a slot), at learning, with the band's row at 0
+    (S2's switch off: no at-size buy), or when the figures are not positive. It is never release 1019h's floor of the
+    target: a buy the floor would take to 13 shares at $5.00 of a $66.43 target takes 11 ($55.00 reaches $53.144), the
+    reading of the text's words, which trades less. The caller (league/equity/live.py `_size_event`) asks `size_entry`
+    for n x limit and buys n only when every cap gives all n; a cap that cuts the ask under the bar skips the buy (the
+    reading that trades less, section 7)."""
+    if str(band) not in PROBE_UP:
+        return None
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return None
+    target, limit, walls = (Decimal(str(v)) for v in (target, limit, walls))
+    if not (target > 0 and limit > 0 and walls > 0):
+        return None
+    cap = envelope_share(band)
+    if cap is None:
+        return None
+    n = _fewest(target, limit, share)
+    return None if n * limit > cap * walls else n
 
 
 def most_ask(s: "Settings", band: str | None, E: Decimal) -> Decimal:
@@ -1504,4 +1539,4 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
 #: (release 1019i: PREREG-EVL-6 section 6's skip of a pick no whole-share count brings to Done's size bar)
-__all__ += ["under_bar"]
+__all__ += ["under_bar", "at_size_count"]

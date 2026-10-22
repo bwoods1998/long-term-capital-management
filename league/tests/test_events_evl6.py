@@ -19,7 +19,9 @@ The frozen text (docs/prereg/PREREG-EVL-6.md, tag prereg-evl-6, sha256 0f67f94e.
   unsettled event never holding a later close, one unsettled past the ladder judged without, the stay's lower tail,
   Sized's real-money conditions.
 - THE MONEY (section 6): `event.max_open_v6.probe` 14 for these versions alone, the under-bar skip before a slot, the
-  seat's room and issuers with the superseded version's open lots, a superseded seat's instance retired.
+  fewest whole shares that reach Done's bar (a cap's cut under it skips the buy), a Probe lot unsold past the ladder
+  holding the version's Probe buys, the seat's room and issuers with the superseded version's open lots, a superseded
+  seat's instance retired.
 - THE COUNT (section 5): 0.13 a version or run of 3.9, three ways, per version beside; R3's validator.
 - THE PROOF: an invented week's real-money picks are identical with and without the change, no superseded band moves.
 - THE REPORT AND THE SITE; release 1019h's re-review minors in births.py and house.py; the docs and the wall.
@@ -888,6 +890,93 @@ class TheMoneyInTheBook(unittest.TestCase):
         case.setUp()
         self.addCleanup(case.tmp.cleanup)
         return case.harness()
+
+    def sent(self, h) -> dict[str, str]:
+        return {b["symbol"]: b["qty"] for b in h.bodies() if b["side"] == "buy"}
+
+    def test_a_probe_buy_takes_the_fewest_whole_shares_that_reach_dones_bar(self):
+        """Section 6, clause 2's words (release 1019i's review, the money lens): at E $1,898 the Probe target is
+        $66.43 and Done's bar $53.144; at a $5.00 limit the floor of the target is 13 shares ($65.00), the fewest
+        that reach the bar 11 ($55.00)."""
+        h = self.case.harness(cash="1898", E="1898")
+        self.probe_pick(h, version=3, prev_close=4.0)            # limit $5.00
+        h.tick(9, 15)
+        h.tick(9, 16)
+        self.assertEqual(self.sent(h), {"ACME": "11"})
+        [row] = h.event_intents("buy")
+        self.assertEqual((D(row["target_usd"]), D(row["sized_usd"]), row["binding"]), (D("66.430"), D("55"), None),
+                         "the target stays the band's; the dollars sent reach the bar")
+        self.assertTrue(EB.at_size(D(row["target_usd"]), D(row["sized_usd"])))
+        self.assertEqual(EB.at_size_count("probe", D("66.43"), D("5"), D("1898")), 11)
+        self.assertEqual(EB.at_size_count("sized", D("189.80"), D("5"), D("1898")), 31, "Sized: 0.8 x 10% of E")
+        self.assertIsNone(EB.at_size_count("probe", D("66.43"), D("50"), D("1898")), "under the bar: no count fits")
+        self.assertIsNone(EB.at_size_count("learning", D("37.96"), D("5"), D("1898")))
+        with F6.before_evl6():
+            h2 = self.fresh()
+            h2.E = D("1898")
+            self.probe_pick(h2, version=2, prev_close=4.0)
+            h2.tick(9, 15)
+            h2.tick(9, 16)
+            self.assertEqual(self.sent(h2), {"ACME": "13"}, "release 1019h's S2 for its versions: the floor of the target")
+
+    def test_a_cap_that_cuts_the_at_size_ask_under_the_bar_skips_the_buy(self):
+        h = self.case.harness(cash="1898", E="1898")
+        h.options.reserved_usd = 1798.0          # available: $1,898 - $1,798 - the $50 reserve = $50 < 11 x $5.00
+        self.probe_pick(h, version=3, prev_close=4.0)
+        h.tick(9, 15)
+        h.tick(9, 16)
+        self.assertEqual(self.sent(h), {}, "10 shares ($50) would be under Done's bar: skipped, the shadow keeps it")
+        [row] = h.event_intents("buy")
+        self.assertEqual((row["status"], D(row["sized_usd"]), row["binding"]), ("refused", D("0"), "cash"))
+        self.assertIn("cut under Done's size bar", row["why"])
+
+    def pick_on(self, h, day: dt.date, accession: str, cik: str, symbol: str, prev_close: float = 16.0) -> None:
+        """A Probe pick of EVL-ERN-READ-O1 v3 on `day`: its 8-K after the previous session's close, its verdict, its
+        universe row and the lane's intent."""
+        TB = self.TB
+        prior = TB.ES.previous_session(day)
+        h.lane.filing(accession, cik, accepted=TB.iso(prior, 16, 30), received=TB.iso(prior, 16, 31))
+        h.lane.verdict(accession, 3, answered=TB.iso(prior, 16, 35))
+        h.lane.universe(day, symbol, cik, prev_close)
+        h.lane.intent(P.BY_KEY[("EVL-ERN-READ-O1", 3)], f"8k:{accession}", symbol, cik, day, day)
+        self.case.ready(h, day)
+        h.symbol(symbol, last=prev_close, sd=0.02)
+
+    def test_a_probe_lot_unsold_past_the_ladder_holds_the_versions_new_probe_buys_with_an_alarm(self):
+        """Section 3 with a real-money event that never settles (release 1019i's review, the money lens): from the
+        session `LADDER_CLOSES` + 1 after its planned exit the version's Probe and Sized buys are held (the reading that
+        trades less) and an error alarm is said once a session; the lane judges its stay without the lot."""
+        TB, ES = self.TB, self.TB.ES
+        h = self.case.harness()
+        self.probe_pick(h, version=3, prev_close=16.0)           # limit $20.00
+        h.venue.prints[("ACME", TB.DAY.isoformat(), "open")] = D("20.00")     # bought at the open, no close print
+        h.venue.fill = "none"                                                 # and no day trade: its sale never fills
+        h.day(TB.DAY)
+        [lot] = h.lots()
+        self.assertEqual((lot.version, lot.info["evl"]["band"]), (3, "probe"))
+        self.assertIn(lot.status, ("open", "closing"))
+        day = TB.DAY
+        for _ in range(EB.LADDER_CLOSES):
+            day = ES.next_session(day)
+        self.pick_on(h, day, "b-1", "0000000101", "BETA")
+        h.tick(9, 15, day=day)
+        mine = self.summary_of(h, day)["programs"]["EVL-ERN-READ-O1"]
+        self.assertEqual((mine["planned"], mine.get("held")), (1, None), "inside the ladder: the buys go on")
+        day = ES.next_session(day)
+        self.pick_on(h, day, "b-2", "0000000102", "GAMA")
+        h.tick(9, 15, day=day)
+        mine = self.summary_of(h, day)["programs"]["EVL-ERN-READ-O1"]
+        self.assertEqual((mine["picks"], mine["room"], mine["held"]), (None, 0, "unsettled"))
+        self.assertNotIn("GAMA", {r["symbol"] for r in h.event_intents("buy")})
+        said = [text for level, text in h.alerts if level == "error" and "holds EVL-ERN-READ-O1 v3's Probe" in text]
+        self.assertEqual(len(said), 1)
+        self.assertIn(f"{lot.lid} (ACME)", said[0])
+        h.tick(9, 16, day=day)
+        self.assertEqual(len([t for _, t in h.alerts if "holds EVL-ERN-READ-O1 v3's Probe" in t]), 1, "once a session")
+
+    def summary_of(self, h, day: dt.date, at: str = "open") -> dict:
+        row = h.state.rows("SELECT summary FROM eq_event_decisions WHERE day=? AND at=?", (day.isoformat(), at))
+        return json.loads(row[0]["summary"])
 
     def test_the_seat_counts_the_superseded_versions_open_lot_and_its_instance_is_retired_at_the_sync(self):
         TB = self.TB
