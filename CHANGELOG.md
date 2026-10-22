@@ -40,6 +40,77 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
+### Release 1019i infrastructure: the batched score, the price lane's data layer, the attempts ledger (PREREG-EVL-8's harness plan H1 and H2, PREREG-EVL-7's harness changes H3 and H4), on `feat/infra-1019i` (unreleased; cut from `rel/1019h` `59663f06`; a draft PR with base `rel/1019h`; it joins release 1019i beside `feat/evl-6` and `feat/evl-7`, in its own modules where it could; an owner deploy after release 1019h: THE GATEWAY FIRST)
+
+Harness only, four parts in three commits, each held by tests that fail without it; no money row, no constitution row
+and no judge's rule moves:
+
+- **H1, THE BATCHED SCORE** (`d9129a32`, and the fix round; league/events/score.py `prefetch`, `Prefetch`,
+  `order_due`, `parity_window`, `check_parity`, `latched`; league/events/house.py `_score`, `PREFETCH_WINDOW`): the
+  night's score reads the daily bars (raw and adjusted) of every due intent's symbol and both benchmarks once over the
+  union window, 200 symbols a request, INTO A CACHE OF THE PASS, and `settle_one(prefetched=...)` skips its own two
+  fetches when the cache holds every bar it reads, reading its ratios from it and writing to `bars` exactly the rows
+  those two fetches would have written (a bar the vendor did not send falls back to them); the seating versions and
+  their controls settle first; prints stay read once per (symbol, day, label). A GOLDEN synthetic tape (a split inside
+  a hold, a missing bar, a ladder exit, a skip for no auction, a skip at the limit, a failed prefetch chunk) settles
+  byte-identically both ways, outcomes and the whole `bars` table, with 4 bar requests against 14. `events.score_batch`
+  (on; false is release 1019h's per-intent path, the instant rollback). The first batched night checks 5% of each
+  prefetch's intents against the per-intent path in memory before any is written and keeps EQUALITY FLAGS only
+  (`score_parity`, `events.score_parity`); a flag 0 LATCHES the batched score off until the captain clears it
+  (`score-unlatch`). The daily report's settle-pace line (league/events/report.py `settle_pace`;
+  league/ops/daily_report.py `settle_line`; the gateway's "Score:" lines, "BATCHED SCORE OFF" while latched).
+- **H3, THE ATTEMPTS LEDGER** (league/events/attempts.py, `real_attempts` in `store.SCHEMA_1019I`; league/equity/live.py
+  `_event_attempts`; league/events/book.py `attempt_rows`, `write_attempts`): every event order the book sent or tried
+  (LOO/LOC buys, MOO/MOC sales, the ladder's day sales, A80's re-sends) with the venue's own order states and
+  quantities, A80's cancel time and the venue's stamps, and every planned real buy that ended unsent with its binding;
+  written each minute beside the real fills from the book's own rows; it never sends, changes or cancels an order (a
+  test pins the bodies byte-identical with the ledger on and off).
+- **H4, THE FILL-RATE LINES AND ALARMS** (league/events/attempts.py `fill_rates`, `fill_drop`, `open_attempts`,
+  `missing`; league/ops/evl_health.py; league/ops/stall.py `CAUSES`; gateway/lib/email.mjs): the daily report (the
+  lane's and the mail's `fill_rates`) by auction over 3 and 20 sessions with the venue-cancel and re-send counts; the
+  stall causes `evl_fill_rate` (under 85% over 3 sessions, or 10 points under the last 20) and `evl_attempts` (an order
+  with no final state an hour after its auction, or one the ledger lacks), and from the fix round `evl_score_parity`
+  and `evl_px_store`; births `FACTS_DENY` gains `real_attempts`, `score_parity` and every `px_*` table.
+- **H2, THE PRICE LANE'S DATA LAYER** (league/events/pxstore.py, pxdata.py; league/events/house.py `_px_due`;
+  league/events/universe.py's pure core `eligible_row`): px.sqlite with write-once `px_features` (the run id and bar
+  times), `px_minutes`, `px_flags`, `px_eligibility`, `px_universe`, `px_bars` with `px_bar_moves`, `px_runs` and its own
+  operating cache; the recorders through the gateway's existing SIP bars route with `sip_end`'s clamp and a 150-a-minute
+  bucket shared with the lane's reads, the lane first; PXU(D) never writes the lane's `eligibility` or `universe`; the
+  270-session backfill and the operating cache on the first nights; FLAGGED(D) on corporate actions; scheduled last,
+  bounded, never within 10 minutes of a decision, behind `events.px_data`, SHIPPED OFF (on, the recorders only warm the
+  store); THE STORE'S ROOM (the fix round, `pxstore.room`): no run and no request while px.sqlite is at 2 GiB or the
+  state disk under 5 GiB free (a run `disk`, nothing written), `px_runs` with each run's free space and size, lane.json
+  `px_store`, the mail's PX line. league/ci.py walls attempts.py, pxstore.py and pxdata.py beside the lane's rule
+  inputs.
+
+**The fix round** (three majors of the review, each held by tests that fail without its fix, on the code head
+`407f4a97`): (1) THE `bars` TABLE (league/events/score.py): the prefetch had written the whole union window to `bars`,
+symbols that then skipped or waited and days outside every intent's window included, re-basing settled days' adjusted
+bars to today's; after a split a later batched night moved Done's fill gap of an earlier real event (done.py `_ratio`:
+-5000 bp against 1019h's 0.0 in the review's two-night case). The prefetch is now a cache of the pass (`Prefetch`) and
+an intent served by it writes exactly its own window's rows (`Prefetch.store_window`): test_events_score_batch.py
+compares the whole `bars` table in both directions and `TwoNights` holds Done's gap at 0.0 across a split between two
+nights. (2) THE PARITY NIGHT FAILS CLOSED: the check now runs before any intent of its prefetch settles, both paths in
+memory (`Narrow`: the per-intent path's own two requests, never stored), so it writes no bar another intent reads (the
+review's case: an unsampled intent on the same benchmark settled on a mix of two bases, b 0.0058 against 1019h's
+0.0159; now 1019h's); only intents the cache served are flagged; a flag 0 sets the parity latch (meta
+`evl:score:batch:latched`), the pass and every later one settle by the per-intent path until `python3 -m league.events
+--state DIR score-unlatch`, and the stall cause `evl_score_parity` (worded by the gateway) stands meanwhile. The
+parity night is the first night on which a flag is written (meta `evl:score:batch:first_night` is kept with the first
+flag, `check_parity`), so a first batched night whose prefetch failed, or whose 5% sample the cache served none of, no
+longer uses up the parity night with nothing tested (`TheParityNightIsTheFirstThatTests`); and clearing the latch
+makes the next batched night a parity night again (`unlatch` clears that meta with it). (3) THE PX
+STORE'S ROOM (league/events/pxstore.py `room`, pxdata.py `PxRoom`, house.py `_px`): PREREG-EVL-8's "a size line and a
+2 GB alarm", with the stall cause `evl_px_store`. The identities do not move.
+
+**The fix round's tests** (on `21d42770`, then `7c9c1f1b`, whose change is `score.unlatch` and its test): the full suite on Python 3.14, module by module over six processes, 488 modules and 13,161 tests OK (no wall-clock or module-order failure this time); the events, equity, live, ci, constitution and ops modules with every module that imports league/events/score.py or reads the docs (138 modules, 3,666 tests) on `7c9c1f1b` on 3.14 and on 3.11, OK on each (two helper modules with no tests, `money_fakes` and `equity_design`, report no tests on 3.14); the gateway's 509 tests and `npm run check` pass; `python -m league.ci --base origin/main --branch feat/infra-1019i --no-tests` passed. Thirteen mutations, each undoing one part of the fix round in a copy of the tree (the cache stored whole into `bars`; the parity's per-intent path writing its bars; a flag 0 that latches nothing; flags on intents the cache did not serve; the latch unread by `settle` or by the House's pass; `evl_score_parity` that never stands; a night that tested nothing using up the parity night; an unlatch that leaves it used up; a store that always has room; a request or a run that ignores the room; `evl_px_store` that never stands), fail their tests on both Pythons; release 1019h's `score.py` fails `TwoNights` at -5000 bp. The identities, read with the tree's own functions on 3.14 and 3.11 at `59663f06` and at the head, do not move: money `8e63ce64`, constitution `c3026eba`, `b60410ad`, `78022ca6`, `2f0083bc`, `397b22b7`, the Done rule `54241925`, the births prompt `0cae215b` at `PARSE_VERSION` 4, `equity_money_problems()` [].
+
+**Tests** (on `069c0f54`, the code head; this entry's commit changes only it): the full suite on Python 3.14 in six shards, 13,147 tests OK (four shards whole, 8,713 tests; the two the machine's load ran past their 50-minute bound re-run module by module, 163 modules, 4,434 tests; `test_e3_identities`, which the first run failed until the three new modules were admitted behind the wall, passes on both Pythons; `test_swarm_d2a_sentinel` passed alone; the known module-order artifact of `test_equity_fx_daily` after `test_equity_bands_money` and `test_equity_design`, which fails the same nine on `59663f06`, passes alone); the events, equity, live, ci, constitution and ops modules (119, the four new ones with them) module by module on 3.14 and on 3.11, 3,037 tests OK on each; GitHub's checks on `069c0f54` green (tests 3.11, tests 3.14, gateway); the gateway's 508 tests and `npm run check` pass; `python -m league.ci --base origin/main --branch feat/infra-1019i --no-tests` passed. The new tests fail without each part: test_events_score_batch.py (H1, the golden tape), test_events_attempts.py (H3), test_events_1019i_alarms.py (H4), test_events_pxdata.py (H2). The identities, read with the tree's own functions on 3.14 and 3.11, are release 1019h's: money `8e63ce64`, constitution `c3026eba`, `b60410ad`, `78022ca6`, `2f0083bc`, `397b22b7`, the Done rule `54241925`, the births prompt `0cae215b` at `PARSE_VERSION` 4, `equity_money_problems()` [].
+
+**Deploy and rollback**: docs/operations.md, **Release 1019i infrastructure** (the gateway first, then the House with
+release 1019h's pair unchanged; `events.score_batch` false is H1's instant rollback, `events.px_data` false the PX
+recorders'; the whole release back to release 1019h's head, nothing to re-ratify).
+
 ### Release 1019h: Done speed, release 1019g's minors, the births architect on Opus 5.5 (the captain's A97, A100, A113 and A109), on `rel/1019h` (unreleased; cut from `fix/1019h-minors` `8e83ad1b` (PR 598, reviewed ship), which was cut from `feat/done-speed` `88ecf37f` (PR 597, reviewed ship: cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in), then A109 on top and origin/main merged with rerere off (`b374d862`, already in: main fast-forwards to the release); a draft PR with base main; an owner deploy after release 1019g, which is live: THE GATEWAY FIRST (`gateway/lib/email.mjs`, feat/done-speed's report composer: the Done supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR `8e63ce64` / `c3026eba`; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100; the minors and A109 move neither), so the standing grant re-ratifies at the House's start; S2's instant rollback is the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; THE BIRTHS PROMPT'S SHA MOVES `8294fe77` -> `0cae215b` WITH `births.PARSE_VERSION` 2 -> 4 (SUP-3's `890806ff` at 3, A109's architect at 4; 3 was never live); the Done rule `54241925` is untouched; the full rollback is to release 1019g, `b374d862`)
 
 Three parts in one owner deploy, each held by tests that fail without it. Parts 1 and 2 are their reviewed branches'

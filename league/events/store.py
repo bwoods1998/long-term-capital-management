@@ -131,6 +131,32 @@ CREATE TABLE IF NOT EXISTS birth_candidates(night TEXT NOT NULL, seq INTEGER NOT
   PRIMARY KEY(night, seq));
 """
 
+#: RELEASE 1019i'S TWO ADDITIVE TABLES (each made by `Store` beside `SCHEMA`, so `SCHEMA_VERSION` stays 1: an older
+#: release never reads them, and a rollback opens the store as before):
+#: - `real_attempts` (PREREG-EVL-7's harness change H3, league/events/attempts.py): ONE ROW PER EVENT ORDER the House's
+#:   book sent or tried (its client id: the buys' limit-on-open and limit-on-close orders, the sales' market-on-open and
+#:   market-on-close, the fallback ladder's day sales, A80's re-sends), its states as the VENUE's own order states told
+#:   the book (sent, accepted, cancelled, filled, expired, rejected, lost, refused) with its quantities, limit, the
+#:   venue's stamps and A80's cancel time; and one row (`unsent:<iid>`) per planned real buy that ended with no order
+#:   sent, with its binding. Written by the book's hand-back (league/equity/live.py `_event_attempts`, through
+#:   league/events/book.py `write_attempts`), which only reads its orders and never sends, changes or cancels one. Its
+#:   fill prices are outcome-derived: league/events/births.py `FACTS_DENY` refuses it.
+#: - `score_parity` (PREREG-EVL-8's harness plan H1, league/events/score.py `check_parity`): the batched score's parity
+#:   night, one EQUALITY FLAG per sampled intent the pass's cache served (1 when the per-intent path settles it
+#:   identically, in memory, before either is written, else 0), never a value; a 0 sets the parity latch (meta
+#:   `evl:score:batch:latched`, score.py `latched`).
+SCHEMA_1019I = """
+CREATE TABLE IF NOT EXISTS real_attempts(client_id TEXT PRIMARY KEY, venue_id TEXT, program TEXT NOT NULL,
+  version INTEGER NOT NULL, event TEXT NOT NULL, side TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, at TEXT,
+  band TEXT, rung INTEGER, resend INTEGER NOT NULL DEFAULT 0, replaces TEXT, sent INTEGER NOT NULL,
+  accepted INTEGER NOT NULL, state TEXT NOT NULL, final INTEGER NOT NULL, venue_status TEXT, qty REAL NOT NULL,
+  filled_qty REAL NOT NULL, avg_px REAL, limit_px REAL, cancel_ms INTEGER, sent_at TEXT, submitted_at TEXT,
+  filled_at TEXT, canceled_at TEXT, expired_at TEXT, binding TEXT, first_seen TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS real_attempts_day ON real_attempts(day, side, at);
+CREATE TABLE IF NOT EXISTS score_parity(program TEXT NOT NULL, version INTEGER NOT NULL, event TEXT NOT NULL,
+  night TEXT NOT NULL, equal INTEGER NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(program, version, event));
+"""
+
 #: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).
 LIVE_RULE = "live"
 BACKFILL_RULE = "backfill"
@@ -210,6 +236,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        self.db.executescript(SCHEMA_1019I)     # (release 1019i: `real_attempts` and `score_parity`, additive)
         have = self.meta("schema_version")
         if have is None:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -373,4 +400,4 @@ def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
 
 __all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
            "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers", "FILL_COLUMNS_DDL",
-           "migrate_fills"]
+           "migrate_fills", "SCHEMA_1019I"]

@@ -1539,6 +1539,16 @@ path.
   its band. `_event_fills` writes each event lot's buy (once its buy ended) and sale (once closed; again when its fees
   move) into the lane's `real_fills` through `book.write_fills` (release 1019f: a buy's row with its side row's
   `target_usd`, `binding` and `sized_usd`, "venue" when no cap cut it and the cross filled short, `_event_size_record`).
+  RELEASE 1019i, THE ATTEMPTS LEDGER (PREREG-EVL-7's H3): `_event_attempts(adapter, out)`, every minute right after
+  `_event_fills` in its own try, reads this book's own rows changed since kv `adapter.ATTEMPTS_MARK` (less
+  `adapter.ATTEMPTS_SLACK_S`, 120 s) through `adapter.attempt_rows(self.state.rows, since=...)` and hands them to
+  `adapter.write_attempts(self.root, rows)`: one row per order of a real event instance (`eq_orders` joined with
+  `eq_instances` lane "event", instance `...:r`; its `eq_event_intents` side row or its lot's `info.evl` for the
+  program, version and event; kind loo | loc | moo | moc | day by side and `tif`; A80's cancel time and re-send read
+  off the venue's own stamps in `answer`) and one `unsent:<iid>` row per event buy intent that ended with no order; the
+  mark moves only once the lane's store took them (None: no `real_attempts` table yet). It never sends, changes or
+  cancels an order (league/tests/test_events_attempts.py: the bodies sent are byte-identical with the adapter's
+  writer present and absent); an adapter without `attempt_rows` / `write_attempts` (an older release's) is skipped.
 - **The adapter** (league/events/book.py; standard library only; plumbing, in no identity): `settings`, `seatable()`,
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
   `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
@@ -1572,7 +1582,10 @@ path.
   none), `reaction_reader`, `limit_price`, `sigma`, `weight`, `exit_plan(program,
   day) -> (day, "open" | "close")`,
   `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
-  changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
+  changed), release 1019i's `attempt_rows(rows, *, since=0.0) -> (rows, newest updated_at | None)` and
+  `write_attempts(root, rows) -> int | None` (league/events/attempts.py `book_rows` and `record` on a `FillWriter`; None
+  with no lane store or no `real_attempts` table), `ATTEMPTS_MARK` ("eq_event_attempts_mark") and `ATTEMPTS_SLACK_S`
+  (120.0); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
   and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `RAISED_GUARD`,
   `BANDS`, `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `PROBE_UP` ("sized", "probe"), `RESERVE_DECISIONS` 5,
   `ROUND_ROBIN_TIERS` (the PREREG Sized and Probe tiers), `reserved_for(program, band)`, `leaves_room(program, band)`,
@@ -1589,7 +1602,14 @@ path.
   `bands(program, version, band, since, why)` and `real_fills(program, version, event, side, qty, price, fee,
   filled_at, band, target_usd, binding, sized_usd)` as league/events/store.py's schema makes them (release 1019f's three nullable
   columns added to an older store by `store.migrate_fills`, at every open and by `write_fills`; `record_fill` takes
-  them as keywords, a buy's only, written once). league/tests/test_events_book.py `TheRealLane` runs
+  them as keywords, a buy's only, written once), and release 1019i's `real_attempts(client_id PRIMARY KEY, venue_id,
+  program, version, event, side, kind, day, at, band, rung, resend, replaces, sent, accepted, state, final,
+  venue_status, qty, filled_qty, avg_px, limit_px, cancel_ms, sent_at, submitted_at, filled_at, canceled_at,
+  expired_at, binding, first_seen, updated_at)` (`store.SCHEMA_1019I`, made by the lane's `Store`; additive, schema
+  version 1; refused to the births' facts). The lane's `bars`, which `reaction_reader` reads for a base close (and
+  league/events/run.py for its missing bars), are written by the lane's score exactly as under release 1019h whatever
+  `events.score_batch` says (release 1019i's review: the batched score's prefetch is a cache of its pass, and an intent
+  writes only the rows its own two fetches would have). league/tests/test_events_book.py `TheRealLane` runs
   the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the

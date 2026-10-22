@@ -257,6 +257,12 @@ PENDING_GATEWAY += ("league/events/births.py",)
 #: deploy; its pin `RULE_SHA256` ties only the constant to the rule file, never the reading to it. It ships in the same
 #: owner deploy as its hook in house.py. It waits here for the gateway's merge-list follow-up.
 PENDING_GATEWAY += ("league/events/done.py",)
+#: RELEASE 1019i'S NEW MODULES (PREREG-EVL-7's H3, PREREG-EVL-8's H2): the attempts ledger (league/events/attempts.py:
+#: the fill evidence COST-7's selection term will judge by, written by the money book's hand-back) and the price lane's
+#: store and recorders (league/events/pxstore.py, pxdata.py: every PX value's inputs, write-once, before any PX
+#: decision reads them): rule inputs like universe.py and store.py, so no main commit the in-box updater would ship can
+#: change them without the owner's deploy. They wait here for the gateway's merge-list follow-up, as the lane's do.
+PENDING_GATEWAY += ("league/events/attempts.py", "league/events/pxstore.py", "league/events/pxdata.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
