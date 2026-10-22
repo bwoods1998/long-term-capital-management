@@ -36,12 +36,13 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   against the shadow's own auction prints (positive when real money did worse; league/ops/evl_health.py `fill_gaps`,
   the goal's Done item "fills within 15 bp of replay").
 - `programs`: each program that may trade real money (`programs.SEATING`: version 2 of the nine, PREREG-EVL-3, then
-  version 1 of PREREG-EVL-4's three from release 1019d), in the tables' order: its
-  band, settled n (shadow TRADABLE, and real), account-shown and Net by band (metered compute shared over the settled
-  real events, so the programs' Nets add up to the lane's), its next look and the TRADABLE events to go, the
-  market-direction share and the benchmark's mean (shadow, PREREG-EVL-1 section 7's "beside every look"), and its
-  same-risk buy-and-hold: the event's benchmark bought and held continuously from its first real buy to its last real
-  sale at its average invested dollars (PREREG-EVL-1 section 9), "n/a until real fills".
+  version 1 of PREREG-EVL-4's three from release 1019d, then R3's seatable births in registration order, loaded from
+  the lane's store for the report: `facts`), in the tables' order: its band, settled n (shadow TRADABLE, and real),
+  account-shown and Net by band (metered compute shared over the settled real events, so the programs' Nets add up
+  to the lane's), its next look and the TRADABLE events to go, the market-direction share and the benchmark's mean
+  (shadow, PREREG-EVL-1 section 7's "beside every look"), and its same-risk buy-and-hold: the event's benchmark
+  bought and held continuously from its first real buy to its last real sale at its average invested dollars
+  (PREREG-EVL-1 section 9), "n/a until real fills".
 - the records and controls in one line, the `expected_false_passes`, and the `alarms` standing at this run.
 - `entries` (release 1019f; the captain's A80 (2): "the daily report counts venue cancels as a fill gap"): the day's
   real event buys from the book's own rows in live.sqlite (league/ops/evl_health.py `entry_facts`, the numbers
@@ -334,7 +335,29 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
           budget: Mapping[str, Any] | None = None, alarms: list[str] | None = None,
           lane_report: bool = True) -> dict[str, Any]:
     """The `report` notice's facts for New York day `day` (the module docstring): figures only. Raises when the lane's
-    store cannot be read (the stall job says so and tries again at its next run)."""
+    store cannot be read (the stall job says so and tries again at its next run).
+    WITH R3'S BIRTHS (release 1019f's review, lens alarms): a seatable birth trades real money at learning size from its
+    first event (A81), so its settled real round trips are in the account-shown profit (the day's and to date), it has
+    its row in `programs` with its buy-and-hold, its 0.10 in `expected_false_passes` and its line in the Done reader's
+    `done`. Every one of those reads `programs.SEATING`, and the stall job runs in its own process, where no lane has
+    loaded the registered births: so they are loaded here from the same read-only store (league/events/programs.py
+    `load_births`, as league/ops/evl_health.py `final_lags` does) for the whole of the report, and the table is left as
+    this process had it (unloaded again when it held none)."""
+    from ..events import programs as P
+
+    had = tuple(P.BIRTHS)
+    try:
+        return _facts(ctx, root, now, day, ledger=ledger, budget=budget, alarms=alarms, lane_report=lane_report,
+                      births=not had)
+    finally:
+        if not had:
+            P.load_births(None)
+
+
+def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[str, Any] | None,
+           budget: Mapping[str, Any] | None, alarms: list[str] | None, lane_report: bool,
+           births: bool) -> dict[str, Any]:
+    """`facts`, with the registered births loaded from the lane's store first when `births`."""
     from ..events import programs as P
     from ..events import report as RP
     from ..events import screen as SC
@@ -345,6 +368,8 @@ def facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[s
     with guard.readonly():
         store = ReadOnlyStore(root / LANE)
         try:
+            if births:
+                P.load_births(store)
             ev, vd = RP.events(store, on), RP.verdicts(store, on)
             seating = {(p.id, p.version) for p in P.SEATING}
             statuses = {}
