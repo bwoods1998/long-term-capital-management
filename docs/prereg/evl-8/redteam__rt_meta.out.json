@@ -1,0 +1,371 @@
+[
+ {
+  "F": 50,
+  "world": "NULL",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.058,
+   "retire_rate": 0.018,
+   "picks_mean_a_bp": 1.5002309868994945,
+   "picks_mean_r_bp": 2.5173669574851925,
+   "picks_beta": 1.1521900819201938,
+   "picks_crash_rate": 0.015854313856850585,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.055,
+   "retire_rate": 0.021,
+   "picks_mean_a_bp": 1.5473638487100632,
+   "picks_mean_r_bp": 2.5644998192957624,
+   "picks_beta": 1.2025947047793648,
+   "picks_crash_rate": 0.016512650159342147,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.061,
+   "retire_rate": 0.019,
+   "picks_mean_a_bp": 1.9931770022789335,
+   "picks_mean_r_bp": 3.3508571412803314,
+   "picks_beta": 1.2071462294687527,
+   "picks_crash_rate": 0.013515104680702834,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.047,
+   "retire_rate": 0.028,
+   "picks_mean_a_bp": 1.730323261469281,
+   "picks_mean_r_bp": 3.088003400470681,
+   "picks_beta": 1.2072405358433904,
+   "picks_crash_rate": 0.010252298181159334,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 200,
+  "world": "NULL",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.065,
+   "retire_rate": 0.024,
+   "picks_mean_a_bp": -1.035857038250484,
+   "picks_mean_r_bp": 0.3735672331750782,
+   "picks_beta": 1.142777922485601,
+   "picks_crash_rate": 0.01834883222372907,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.061,
+   "retire_rate": 0.025,
+   "picks_mean_a_bp": 2.6914912593978393,
+   "picks_mean_r_bp": 4.100915530823395,
+   "picks_beta": 1.21545955440591,
+   "picks_crash_rate": 0.019385807748898417,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.061,
+   "retire_rate": 0.014,
+   "picks_mean_a_bp": 1.9332345948781333,
+   "picks_mean_r_bp": 3.2700562490036083,
+   "picks_beta": 1.2178687310638943,
+   "picks_crash_rate": 0.0160216300625928,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.042,
+   "retire_rate": 0.029,
+   "picks_mean_a_bp": 2.3911581175650674,
+   "picks_mean_r_bp": 3.7279797716905554,
+   "picks_beta": 1.2022154158003555,
+   "picks_crash_rate": 0.009708419375640313,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 800,
+  "world": "NULL",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.061,
+   "retire_rate": 0.018,
+   "picks_mean_a_bp": 0.44645849896288775,
+   "picks_mean_r_bp": 2.0951383849360252,
+   "picks_beta": 1.1107190292324705,
+   "picks_crash_rate": 0.02035867342692257,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.067,
+   "retire_rate": 0.018,
+   "picks_mean_a_bp": 2.400969982963348,
+   "picks_mean_r_bp": 4.049649868936486,
+   "picks_beta": 1.1985689100309032,
+   "picks_crash_rate": 0.021353899474438616,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.06,
+   "retire_rate": 0.017,
+   "picks_mean_a_bp": 2.514678328024817,
+   "picks_mean_r_bp": 4.125357409316219,
+   "picks_beta": 1.2011975391271066,
+   "picks_crash_rate": 0.0182584732867945,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.038,
+   "retire_rate": 0.034,
+   "picks_mean_a_bp": 4.273950170045402,
+   "picks_mean_r_bp": 5.8846292513368015,
+   "picks_beta": 1.2068080463663655,
+   "picks_crash_rate": 0.009149626648386913,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 50,
+  "world": "LOTTERY",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.025,
+   "retire_rate": 0.034,
+   "picks_mean_a_bp": -5.969603681290376,
+   "picks_mean_r_bp": -5.54086653041219,
+   "picks_beta": 1.1565195882761614,
+   "picks_crash_rate": 0.012879019563131713,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.033,
+   "retire_rate": 0.022,
+   "picks_mean_a_bp": -5.6635420874916775,
+   "picks_mean_r_bp": -5.23480493661352,
+   "picks_beta": 1.1989262683103317,
+   "picks_crash_rate": 0.013625432080762986,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.038,
+   "retire_rate": 0.029,
+   "picks_mean_a_bp": -5.320614084990958,
+   "picks_mean_r_bp": -4.9854949795406815,
+   "picks_beta": 1.2035450687864928,
+   "picks_crash_rate": 0.010529171275846363,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.031,
+   "retire_rate": 0.035,
+   "picks_mean_a_bp": -2.6850584158763997,
+   "picks_mean_r_bp": -2.3499393104261332,
+   "picks_beta": 1.1934291391169378,
+   "picks_crash_rate": 0.007842998363939296,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 200,
+  "world": "LOTTERY",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.036,
+   "retire_rate": 0.035,
+   "picks_mean_a_bp": -7.710834470641228,
+   "picks_mean_r_bp": -7.855944008769039,
+   "picks_beta": 1.142753425316366,
+   "picks_crash_rate": 0.014857119372119136,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.031,
+   "retire_rate": 0.035,
+   "picks_mean_a_bp": -8.714846295596466,
+   "picks_mean_r_bp": -8.859955833724277,
+   "picks_beta": 1.2105093845086417,
+   "picks_crash_rate": 0.01578079653032269,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.024,
+   "retire_rate": 0.03,
+   "picks_mean_a_bp": -6.232479212693887,
+   "picks_mean_r_bp": -6.4672932119894675,
+   "picks_beta": 1.2098640605986768,
+   "picks_crash_rate": 0.01235309863614606,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.025,
+   "retire_rate": 0.04,
+   "picks_mean_a_bp": -4.387465301357465,
+   "picks_mean_r_bp": -4.622279300653068,
+   "picks_beta": 1.2128619245471366,
+   "picks_crash_rate": 0.0076540187068337324,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 800,
+  "world": "LOTTERY",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.034,
+   "retire_rate": 0.025,
+   "picks_mean_a_bp": -6.3892317830017555,
+   "picks_mean_r_bp": -5.781552413830919,
+   "picks_beta": 1.1296284400591035,
+   "picks_crash_rate": 0.01663648880382626,
+   "true_rule_share": null
+  },
+  "ABNP": {
+   "pass_rate": 0.033,
+   "retire_rate": 0.025,
+   "picks_mean_a_bp": -6.630125225747103,
+   "picks_mean_r_bp": -6.022445856576272,
+   "picks_beta": 1.2150898790375328,
+   "picks_crash_rate": 0.017830542763238835,
+   "true_rule_share": null
+  },
+  "ABNC": {
+   "pass_rate": 0.033,
+   "retire_rate": 0.031,
+   "picks_mean_a_bp": -6.346198476889997,
+   "picks_mean_r_bp": -5.56460217792515,
+   "picks_beta": 1.2111698156351716,
+   "picks_crash_rate": 0.014506811564485161,
+   "true_rule_share": null
+  },
+  "ABNU": {
+   "pass_rate": 0.03,
+   "retire_rate": 0.036,
+   "picks_mean_a_bp": -1.833788305137409,
+   "picks_mean_r_bp": -1.0521920061725587,
+   "picks_beta": 1.2026494941553265,
+   "picks_crash_rate": 0.007485762276654154,
+   "true_rule_share": null
+  }
+ },
+ {
+  "F": 50,
+  "world": "POWER",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.059,
+   "retire_rate": 0.025,
+   "picks_mean_a_bp": 0.9293431163801538,
+   "picks_mean_r_bp": 0.6180388125701133,
+   "picks_beta": 1.1470749342146938,
+   "picks_crash_rate": 0.014970807823804779,
+   "true_rule_share": 0.0641176470588236
+  },
+  "ABNP": {
+   "pass_rate": 0.055,
+   "retire_rate": 0.017,
+   "picks_mean_a_bp": 1.142181420512297,
+   "picks_mean_r_bp": 0.8308771167022555,
+   "picks_beta": 1.1995011999535838,
+   "picks_crash_rate": 0.015877318726924966,
+   "true_rule_share": 0.05708823529411773
+  },
+  "ABNC": {
+   "pass_rate": 0.057,
+   "retire_rate": 0.02,
+   "picks_mean_a_bp": 0.7670932958187712,
+   "picks_mean_r_bp": 0.605345575987954,
+   "picks_beta": 1.2025376197619269,
+   "picks_crash_rate": 0.01250184257154312,
+   "true_rule_share": 0.07714896893508139
+  },
+  "ABNU": {
+   "pass_rate": 0.043,
+   "retire_rate": 0.019,
+   "picks_mean_a_bp": 0.765024412350857,
+   "picks_mean_r_bp": 0.6032766925200423,
+   "picks_beta": 1.2004609123685035,
+   "picks_crash_rate": 0.009667688535710026,
+   "true_rule_share": 0.06533783278707378
+  }
+ },
+ {
+  "F": 200,
+  "world": "POWER",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.065,
+   "retire_rate": 0.018,
+   "picks_mean_a_bp": -0.12407134376345126,
+   "picks_mean_r_bp": -0.0755858827942919,
+   "picks_beta": 1.1283781952957919,
+   "picks_crash_rate": 0.018409743845068688,
+   "true_rule_share": 0.016970588235294116
+  },
+  "ABNP": {
+   "pass_rate": 0.062,
+   "retire_rate": 0.015,
+   "picks_mean_a_bp": 1.025819653860998,
+   "picks_mean_r_bp": 1.074305114830152,
+   "picks_beta": 1.2021470888083772,
+   "picks_crash_rate": 0.019518606493351725,
+   "true_rule_share": 0.014382352941176466
+  },
+  "ABNC": {
+   "pass_rate": 0.052,
+   "retire_rate": 0.029,
+   "picks_mean_a_bp": -0.4022745973521899,
+   "picks_mean_r_bp": -0.8822951833493419,
+   "picks_beta": 1.2054932485905894,
+   "picks_crash_rate": 0.01607289311557222,
+   "true_rule_share": 0.019709677419354848
+  },
+  "ABNU": {
+   "pass_rate": 0.053,
+   "retire_rate": 0.031,
+   "picks_mean_a_bp": 1.383062464161954,
+   "picks_mean_r_bp": 0.9030418781648014,
+   "picks_beta": 1.1966569760590111,
+   "picks_crash_rate": 0.010301755707002657,
+   "true_rule_share": 0.016548387096774208
+  }
+ },
+ {
+  "F": 800,
+  "world": "POWER",
+  "reps": 1000,
+  "RAWP": {
+   "pass_rate": 0.056,
+   "retire_rate": 0.021,
+   "picks_mean_a_bp": -0.1626607633049204,
+   "picks_mean_r_bp": -0.9216642447524304,
+   "picks_beta": 1.1016799704885247,
+   "picks_crash_rate": 0.020059872832442326,
+   "true_rule_share": 0.0011176470588235294
+  },
+  "ABNP": {
+   "pass_rate": 0.067,
+   "retire_rate": 0.022,
+   "picks_mean_a_bp": 0.7495014832353367,
+   "picks_mean_r_bp": -0.00950199821217519,
+   "picks_beta": 1.196718348974013,
+   "picks_crash_rate": 0.021082501090989202,
+   "true_rule_share": 0.0009411764705882354
+  },
+  "ABNC": {
+   "pass_rate": 0.059,
+   "retire_rate": 0.02,
+   "picks_mean_a_bp": 1.549338860941482,
+   "picks_mean_r_bp": 0.5347313977655633,
+   "picks_beta": 1.1954699450831452,
+   "picks_crash_rate": 0.018121266170274694,
+   "true_rule_share": 0.0019354838709677413
+  },
+  "ABNU": {
+   "pass_rate": 0.025,
+   "retire_rate": 0.025,
+   "picks_mean_a_bp": 1.066908085915813,
+   "picks_mean_r_bp": 0.05230062273989379,
+   "picks_beta": 1.2055833402770089,
+   "picks_crash_rate": 0.008876199991871168,
+   "true_rule_share": 0.003999999999999999
+  }
+ }
+]

@@ -1,0 +1,358 @@
+====================================================================================================
+THE PX SCREEN'S FIRST LOOK (F1): search seeds 171,000,001+ (1,000 a cell, 1,590 plausible cells), fresh seeds
+172,000,001+ (4,000 a cell, the cells within 3.5 points of each first look's search worst), confirmation seeds
+173,000,001+ (4,000 a cell, the chosen first look's 16 worst fresh cells; they chose nothing)
+  first look 22: search worst 0.1430 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40]; fresh worst 0.1190 +- 0.0051 [rho15|phi0.20|crasht3cl|skew|d20|lam40K40]; other cells' search worst 0.1050; holds 0.13: True
+  first look 25: search worst 0.1250 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40]; fresh worst 0.1045 +- 0.0048 [rho15|phi0.20|crasht3cl|skew|d20|lam40K40]; other cells' search worst 0.0880; holds 0.13: True
+  first look 30: search worst 0.1030 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40]; fresh worst 0.0803 +- 0.0043 [rho15|phi0.20|crasht3cl|skew|d20|lam40K40]; other cells' search worst 0.0670; holds 0.13: True
+  first look 35: search worst 0.0670 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40]; fresh worst 0.0505 +- 0.0035 [rho15|phi0.20|crasht3cl|skew|d20|lam40K40]; other cells' search worst 0.0500; holds 0.13: True
+  first look 40: search worst 0.0490 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40]; fresh worst 0.0390 +- 0.0031 [rho15|phi0.20|crashcl|skew|d20|lam40K40]; other cells' search worst 0.0380; holds 0.13: True
+  CHOSEN (the earliest that holds): 22
+
+CONFIRMATION (never chose) at the chosen first look, beside the fresh (choosing) seeds:
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40        confirm 0.1165 +- 0.0051 (two runs 0.2062) | fresh 0.1190 (two runs 0.2142) | pooled 0.1177 +- 0.0036
+  rho15|phi0.20|crasht3cl|t3|d20|lam40K40          confirm 0.1115 +- 0.0050 (two runs 0.2047) | fresh 0.1042 (two runs 0.1900) | pooled 0.1079 +- 0.0035
+  rho15|phi0.15|crasht3cl|t3|d20|lam40K40          confirm 0.1072 +- 0.0049 (two runs 0.1928) | fresh 0.0973 (two runs 0.1800) | pooled 0.1022 +- 0.0034
+  rho15|phi0.20|crashcl|skew|d20|lam40K40          confirm 0.1032 +- 0.0048 (two runs 0.1852) | fresh 0.1040 (two runs 0.1905) | pooled 0.1036 +- 0.0034
+  rho15|phi0.20|crasht3cl|t3|d10|lam40K40          confirm 0.1025 +- 0.0048 (two runs 0.1827) | fresh 0.0985 (two runs 0.1938) | pooled 0.1005 +- 0.0034
+  rho15|phi0.20|crashcl|t3|d20|lam40K40            confirm 0.1000 +- 0.0047 (two runs 0.1940) | fresh 0.1067 (two runs 0.1852) | pooled 0.1034 +- 0.0034
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20         confirm 0.0998 +- 0.0047 (two runs 0.1742) | fresh 0.0912 (two runs 0.1737) | pooled 0.0955 +- 0.0033
+  rho15|phi0.20|crasht3cl|t3|d20|lam20K20          confirm 0.0983 +- 0.0047 (two runs 0.1735) | fresh 0.1008 (two runs 0.1855) | pooled 0.0995 +- 0.0033
+  rho15|phi0.20|crashcl|t3|d0|lam40K40             confirm 0.0938 +- 0.0046 (two runs 0.1727) | fresh 0.0945 (two runs 0.1777) | pooled 0.0941 +- 0.0033
+  rho15|phi0.20|crashcl|skew|d10|lam40K40          confirm 0.0932 +- 0.0046 (two runs 0.1678) | fresh 0.0963 (two runs 0.1775) | pooled 0.0948 +- 0.0033
+  rho15|phi0.20|crashcl|skew|d20|cnt8              confirm 0.0922 +- 0.0046 (two runs 0.1658) | fresh 0.0872 (two runs 0.1675) | pooled 0.0897 +- 0.0032
+  rho15|phi0.20|crasht3|skew|d20|lam20K20          confirm 0.0922 +- 0.0046 (two runs 0.1678) | fresh 0.0892 (two runs 0.1720) | pooled 0.0907 +- 0.0032
+  rho15|phi0.20|crasht3cl|skew|d0|cnt8             confirm 0.0892 +- 0.0045 (two runs 0.1653) | fresh 0.0872 (two runs 0.1560) | pooled 0.0882 +- 0.0032
+  rho15|phi0.15|crashcl|t3|d20|lam40K40            confirm 0.0885 +- 0.0045 (two runs 0.1580) | fresh 0.0910 (two runs 0.1688) | pooled 0.0897 +- 0.0032
+  rho15|phi0.20|crasht3cl|skew|d10|lam20K20        confirm 0.0880 +- 0.0045 (two runs 0.1722) | fresh 0.1005 (two runs 0.1820) | pooled 0.0943 +- 0.0033
+  rho15|phi0.15|crasht3cl|t3|d10|lam40K40          confirm 0.0855 +- 0.0044 (two runs 0.1585) | fresh 0.0995 (two runs 0.1777) | pooled 0.0925 +- 0.0032
+  pooled worst 0.1177 [rho15|phi0.20|crasht3cl|skew|d20|lam40K40]
+  per version (two runs within 120 sessions), worst over the fresh cells: 0.2142; over the confirmation cells: 0.2062
+
+THE PLAUSIBLE GRID AT THE CHOSEN FIRST LOOK (the knife edge NK; the maximum over the drifts 0/10/20 bp and the count
+rates of each row; fresh seeds where the cell was re-run, else search seeds; 'cnt' = counts that follow the day at
+lam 3/5/8, 'ind' = independent counts at lam 3/5/8/20/40):
+                               rho0/0.10  rho.05/0.10  rho.05/0.15  rho.05/0.20  rho.15/0.10  rho.15/0.15  rho.15/0.20
+  t3        t3   ind                0.040        0.041        0.041        0.049        0.046        0.046        0.065
+  t3        t3   cnt                  -          0.036        0.045        0.040        0.041        0.044        0.055
+  t3        skew ind                0.059        0.053        0.060        0.069        0.051        0.067        0.071
+  t3        skew cnt                  -          0.062        0.067        0.056        0.050        0.065        0.064
+  crash     t3   ind                0.057        0.055        0.057        0.057        0.072        0.082        0.085
+  crash     t3   cnt                  -          0.046        0.038        0.050        0.074        0.073        0.084
+  crash     skew ind                0.056        0.069        0.068        0.068        0.083        0.086        0.093
+  crash     skew cnt                  -          0.062        0.063        0.073        0.077        0.076        0.087
+  crasht3   t3   ind                0.046        0.056        0.058        0.057        0.079        0.084        0.089
+  crasht3   t3   cnt                  -          0.046        0.050        0.042        0.064        0.069        0.078
+  crasht3   skew ind                0.074        0.073        0.069        0.079        0.090        0.089        0.103
+  crasht3   skew cnt                  -          0.068        0.074        0.072        0.087        0.095        0.095
+  crashcl   t3   ind                0.043        0.059        0.061        0.076        0.082        0.097        0.107
+  crashcl   t3   cnt                  -          0.050        0.050        0.049        0.074        0.076        0.086
+  crashcl   skew ind                0.067        0.065        0.067        0.085        0.090        0.095        0.104
+  crashcl   skew cnt                  -          0.065        0.069        0.073        0.095        0.098        0.094
+  crasht3cl t3   ind                0.049        0.073        0.076        0.077        0.090        0.100        0.104
+  crasht3cl t3   cnt                  -          0.054        0.057        0.061        0.076        0.082        0.083
+  crasht3cl skew ind                0.066        0.077        0.071        0.076        0.105        0.104        0.119
+  crasht3cl skew cnt                  -          0.068        0.067        0.076        0.096        0.087        0.092
+  the realized money-weighted mean a over the search cells: -3.7 to +4.1 bp, mean +0.23 bp
+
+BASE (the PX designer's base: sd_c 0.4%, t3, no drift, beta 1, no issuer effect):
+  sdc0.4|phi0.10|t3|t3|d0|lam3K20|tau0.0|beta1.0|PX-base                   0.0187 (two runs 0.0343; mw mean a -0.1 bp, 3.0 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam5K20|tau0.0|beta1.0|PX-base                   0.0185 (two runs 0.0330; mw mean a -0.1 bp, 4.8 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam5K20|ctrl0|tau0.0|beta1.0|PX-base             0.0158 (two runs 0.0330; mw mean a +0.0 bp, 4.8 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam3K20|ctrl0|tau0.0|beta1.0|PX-base             0.0155 (two runs 0.0297; mw mean a -0.2 bp, 2.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|ctrl0|tau0.0|beta1.0|PX-base             0.0145 (two runs 0.0307; mw mean a -0.2 bp, 7.5 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|tau0.0|beta1.0|PX-base                   0.0135 (two runs 0.0262; mw mean a +0.1 bp, 7.5 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|tau0.0|beta1.0|PX-base                  0.0103 (two runs 0.0208; mw mean a -0.0 bp, 13.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|ctrl0|tau0.0|beta1.0|PX-base            0.0100 (two runs 0.0213; mw mean a -0.1 bp, 13.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|ctrl0|tau0.0|beta1.0|PX-base            0.0083 (two runs 0.0168; mw mean a -0.0 bp, 26.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|tau0.0|beta1.0|PX-base                  0.0067 (two runs 0.0132; mw mean a -0.1 bp, 26.9 events a session)
+
+STRESSES AND THE PX DESIGNER'S OWN CELLS:
+  rho15|phi0.20|crasht3cl|skew|d30|lam40K40                                0.1430 (two runs 0.2500; mw mean a +0.8 bp, 26.9 events a session)
+  rho15|phi0.25|crasht3cl|skew|d20|lam40K40                                0.1315 (two runs 0.2330; mw mean a +0.6 bp, 27.0 events a session)
+  sdc3.4|phi0.10|crasht3cl|skew|d20|lam40K40                               0.1250 (two runs 0.2135; mw mean a +0.8 bp, 27.0 events a session)
+  rho15|phi0.25|crashcl|skew|d20|lam40K40                                  0.1185 (two runs 0.2100; mw mean a +0.1 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d30|lam8K20                                 0.1180 (two runs 0.2000; mw mean a +1.5 bp, 7.5 events a session)
+  rho15|phi0.25|crasht3cl|t3|d20|lam40K40                                  0.1175 (two runs 0.2240; mw mean a +1.5 bp, 26.9 events a session)
+  rho15|phi0.25|crash|skew|d30|lam40K40|beta1.5|PX-stress                  0.1140 (two runs 0.1980; mw mean a -0.4 bp, 26.9 events a session)
+  rho15|phi0.25|crash|skew|d30|lam20K20|beta1.5|PX-stress                  0.1135 (two runs 0.2000; mw mean a +1.7 bp, 13.9 events a session)
+  rho05|phi0.20|crasht3cl|skew|d30|lam40K40                                0.1130 (two runs 0.2040; mw mean a -0.6 bp, 26.9 events a session)
+  rho15|phi0.25|crashcl|skew|d20|cnt3                                      0.1125 (two runs 0.1945; mw mean a +0.7 bp, 2.9 events a session)
+  rho15|phi0.20|crash|skew|d30|lam40K40                                    0.1115 (two runs 0.1975; mw mean a +0.9 bp, 26.9 events a session)
+  sdc3.4|phi0.10|crasht3cl|skew|d20|lam8K20                                0.1105 (two runs 0.1945; mw mean a +1.1 bp, 7.4 events a session)
+  rho15|phi0.25|crasht3cl|skew|d20|cnt3                                    0.1100 (two runs 0.2010; mw mean a -0.2 bp, 2.9 events a session)
+  rho15|phi0.25|crasht3|skew|d20|lam40K40                                  0.1065 (two runs 0.1990; mw mean a -0.4 bp, 27.0 events a session)
+  rho15|phi0.25|crashcl|t3|d20|lam40K40                                    0.1055 (two runs 0.2010; mw mean a +0.1 bp, 26.9 events a session)
+  rho15|phi0.25|crasht3cl|skew|d20|lam8K20                                 0.1030 (two runs 0.1780; mw mean a +0.3 bp, 7.5 events a session)
+  rho15|phi0.25|crasht3|skew|d20|lam8K20                                   0.1025 (two runs 0.1825; mw mean a -0.6 bp, 7.5 events a session)
+  rho15|phi0.20|crash|skew|d20|lam40K40|beta1.5                            0.1015 (two runs 0.1765; mw mean a +1.8 bp, 27.0 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|beta1.5                         0.1010 (two runs 0.1745; mw mean a -0.4 bp, 7.5 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|beta1.5                        0.1005 (two runs 0.1905; mw mean a -0.5 bp, 26.9 events a session)
+  rho15|phi0.25|crasht3cl|skew|d20|lam3K20                                 0.0990 (two runs 0.1860; mw mean a +1.2 bp, 2.9 events a session)
+  rho15|phi0.25|crasht3|t3|d20|lam40K40                                    0.0965 (two runs 0.1925; mw mean a -0.2 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d30|lam3K20                                 0.0940 (two runs 0.1795; mw mean a -0.4 bp, 2.9 events a session)
+  sdc3.4|phi0.10|crash|skew|d20|lam40K40                                   0.0920 (two runs 0.1685; mw mean a +0.3 bp, 26.9 events a session)
+  rho05|phi0.20|crash|skew|d30|lam40K40                                    0.0915 (two runs 0.1625; mw mean a +0.1 bp, 26.9 events a session)
+  rho15|phi0.25|crash|skew|d30|lam8K20|beta1.5|PX-stress                   0.0915 (two runs 0.1705; mw mean a +1.0 bp, 7.4 events a session)
+  rho15|phi0.25|crashcl|skew|d20|lam3K20                                   0.0910 (two runs 0.1665; mw mean a +1.1 bp, 3.0 events a session)
+  sdc3.4|phi0.10|crasht3cl|skew|d20|lam3K20                                0.0910 (two runs 0.1745; mw mean a +2.8 bp, 3.0 events a session)
+  rho15|phi0.20|crash|skew|d30|lam3K20                                     0.0900 (two runs 0.1525; mw mean a +0.8 bp, 3.0 events a session)
+  rho15|phi0.25|crasht3cl|t3|d20|lam8K20                                   0.0895 (two runs 0.1670; mw mean a +0.3 bp, 7.4 events a session)
+  rho15|phi0.25|crasht3cl|t3|d20|cnt3                                      0.0885 (two runs 0.1590; mw mean a +1.0 bp, 2.9 events a session)
+  sdc1.5|phi0.25|crash|skew|d20|lam40K40|PX-worst                          0.0885 (two runs 0.1665; mw mean a +1.2 bp, 26.9 events a session)
+  sdc1.5|phi0.25|crash|skew|d20|lam20K20|PX-worst                          0.0875 (two runs 0.1450; mw mean a -0.5 bp, 13.9 events a session)
+  rho05|phi0.20|crash|skew|d30|lam8K20                                     0.0860 (two runs 0.1415; mw mean a -1.4 bp, 7.5 events a session)
+  rho15|phi0.25|crashcl|skew|d20|lam8K20                                   0.0860 (two runs 0.1675; mw mean a +0.1 bp, 7.5 events a session)
+  rho05|phi0.20|crasht3cl|skew|d30|lam8K20                                 0.0855 (two runs 0.1630; mw mean a +1.5 bp, 7.5 events a session)
+  rho15|phi0.25|crasht3|t3|d20|lam8K20                                     0.0850 (two runs 0.1530; mw mean a +0.8 bp, 7.4 events a session)
+  rho15|phi0.25|crashcl|t3|d20|cnt3                                        0.0840 (two runs 0.1495; mw mean a +0.8 bp, 2.9 events a session)
+  rho15|phi0.25|crashcl|t3|d20|lam8K20                                     0.0820 (two runs 0.1485; mw mean a +0.6 bp, 7.4 events a session)
+  rho15|phi0.25|crasht3|skew|d20|cnt3                                      0.0815 (two runs 0.1630; mw mean a -0.4 bp, 2.9 events a session)
+  rho15|phi0.20|crash|skew|d30|lam8K20                                     0.0795 (two runs 0.1510; mw mean a +1.3 bp, 7.5 events a session)
+  sdc3.4|phi0.10|crash|skew|d20|lam3K20                                    0.0765 (two runs 0.1300; mw mean a +0.1 bp, 2.9 events a session)
+  rho15|phi0.20|crash|skew|d20|lam8K20|beta1.5                             0.0755 (two runs 0.1460; mw mean a +0.7 bp, 7.5 events a session)
+  rho05|phi0.20|crasht3cl|skew|d30|lam3K20                                 0.0750 (two runs 0.1425; mw mean a +1.6 bp, 2.9 events a session)
+  rho15|phi0.25|crashcl|t3|d20|lam3K20                                     0.0750 (two runs 0.1405; mw mean a +2.1 bp, 2.9 events a session)
+  rho15|phi0.25|crasht3cl|t3|d20|lam3K20                                   0.0745 (two runs 0.1340; mw mean a -1.4 bp, 2.9 events a session)
+  rho15|phi0.25|crasht3|skew|d20|lam3K20                                   0.0745 (two runs 0.1520; mw mean a +0.7 bp, 2.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam3K20|beta1.5                         0.0740 (two runs 0.1415; mw mean a -0.2 bp, 3.0 events a session)
+  rho15|phi0.20|crash|skew|d20|lam3K20|beta1.5                             0.0715 (two runs 0.1350; mw mean a +0.7 bp, 3.0 events a session)
+  rho15|phi0.25|crasht3|t3|d20|cnt3                                        0.0705 (two runs 0.1390; mw mean a -0.6 bp, 2.9 events a session)
+  sdc3.4|phi0.10|crash|skew|d20|lam8K20                                    0.0675 (two runs 0.1320; mw mean a +0.8 bp, 7.5 events a session)
+  sdc1.5|phi0.25|crash|skew|d20|lam8K20|PX-worst                           0.0655 (two runs 0.1295; mw mean a +0.2 bp, 7.4 events a session)
+  rho05|phi0.20|crash|skew|d30|lam3K20                                     0.0650 (two runs 0.1285; mw mean a +0.4 bp, 3.0 events a session)
+  rho15|phi0.25|crasht3|t3|d20|lam3K20                                     0.0605 (two runs 0.1165; mw mean a -1.0 bp, 2.9 events a session)
+  sdc0.8|phi0.10|crash|t3|d10|lam40K40|tau0.5|beta1.25|PX-mid              0.0300 (two runs 0.0535; mw mean a -0.5 bp, 26.9 events a session)
+  sdc0.8|phi0.10|crash|t3|d10|lam20K20|tau0.5|beta1.25|PX-mid              0.0215 (two runs 0.0450; mw mean a +0.1 bp, 13.9 events a session)
+  sdc0.8|phi0.10|crash|t3|d10|lam8K20|tau0.5|beta1.25|PX-mid               0.0190 (two runs 0.0435; mw mean a -0.3 bp, 7.5 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|tau0.0|beta1.0|PX-base                   0.0165 (two runs 0.0305; mw mean a +0.1 bp, 7.5 events a session)
+  sdc0.3|phi0.10|t3|t3|d0|lam8K20|tau0.0|beta1.0|PX-quiet                  0.0110 (two runs 0.0215; mw mean a +0.1 bp, 7.5 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|tau0.0|beta1.0|PX-base                  0.0095 (two runs 0.0150; mw mean a +0.2 bp, 27.0 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|tau0.0|beta1.0|PX-base                  0.0085 (two runs 0.0170; mw mean a +0.0 bp, 13.9 events a session)
+  sdc0.3|phi0.10|t3|t3|d0|lam40K40|tau0.0|beta1.0|PX-quiet                 0.0080 (two runs 0.0145; mw mean a +0.1 bp, 26.9 events a session)
+  sdc0.3|phi0.10|t3|t3|d0|lam20K20|tau0.0|beta1.0|PX-quiet                 0.0060 (two runs 0.0100; mw mean a -0.2 bp, 13.9 events a session)
+
+SENSITIVITIES AT THE CORNER (tau 0; the real control at 0; beta 1.0):
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|tau0.0                         0.1207 (two runs 0.2208; mw mean a +0.5 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|beta1.0                        0.1160 (two runs 0.2105; mw mean a -0.3 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|ctrl0                          0.1143 (two runs 0.2195; mw mean a +1.0 bp, 26.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam40K40|tau0.0                           0.1100 (two runs 0.2025; mw mean a +1.2 bp, 26.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam40K40|ctrl0                            0.1075 (two runs 0.2028; mw mean a +0.2 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|beta1.0                        0.1075 (two runs 0.1938; mw mean a +0.7 bp, 13.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|ctrl0                          0.1017 (two runs 0.1893; mw mean a +0.6 bp, 13.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|tau0.0                         0.1017 (two runs 0.1840; mw mean a +0.4 bp, 13.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam40K40|beta1.0                          0.0980 (two runs 0.1973; mw mean a +0.6 bp, 26.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam20K20|ctrl0                            0.0975 (two runs 0.1810; mw mean a -0.4 bp, 13.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam20K20|tau0.0                           0.0965 (two runs 0.1820; mw mean a -0.1 bp, 13.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam3K20|tau0.0                          0.0925 (two runs 0.1680; mw mean a +0.7 bp, 2.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam20K20|beta1.0                          0.0912 (two runs 0.1745; mw mean a +0.1 bp, 13.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam3K20|beta1.0                           0.0833 (two runs 0.1537; mw mean a -0.8 bp, 3.0 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam3K20|tau0.0                            0.0800 (two runs 0.1522; mw mean a -0.6 bp, 2.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam3K20|ctrl0                           0.0800 (two runs 0.1500; mw mean a +0.2 bp, 2.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam3K20|beta1.0                         0.0798 (two runs 0.1500; mw mean a -0.4 bp, 2.9 events a session)
+  rho15|phi0.20|crashcl|skew|d20|lam3K20|ctrl0                             0.0757 (two runs 0.1430; mw mean a -0.5 bp, 2.9 events a session)
+
+MONEY'S POPULATION (check 1's attack: the top CAP events at mu_top, the rest at mu):
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu60|top4@0|tau0.0|beta1.0|PX-base      0.5010 (two runs 0.7425; mw mean a +48.2 bp, 26.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu80|top4@-15|tau0.0|beta1.0|PX-base    0.4535 (two runs 0.6890; mw mean a +61.6 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu80|top4@-15                  0.4110 (two runs 0.6540; mw mean a +61.5 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu60|top4@0                    0.3605 (two runs 0.5770; mw mean a +48.7 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu40|top4@0                    0.2710 (two runs 0.4645; mw mean a +32.7 bp, 26.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu40|top4@0|tau0.0|beta1.0|PX-base      0.2595 (two runs 0.4625; mw mean a +32.5 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu80|top14@-15                 0.2235 (two runs 0.3900; mw mean a +25.6 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu60|top14@0                   0.2115 (two runs 0.3820; mw mean a +25.5 bp, 26.9 events a session)
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu40|top14@0                   0.1755 (two runs 0.3350; mw mean a +16.7 bp, 26.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu60|top14@0|tau0.0|beta1.0|PX-base     0.1530 (two runs 0.2740; mw mean a +25.5 bp, 27.0 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu80|top14@-15|tau0.0|beta1.0|PX-base   0.1185 (two runs 0.2215; mw mean a +25.3 bp, 26.9 events a session)
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu40|top14@0|tau0.0|beta1.0|PX-base     0.0735 (two runs 0.1430; mw mean a +17.3 bp, 26.9 events a session)
+
+SHARED DRIFT (check 1: two ON seats sharing only the family drift):
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|SHARED             P(A) 0.1082 P(B) 0.1030 P(both) 0.0155 (independent 0.0111); P(B | A) 0.143
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|SHARED             P(A) 0.1123 P(B) 0.1148 P(both) 0.0200 (independent 0.0129); P(B | A) 0.178
+  rho15|phi0.20|crasht3cl|skew|d30|lam40K40|SHARED             P(A) 0.1240 P(B) 0.1350 P(both) 0.0307 (independent 0.0167); P(B | A) 0.248
+  rho15|phi0.20|crasht3cl|t3|d20|lam20K20|SHARED               P(A) 0.0968 P(B) 0.0968 P(both) 0.0112 (independent 0.0094); P(B | A) 0.116
+  rho15|phi0.20|crasht3cl|t3|d20|lam40K40|SHARED               P(A) 0.1103 P(B) 0.1000 P(both) 0.0152 (independent 0.0110); P(B | A) 0.138
+  rho15|phi0.20|crash|skew|d20|lam20K20|SHARED                 P(A) 0.0848 P(B) 0.0800 P(both) 0.0107 (independent 0.0068); P(B | A) 0.127
+  rho15|phi0.20|crash|skew|d20|lam40K40|SHARED                 P(A) 0.0880 P(B) 0.0838 P(both) 0.0110 (independent 0.0074); P(B | A) 0.125
+
+POWER at the chosen first look (P(promoted) by the session; run 1; 'two runs' = within 120 sessions with run 2):
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu20|ctrl0|tau0.0|beta1.0                by25 0.064 by30 0.077 by40 0.079 by60 0.081 by120 0.081 two 0.151 | run 1 ended unpassed 0.909 | E[min(T,60)] 57.2
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu30|ctrl0|tau0.0|beta1.0                by25 0.114 by30 0.138 by40 0.148 by60 0.151 by120 0.151 two 0.284 | run 1 ended unpassed 0.845 | E[min(T,60)] 54.8
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu40|ctrl0|tau0.0|beta1.0                by25 0.181 by30 0.224 by40 0.239 by60 0.247 by120 0.248 two 0.427 | run 1 ended unpassed 0.750 | E[min(T,60)] 51.6
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu60|ctrl0|tau0.0|beta1.0                by25 0.382 by30 0.453 by40 0.492 by60 0.531 by120 0.533 two 0.770 | run 1 ended unpassed 0.467 | E[min(T,60)] 42.5
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu80|ctrl0|tau0.0|beta1.0                by25 0.607 by30 0.679 by40 0.729 by60 0.768 by120 0.773 two 0.942 | run 1 ended unpassed 0.227 | E[min(T,60)] 33.8
+  rho05|phi0.10|t3|t3|d0|lam20K20|mu100|ctrl0|tau0.0|beta1.0               by25 0.747 by30 0.812 by40 0.848 by60 0.886 by120 0.892 two 0.991 | run 1 ended unpassed 0.108 | E[min(T,60)] 28.9
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu20|ctrl0|tau0.0|beta1.0                by25 0.061 by30 0.087 by40 0.089 by60 0.092 by120 0.092 two 0.181 | run 1 ended unpassed 0.900 | E[min(T,60)] 56.9
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu30|ctrl0|tau0.0|beta1.0                by25 0.141 by30 0.171 by40 0.187 by60 0.191 by120 0.191 two 0.334 | run 1 ended unpassed 0.808 | E[min(T,60)] 53.5
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu40|ctrl0|tau0.0|beta1.0                by25 0.238 by30 0.293 by40 0.312 by60 0.327 by120 0.327 two 0.532 | run 1 ended unpassed 0.672 | E[min(T,60)] 49.0
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu60|ctrl0|tau0.0|beta1.0                by25 0.460 by30 0.538 by40 0.581 by60 0.617 by120 0.618 two 0.853 | run 1 ended unpassed 0.382 | E[min(T,60)] 39.4
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu80|ctrl0|tau0.0|beta1.0                by25 0.686 by30 0.757 by40 0.801 by60 0.850 by120 0.851 two 0.980 | run 1 ended unpassed 0.149 | E[min(T,60)] 31.0
+  rho05|phi0.10|t3|t3|d0|lam40K40|mu100|ctrl0|tau0.0|beta1.0               by25 0.836 by30 0.896 by40 0.922 by60 0.953 by120 0.953 two 0.999 | run 1 ended unpassed 0.048 | E[min(T,60)] 26.0
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu20|ctrl0|tau0.0|beta1.0                 by25 0.044 by30 0.057 by40 0.065 by60 0.067 by120 0.068 two 0.133 | run 1 ended unpassed 0.920 | E[min(T,60)] 57.7
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu30|ctrl0|tau0.0|beta1.0                 by25 0.086 by30 0.110 by40 0.129 by60 0.134 by120 0.137 two 0.237 | run 1 ended unpassed 0.860 | E[min(T,60)] 55.4
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu40|ctrl0|tau0.0|beta1.0                 by25 0.128 by30 0.154 by40 0.175 by60 0.183 by120 0.189 two 0.347 | run 1 ended unpassed 0.810 | E[min(T,60)] 53.7
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu60|ctrl0|tau0.0|beta1.0                 by25 0.249 by30 0.306 by40 0.355 by60 0.374 by120 0.389 two 0.617 | run 1 ended unpassed 0.611 | E[min(T,60)] 47.3
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu80|ctrl0|tau0.0|beta1.0                 by25 0.403 by30 0.484 by40 0.539 by60 0.579 by120 0.604 two 0.837 | run 1 ended unpassed 0.396 | E[min(T,60)] 40.6
+  rho05|phi0.10|t3|t3|d0|lam8K20|mu100|ctrl0|tau0.0|beta1.0                by25 0.590 by30 0.669 by40 0.731 by60 0.774 by120 0.793 two 0.947 | run 1 ended unpassed 0.206 | E[min(T,60)] 33.4
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu20|ctrl0                     by25 0.130 by30 0.159 by40 0.172 by60 0.176 by120 0.176 two 0.325 | run 1 ended unpassed 0.804 | E[min(T,60)] 53.9
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu30|ctrl0                     by25 0.173 by30 0.206 by40 0.222 by60 0.230 by120 0.230 two 0.389 | run 1 ended unpassed 0.758 | E[min(T,60)] 52.1
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu40|ctrl0                     by25 0.213 by30 0.267 by40 0.284 by60 0.291 by120 0.293 two 0.490 | run 1 ended unpassed 0.700 | E[min(T,60)] 50.0
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu60|ctrl0                     by25 0.318 by30 0.363 by40 0.390 by60 0.409 by120 0.413 two 0.664 | run 1 ended unpassed 0.587 | E[min(T,60)] 46.0
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu80|ctrl0                     by25 0.426 by30 0.484 by40 0.516 by60 0.551 by120 0.557 two 0.797 | run 1 ended unpassed 0.443 | E[min(T,60)] 41.3
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|mu100|ctrl0                    by25 0.522 by30 0.592 by40 0.634 by60 0.674 by120 0.681 two 0.898 | run 1 ended unpassed 0.319 | E[min(T,60)] 37.2
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu20|ctrl0                     by25 0.163 by30 0.184 by40 0.195 by60 0.203 by120 0.203 two 0.364 | run 1 ended unpassed 0.785 | E[min(T,60)] 53.0
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu30|ctrl0                     by25 0.206 by30 0.243 by40 0.257 by60 0.272 by120 0.273 two 0.460 | run 1 ended unpassed 0.718 | E[min(T,60)] 50.8
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu40|ctrl0                     by25 0.250 by30 0.301 by40 0.322 by60 0.341 by120 0.341 two 0.548 | run 1 ended unpassed 0.654 | E[min(T,60)] 48.6
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu60|ctrl0                     by25 0.349 by30 0.407 by40 0.441 by60 0.465 by120 0.466 two 0.701 | run 1 ended unpassed 0.533 | E[min(T,60)] 44.4
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu80|ctrl0                     by25 0.473 by30 0.536 by40 0.574 by60 0.609 by120 0.610 two 0.826 | run 1 ended unpassed 0.391 | E[min(T,60)] 39.4
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|mu100|ctrl0                    by25 0.569 by30 0.628 by40 0.658 by60 0.700 by120 0.701 two 0.912 | run 1 ended unpassed 0.299 | E[min(T,60)] 36.1
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu20|ctrl0                      by25 0.123 by30 0.148 by40 0.162 by60 0.168 by120 0.170 two 0.287 | run 1 ended unpassed 0.817 | E[min(T,60)] 54.2
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu30|ctrl0                      by25 0.142 by30 0.174 by40 0.193 by60 0.201 by120 0.205 two 0.360 | run 1 ended unpassed 0.783 | E[min(T,60)] 53.1
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu40|ctrl0                      by25 0.175 by30 0.211 by40 0.236 by60 0.245 by120 0.249 two 0.440 | run 1 ended unpassed 0.742 | E[min(T,60)] 51.5
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu60|ctrl0                      by25 0.258 by30 0.297 by40 0.341 by60 0.356 by120 0.370 two 0.599 | run 1 ended unpassed 0.628 | E[min(T,60)] 47.8
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu80|ctrl0                      by25 0.355 by30 0.405 by40 0.460 by60 0.485 by120 0.498 two 0.713 | run 1 ended unpassed 0.501 | E[min(T,60)] 43.4
+  rho15|phi0.20|crasht3cl|skew|d20|lam8K20|mu100|ctrl0                     by25 0.437 by30 0.495 by40 0.558 by60 0.592 by120 0.616 two 0.846 | run 1 ended unpassed 0.384 | E[min(T,60)] 39.8
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu20|ctrl0|tau0.0|beta1.0|PX-base       by25 0.071 by30 0.087 by40 0.095 by60 0.097 by120 0.098 two 0.186 | run 1 ended unpassed 0.895 | E[min(T,60)] 56.7
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu30|ctrl0|tau0.0|beta1.0|PX-base       by25 0.128 by30 0.172 by40 0.189 by60 0.196 by120 0.197 two 0.349 | run 1 ended unpassed 0.802 | E[min(T,60)] 53.5
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu40|ctrl0|tau0.0|beta1.0|PX-base       by25 0.249 by30 0.306 by40 0.336 by60 0.348 by120 0.351 two 0.560 | run 1 ended unpassed 0.648 | E[min(T,60)] 48.2
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu60|ctrl0|tau0.0|beta1.0|PX-base       by25 0.526 by30 0.606 by40 0.646 by60 0.694 by120 0.703 two 0.901 | run 1 ended unpassed 0.297 | E[min(T,60)] 36.7
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu80|ctrl0|tau0.0|beta1.0|PX-base       by25 0.758 by30 0.835 by40 0.875 by60 0.908 by120 0.911 two 0.992 | run 1 ended unpassed 0.088 | E[min(T,60)] 28.1
+  sdc0.4|phi0.10|t3|t3|d0|lam20K20|mu100|ctrl0|tau0.0|beta1.0|PX-base      by25 0.890 by30 0.937 by40 0.965 by60 0.985 by120 0.987 two 1.000 | run 1 ended unpassed 0.013 | E[min(T,60)] 24.3
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu20|ctrl0|tau0.0|beta1.0|PX-base       by25 0.071 by30 0.096 by40 0.103 by60 0.106 by120 0.106 two 0.206 | run 1 ended unpassed 0.892 | E[min(T,60)] 56.5
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu30|ctrl0|tau0.0|beta1.0|PX-base       by25 0.179 by30 0.223 by40 0.239 by60 0.257 by120 0.257 two 0.457 | run 1 ended unpassed 0.743 | E[min(T,60)] 51.6
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu40|ctrl0|tau0.0|beta1.0|PX-base       by25 0.332 by30 0.416 by40 0.453 by60 0.485 by120 0.485 two 0.736 | run 1 ended unpassed 0.515 | E[min(T,60)] 44.2
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu60|ctrl0|tau0.0|beta1.0|PX-base       by25 0.676 by30 0.765 by40 0.816 by60 0.868 by120 0.870 two 0.983 | run 1 ended unpassed 0.130 | E[min(T,60)] 30.6
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu80|ctrl0|tau0.0|beta1.0|PX-base       by25 0.875 by30 0.931 by40 0.957 by60 0.983 by120 0.983 two 1.000 | run 1 ended unpassed 0.017 | E[min(T,60)] 24.6
+  sdc0.4|phi0.10|t3|t3|d0|lam40K40|mu100|ctrl0|tau0.0|beta1.0|PX-base      by25 0.966 by30 0.987 by40 0.994 by60 0.999 by120 1.000 two 1.000 | run 1 ended unpassed 0.001 | E[min(T,60)] 22.6
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu20|ctrl0|tau0.0|beta1.0|PX-base        by25 0.042 by30 0.053 by40 0.059 by60 0.060 by120 0.061 two 0.135 | run 1 ended unpassed 0.932 | E[min(T,60)] 57.9
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu30|ctrl0|tau0.0|beta1.0|PX-base        by25 0.098 by30 0.124 by40 0.145 by60 0.147 by120 0.149 two 0.265 | run 1 ended unpassed 0.850 | E[min(T,60)] 55.0
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu40|ctrl0|tau0.0|beta1.0|PX-base        by25 0.161 by30 0.198 by40 0.229 by60 0.238 by120 0.244 two 0.409 | run 1 ended unpassed 0.755 | E[min(T,60)] 51.9
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu60|ctrl0|tau0.0|beta1.0|PX-base        by25 0.340 by30 0.408 by40 0.465 by60 0.491 by120 0.514 two 0.753 | run 1 ended unpassed 0.486 | E[min(T,60)] 43.4
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu80|ctrl0|tau0.0|beta1.0|PX-base        by25 0.560 by30 0.643 by40 0.701 by60 0.736 by120 0.764 two 0.941 | run 1 ended unpassed 0.236 | E[min(T,60)] 34.6
+  sdc0.4|phi0.10|t3|t3|d0|lam8K20|mu100|ctrl0|tau0.0|beta1.0|PX-base       by25 0.728 by30 0.798 by40 0.853 by60 0.888 by120 0.909 two 0.987 | run 1 ended unpassed 0.090 | E[min(T,60)] 28.8
+
+PX DEMOTION (F3; PREREG-EVL-6 section 3 frozen; Probe 14 at $67.9, Sized 8 at $190; seeds from 178,000,001):
+  -15bp (cost only)|base (the PX designer's)                     lam  8 R 2000: by 300/1000/2000/3000 0.402 / 0.625 / 0.743 / 0.800+ | at 1,000: reads 0.597 stop 0.001 tail 0.028 | Sized 0.004 | se 0.0108
+  -15bp (cost only)|base (the PX designer's)                     lam 40 R 2000: by 300/1000/2000/3000 0.421 / 0.646 / 0.762 / 0.822 | at 1,000: reads 0.598 stop 0.000 tail 0.048 | Sized 0.000 | se 0.0107
+  0bp (a false pass's stay)|base (the PX designer's)             lam  8 R 2000: by 300/1000/2000/3000 0.230 / 0.332 / 0.385 / 0.405+ | at 1,000: reads 0.319 stop 0.001 tail 0.013 | Sized 0.015 | se 0.0105
+  0bp (a false pass's stay)|base (the PX designer's)             lam 40 R 2000: by 300/1000/2000/3000 0.251 / 0.370 / 0.413 / 0.441 | at 1,000: reads 0.359 stop 0.001 tail 0.011 | Sized 0.007 | se 0.0108
+  0bp (a false pass's stay)|crasht3cl|skew|rho15 phi.20 d20      lam 40 R 2000: by 300/1000/2000/3000 0.252 / 0.383 / 0.459 / 0.493+ | at 1,000: reads 0.369 stop 0.009 tail 0.004 | Sized 0.128 | se 0.0109
+  0bp (a false pass's stay)|crasht3cl|t3|rho15 phi.20 d20        lam 40 R 2000: by 300/1000/2000/3000 0.240 / 0.367 / 0.444 / 0.482+ | at 1,000: reads 0.355 stop 0.011 tail 0.002 | Sized 0.123 | se 0.0108
+  0bp (a false pass's stay)|crash|skew|rho15 phi.20 d20          lam 40 R 2000: by 300/1000/2000/3000 0.253 / 0.388 / 0.455 / 0.490+ | at 1,000: reads 0.382 stop 0.004 tail 0.002 | Sized 0.082 | se 0.0109
+  0bp (a false pass's stay)|crash|t3|rho15 phi.20 d20            lam 40 R 2000: by 300/1000/2000/3000 0.256 / 0.411 / 0.483 / 0.513+ | at 1,000: reads 0.405 stop 0.004 tail 0.003 | Sized 0.087 | se 0.0110
+  40bp|STRESS crasht3cl skew rho15 phi.25 d20                    lam 40 R 2000: by 300/1000/2000/3000 0.130 / 0.176 / 0.184 / 0.188+ | at 1,000: reads 0.168 stop 0.008 tail 0.000 | Sized 0.353 | se 0.0085
+  40bp|STRESS the PX designer's stress (phi .25)                 lam 40 R 2000: by 300/1000/2000/3000 0.133 / 0.197 / 0.207 / 0.211+ | at 1,000: reads 0.193 stop 0.002 tail 0.002 | Sized 0.286 | se 0.0089
+  40bp|STRESS the PX designer's worst (phi .25)                  lam 40 R 2000: by 300/1000/2000/3000 0.107 / 0.129 / 0.133 / 0.133+ | at 1,000: reads 0.126 stop 0.002 tail 0.001 | Sized 0.342 | se 0.0075
+  40bp|base (the PX designer's)                                  lam  8 R 2000: by 300/1000/2000/3000 0.035 / 0.037 / 0.037 / 0.037- | at 1,000: reads 0.036 stop 0.001 tail 0.001 | Sized 0.243 | se 0.0042
+  40bp|base (the PX designer's)                                  lam 40 R 2000: by 300/1000/2000/3000 0.032 / 0.035 / 0.035 / 0.035- | at 1,000: reads 0.035 stop 0.000 tail 0.000 | Sized 0.492 | se 0.0041
+  40bp|crashcl|skew|rho15 phi.20 d20                             lam 40 R 2000: by 300/1000/2000/3000 0.117 / 0.153 / 0.160 / 0.162+ | at 1,000: reads 0.143 stop 0.010 tail 0.001 | Sized 0.300 | se 0.0081
+  40bp|crashcl|t3|rho15 phi.20 d20                               lam 40 R 2000: by 300/1000/2000/3000 0.114 / 0.160 / 0.167 / 0.168+ | at 1,000: reads 0.148 stop 0.010 tail 0.001 | Sized 0.308 | se 0.0082
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam  8 R 2000: by 300/1000/2000/3000 0.085 / 0.112 / 0.117 / 0.117- | at 1,000: reads 0.103 stop 0.007 tail 0.001 | Sized 0.257 | se 0.0071
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam 20 R 2000: by 300/1000/2000/3000 0.108 / 0.142 / 0.148 / 0.150+ | at 1,000: reads 0.129 stop 0.014 tail 0.000 | Sized 0.320 | se 0.0078
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam 40 R 2000: by 300/1000/2000/3000 0.105 / 0.141 / 0.145 / 0.147+ | at 1,000: reads 0.132 stop 0.009 tail 0.000 | Sized 0.336 | se 0.0078
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam  8 R 2000: by 300/1000/2000/3000 0.102 / 0.126 / 0.132 / 0.132- | at 1,000: reads 0.106 stop 0.016 tail 0.003 | Sized 0.272 | se 0.0074
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam 20 R 2000: by 300/1000/2000/3000 0.108 / 0.136 / 0.142 / 0.144+ | at 1,000: reads 0.122 stop 0.013 tail 0.001 | Sized 0.301 | se 0.0077
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam 40 R 2000: by 300/1000/2000/3000 0.107 / 0.143 / 0.153 / 0.155+ | at 1,000: reads 0.136 stop 0.007 tail 0.000 | Sized 0.341 | se 0.0078
+  40bp|crasht3|skew|rho15 phi.20 d20                             lam 40 R 2000: by 300/1000/2000/3000 0.102 / 0.131 / 0.140 / 0.141+ | at 1,000: reads 0.119 stop 0.011 tail 0.001 | Sized 0.311 | se 0.0075
+  40bp|crasht3|t3|rho15 phi.20 d20                               lam 40 R 2000: by 300/1000/2000/3000 0.109 / 0.142 / 0.148 / 0.150+ | at 1,000: reads 0.139 stop 0.004 tail 0.000 | Sized 0.311 | se 0.0078
+  40bp|crash|skew|rho15 phi.20 d20                               lam  8 R 2000: by 300/1000/2000/3000 0.111 / 0.135 / 0.138 / 0.138- | at 1,000: reads 0.124 stop 0.009 tail 0.001 | Sized 0.234 | se 0.0076
+  40bp|crash|skew|rho15 phi.20 d20                               lam 20 R 2000: by 300/1000/2000/3000 0.123 / 0.163 / 0.166 / 0.167+ | at 1,000: reads 0.154 stop 0.008 tail 0.001 | Sized 0.261 | se 0.0083
+  40bp|crash|skew|rho15 phi.20 d20                               lam 40 R 2000: by 300/1000/2000/3000 0.121 / 0.159 / 0.167 / 0.169+ | at 1,000: reads 0.155 stop 0.004 tail 0.000 | Sized 0.269 | se 0.0082
+  40bp|crash|t3|rho15 phi.20 d20                                 lam  8 R 2000: by 300/1000/2000/3000 0.123 / 0.146 / 0.150 / 0.150- | at 1,000: reads 0.134 stop 0.009 tail 0.003 | Sized 0.207 | se 0.0079
+  40bp|crash|t3|rho15 phi.20 d20                                 lam 20 R 2000: by 300/1000/2000/3000 0.108 / 0.145 / 0.151 / 0.153+ | at 1,000: reads 0.139 stop 0.006 tail 0.000 | Sized 0.276 | se 0.0079
+  40bp|crash|t3|rho15 phi.20 d20                                 lam 40 R 2000: by 300/1000/2000/3000 0.129 / 0.168 / 0.178 / 0.181+ | at 1,000: reads 0.163 stop 0.004 tail 0.001 | Sized 0.272 | se 0.0083
+  60bp|base (the PX designer's)                                  lam  8 R 2000: by 300/1000/2000/3000 0.013 / 0.013 / 0.013 / 0.013- | at 1,000: reads 0.011 stop 0.002 tail 0.000 | Sized 0.512 | se 0.0026
+  60bp|base (the PX designer's)                                  lam 40 R 2000: by 300/1000/2000/3000 0.009 / 0.009 / 0.009 / 0.009- | at 1,000: reads 0.009 stop 0.001 tail 0.000 | Sized 0.892 | se 0.0022
+  60bp|crasht3cl|skew|rho15 phi.20 d20                           lam 40 R 2000: by 300/1000/2000/3000 0.064 / 0.080 / 0.082 / 0.082- | at 1,000: reads 0.071 stop 0.008 tail 0.001 | Sized 0.456 | se 0.0061
+  60bp|crasht3cl|t3|rho15 phi.20 d20                             lam 40 R 2000: by 300/1000/2000/3000 0.076 / 0.089 / 0.092 / 0.092- | at 1,000: reads 0.082 stop 0.007 tail 0.000 | Sized 0.471 | se 0.0064
+  60bp|crash|skew|rho15 phi.20 d20                               lam 40 R 2000: by 300/1000/2000/3000 0.083 / 0.098 / 0.100 / 0.100+ | at 1,000: reads 0.091 stop 0.006 tail 0.001 | Sized 0.393 | se 0.0066
+  60bp|crash|t3|rho15 phi.20 d20                                 lam 40 R 2000: by 300/1000/2000/3000 0.075 / 0.090 / 0.092 / 0.092- | at 1,000: reads 0.084 stop 0.006 tail 0.000 | Sized 0.409 | se 0.0064
+
+PLACEBO AUDIT AND CANARY (first look 22, CAP 4, no control condition; 2,000 pools a cell):
+  lift    0 bp drift    0 bp crash False: a placebo 0.0121, >=3 of 8 0.0010, canary 0.0010, ALARM (>=3 or canary) 0.0020
+  lift    0 bp drift   10 bp crash True : a placebo 0.0205, >=3 of 8 0.0060, canary 0.0190, ALARM (>=3 or canary) 0.0220
+  lift    0 bp drift   20 bp crash True : a placebo 0.0342, >=3 of 8 0.0275, canary 0.0770, ALARM (>=3 or canary) 0.0805
+  lift   20 bp drift    0 bp crash False: a placebo 0.0792, >=3 of 8 0.0405, canary 0.1855, ALARM (>=3 or canary) 0.1930
+  lift   30 bp drift    0 bp crash False: a placebo 0.1774, >=3 of 8 0.1930, canary 0.6310, ALARM (>=3 or canary) 0.6495
+  lift   50 bp drift    0 bp crash False: a placebo 0.4871, >=3 of 8 0.7610, canary 0.9735, ALARM (>=3 or canary) 0.9825
+  lift   30 bp drift   20 bp crash True : a placebo 0.2347, >=3 of 8 0.3145, canary 0.5415, ALARM (>=3 or canary) 0.5550
+  lift   50 bp drift   20 bp crash True : a placebo 0.5123, >=3 of 8 0.6875, canary 0.8865, ALARM (>=3 or canary) 0.8945
+
+META-LEARNERS (null; the frozen screen; CAP 8 = PREREG-EVL-3's learning band, CAP 4 beside):
+  M-N0-worstnotauT3CL-phi20-n300-wide4-T720            R 600 T 720 null 0.53: CAP 8 run 1 by 120 0.018 (|null 0.009), any run by 120/240/480/720 0.018 / 0.022 / 0.030 / 0.033 (|null by 720 0.019); CAP 4 any by 720 0.032 | picks/s 0.41 in 0.036 of sessions, blocks 26, true -1.1247043631729454
+  M-N0-worst-phi20-n300-wide4-T720                     R 600 T 720 null 0.46: CAP 8 run 1 by 120 0.023 (|null 0.004), any run by 120/240/480/720 0.023 / 0.037 / 0.043 / 0.063 (|null by 720 0.007); CAP 4 any by 720 0.058 | picks/s 0.56 in 0.049 of sessions, blocks 35, true 6.718819988775212
+  M-N0-worst-phi10-n300-T720                           R 600 T 720 null 0.55: CAP 8 run 1 by 120 0.017 (|null 0.006), any run by 120/240/480/720 0.017 / 0.020 / 0.025 / 0.037 (|null by 720 0.012); CAP 4 any by 720 0.033 | picks/s 0.34 in 0.032 of sessions, blocks 23, true 9.001295116509318
+  M-FAC06-N0-worstnotauT3CL-phi20-n300-wide4-T720      R 600 T 720 null 0.53: CAP 8 run 1 by 120 0.038 (|null 0.022), any run by 120/240/480/720 0.038 / 0.047 / 0.052 / 0.063 (|null by 720 0.044); CAP 4 any by 720 0.072 | picks/s 0.61 in 0.050 of sessions, blocks 36, true -0.3786351628307634
+  M-N0-worst-phi20-n300-T720                           R 600 T 720 null 0.53: CAP 8 run 1 by 120 0.012 (|null 0.003), any run by 120/240/480/720 0.012 / 0.022 / 0.032 / 0.040 (|null by 720 0.006); CAP 4 any by 720 0.038 | picks/s 0.41 in 0.038 of sessions, blocks 27, true 7.948137550963561
+  M-N0-worstT3CL-phi20-n300-T720                       R 600 T 720 null 0.52: CAP 8 run 1 by 120 0.018 (|null 0.010), any run by 120/240/480/720 0.018 / 0.028 / 0.038 / 0.045 (|null by 720 0.019); CAP 4 any by 720 0.048 | picks/s 0.37 in 0.034 of sessions, blocks 24, true 9.087795954274526
+  M-N0-worstCL-phi20-n300-T720                         R 600 T 720 null 0.53: CAP 8 run 1 by 120 0.020 (|null 0.003), any run by 120/240/480/720 0.022 / 0.032 / 0.040 / 0.048 (|null by 720 0.009); CAP 4 any by 720 0.047 | picks/s 0.34 in 0.031 of sessions, blocks 23, true 8.352733764422792
+  M-N0-worstT3-phi20-n300-T720                         R 600 T 720 null 0.58: CAP 8 run 1 by 120 0.013 (|null 0.003), any run by 120/240/480/720 0.013 / 0.027 / 0.032 / 0.043 (|null by 720 0.006); CAP 4 any by 720 0.048 | picks/s 0.33 in 0.030 of sessions, blocks 21, true 6.5605564516367725
+  M-N0-worstT3CL-phi20-n800-T720                       R 600 T 720 null 0.63: CAP 8 run 1 by 120 0.013 (|null 0.003), any run by 120/240/480/720 0.013 / 0.018 / 0.025 / 0.027 (|null by 720 0.003); CAP 4 any by 720 0.027 | picks/s 0.26 in 0.021 of sessions, blocks 15, true 13.224966752483795
+  M-N2r3-worstT3CL-phi20-n300-T720                     R 600 T 720 null 0.64: CAP 8 run 1 by 120 0.013 (|null 0.005), any run by 120/240/480/720 0.015 / 0.023 / 0.037 / 0.050 (|null by 720 0.026); CAP 4 any by 720 0.047 | picks/s 0.44 in 0.041 of sessions, blocks 29, true 1.0173023483941745
+  M-N1-worstT3CL-phi20-n300-T720                       R 600 T 720 null 0.78: CAP 8 run 1 by 120 0.010 (|null 0.011), any run by 120/240/480/720 0.010 / 0.012 / 0.017 / 0.025 (|null by 720 0.017); CAP 4 any by 720 0.023 | picks/s 0.32 in 0.030 of sessions, blocks 22, true -4.088817034875675
+  M-RAND-N0-worstT3CL-phi20-n300-T720                  R 600 T 720 null 0.51: CAP 8 run 1 by 120 0.080 (|null 0.085), any run by 120/240/480/720 0.157 / 0.268 / 0.447 / 0.540 (|null by 720 0.462); CAP 4 any by 720 0.535 | picks/s 16.00 in 1.000 of sessions, blocks 720, true -0.27945240767779983
+  M-N0-base-n300-T720                                  R 600 T 720 null 1.00: CAP 8 run 1 by 120 0.007 (|null 0.007), any run by 120/240/480/720 0.007 / 0.013 / 0.020 / 0.025 (|null by 720 0.025); CAP 4 any by 720 0.022 | picks/s 0.36 in 0.034 of sessions, blocks 24, true 0.0
+
+META-LEARNERS (stress; the frozen screen; CAP 8 = PREREG-EVL-3's learning band, CAP 4 beside):
+  MS-FAC12-N0-worstnotauT3CL-phi20-n300-wide4-T720     R 600 T 720 null 0.49: CAP 8 run 1 by 120 0.037 (|null 0.027), any run by 120/240/480/720 0.037 / 0.050 / 0.063 / 0.077 (|null by 720 0.058); CAP 4 any by 720 0.073 | picks/s 1.11 in 0.082 of sessions, blocks 59, true -0.024122165941414087
+  MS-N0-worstT3CL-phi25-n300-wide4-T720                R 600 T 720 null 0.45: CAP 8 run 1 by 120 0.037 (|null 0.029), any run by 120/240/480/720 0.040 / 0.052 / 0.058 / 0.075 (|null by 720 0.051); CAP 4 any by 720 0.075 | picks/s 0.59 in 0.051 of sessions, blocks 37, true 5.43215476697135
+  MS-N0-rho30-worstnotau-n300-T720                     R 600 T 720 null 0.63: CAP 8 run 1 by 120 0.010 (|null 0.005), any run by 120/240/480/720 0.010 / 0.020 / 0.020 / 0.028 (|null by 720 0.016); CAP 4 any by 720 0.032 | picks/s 0.22 in 0.020 of sessions, blocks 14, true 0.4406395626763031
+  MS-N0-famdrift20-worstnotauT3CL-n300-T720            R 600 T 720 null 0.41: CAP 8 run 1 by 120 0.040 (|null 0.008), any run by 120/240/480/720 0.043 / 0.062 / 0.077 / 0.087 (|null by 720 0.020); CAP 4 any by 720 0.080 | picks/s 0.60 in 0.052 of sessions, blocks 37, true 13.092673340189068
+
+META-LEARNERS (power; the frozen screen; CAP 8 = PREREG-EVL-3's learning band, CAP 4 beside):
+  MP-r1-e40-base-n300                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.007 / 0.047 / 0.105 / 0.207 / 0.547; run 1 by 120 0.158; CAP 4 by 120 0.203 | picks/s 10.12, true 37.04020298491891
+  MP-r3-e40-base-n300                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.017 / 0.052 / 0.103 / 0.203 / 0.472; run 1 by 120 0.145; CAP 4 by 120 0.200 | picks/s 10.51, true 37.174384475423636
+  MP-r1-e40-worstT3CL-phi20-n300                       R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.023 / 0.067 / 0.137 / 0.257 / 0.562; run 1 by 120 0.225; CAP 4 by 120 0.255 | picks/s 9.42, true 38.750594662353514
+  MP-r1-e60-base-n300                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.127 / 0.350 / 0.438 / 0.657 / 0.902; run 1 by 120 0.478; CAP 4 by 120 0.647 | picks/s 13.32, true 53.73588186089417
+  MP-r3-e60-base-n300                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.112 / 0.247 / 0.305 / 0.533 / 0.870; run 1 by 120 0.327; CAP 4 by 120 0.528 | picks/s 13.96, true 58.229450703825975
+  MP-r1-e60-worstT3CL-phi20-n300                       R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.093 / 0.290 / 0.370 / 0.570 / 0.847; run 1 by 120 0.408; CAP 4 by 120 0.563 | picks/s 13.04, true 54.64100889116712
+  MP-r1-e100-base-n300                                 R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.700 / 0.852 / 0.892 / 0.977 / 0.998; run 1 by 120 0.892; CAP 4 by 120 0.980 | picks/s 14.76, true 87.13617582843746
+  MP-r3-e100-base-n300                                 R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.598 / 0.755 / 0.813 / 0.962 / 0.997; run 1 by 120 0.817; CAP 4 by 120 0.960 | picks/s 15.01, true 98.05999371774155
+  MP-r1-e100-worstT3CL-phi20-n300                      R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.483 / 0.623 / 0.655 / 0.857 / 0.978; run 1 by 120 0.658; CAP 4 by 120 0.850 | picks/s 14.74, true 87.56911220743282
+  MP-truthK16-r1-e40-base-n300                         R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.263 / 0.272 / 0.273 / 0.480 / 0.703; run 1 by 120 0.273; CAP 4 by 120 0.477 | picks/s 13.90, true 40.00000000000001
+  MP-r1-e40-base-n800                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.070 / 0.207 / 0.238 / 0.447 / 0.723; run 1 by 120 0.243; CAP 4 by 120 0.442 | picks/s 14.33, true 38.96366021420757
+  MP-truthK16-r1-e60-base-n300                         R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.555 / 0.592 / 0.595 / 0.808 / 0.965; run 1 by 120 0.595; CAP 4 by 120 0.800 | picks/s 13.91, true 59.99999999999999
+  MP-r1-e60-base-n800                                  R 600 T 240: CAP 8 pass by 40/60/80/120/240 0.377 / 0.500 / 0.533 / 0.788 / 0.968; run 1 by 120 0.540; CAP 4 by 120 0.788 | picks/s 15.08, true 58.779681126324796
+
+META-LEARNERS PER RUN TO THE RUN'S END (the final fix, meta_life8.py; seeds from 182,000,001; L = plausible, S = stress; B03 / B05 = beta_day 0.3 / 0.5; CAP 8, CAP 4 beside):
+  L-B03-N0-worstnotauT3CL-phi20-n300-wide4-T4000             R 800 T 4000 null 0.50 s22 med 177.0: run 1 by 120 / 720 / 2500 / 4000 0.0550 / 0.0762 / 0.0825 / 0.0825 (+- 0.0097; |null 0.0673); ended 0.968, among ended 0.0853, upper 0.1150; every run by 720 0.1013 / by T 0.2800 (|null 0.2344); CAP 4 run 1 by T 0.0912, every run by T 0.2900 | picks/s 0.66 in 0.052 of sessions
+  S-B05-N0-worstnotauT3CL-phi20-n300-wide4-T4000             R 600 T 4000 null 0.52 s22 med 71.0: run 1 by 120 / 720 / 2500 / 4000 0.0883 / 0.1150 / 0.1183 / 0.1183 (+- 0.0132; |null 0.0927); ended 1.000, among ended 0.1183, upper 0.1183; every run by 720 0.2167 / by T 0.5217 (|null 0.4441); CAP 4 run 1 by T 0.1200, every run by T 0.5267 | picks/s 1.79 in 0.124 of sessions
+  L-B03-FAC06-N0-worstnotauT3CL-phi20-n300-wide4-T2500       R 600 T 2500 null 0.48 s22 med 118.0: run 1 by 120 / 720 / 2500 0.0633 / 0.0967 / 0.1083 (+- 0.0127; |null 0.0893); ended 0.923, among ended 0.1173, upper 0.1850; every run by 720 0.1367 / by T 0.2483 (|null 0.2131); CAP 4 run 1 by T 0.1050, every run by T 0.2433 | picks/s 0.87 in 0.067 of sessions
+  L-B03-N0-worst-phi20-n300-wide4-T2500                      R 400 T 2500 null 0.36 s22 med 174.0: run 1 by 120 / 720 / 2500 0.0425 / 0.0650 / 0.0775 (+- 0.0134; |null 0.0490); ended 0.850, among ended 0.0912, upper 0.2275; every run by 720 0.1075 / by T 0.2325 (|null 0.1399); CAP 4 run 1 by T 0.0800, every run by T 0.2300 | picks/s 0.99 in 0.076 of sessions
+  L-B0-FAC06-N0-worstnotauT3CL-phi20-n300-wide4-T2500        R 400 T 2500 null 0.54 s22 med 442.0: run 1 by 120 / 720 / 2500 0.0250 / 0.0400 / 0.0650 (+- 0.0123; |null 0.0561); ended 0.605, among ended 0.1074, upper 0.4600; every run by 720 0.0450 / by T 0.1000 (|null 0.0841); CAP 4 run 1 by T 0.0625, every run by T 0.1000 | picks/s 0.36 in 0.032 of sessions
+  L-B03-N0-worstT3CL-phi20-n300-T2500                        R 600 T 2500 null 0.28 s22 med 342.5: run 1 by 120 / 720 / 2500 0.0533 / 0.0950 / 0.1167 (+- 0.0131; |null 0.0994); ended 0.782, among ended 0.1493, upper 0.3350; every run by 720 0.1383 / by T 0.2633 (|null 0.1345); CAP 4 run 1 by T 0.1100, every run by T 0.2583 | picks/s 0.77 in 0.062 of sessions
+  L-B03-N0-base-n300-T2500                                   R 400 T 2500 null 1.00 s22 med 568.0: run 1 by 120 / 720 / 2500 0.0000 / 0.0050 / 0.0100 (+- 0.0050; |null 0.0100); ended 0.515, among ended 0.0194, upper 0.4950; every run by 720 0.0075 / by T 0.0250 (|null 0.0250); CAP 4 run 1 by T 0.0175, every run by T 0.0325 | picks/s 0.30 in 0.028 of sessions
+  L-B0-N0-base-n300-T2500                                    R 400 T 2500 null 1.00 s22 med 737.0: run 1 by 120 / 720 / 2500 0.0000 / 0.0075 / 0.0125 (+- 0.0056; |null 0.0125); ended 0.390, among ended 0.0321, upper 0.6225; every run by 720 0.0075 / by T 0.0250 (|null 0.0250); CAP 4 run 1 by T 0.0075, every run by T 0.0200 | picks/s 0.24 in 0.023 of sessions
+  S-B05-N0-worstT3CL-phi20-n300-T2500                        R 600 T 2500 null 0.27 s22 med 120.0: run 1 by 120 / 720 / 2500 0.0650 / 0.0950 / 0.1033 (+- 0.0124; |null 0.0982); ended 0.985, among ended 0.1049, upper 0.1183; every run by 720 0.1817 / by T 0.3850 (|null 0.3067); CAP 4 run 1 by T 0.0967, every run by T 0.3850 | picks/s 1.83 in 0.129 of sessions
+  S-B0-famdrift20-worstnotauT3CL-n300-T2500                  R 400 T 2500 null 0.26 s22 med 587.0: run 1 by 120 / 720 / 2500 0.0550 / 0.0775 / 0.1250 (+- 0.0165; |null 0.0680); ended 0.627, among ended 0.1992, upper 0.4975; every run by 720 0.0850 / by T 0.2075 (|null 0.1068); CAP 4 run 1 by T 0.1025, every run by T 0.1925 | picks/s 0.43 in 0.037 of sessions
+  L-B03-FAC06-N0-worstnotauT3CL-phi20-n300-wide4-T4000       R 600 T 4000 null 0.55 s22 med 164.0: run 1 by 120 / 720 / 2500 / 4000 0.0533 / 0.0867 / 0.0983 / 0.0983 (+- 0.0122; |null 0.1040); ended 0.987, among ended 0.0997, upper 0.1117; every run by 720 0.1100 / by T 0.3183 (|null 0.2875); CAP 4 run 1 by T 0.0967, every run by T 0.3050 | picks/s 0.79 in 0.061 of sessions
+  L-B03-N0-worst-phi20-n300-wide4-T4000                      R 400 T 4000 null 0.35 s22 med 152.5: run 1 by 120 / 720 / 2500 / 4000 0.0375 / 0.0600 / 0.0675 / 0.0675 (+- 0.0125; |null 0.0571); ended 0.968, among ended 0.0698, upper 0.1000; every run by 720 0.0950 / by T 0.2575 (|null 0.1857); CAP 4 run 1 by T 0.0675, every run by T 0.2625 | picks/s 0.91 in 0.071 of sessions
+  L-B03-N0-worstT3CL-phi20-n300-T4000                        R 600 T 4000 null 0.32 s22 med 529.5: run 1 by 120 / 720 / 2500 / 4000 0.0483 / 0.0717 / 0.0833 / 0.0867 (+- 0.0115; |null 0.0729); ended 0.862, among ended 0.1006, upper 0.2250; every run by 720 0.0983 / by T 0.2817 (|null 0.1510); CAP 4 run 1 by T 0.0900, every run by T 0.2783 | picks/s 0.61 in 0.049 of sessions
+
+SHARED DAY (the final fix, px_shared8day.py, seeds from 183,000,001: two ON seats sharing every day-level shock, events, issuers and counts independent):
+  rho15|phi0.20|crasht3cl|skew|d20|lam40K40|SHARED-DAY         R 4000 P(A) 0.1133 P(B) 0.1077 P(both) 0.0715 (independent 0.0122); P(B | A) 0.631; block correlation 0.858
+  rho15|phi0.20|crasht3cl|skew|d20|lam20K20|SHARED-DAY         R 4000 P(A) 0.1120 P(B) 0.1077 P(both) 0.0605 (independent 0.0121); P(B | A) 0.540; block correlation 0.751
+  rho15|phi0.20|crash|skew|d20|lam40K40|SHARED-DAY             R 4000 P(A) 0.0912 P(B) 0.0917 P(both) 0.0607 (independent 0.0084); P(B | A) 0.666; block correlation 0.854
+
+PX DEMOTION, A THIRD SEED SET (the final fix; px_demotion8.py --only '40bp|' --R 4000; seeds from 184,000,001):
+  40bp|STRESS crasht3cl skew rho15 phi.25 d20                    lam 40 R 4000: by 300/1000/2000/3000 0.115 / 0.153 / 0.161 / 0.162+ | at 1,000: reads 0.142 stop 0.010 tail 0.000 | se 0.0057
+  40bp|STRESS the PX designer's stress (phi .25)                 lam 40 R 4000: by 300/1000/2000/3000 0.134 / 0.185 / 0.196 / 0.201+ | at 1,000: reads 0.177 stop 0.006 tail 0.002 | se 0.0061
+  40bp|STRESS the PX designer's worst (phi .25)                  lam 40 R 4000: by 300/1000/2000/3000 0.100 / 0.122 / 0.127 / 0.127+ | at 1,000: reads 0.121 stop 0.001 tail 0.000 | se 0.0052
+  40bp|base (the PX designer's)                                  lam  8 R 4000: by 300/1000/2000/3000 0.036 / 0.039 / 0.039 / 0.039- | at 1,000: reads 0.036 stop 0.003 tail 0.001 | se 0.0031
+  40bp|base (the PX designer's)                                  lam 40 R 4000: by 300/1000/2000/3000 0.038 / 0.041 / 0.041 / 0.041- | at 1,000: reads 0.041 stop 0.000 tail 0.000 | se 0.0031
+  40bp|crashcl|skew|rho15 phi.20 d20                             lam 40 R 4000: by 300/1000/2000/3000 0.116 / 0.157 / 0.166 / 0.168+ | at 1,000: reads 0.148 stop 0.009 tail 0.001 | se 0.0058
+  40bp|crashcl|t3|rho15 phi.20 d20                               lam 40 R 4000: by 300/1000/2000/3000 0.122 / 0.156 / 0.162 / 0.163+ | at 1,000: reads 0.145 stop 0.011 tail 0.000 | se 0.0057
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam  8 R 4000: by 300/1000/2000/3000 0.098 / 0.123 / 0.127 / 0.128- | at 1,000: reads 0.108 stop 0.014 tail 0.001 | se 0.0052
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam 20 R 4000: by 300/1000/2000/3000 0.097 / 0.138 / 0.145 / 0.146+ | at 1,000: reads 0.129 stop 0.009 tail 0.000 | se 0.0055
+  40bp|crasht3cl|skew|rho15 phi.20 d20                           lam 40 R 4000: by 300/1000/2000/3000 0.113 / 0.148 / 0.153 / 0.155+ | at 1,000: reads 0.138 stop 0.010 tail 0.000 | se 0.0056
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam  8 R 4000: by 300/1000/2000/3000 0.102 / 0.123 / 0.127 / 0.127- | at 1,000: reads 0.109 stop 0.012 tail 0.002 | se 0.0052
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam 20 R 4000: by 300/1000/2000/3000 0.111 / 0.145 / 0.154 / 0.155+ | at 1,000: reads 0.135 stop 0.010 tail 0.001 | se 0.0056
+  40bp|crasht3cl|t3|rho15 phi.20 d20                             lam 40 R 4000: by 300/1000/2000/3000 0.107 / 0.139 / 0.145 / 0.148+ | at 1,000: reads 0.128 stop 0.011 tail 0.001 | se 0.0055
+  40bp|crasht3|skew|rho15 phi.20 d20                             lam 40 R 4000: by 300/1000/2000/3000 0.112 / 0.151 / 0.159 / 0.161+ | at 1,000: reads 0.144 stop 0.007 tail 0.000 | se 0.0057
+  40bp|crasht3|t3|rho15 phi.20 d20                               lam 40 R 4000: by 300/1000/2000/3000 0.121 / 0.161 / 0.171 / 0.172+ | at 1,000: reads 0.152 stop 0.009 tail 0.000 | se 0.0058
+  40bp|crash|skew|rho15 phi.20 d20                               lam  8 R 4000: by 300/1000/2000/3000 0.104 / 0.130 / 0.133 / 0.134- | at 1,000: reads 0.120 stop 0.007 tail 0.003 | se 0.0053
+  40bp|crash|skew|rho15 phi.20 d20                               lam 20 R 4000: by 300/1000/2000/3000 0.119 / 0.153 / 0.160 / 0.162+ | at 1,000: reads 0.145 stop 0.007 tail 0.001 | se 0.0057
+  40bp|crash|skew|rho15 phi.20 d20                               lam 40 R 4000: by 300/1000/2000/3000 0.120 / 0.151 / 0.161 / 0.164+ | at 1,000: reads 0.144 stop 0.007 tail 0.000 | se 0.0057
+  40bp|crash|t3|rho15 phi.20 d20                                 lam  8 R 4000: by 300/1000/2000/3000 0.112 / 0.139 / 0.143 / 0.144- | at 1,000: reads 0.124 stop 0.011 tail 0.004 | se 0.0055
+  40bp|crash|t3|rho15 phi.20 d20                                 lam 20 R 4000: by 300/1000/2000/3000 0.112 / 0.150 / 0.158 / 0.160+ | at 1,000: reads 0.143 stop 0.005 tail 0.001 | se 0.0056
+  40bp|crash|t3|rho15 phi.20 d20                                 lam 40 R 4000: by 300/1000/2000/3000 0.125 / 0.166 / 0.175 / 0.177+ | at 1,000: reads 0.158 stop 0.007 tail 0.001 | se 0.0059

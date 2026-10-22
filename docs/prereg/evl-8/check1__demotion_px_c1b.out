@@ -1,0 +1,12 @@
+{"noise": "base", "edge_bp": 0.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.755, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.394}
+{"noise": "base", "edge_bp": 40.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.274, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.066}
+{"noise": "base", "edge_bp": 60.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.124, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.016}
+{"noise": "base", "edge_bp": 100.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.031, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.002}
+{"noise": "mid", "edge_bp": 0.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.765, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.402}
+{"noise": "mid", "edge_bp": 40.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.362, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.088}
+{"noise": "mid", "edge_bp": 60.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.204, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.036}
+{"noise": "mid", "edge_bp": 100.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.062, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.007}
+{"noise": "worst", "edge_bp": 0.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.776, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.485}
+{"noise": "worst", "edge_bp": 40.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.435, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.154}
+{"noise": "worst", "edge_bp": 60.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.324, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.097}
+{"noise": "worst", "edge_bp": 100.0, "probe_events_a_session": 14, "R": 2000, "P_demoted_by_1000th_event_DRAFT_fixed_reads": 0.15, "P_demoted_by_1000th_event_FIX_signflip_p020": 0.029}

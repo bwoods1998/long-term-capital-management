@@ -1,0 +1,13 @@
+AUTO = learning share 0.25, tightened to 0.10 while the window's worst stretch exceeds $200
+mu   +0 aL   +0 share 0.95 auto False | P(probe cut) 0.083 lost 0.009 | P&L mean    +0.5 p05  -269.4
+mu   +0 aL   +0 share 0.25 auto False | P(probe cut) 0.042 lost 0.004 | P&L mean    -1.5 p05  -225.6
+mu   +0 aL   +0 share 0.25 auto True  | P(probe cut) 0.039 lost 0.004 | P&L mean    -0.0 p05  -221.4
+mu   +0 aL  -20 share 0.95 auto False | P(probe cut) 0.106 lost 0.010 | P&L mean   -55.0 p05  -304.4
+mu   +0 aL  -20 share 0.25 auto False | P(probe cut) 0.052 lost 0.004 | P&L mean   -29.2 p05  -253.3
+mu   +0 aL  -20 share 0.25 auto True  | P(probe cut) 0.045 lost 0.003 | P&L mean   -26.8 p05  -246.2
+mu  -33 aL   +0 share 0.95 auto False | P(probe cut) 0.296 lost 0.028 | P&L mean  -197.1 p05  -410.2
+mu  -33 aL   +0 share 0.25 auto False | P(probe cut) 0.172 lost 0.013 | P&L mean  -150.9 p05  -346.7
+mu  -33 aL   +0 share 0.25 auto True  | P(probe cut) 0.157 lost 0.012 | P&L mean  -151.3 p05  -344.0
+mu  -33 aL  -20 share 0.95 auto False | P(probe cut) 0.377 lost 0.038 | P&L mean  -240.2 p05  -432.2
+mu  -33 aL  -20 share 0.25 auto False | P(probe cut) 0.201 lost 0.015 | P&L mean  -175.6 p05  -360.6
+mu  -33 aL  -20 share 0.25 auto True  | P(probe cut) 0.179 lost 0.014 | P&L mean  -173.5 p05  -354.0

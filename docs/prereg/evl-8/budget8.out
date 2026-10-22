@@ -1,0 +1,8 @@
+PREREG-EVL-6 at REGISTERED_AT_6: 15 new versions x 0.13 = 1.95 (+ 0.13 per seatable birth B6 registered before it)
+PREREG-EVL-7 at its registration: 2 x c7 = 0.26 (c7 = 0.13); at most 6 x c7 = 0.78 over its ids' lives
+PREREG-EVL-8 at its registration: 5 versions x 0.13 = 0.65; every later run 0.13 when it starts
+A104's three day-news births, if registered: 0.39
+USED after PREREG-EVL-8 (both files registered, no birth): 2.86 of 3.9; LEFT 1.04 = 8 charges, less 0.13 per birth
+with A104's three births: USED 3.25, LEFT 0.65 = 5 charges (every fresh run of every version of every file and every later birth draws from it, in registration order)
+if none of PREREG-EVL-6's fifteen passes, their second runs alone need 15 x 0.13 = 1.95, more than is left: they start first (registration order), and this file's versions' second runs start only if room is left after them
+this file's lifetime draw if every one of its five versions ran two runs: 1.30; three: 1.95

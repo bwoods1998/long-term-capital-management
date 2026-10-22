@@ -1,0 +1,6 @@
+F=22: search worst 0.1430 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40], 5 cells within 0.035
+F=25: search worst 0.1250 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40], 9 cells within 0.035
+F=30: search worst 0.1030 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40], 17 cells within 0.035
+F=35: search worst 0.0670 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40], 110 cells within 0.035
+F=40: search worst 0.0490 [rho15|phi0.20|crasht3cl|t3|d20|lam40K40], 635 cells within 0.035
+18 cells to the fresh seeds
