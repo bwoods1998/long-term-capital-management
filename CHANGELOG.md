@@ -276,6 +276,16 @@ names it after `test_equity_design`). league/tests/test_events_1019h_architect.p
 fail on `8e83ad1b`); the gateway's 507 tests and `npm run check` pass; `python -m league.ci --base origin/main --branch
 rel/1019h --no-tests` passed.
 
+**Tests (the fix round's head)**: the full suite (league/tests and ltcm/tests) on Python 3.14 in six shards, 15,104
+tests OK (34 skipped; `test_swarm_d2a_sentinel`, known to fail on a module-order artifact on the base, passed in its
+shard and passes alone); the events, equity, live, ci, constitution and ops modules (115, the new one with them) on
+Python 3.11 in five shards, 2,981 tests OK; league/tests/test_events_1019h_births_stream.py passes on both (eighteen of
+its nineteen fail on `2fd0c096`); the gateway's 507 tests and `npm run check` pass (no gateway file changed); `python
+-m league.ci --base origin/main --branch rel/1019h --no-tests` passed. The identities, read with the tree's own
+functions on 3.14 and 3.11, are the release's: money `8e63ce64`, constitution `c3026eba`, S2's switch `adf52674` /
+`fe5d87b7`, the rollback pair `973aa2e9` / `3e8cf1c8`, `b60410ad`, `78022ca6`, `2f0083bc`, `397b22b7`, the Done rule
+`54241925`, the births prompt `0cae215b` at `PARSE_VERSION` 4, `equity_money_problems()` [].
+
 **Deploy and rollback**: docs/operations.md, **Release 1019h** (the gateway first, then the House with the new pair;
 S2's instant rollback, the `reach_bar` rows to "0", one money-digest move the grant re-ratifies; the full rollback,
 the House to release 1019g's deployed head `b374d862`, then the gateway).
