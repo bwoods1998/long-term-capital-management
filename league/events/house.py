@@ -1070,7 +1070,7 @@ class EventLane:
             known = [r[0] for r in st.db.execute("SELECT accession FROM filings WHERE form=? ORDER BY accepted_at DESC "
                                                  "LIMIT 2000", (form,))]
             try:
-                entries = E.poll_current(ctx.sec, form, known)
+                entries = E.poll_current(ctx.sec, form, known, prefer=listed)   # (co-registered: a listed filer's)
             except LaneDeadline:
                 raise
             except Exception as exc:  # noqa: BLE001 - one feed's outage never stops the other or the news
@@ -1573,8 +1573,10 @@ class EventLane:
             tried = failed.get(accession)
             if tried is not None and now < tried[1] + FETCH_BACKOFF[tried[0] - 1]:
                 continue    # (its next try is not due yet: the tries-th after the first failure)
+            # (`listed`: a co-registered 8-K the live pass stored under an unlisted co-registrant is moved to this
+            # listed filer's CIK before it is fetched, release 1019f's review)
             status = E.record_filing(st, ctx.sec, row | {"accepted_at": None, "index_url": None, "items": []},
-                                     source="daily-index", now=ctx.now(), fetch=True)
+                                     source="daily-index", now=ctx.now(), fetch=True, listed=listed)
             if tried is not None:
                 counts["retried"] += 1
             if status.startswith("failed"):
