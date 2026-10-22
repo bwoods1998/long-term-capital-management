@@ -499,21 +499,44 @@ every earlier file's row and before R3's births.
 3. The nightly `cost-basis` step after the score and before the screen (`costs7.nightly`: one `cost_basis` row a night,
    the `costs7` rows of newly settled outcomes); one that fails waits its back-off and never holds the screen.
 4. The book's learner decision of each auction (`EquityBook._event_decide_lrn`, row `"<at>-lrn"` of
-   `eq_event_decisions`), after the auction's own decision of every other row: it waits for a running part until 240 s
-   after 09:15 ET or 150 s after the close decision time, then plans the learner's LIVE picks (the ERN and 8-K guards,
-   names given at the auction passed over), sent after every earlier row's.
+   `eq_event_decisions`), after the auction's own decision, which gives every name before the learners' ROOM place at
+   once and holds back the names from it on (R3's births at learning; with a learner at Probe or Sized its whole tier
+   and every later one): it waits for a running part until 240 s after 09:15 ET or 150 s after the close decision time,
+   then gives the learners' LIVE picks (their gate, the ERN and 8-K guards) and the held-back programs' picks their
+   names together in ROOM's order, the summaries written into the auction's own row too. A learner entry keeps the day
+   line's room for every earlier row's later orders that day (`_event_line_keep`).
+5. The screen's learner step (`judge7.run`, inside the nightly `screen` task after every earlier file's looks; its
+   receipt's `learners`): with the night's `cost_basis` row, each learner's looks (22 ... 60 blocks, PREREG-EVL-6's
+   schedule, through `costs7.judge_record`), its band move with the look (PASS probe, RETIRE retired), its run's end at
+   the 60th block and its next run when the lane's count holds 0.13 (else refused for good, meta `evl7:norun:...`).
+   Release 1019i without `feat/evl-6`'s screen: nothing is written and the learners' gate refuses their real money once
+   a look is due.
 
 **Timing** (one decision, invented data, this machine; the PR body has the table): the part's work is its candidates
 (each pool program's real-money reading), its features, the training sums (cached per session: only a session settled
-since is summed again) and a 57- or 63-column Cholesky. Its own bound is what holds it, never the earlier rows.
+since is summed again) and a 57- or 63-column Cholesky. Its own bound is what holds it, never the earlier rows' shadow
+decision. In the book, the PREREG-EVL-1 to -6 rows' names at learning never wait; R3's births at learning wait for the
+learners' decision of the auction (at most to 09:19 ET at the open and 15:48:30 ET at the close on a full day, the
+close's buys then having until the 15:49 cut-off); a promoted learner (not before its 22nd live block, and while
+PREREG-EVL-6 section 3's stays for COST-7 are not built it buys nothing at Probe) would hold its band's whole tier.
+
+**The gate and what it says**: a learner's real money stops (its shadow goes on) when it is retired, at Probe or Sized
+(no stay judge for COST-7's versions in this tree), between runs or refused a run, or when its run's next look (or the
+run's end) is due and not written: the `evl_learner` stall says which (`look_overdue`, `end_overdue`, `no_stay_judge`).
+A look that waits on its final close or an unsettled intent shuts the gate for those few sessions; a release without
+PREREG-EVL-6's screen shuts it for good from the 22nd live block.
 
 **Watch**: the stall job's `evl_learner` (a failed or expired part, a decision owed over 2 h, a lagging training, a
-recompute mismatch, a warm-up unmet after 5 live decisions); `learner_fits` (kind, status, receipt, code sha) and the
-report's learner lines (counts only). The learner and COST-7 tables are outcome-derived: R3's facts refuse them.
+recompute mismatch, a warm-up unmet after 5 live decisions, the gate shut for a look overdue or no stay judge);
+`learner_fits` (kind, status, receipt, code sha), the screen receipt's `learners` and the report's learner lines and
+next look (counts only). The learner and COST-7 tables are outcome-derived: R3's facts refuse them.
 
 **Rollback**: the release before (release 1019h) never reads the new tables (`learner_fits`, `learner_cands`,
-`learner_stats`, `costs7`, `cost_basis`: additive, `SCHEMA_VERSION` stays 1) nor the learners' intents' rows beyond
-settling them as any program's; a learner's open lots exit at their scheduled auctions by the book's own exit path.
+`learner_stats`, `costs7`, `cost_basis`: additive, `SCHEMA_VERSION` stays 1), the learners' looks or the meta keys
+`evl6:run:`, `evl6:end:`, `evl7:*` beyond what any program's rows are, nor the learners' intents' rows beyond settling
+them as any program's; a learner's open lots exit at their scheduled auctions by the book's own exit path. An
+`eq_event_decisions` row `"<at>-lrn"` is read by nothing of release 1019h; a held-back birth of an auction whose
+learners' decision did not run before the rollback is not traded at that auction.
 
 ## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, in release 1019g, deployed 05:36Z Oct 22
 

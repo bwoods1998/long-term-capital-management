@@ -1879,14 +1879,24 @@ is None) trade through the event kind's own path with these additions, each addi
   rank order, less EVL-LRN-O1's ERN guard (`book.ern_issuer`), EVL-LRN-ON's per-issuer 8-K guard
   (`book.issuer_8k_guard`), one position per issuer (`held_recently` and `held`). Each `Pick.rank` is the pick's place
   counted down from 8: no fitted figure reaches live.sqlite.
-- `book.is_learner`, `book.learner_pending` (no decision and no recorded failure yet), `book.line_keep` (16 buys' worth
-  of the day order line, `LEARNER_LINE_KEEP` 32 slots, for a learner's entry; 0 otherwise).
+- `book.is_learner`, `book.learner_pending` (no decision and no recorded failure yet), `book.learner_gate` (the
+  learner's real-money gate, league/events/judge7.py `gate`: a reason, or None when it may buy; unreadable is a
+  reason), `book.learner_cut` (the ROOM key from which an auction's names wait for its learners: a learner at learning
+  its own key, one in a round-robin tier the whole tier), `book.pick_record` / `book.pick_of` (a `Pick` as JSON and
+  back, exactly).
 - `book.universe_rows(lane, day)` reads, for a lane view carrying `eligible_by` (the learner's own `learner.AsOf`), only
   the live results decided at or before it (E5); every other caller's reading is unchanged.
-- `EquityBook._event_decide` passes over a learner's instance (`live._learner`); `EquityBook._event_decide_lrn` decides
-  the learners' buys of the auction once, after the auction's own decision (row `"<at>-lrn"` in
-  `eq_event_decisions`), waiting for a running part up to `EVENT_LRN_WAIT_S` (`open` 240 s, `close` 150 s after the
-  decision time), passing over every name the auction's decision gave; the buys are planned with their side rows as
-  any event buy's and sent by `_event_send` in `send_key`'s order (the learners after every earlier file's row, before
-  R3's births at learning). `_event_work_entry` adds `book.line_keep` to the buys it counts ahead on the day order
-  line for a learner's entry. Nothing here changes for any other program.
+- `EquityBook._event_decide` passes over a learner's instance (`live._learner`) and, when a learner of the auction may
+  take a name (`_event_learner_cut`: live, with room, its gate open), gives the names of every program BEFORE
+  `book.learner_cut` at once and keeps the picks of every program from it on, read as of its decision time, in its
+  summary (`learners.deferred`: `book.pick_record`s, the program's room and band), naming them `"after": "learners"`.
+  With no such learner nothing is held back and the decision is exactly release 1019h's. `EquityBook._event_decide_lrn`
+  decides once, after it (row `"<at>-lrn"` in `eq_event_decisions`), waiting for a running part up to
+  `EVENT_LRN_WAIT_S` (`open` 240 s, `close` 150 s after the decision time): the learners' picks and the held-back
+  programs' (`book.pick_of`) given their names together by `book.allocate` in ROOM's order, passing over every name the
+  auction's decision gave; the buys planned with their side rows as any event buy's and sent by `_event_send` in
+  `send_key`'s order; the summaries merged into the auction's own row (`programs`, `sale_to_later`, `learners.decided`),
+  so `_event_recent` (A85), the daily report and the alarms read them as every program's. `_event_work_entry` passes a
+  learner entry's `_event_line_keep` (the orders the earlier PREREG rows may still send that day: this auction's buys not
+  sent and A80's re-sends, at the open the close's remaining room x 2, plus one) to `_count_refusal(..., keep=)`, kept on
+  the event line and the House-wide line; an exit never meets it. Nothing here changes for any other program.
