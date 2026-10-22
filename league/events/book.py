@@ -135,6 +135,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..equity import schedule as ES
+from . import attempts as AT
 from . import bands as BA
 from . import calendar as C
 from . import programs as P
@@ -802,6 +803,39 @@ def write_fills(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> i
                                            binding=row.get("binding"),
                                            sized_usd=None if sent is None else float(sent)))
         return changed
+    finally:
+        store.close()
+
+
+#: THE ATTEMPTS LEDGER (release 1019i, PREREG-EVL-7's H3; league/events/attempts.py): the book's kv mark of the newest
+#: row the lane's store took, and the slack it reads again before it (league/equity/live.py `_event_attempts`).
+ATTEMPTS_MARK = AT.MARK_KEY
+ATTEMPTS_SLACK_S = AT.MARK_SLACK_S
+
+
+def attempt_rows(rows: Callable[..., list], *, since: float = 0.0) -> tuple[list[dict[str, Any]], float | None]:
+    """THE ATTEMPTS LEDGER'S ROWS from the book's own live.sqlite (`rows`, read only: league/events/attempts.py
+    `book_rows`): every order of a real event instance, and every planned real buy that ended unsent, changed at or after
+    `since`; and the newest change read. Nothing here sends, changes or cancels an order."""
+    return AT.book_rows(rows, since=since)
+
+
+def write_attempts(root: str | Path | None, rows: Sequence[Mapping[str, Any]]) -> int | None:
+    """THE ATTEMPTS HANDED TO THE LANE (release 1019i): `rows` (`attempt_rows`) into the lane's `real_attempts`
+    (league/events/attempts.py `record`, one transaction), through the same existing-file opener as the real fills
+    (`FillWriter`: never a new store or table). Returns how many rows were new or changed; None when there is no lane
+    store or it holds no `real_attempts` table yet (a lane not yet opened by release 1019i: the book writes them once
+    it does). Raises `sqlite3.Error` when the store cannot be written (asked again next minute)."""
+    if root is None:
+        return None
+    path = lane_path(root)
+    if not path.is_file():
+        return None
+    store = FillWriter(path)
+    try:
+        if not AT.has_table(store.db):
+            return None
+        return AT.record(store, rows)
     finally:
         store.close()
 
@@ -1703,7 +1737,8 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "PRIORITY", "STRICT_WEIGHT", "LADDER_CLOSES", "ZERO_AFTER", "ISSUER_GAP_SESSIONS", "LANE_DIR", "FILLS_TABLE",
            "FILL_COLUMNS", "seatable", "program_of", "order_of", "room_key", "BIRTH_ROOM", "SCHEMA", "Settings", "FALLBACK",
            "settings", "Lane", "lane_path", "open_lane", "decided", "LIVE_ROWS", "eligible", "universe_rows", "Band",
-           "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
+           "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "attempt_rows", "write_attempts",
+           "ATTEMPTS_MARK", "ATTEMPTS_SLACK_S", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish", "band_mark", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader",

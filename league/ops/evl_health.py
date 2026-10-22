@@ -87,6 +87,20 @@ RELEASE 1019f (the audit of the live House, lens "stalls": alarms that did not e
   and not in it. The lane computes Sized, demotion and retirement from those rows (PREREG-EVL-3), so a gap is evidence
   the judge never sees.
 
+RELEASE 1019i (PREREG-EVL-7's H4 and PREREG-EVL-8's H1 and H2; its review):
+- `evl_fill_rate` and `evl_attempts` (the attempts ledger, league/events/attempts.py): an auction's real buys filled
+  under 85% over the last 3 sessions, or more than 10 points under their last 20; an event order with no final state
+  an hour after its auction, or one of the book's the ledger lacks.
+- `evl_score_parity` (the batched score's parity night FAILS CLOSED, league/events/score.py `latched`): stands while
+  the parity latch stands (a sampled intent the batched path and the per-intent path settled differently): the lane
+  settles every intent by release 1019h's per-intent path meanwhile, and the captain clears the latch once the flag
+  0 is explained (`python3 -m league.events --state /workspace/state/events score-unlatch`). The numbers are the
+  night's flags (checked, equal) and the latched intent's identifiers: never a value.
+- `evl_px_store` (the price lane's store, league/events/pxstore.py `room`): px.sqlite and its WAL at or over 2 GiB,
+  or, with league/config.json `events.px_data` on, the state disk under the PX floor (the swarm guard's 3 GB and 2 GB
+  more, 5 GiB) or its free space unreadable: the recorders write nothing while it stands (every run `disk`). Judged
+  while `events.px_data` is on or px.sqlite exists; read by `stat` and the disk's usage alone.
+
 IDLE BY DESIGN: while `<state>/events/STOP` stands (the lane records, decides and asks nothing) the causes are not judged,
 nor for `RESUME_MINUTES` after it goes (the lane's first passes); a decision whose window fell inside it is excused for
 good. While the House's maintenance `<state>/PAUSE` stands (no paid call: no verdict) `evl_verdicts` is not judged, and a
@@ -112,7 +126,7 @@ from . import guard
 from . import schedule as S
 
 CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
-          "evl_backfill", "evl_handback", "evl_learner")
+          "evl_backfill", "evl_handback", "evl_learner", "evl_fill_rate", "evl_attempts", "evl_score_parity", "evl_px_store")
 #: The stall job's key in `<state>/ops.json` that switches these off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
@@ -242,6 +256,27 @@ DOING = {
                      "complete, filing by filing (A82), and decides again the sessions the filings it fetches enter; the "
                      "screen's looks wait for every weekday of its reach to be done (A66, A69 (iii)), so a day not done "
                      "holds every look that covers it."),
+    "evl_fill_rate": ("Each planned event buy goes at its auction with every gate of a real open (A80's one re-send after a "
+                      "venue cancel at once included); the attempts ledger (release 1019i) keeps every order sent with "
+                      "the venue's own states, so the House reads the fill rate by auction over 3 and 20 sessions. A "
+                      "fall is the venue's or the House's to explain (cancels at once, limits off the cross, a gate); "
+                      "its full-size shadow keeps every event, so real settled events only come slower. No wall moves."),
+    "evl_attempts": ("The book writes every event order it sends, and every planned buy that ended unsent, into the lane's "
+                     "attempts ledger each minute, from the venue's own order states (it never sends or changes an "
+                     "order); the venue ends an auction order at its cross and a day sale at the close, so an order with "
+                     "no final state an hour after its auction, or one the ledger lacks, is a gap in the fill evidence "
+                     "COST-7 measures, for the House to read again or fix."),
+    "evl_score_parity": ("On the batched score's parity night a 5% sample of the intents is settled twice in memory, by "
+                         "the batched path and by the per-intent path, before anything is written; a difference sets "
+                         "the parity latch, and from that intent on the lane settles every intent by release 1019h's "
+                         "per-intent path (no outcome is written from the batched path while it stands). The captain "
+                         "reads why the two paths differed (the vendor's adjustment, the cache) and clears the latch "
+                         "(score-unlatch) or keeps events.score_batch false. No wall moves."),
+    "evl_px_store": ("The price lane's recorders write px.sqlite only while it holds under 2 GB and the state disk keeps "
+                     "the PX floor free (the swarm guard's 3 GB and 2 GB more); a run without room writes nothing, so "
+                     "the lane's and the book's ledgers keep their disk. No decision reads px.sqlite yet: the gap is "
+                     "warm-up data only, for the captain to make room (prune px.sqlite, grow the disk) or to switch "
+                     "events.px_data off."),
     "evl_learner": ("PREREG-EVL-7's learners decide after the House's own decision of each auction, under their own "
                     "bound; a part that fails or expires is decided later by itself (never traded); the nightly recompute "
                     "alarms on a mismatch; the training follows the evening score (league/ops/evl_learner.py)."),
@@ -1466,6 +1501,208 @@ def _handback(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
             "doing": DOING["evl_handback"], "owner_step": None, "onset": None if first is None else first[0]}
 
 
+# ---------------------------------------------------------------------------------------------- release 1019i
+def attempt_facts(root: str | Path, now: float) -> dict[str, Any] | None:
+    """THE ATTEMPTS LEDGER as the two causes read it (release 1019i, PREREG-EVL-7's H4; league/events/attempts.py), each
+    store read-only: the lane's `real_attempts` (its fill rates through the New York day of `now`, its attempts with no
+    final state, every row's state by client id) and the book's own rows of live.sqlite beside it (`book_rows`; None with
+    no live.sqlite). None when the lane's store holds no ledger yet (a lane not opened by release 1019i)."""
+    from ..events import attempts as AT
+
+    path = Path(root) / STORE
+    if not path.exists():
+        return None
+    moment = dt.datetime.fromtimestamp(now, dt.timezone.utc)
+
+    def lane(db: Any) -> dict[str, Any] | None:
+        store = _Db(db)
+        if not AT.has_table(db):
+            return None
+        return {"rates": AT.fill_rates(store, moment.astimezone(NY).date()), "open": AT.open_attempts(store, moment),
+                "held": {str(r["client_id"]): {"state": r["state"]}
+                         for r in guard.rows(db, f"SELECT client_id, state FROM {AT.TABLE}")}}
+    found = guard.read(path, lane)
+    if found is None:
+        return None
+    live = Path(root) / LIVE_DB
+    book = None
+    if live.exists():
+        try:    # (live.sqlite that cannot be read blinds only the ledger's completeness, never its own states)
+            book = guard.read(live, lambda db: AT.book_rows(lambda sql, params=(): guard.rows(db, sql, params))[0])
+        except Exception:  # noqa: BLE001 - evl_entries and evl_handback say live.sqlite could not be read
+            book = None
+    return {**found, "book": book}
+
+
+def _fill_rate(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`evl_fill_rate`: an auction's real buys filled under 85% of those sent over the last 3 sessions (at least 5 sent),
+    or more than 10 points under their last 20 (league/events/attempts.py `fill_drop`)."""
+    from ..events import attempts as AT
+
+    if found is None:
+        return _not_judged("the lane's store holds no attempts ledger yet (release 1019i)")
+    rates = found.get("rates") or {}
+    drops = AT.fill_drop(rates)
+    by = rates.get("auctions") or {}
+    numbers: dict[str, Any] = {}
+    for auction in ("open", "close"):
+        for n in ("3", "20"):
+            c = (by.get(auction) or {}).get(n) or {}
+            numbers[f"{auction}_sent_{n}"] = int(c.get("buys_sent") or 0)
+            numbers[f"{auction}_filled_{n}"] = int(c.get("buys_filled") or 0)
+        c3 = (by.get(auction) or {}).get("3") or {}
+        numbers[f"{auction}_venue_cancels_3"] = int(c3.get("venue_cancels") or 0)
+    if not drops:
+        what = "The real event buys' fill rates hold: " + "; ".join(
+            f"{a} {numbers[f'{a}_filled_3']} of {numbers[f'{a}_sent_3']} over 3 sessions, "
+            f"{numbers[f'{a}_filled_20']} of {numbers[f'{a}_sent_20']} over 20" for a in ("open", "close")) + "."
+        return {"stalled": False, "judged": True, "what": what, "numbers": numbers, "doing": DOING["evl_fill_rate"],
+                "owner_step": None, "onset": None}
+    said = []
+    for d in drops:
+        rate3 = "n/a" if d["rate3"] is None else f"{d['rate3'] * 100:.0f}%"
+        rate20 = "n/a" if d["rate20"] is None else f"{d['rate20'] * 100:.0f}%"
+        said.append(f"the {d['auction']}'s {rate3} of {d['sent3']} sent over 3 sessions "
+                    + (f"is under {AT.FILL_LOW:.0%}" if d["why"] == "low"
+                       else f"is more than {AT.FILL_FALL * 100:.0f} points under its {rate20} of {d['sent20']} over 20"))
+    numbers["dropped"] = ",".join(d["auction"] for d in drops)
+    return {"stalled": True, "judged": True, "what": "Real event buys fill less often: " + "; ".join(said) + ".",
+            "numbers": numbers, "doing": DOING["evl_fill_rate"], "owner_step": None, "onset": None}
+
+
+def _attempts(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`evl_attempts`: an order sent with no final state in the ledger an hour after its auction ended, or a row of the
+    book's the ledger lacks (or holds in another state) an hour after its last change (league/events/attempts.py
+    `open_attempts`, `missing`)."""
+    from ..events import attempts as AT
+
+    if found is None:
+        return _not_judged("the lane's store holds no attempts ledger yet (release 1019i)")
+    opened = list(found.get("open") or [])
+    gaps = AT.missing(found["book"], found.get("held") or {}, now) if found.get("book") is not None else []
+    numbers = {"open": len(opened), "missing": sum(1 for g in gaps if g["ledger"] is None),
+               "stale": sum(1 for g in gaps if g["ledger"] is not None), "rows": len(found.get("held") or {}),
+               "book_read": found.get("book") is not None}
+    if not opened and not gaps:
+        return {"stalled": False, "judged": True,
+                "what": f"Every event order in the attempts ledger has its final state ({numbers['rows']} rows)"
+                        + ("" if numbers["book_read"] else "; no live.sqlite to set beside it") + ".",
+                "numbers": numbers, "doing": DOING["evl_attempts"], "owner_step": None, "onset": None}
+    parts = []
+    onset = None
+    if opened:
+        first = opened[0]
+        parts.append(f"{len(opened)} order{'s' if len(opened) != 1 else ''} sent with no final state an hour after the "
+                     f"auction; the first, a {first['kind']} of {str(first['program']).lower()} version {first['version']} "
+                     f"at the {first['at']} of {first['day']}, is {first['state']}")
+        onset = S.epoch(first["ended"]) + AT.OPEN_GRACE.total_seconds()
+        numbers["first_day"] = str(first["day"])
+    if gaps:
+        parts.append(f"{numbers['missing']} of the book's orders are not in the ledger and {numbers['stale']} are there "
+                     f"in an older state, an hour after their last change")
+    return {"stalled": True, "judged": True, "what": "The attempts ledger is incomplete: " + "; ".join(parts) + ".",
+            "numbers": numbers, "doing": DOING["evl_attempts"], "owner_step": None, "onset": onset}
+
+
+def px_on(ctx: Any) -> bool:
+    """The price lane's recorders run (league/config.json `events.px_data` true; a missing key or false is off)."""
+    config = _get(ctx, "config")
+    block = config.get("events") if isinstance(config, Mapping) else None
+    return isinstance(block, Mapping) and block.get("px_data") is True
+
+
+def score_latch(root: str | Path) -> dict[str, Any] | None:
+    """THE PARITY LATCH as `evl_score_parity` reads it (league/events/score.py `latched`, read-only): {latch: the
+    latched intent's identifiers or None, flags: {checked, equal} of the latch's night}; None when the lane's store
+    does not exist."""
+    from ..events import score as SCO
+
+    path = Path(root) / STORE
+    if not path.exists():
+        return None
+
+    def read(db: Any) -> dict[str, Any]:
+        held = SCO.latched(_Db(db))
+        flags = {"checked": 0, "equal": 0}
+        night = (held or {}).get("night")
+        has = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='score_parity'").fetchone()
+        if night and has:
+            row = db.execute("SELECT COUNT(*), COALESCE(SUM(equal), 0) FROM score_parity WHERE night=?",
+                             (str(night),)).fetchone()
+            flags = {"checked": int(row[0] or 0), "equal": int(row[1] or 0)}
+        return {"latch": held, "flags": flags}
+    return guard.read(path, read)
+
+
+def _score_parity(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`evl_score_parity`: the parity latch stands (`score_latch`)."""
+    if found is None:
+        return _not_judged("the event lane has no store yet")
+    held = found.get("latch")
+    flags = found.get("flags") or {}
+    numbers: dict[str, Any] = {"latched": held is not None, "checked": int(flags.get("checked") or 0),
+                               "equal": int(flags.get("equal") or 0)}
+    if held is None:
+        return {"stalled": False, "judged": True, "what": "The batched score has no parity latch: it settles as switched.",
+                "numbers": numbers, "doing": DOING["evl_score_parity"], "owner_step": None, "onset": None}
+    program = re.sub(r"[^A-Za-z0-9._-]", "", str(held.get("program") or ""))[:40]
+    night = str(held.get("night") or "")[:10]
+    numbers.update(night=night, program=program, version=held.get("version") if isinstance(held.get("version"), int)
+                   else None)
+    what = (f"The batched score's parity check found a difference on the night of {night or 'unknown'} "
+            f"({numbers['equal']} of {numbers['checked']} sampled intents equal; the first difference "
+            f"{program.lower() or 'a program'} version {numbers['version']}): the batched score is OFF and every intent "
+            "settles by the per-intent path until the captain clears the latch (score-unlatch).")
+    at = _parse_ts(held.get("at"))
+    return {"stalled": True, "judged": True, "what": what, "numbers": numbers, "doing": DOING["evl_score_parity"],
+            "owner_step": None, "onset": at}
+
+
+def px_store_facts(ctx: Any, root: str | Path) -> dict[str, Any] | None:
+    """THE PRICE LANE'S STORE as `evl_px_store` reads it (league/events/pxstore.py `room`, by `stat` and the disk's usage
+    alone): the room and whether the recorders run; None while they are off and px.sqlite does not exist."""
+    from ..events import pxstore as PXS
+
+    events = Path(root) / STORE.parent
+    on = px_on(ctx)
+    if not on and not PXS.path_of(events).exists():
+        return None
+    return {"on": on, **PXS.room(events)}
+
+
+def _px_store(now: float, found: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`evl_px_store`: px.sqlite at or over its line, or (the recorders on) the state disk under the PX floor."""
+    if found is None:
+        return _not_judged("the price lane's recorders are off (events.px_data) and px.sqlite does not exist")
+    size, free = int(found.get("size_bytes") or 0), found.get("free_bytes")
+    numbers = {"px_data": bool(found.get("on")), "size_mb": round(size / 2 ** 20, 1),
+               "free_gb": None if free is None else round(int(free) / 2 ** 30, 1),
+               "line_gb": round(int(found["line_bytes"]) / 2 ** 30, 1),
+               "floor_gb": round(int(found["floor_bytes"]) / 2 ** 30, 1)}
+    over, low = bool(found.get("over")), bool(found.get("on")) and bool(found.get("low"))
+    if not over and not low:
+        return {"stalled": False, "judged": True,
+                "what": f"px.sqlite holds {numbers['size_mb']:.0f} MB of its {numbers['line_gb']:.0f} GB line; the state "
+                        f"disk has {numbers['free_gb']} GB free (the PX floor {numbers['floor_gb']} GB).",
+                "numbers": numbers, "doing": DOING["evl_px_store"], "owner_step": None, "onset": None}
+    parts = []
+    if over:
+        parts.append(f"px.sqlite holds {numbers['size_mb']:.0f} MB, at or over its {numbers['line_gb']:.0f} GB line")
+    if low:
+        parts.append("the state disk's free space could not be read" if free is None
+                     else f"the state disk has {numbers['free_gb']} GB free, under the PX floor of {numbers['floor_gb']} GB")
+    return {"stalled": True, "judged": True,
+            "what": "The price lane's store has no room: " + " and ".join(parts) + "; the PX recorders write nothing.",
+            "numbers": numbers, "doing": DOING["evl_px_store"], "owner_step": None, "onset": None}
+
+
+def _parse_ts(text: Any) -> float | None:
+    try:
+        return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None = None, idle: Any = None,
            line: Mapping[str, Any] | None = None, kept: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """THE STALL JOB'S CALL (league/ops/stall.py `run`): the causes' checks (the module docstring). `idle` is
@@ -1524,6 +1761,16 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
                                   "is not judged")
                 out["evl_final"] = _not_judged(f"the final records could not be read ({type(exc).__name__})")
         out["evl_backfill"] = _backfill(now, f, backfill_reach(now))
+        # (Release 1019i: the batched score's parity latch and the price lane's store, each on its own reader.)
+        for cause, judge in (("evl_score_parity", lambda: _score_parity(now, score_latch(root))),
+                             ("evl_px_store", lambda: _px_store(now, px_store_facts(ctx, root)))):
+            try:
+                with guard.readonly():
+                    out[cause] = judge()
+            except Exception as exc:  # noqa: BLE001 - said, and the other causes stand as judged
+                if errors is not None:
+                    errors.append(f"{cause} could not be judged ({type(exc).__name__})")
+                out[cause] = _not_judged(f"it could not be read ({type(exc).__name__})")
         try:    # (PREREG-EVL-7's learners, league/ops/evl_learner.py: its own reader, blinding no other cause)
             from . import evl_learner as LRN
 
@@ -1533,8 +1780,17 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
                 errors.append(f"the learners' records could not be read ({type(exc).__name__}): evl_learner is not judged")
             out["evl_learner"] = _not_judged(f"the learners' records could not be read ({type(exc).__name__})")
         # THE BOOK'S OWN ROWS (live.sqlite, read-only), each read on its own: one that cannot be read blinds only itself.
+        # (Release 1019i: the attempts ledger's two causes read the lane's ledger and the book's rows beside it.)
+        ledger: dict[str, Any] = {}
+
+        def attempts_read() -> dict[str, Any] | None:
+            if "found" not in ledger:
+                ledger["found"] = attempt_facts(root, now)
+            return ledger["found"]
         for cause, judge in (("evl_entries", lambda: _entries(now, entry_facts(root, auctions(now)))),
-                             ("evl_handback", lambda: _handback(now, handback_facts(root)))):
+                             ("evl_handback", lambda: _handback(now, handback_facts(root))),
+                             ("evl_fill_rate", lambda: _fill_rate(now, attempts_read())),
+                             ("evl_attempts", lambda: _attempts(now, attempts_read()))):
             try:
                 with guard.readonly():
                     out[cause] = judge()

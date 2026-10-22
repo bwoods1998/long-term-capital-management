@@ -257,6 +257,12 @@ PENDING_GATEWAY += ("league/events/births.py",)
 #: deploy; its pin `RULE_SHA256` ties only the constant to the rule file, never the reading to it. It ships in the same
 #: owner deploy as its hook in house.py. It waits here for the gateway's merge-list follow-up.
 PENDING_GATEWAY += ("league/events/done.py",)
+#: RELEASE 1019i'S NEW MODULES (PREREG-EVL-7's H3, PREREG-EVL-8's H2): the attempts ledger (league/events/attempts.py:
+#: the fill evidence COST-7's selection term will judge by, written by the money book's hand-back) and the price lane's
+#: store and recorders (league/events/pxstore.py, pxdata.py: every PX value's inputs, write-once, before any PX
+#: decision reads them): rule inputs like universe.py and store.py, so no main commit the in-box updater would ship can
+#: change them without the owner's deploy. They wait here for the gateway's merge-list follow-up, as the lane's do.
+PENDING_GATEWAY += ("league/events/attempts.py", "league/events/pxstore.py", "league/events/pxdata.py")
 #: PREREG-EVL-7's LEARNERS AND COST-7 (release 1019i): league/events/learner.py is two programs' pinned rule (what they
 #: read as of tau, their training rows, their fit and their picks, which real money buys) and league/events/costs7.py the
 #: cost basis their judge reads (a7, r7, the measured terms that only rise, the judged record): a program's rule and a

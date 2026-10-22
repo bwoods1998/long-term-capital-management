@@ -451,8 +451,58 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
+        "settle": settle_pace(store, day), "fill_rates": _fill_rates(store, day),
         "learners": _learners(store, day),
     }
+
+
+def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
+    """THE SETTLE-PACE LINE (release 1019i, PREREG-EVL-8's harness plan H1, the batched score): the night's score passes
+    (receipts `score` whose summary's `day` is the session `night`, league/events/house.py `_score`) added up: passes,
+    whether the last finished the night (`complete`), intents tried, settled, skipped, waiting and failed, the passes'
+    seconds and the settlements a minute over them (`pace`), the batched passes, the gateway requests by kind (bars,
+    trades, other), the parity night's flags (checked, equal: counts only) and whether THE PARITY LATCH stands
+    (league/events/score.py `latched`: a flag 0 turned the batched score off). None when no pass of the night is on
+    record."""
+    passes = []
+    for r in store.db.execute("SELECT status, summary FROM receipts WHERE job='score' ORDER BY id"):
+        try:
+            summary = json.loads(r["summary"] or "{}")
+        except ValueError:
+            continue
+        if isinstance(summary, dict) and summary.get("day") == night.isoformat():
+            passes.append((str(r["status"] or ""), summary))
+    if not passes:
+        return None
+    out: dict[str, Any] = {"passes": len(passes), "complete": passes[-1][0] == "ok",
+                           "batched": sum(1 for _, x in passes if x.get("batched")),
+                           "requests": {"bars": 0, "trades": 0, "other": 0}, "parity": {"checked": 0, "equal": 0},
+                           "seconds": 0.0}
+    for key in ("due", "settled", "skipped", "waiting", "errors"):
+        out[key] = sum(int(x.get(key) or 0) for _, x in passes if isinstance(x.get(key), (int, float)))
+    for _, x in passes:
+        out["seconds"] += float(x.get("seconds") or 0.0)
+        for kind, n in (x.get("requests") or {}).items():
+            if kind in out["requests"]:
+                out["requests"][kind] += int(n or 0)
+        for kind in ("checked", "equal"):
+            out["parity"][kind] += int((x.get("parity") or {}).get(kind) or 0)
+    out["seconds"] = round(out["seconds"], 1)
+    out["pace"] = round(out["settled"] / (out["seconds"] / 60.0), 1) if out["seconds"] > 0 else None
+    from . import score as SCO
+
+    out["latched"] = SCO.latched(store) is not None
+    return out
+
+
+def _fill_rates(store: S.Store, day: dt.date) -> dict[str, Any] | None:
+    """The attempts ledger's fill-rate lines (release 1019i; league/events/attempts.py `fill_rates`), None without it."""
+    from . import attempts as AT
+
+    try:
+        return AT.fill_rates(store, day)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
 
 def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
@@ -610,6 +660,32 @@ def render(report: Mapping[str, Any]) -> str:
                      + f"; model ${float(night.get('usd') or 0):.2f}"
                      + (f"; last call {call.get('night')} {call.get('status')} ${float(call.get('usd') or 0):.4f} in "
                         f"{call.get('seconds')} s" if call else ""))
+    pace = report.get("settle")
+    if pace:
+        # (release 1019i: the batched score's settle pace; the parity night's flags, counts only)
+        rq = pace.get("requests") or {}
+        line = (f"Score: {pace['settled']} settled, {pace['skipped']} skipped, {pace['waiting']} waiting of "
+                f"{pace['due']} tried in {pace['passes']} passes ({pace['batched']} batched), {pace['seconds']:.0f} s"
+                + (f", {pace['pace']:.1f} a minute" if pace.get("pace") is not None else "")
+                + f"; requests: bars {rq.get('bars', 0)}, trades {rq.get('trades', 0)}"
+                + ("" if pace.get("complete") else "; the night is not complete"))
+        par = pace.get("parity") or {}
+        if par.get("checked"):
+            line += f"; parity {par['equal']} of {par['checked']} equal"
+        if pace.get("latched"):
+            line += "; THE BATCHED SCORE IS OFF: a parity flag 0 latched it (score-unlatch once explained)"
+        lines.append(line)
+    fr = report.get("fill_rates")
+    if fr and fr.get("auctions"):
+        # (release 1019i: the attempts ledger, by auction over the last 3 and 20 sessions)
+        parts = []
+        for auction in ("open", "close"):
+            by = fr["auctions"].get(auction) or {}
+            short, long_ = by.get("3") or {}, by.get("20") or {}
+            parts.append(f"{auction} {_rate(short)} (3) / {_rate(long_)} (20), venue cancels "
+                         f"{short.get('venue_cancels', 0)}/{short.get('buy_orders', 0)}, re-sends {short.get('resent', 0)}, "
+                         f"unsent {short.get('unsent', 0)}")
+        lines.append("Fills (attempts ledger): " + " | ".join(parts))
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"
@@ -617,5 +693,12 @@ def render(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _rate(counts: Mapping[str, Any]) -> str:
+    rate = counts.get("fill_rate")
+    sent = int(counts.get("buys_sent") or 0)
+    return f"{counts.get('buys_filled', 0)}/{sent}" + ("" if rate is None else f" {rate * 100:.0f}%")
+
+
 __all__ = ["build", "render", "events", "verdicts", "program_status", "kept_out", "late_rows", "gaps", "jobs",
-           "day_bounds", "FAMILIES", "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS", "evl5", "room_effects"]
+           "day_bounds", "FAMILIES", "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS", "evl5", "room_effects",
+           "settle_pace"]

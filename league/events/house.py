@@ -100,6 +100,7 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -112,6 +113,8 @@ from . import edgar as E
 from . import gw as G
 from . import news as N
 from . import programs as P
+from . import pxdata as PX
+from . import pxstore as PXS
 from . import report as RP
 from . import run as R
 from . import score as SC
@@ -220,6 +223,10 @@ UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
 TICKERS_RETRY = dt.timedelta(minutes=5)
 SCORE_AT = dt.time(20, 30)
+#: RELEASE 1019i, THE BATCHED SCORE (`_score`): a pass prefetches the daily bars of this many of its intents at a time
+#: (their symbols and both benchmarks in about two requests a 200 symbols), so a pass its bound cuts has read no bars
+#: for intents it never reached.
+PREFETCH_WINDOW = 400
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 #: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
 #: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
@@ -286,6 +293,28 @@ FETCH_TRIES = 6                               # ... and a failed fetch is tried 
 #: 1019f: `_backfill`), with its own count.
 FETCH_BACKOFF = tuple(dt.timedelta(minutes=2 ** k) for k in range(1, FETCH_TRIES))
 
+#: RELEASE 1019i, THE PRICE LANE'S RECORDERS (PREREG-EVL-8's harness plan H2; league/events/pxdata.py), behind
+#: league/config.json `events.px_data` (a missing key or false is OFF; on, they only WARM px.sqlite: no decision reads
+#: it). Each is a task of its own, the LAST of the plan's (`_px_due`): never inside the live close decision's lead,
+#: never within `PX_CLEAR` of the next decision, bounded by `PX_BUDGET` (and, as every task, to end DECISION_MARGIN
+#: before the next decision), its reads cut at the bound (`PX.PxGateway`) and through the lane's bucket after the lane's
+#: own (`PX.TokenBucket`, THE LANE FIRST), its failure its own (a warning; that recorder waits FAIL_BACKOFF, every other
+#: task goes on), at most one run every `PX_EVERY`. The recorders' windows (New York times): the universe of today's
+#: session from `PX_UNIVERSE_AT` to `PX_FLAGS_AT`; FLAGGED from `PX_FLAGS_AT` until `PX_FLAGS_BEFORE_CLOSE` before the
+#: close; the premarket marks from `PX_PM_AT` (after the open window's sends) and the 15:30 marks from `PX_1530_AFTER`
+#: after the close (each once its span is whole on the Basic plan's tape); the nightly bars once the night's score
+#: has run; the 270-session backfill and the operating-company cache at night (`PX_NIGHT`) and on days with no session.
+#: THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`): no run without it (`_px`: `disk`, nothing
+#: opened), no request of a run without it (`PX.PxRoom`), and every PX run waits FAIL_BACKOFF after one that found none.
+PX_BUDGET = 60.0
+PX_CLEAR = dt.timedelta(minutes=10)
+PX_EVERY = dt.timedelta(minutes=1)
+PX_UNIVERSE_AT = dt.time(7, 40)
+PX_FLAGS_AT = dt.time(9, 0)
+PX_FLAGS_BEFORE_CLOSE = dt.timedelta(minutes=30)
+PX_PM_AT = dt.time(9, 35)
+PX_1530_AFTER = dt.timedelta(minutes=5)
+PX_NIGHT = (dt.time(21, 30), dt.time(7, 0))
 WARN_EVERY = 3600.0
 DATA_INTERVAL = 0.5
 ASSETS_TTL = 1800.0
@@ -439,6 +468,15 @@ class EventLane:
         self._line = {"usd_day": 0.0, "source": "not read yet"}   # THE LANE'S LINE (`_spend_today`): none before it is read
         #: R3's births job: `events.births` true in league/config.json (a missing key or false is off).
         self.births_on = self.settings.get("births") is True
+        #: RELEASE 1019i: the PX recorders, `events.px_data` true (a missing key or false is off), and the bucket the lane's
+        #: own market-data reads share with them (`throttle`: the lane first); no bucket while they are off.
+        self.px_on = self.settings.get("px_data") is True
+        self._bucket = PX.TokenBucket(clock=monotonic, sleep=sleep) if self.px_on else None
+        self._px_last: dt.datetime | None = None
+        #: ... THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`): the last check before a PX run
+        #: (lane.json `px_store`) and when a run last found none (`_px_due` then waits FAIL_BACKOFF before the next).
+        self._px_room: dict[str, Any] | None = None
+        self._px_disk: dt.datetime | None = None
         self._gateway = gateway
         self._sec_base = sec
         self._mono = monotonic
@@ -523,7 +561,9 @@ class EventLane:
                     "tasks": {k: dict(v) for k, v in sorted(self._tasks.items())},
                     "verdict_usd_today": round(float(self._usd["usd"]), 4), "verdict_usd_day": self.verdict_usd_day,
                     "verdict_line_usd": round(float(self._line["usd_day"]), 4), "verdict_line_source": self._line["source"],
-                    "warnings": self._warnings}
+                    "warnings": self._warnings, "px_data": self.px_on,
+                    "px_bucket": None if self._bucket is None else dict(self._bucket.taken),
+                    "px_store": None if self._px_room is None else dict(self._px_room)}
 
     def ready(self) -> bool:
         """The store exists (the migration, scripts/evl_migrate.py, made it, or the operator did; the lane never makes
@@ -548,6 +588,8 @@ class EventLane:
         if wait > 0:
             self._sleep(wait)
         self._last_get = self._mono()
+        if self._bucket is not None:
+            self._bucket.take_lane()    # (release 1019i: the lane's token of the bucket it shares with the PX recorders)
 
     def claude_refusal(self, deadline: float | None) -> str | None:
         if self.closing():
@@ -997,6 +1039,9 @@ class EventLane:
         learner = self._learner_due(st, now, today, session, soon)
         if learner is not None:
             return learner, now
+        px = self._px_due(st, now, today, session, soon)     # (release 1019i: the PX recorders, last of all)
+        if px is not None:
+            return px, now
         return None, min(soon)
 
     def _decision_task(self, decision: tuple[int, dt.datetime, str, dt.date, bool]) -> Task:
@@ -1636,8 +1681,21 @@ class EventLane:
         """The score job (league.events.score.settle), resumable: each due intent is tried once a night, in order,
         while the bound lasts; the night's pass is `ok` once every one has been tried. The night is the SESSION's
         (`night`, `_night`; release 1019f): a pass that runs past midnight ET goes on with the same night, each intent
-        still tried once, and its receipt's `day` is that session."""
+        still tried once, and its receipt's `day` is that session.
+        RELEASE 1019i, THE BATCHED SCORE (PREREG-EVL-8's harness plan H1; league/events/score.py's docstring), while
+        league/config.json `events.score_batch` is not false (`score.batch_on`): the seating versions and their controls
+        first (`score.order_due`), and before each `PREFETCH_WINDOW` intents of the pass the daily bars of their
+        symbols and both benchmarks in one read (`score.prefetch`, stopped at the bound), so each settles with no bar
+        request of its own (`settle_one(prefetched=...)`: a cache that lives only for the pass; `bars` receives exactly
+        the rows release 1019h's two fetches an intent would have written); on the parity night (`score.parity_due`) a
+        5% sample of each prefetch's intents is settled twice in memory, before any of them is written, by the batched
+        and the per-intent path (`score.parity_window`), and only its equality flags kept (`score_parity`). A FLAG 0
+        FAILS CLOSED: it sets the parity latch (`score.latched`), and from that intent on every pass settles by the
+        per-intent path until the captain clears it (`evl_score_parity` stands meanwhile). False: release 1019h's
+        per-intent path. The receipt carries the pass's requests by kind, its seconds, the flags and the latch (the
+        daily report's settle-pace line)."""
         st, now = ctx.store, ctx.now()
+        began = self._mono()
         day = night or now.astimezone(C.NY).date()
         for other in [d for d in self._score_seen if d != day]:
             self._score_seen.pop(other)
@@ -1645,23 +1703,66 @@ class EventLane:
         counts = {"due": 0, "settled": 0, "skipped": 0, "waiting": 0, "errors": 0}
         errors: list[str] = []
         complete = True
-        for intent in SC.due(st, now):
+        batch = SC.batch_on(self.settings) and SC.latched(st) is None
+        gw = SC.Counted(ctx.gw)
+        pending = [i for i in SC.due(st, now)
+                   if (str(i["program"]), int(i["version"]), str(i["event"])) not in seen]
+        if batch:
+            pending = SC.order_due(pending)
+        check = batch and SC.parity_due(st, day, self.settings)
+        flags = {"sampled": 0, "checked": 0, "equal": 0}
+        waits: dict[tuple[str, int, str], str] = {}
+        pre: SC.Prefetch | None = None
+        fetched = {"requests": 0, "rows": 0, "windows": 0, "done": True, "served": 0}
+        on = batch      # (the batched path until the parity latch, if it is set in this pass)
+        for n, intent in enumerate(pending):
             key = (str(intent["program"]), int(intent["version"]), str(intent["event"]))
-            if key in seen:
-                continue
             if self.late(deadline):
                 complete = False
                 break
+            if on and n % PREFETCH_WINDOW == 0:
+                window = pending[n:n + PREFETCH_WINDOW]
+                pre = SC.prefetch(st, gw, window, now=now, late=lambda: self.late(deadline))
+                fetched["requests"] += pre.requests
+                fetched["rows"] += pre.rows
+                fetched["windows"] += 1
+                fetched["done"] = fetched["done"] and pre.done
+                if check and pre.symbols:
+                    got = SC.parity_window(st, gw, window, pre, day, now=now, late=lambda: self.late(deadline))
+                    for k in flags:
+                        flags[k] += int(got[k])
+                    waits.update(got["waits"])
+                if SC.latched(st) is not None:
+                    on, pre = False, None       # (a flag 0: the rest of the pass by the per-intent path)
             seen.add(key)
             counts["due"] += 1
             try:
-                status = SC.settle_one(st, ctx.gw, intent, now=now)
+                use = pre if on and pre is not None and pre.symbols else None    # (nothing prefetched: nothing to skip)
+                if key in waits:        # (a sampled intent the parity check saw wait: not read again this pass)
+                    status = f"waiting:{waits[key]}"
+                else:
+                    status = SC.settle_one(st, gw, intent, now=now, **({"prefetched": use} if use is not None else {}))
             except Exception as exc:  # noqa: BLE001 - one intent's failure is its own (as score.settle)
                 counts["errors"] += 1
                 errors.append(f"{key[0]}:{key[2]}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
-            counts[status.split(":")[0]] = counts.get(status.split(":")[0], 0) + 1
-        summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5]}
+            kind = status.split(":")[0]
+            counts[kind] = counts.get(kind, 0) + 1
+            if kind == "settled" and use is not None:
+                fetched["served"] += int(key in use.hits)
+        summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5],
+                   "batched": batch, "requests": dict(gw.counts), "seconds": round(self._mono() - began, 3)}
+        if batch:
+            summary["prefetch"] = fetched
+        if check:
+            summary["parity"] = flags
+        held = SC.latched(st)
+        if held is not None:
+            summary["latched"] = True
+            if batch:
+                self.warn("score parity", f"the batched score's parity check found a difference ({held.get('program')} "
+                                          f"version {held.get('version')}, the night of {held.get('night')}): the "
+                                          "per-intent path settles every intent until the captain clears the latch")
         self._receipted(st, "score", "ok" if complete else "partial", summary)
         if errors:
             self.warn("score", f"{len(errors)} intents could not be settled this pass, the first: {errors[0]}")
@@ -1936,6 +2037,196 @@ class EventLane:
         self._receipted(ctx.store, "report", "ok", {"day": day.isoformat()})
         return {"day": day.isoformat()}
 
+    # -- the PX recorders (release 1019i) ---------------------------------------------------------------------------
+    def _px_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                soon: list[dt.datetime]) -> Task | None:
+        """THE PX RECORDERS' TASK, the plan's last (`PX_BUDGET`'s comment): None while `events.px_data` is off, inside
+        the live close decision's lead, within `PX_CLEAR` of the next decision, within `PX_EVERY` of the last PX run, or
+        when no recorder is due (`_px_job`)."""
+        if not self.px_on:
+            return None
+        hold = self._hold_from(st, now)
+        if self._lead(st, now) is not None or (hold is not None and hold - now < PX_CLEAR):
+            return None
+        nxt = self._next_decision(st, now)
+        if nxt is not None and nxt - now < PX_CLEAR:
+            soon.append(nxt + dt.timedelta(seconds=DECISION_MARGIN))
+            return None
+        if self._px_last is not None and now < self._px_last + PX_EVERY:
+            soon.append(self._px_last + PX_EVERY)
+            return None
+        if self._px_disk is not None and now < self._px_disk + FAIL_BACKOFF:     # (no room: looked at again later)
+            soon.append(self._px_disk + FAIL_BACKOFF)
+            return None
+        job = self._px_job(st, now, today, session, soon)
+        if job is None:
+            return None
+        name, fn = job
+        return Task(f"px-{name}", lambda ctx, deadline: self._px(ctx, deadline, name, fn), PX_BUDGET, cut=True)
+
+    def _px_job(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                soon: list[dt.datetime]) -> tuple[str, Callable[..., dict[str, Any]]] | None:
+        """Which recorder is due now (the windows of `PX_BUDGET`'s comment), in order: today's universe, FLAGGED, the
+        premarket and 15:30 marks, the night's bars, the backfill, the operating cache; each once done is not due again
+        (px.sqlite `px_meta`), and one that failed waits FAIL_BACKOFF."""
+        path = PXS.path_of(self.root)
+        px = _PxRead(path) if path.exists() else None    # (read-only: the plan never writes px.sqlite)
+        try:
+            meta = (lambda key: px.meta(key)) if px is not None else (lambda key: None)
+            t = _ny_time(now)
+            backfilled = meta("px:backfill:done") is not None
+            if session is not None and backfilled:
+                d = today.isoformat()
+                if PX_UNIVERSE_AT <= t < PX_FLAGS_AT and meta(f"px:universe:{d}") is None and \
+                        not self._quiet("px-universe", now, soon):
+                    return "universe", lambda ctx, px_, gw, run, dl: self._px_universe(ctx, px_, run, dl, today)
+                have = px is not None and px.has_universe(today)
+                if have and t >= PX_FLAGS_AT and now < session.close_at - PX_FLAGS_BEFORE_CLOSE and \
+                        meta(f"px:flags:{d}") is None and not self._quiet("px-flags", now, soon):
+                    return "flags", lambda ctx, px_, gw, run, dl: self._px_flags(ctx, px_, gw, run, today)
+                if have and t >= PX_PM_AT and meta(f"px:pm:{d}") is None and \
+                        not self._quiet("px-pm", now, soon):
+                    return "pm", lambda ctx, px_, gw, run, dl: self._px_minutes(ctx, px_, gw, run, session, "pm")
+                if have and now >= session.close_at + PX_1530_AFTER and meta(f"px:px1530:{d}") is None and \
+                        not self._quiet("px-px1530", now, soon):
+                    return "px1530", lambda ctx, px_, gw, run, dl: self._px_minutes(ctx, px_, gw, run, session, "px1530")
+            night = self._px_night(st, now, today, session)
+            if night is not None and backfilled and meta(f"px:bars:{night.isoformat()}") is None and \
+                    not self._quiet("px-daily", now, soon):
+                return "daily", lambda ctx, px_, gw, run, dl: self._px_daily(ctx, px_, gw, run, night)
+            quiet_hours = session is None or _night(t)
+            if quiet_hours and not backfilled and not self._quiet("px-backfill", now, soon):
+                return "backfill", lambda ctx, px_, gw, run, dl: self._px_backfill(ctx, px_, gw, run, dl, today)
+            if quiet_hours and backfilled and meta(f"px:ops:{today.isoformat()}") is None and \
+                    not self._quiet("px-ops", now, soon):
+                return "ops", lambda ctx, px_, gw, run, dl: self._px_ops(ctx, px_, run, dl, today)
+            return None
+        finally:
+            if px is not None:
+                px.close()
+
+    def _px_night(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None) -> dt.date | None:
+        """The session whose nightly bars are due: today's once its night's score has run (an `ok` score receipt since
+        its 20:30 ET), else the session before today once its own did."""
+        nights = ([today] if session is not None else []) + [s.day for s in C.previous(st, today, 1)]
+        for night in nights:
+            if self._receipt_since(st, "score", _wall(night, SCORE_AT), status="ok"):
+                return night
+        return None
+
+    def _px(self, ctx: LaneContext, deadline: float | None, name: str, fn: Callable[..., dict[str, Any]]) -> dict[str, Any]:
+        """ONE PX RECORDER RUN, ISOLATED: px.sqlite opened for it, a run id kept (`px_runs`), its reads through
+        `PX.PxGateway` (the SIP bars route, the bucket after the lane, cut at the bound), its SEC reads through the
+        lane's bounded reader. Never raises: a cut ends it `cut` (the next run goes on from what it stored), any failure
+        is `failed`, a warning at most once an hour, and that recorder waits FAIL_BACKOFF; nothing else waits on it.
+        THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`: px.sqlite under its 2 GB line and
+        the state disk above the PX floor) is checked BEFORE THE RUN, which without room is `disk` and opens nothing
+        (no row written, px.sqlite not even made), and before every request of it (`PX.PxRoom`: the run ends `disk`
+        before its next page); every PX run then waits FAIL_BACKOFF, a warning says why at most once an hour, the last
+        check is in lane.json (`px_store`), and league/ops/evl_health.py raises `evl_px_store`."""
+        now = ctx.now()
+        self._px_last = now
+        room = PXS.room(self.root)
+        self._px_room = {k: room[k] for k in ("size_bytes", "free_bytes", "ok", "why")} | {"at": S.iso(now)}
+        if not room["ok"]:
+            self._px_disk = now
+            self.warn("px store", f"the PX recorders write nothing: {room['why']}")
+            return {"why": room["why"], "size_bytes": room["size_bytes"], "free_bytes": room["free_bytes"],
+                    "requests": 0, "_status": "disk"}
+        gw = PX.PxGateway(self.gateway(), self._bucket or PX.TokenBucket(clock=self._mono, sleep=self._sleep),
+                          until=deadline, late=lambda: self.late(deadline), room=lambda: PXS.room(self.root)["why"])
+        status, out = "ok", {}
+        px = None
+        run = None
+        try:
+            px = PXS.PxStore(self.root)
+            run = px.start_run(name, now=now, free_bytes=room["free_bytes"])
+            out = dict(fn(ctx, px, gw, run, deadline) or {})
+            status = str(out.pop("_status", "ok"))
+        except PX.PxRoom as exc:
+            status, out = "disk", {"why": str(exc)[:200]}
+            self._px_disk = self.now()
+            self.warn("px store", f"the PX recorders stop: {exc}")
+        except (PX.PxCut, LaneDeadline) as exc:
+            status, out = "cut", {"cut": str(exc)[:200]}
+        except Exception as exc:  # noqa: BLE001 - a recorder's failure is its own
+            status, out = "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+            self._failed[f"px-{name}"] = self.now()
+            self.warn(f"px {name}", exc)
+        finally:
+            if px is not None:
+                try:
+                    if run is not None:
+                        px.finish_run(run, status, now=self.now(), requests=gw.requests,
+                                      rows=int(out.get("rows") or out.get("written") or 0), summary=out)
+                except Exception:  # noqa: BLE001 - the run's record is a report
+                    pass
+                px.close()
+        brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
+        return {**brief, "requests": gw.requests, "_status": status}
+
+    def _px_late(self, deadline: float | None) -> bool:
+        """A PX recorder's `late`: the bound passed, or the store has no room (`PXS.room`: its next write waits)."""
+        return self.late(deadline) or not PXS.room(self.root)["ok"]
+
+    def _px_listed(self, ctx: LaneContext, day: dt.date | None = None) -> dict[str, list[str]] | None:
+        """{cik: listed tickers} from the lane's ticker copy for `day` (the latest with None) and the live asset list;
+        None when the lane holds no ticker copy yet (the recorder waits for the lane's own snapshot)."""
+        if not ctx._snapshots():
+            return None
+        return PX.listed_tickers(ctx.tickers_for(day), ctx.assets(True))
+
+    def _px_backfill(self, ctx: LaneContext, px: PXS.PxStore, gw: Any, run: str, deadline: float | None,
+                     today: dt.date) -> dict[str, Any]:
+        listed = self._px_listed(ctx)
+        if listed is None:
+            return {"why": "no ticker copy yet", "_status": "waiting"}
+        out = PX.backfill(px, gw, {t for ts in listed.values() for t in ts}, ctx.store, today, now=ctx.now(), run=run,
+                          late=lambda: self._px_late(deadline))
+        return out | {"_status": "ok" if out.get("done") else "partial"}
+
+    def _px_daily(self, ctx: LaneContext, px: PXS.PxStore, gw: Any, run: str, night: dt.date) -> dict[str, Any]:
+        listed = self._px_listed(ctx)
+        if listed is None:
+            return {"why": "no ticker copy yet", "_status": "waiting"}
+        return PX.daily(px, gw, {t for ts in listed.values() for t in ts}, ctx.store, night, now=ctx.now(), run=run)
+
+    def _px_ops(self, ctx: LaneContext, px: PXS.PxStore, run: str, deadline: float | None,
+                today: dt.date) -> dict[str, Any]:
+        listed = self._px_listed(ctx)
+        if listed is None:
+            return {"why": "no ticker copy yet", "_status": "waiting"}
+        out = PX.operating_fill(px, listed, today, ctx.sec, now=ctx.now(), late=lambda: self._px_late(deadline))
+        if not out["left"]:
+            px.set_meta(f"px:ops:{today.isoformat()}", S.iso(ctx.now()))
+        return out | {"_status": "ok" if not out["left"] else "partial"}
+
+    def _px_universe(self, ctx: LaneContext, px: PXS.PxStore, run: str, deadline: float | None,
+                     day: dt.date) -> dict[str, Any]:
+        if not ctx._snapshots():
+            return {"why": "no ticker copy yet", "_status": "waiting"}
+        out = PX.universe(px, ctx.store, day, tickers=ctx.tickers_for(day), assets=ctx.assets(True), now=ctx.now(),
+                          run=run, late=lambda: self._px_late(deadline))
+        if "why" in out:
+            return out | {"_status": "waiting"}
+        if not out["left"]:
+            px.set_meta(f"px:universe:{day.isoformat()}", S.iso(ctx.now()))
+        return out | {"_status": "ok" if not out["left"] else "partial"}
+
+    def _px_flags(self, ctx: LaneContext, px: PXS.PxStore, gw: Any, run: str, day: dt.date) -> dict[str, Any]:
+        out = PX.flags(px, gw, PX.names(px, day), ctx.store, day, now=ctx.now(), run=run)
+        px.set_meta(f"px:flags:{day.isoformat()}", S.iso(ctx.now()))
+        return out
+
+    def _px_minutes(self, ctx: LaneContext, px: PXS.PxStore, gw: Any, run: str, session: C.Session,
+                    label: str) -> dict[str, Any]:
+        symbols = PX.pm_names(px, session.day) if label == "pm" else PX.names(px, session.day)
+        out = PX.minutes(px, gw, symbols, session, label, now=ctx.now(), run=run)
+        if out.get("waiting"):
+            return out | {"_status": "waiting"}
+        px.set_meta(f"px:{label}:{session.day.isoformat()}", S.iso(ctx.now()))
+        return out
+
     # -- the ticker snapshot ----------------------------------------------------------------------------------------
     def _tickers_due(self, st: S.Store, now: dt.datetime, today: dt.date, soon: list[dt.datetime]) -> bool:
         at = _wall(today, TICKERS_AT)
@@ -2106,6 +2397,39 @@ class EventLane:
 
 
 # ---------------------------------------------------------------------------------------------------- the hook
+class _PxRead:
+    """px.sqlite opened READ-ONLY for the plan (`EventLane._px_job`): its progress marks and whether a session's
+    universe holds a row; every read error reads as nothing (the recorder that would write it is then due)."""
+
+    def __init__(self, path: Path):
+        self.db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+
+    def meta(self, key: str) -> str | None:
+        try:
+            row = self.db.execute("SELECT value FROM px_meta WHERE key=?", (key,)).fetchone()
+        except sqlite3.Error:
+            return None
+        return None if row is None else str(row[0])
+
+    def has_universe(self, day: dt.date) -> bool:
+        try:
+            return self.db.execute("SELECT 1 FROM px_universe WHERE day=? LIMIT 1", (day.isoformat(),)).fetchone() is not None
+        except sqlite3.Error:
+            return False
+
+    def close(self) -> None:
+        self.db.close()
+
+
+def _ny_time(now: dt.datetime) -> dt.time:
+    return now.astimezone(C.NY).time()
+
+
+def _night(t: dt.time) -> bool:
+    start, end = PX_NIGHT
+    return t >= start or t < end
+
+
 class LanePublisher:
     """`house.publisher`, wrapped: the original publisher's `publish(house)` exactly as before (its failure is still
     the House's "publishing failed" warning), then the lane's turn (`EventLane.turn`, which never raises). Every other

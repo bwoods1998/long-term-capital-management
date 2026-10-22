@@ -296,12 +296,14 @@ class TheEquityLane(unittest.TestCase):
                                               "league/events/news.py", "league/events/run.py",
                                               "league/events/store.py", "league/events/house.py",
                                               "league/events/births.py", "league/events/done.py",
+                                              "league/events/attempts.py", "league/events/pxstore.py",
+                                              "league/events/pxdata.py",
                                               "league/events/learner.py", "league/events/costs7.py",
                                               "league/events/judge7.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
                          "the release; E4's two, FWD1-R's seat path, R0's data plan, R1's event-lane judges, "
                          "PREREG-EVL-3's band rules, R2's event kind, the lane's rule inputs, 1019c's verdict line, "
-                         "R3's births and the Done judge wait for its next one")
+                         "R3's births, the Done judge and release 1019i's ledger and price-lane store wait for its next one")
         for entry in ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py",
                       "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
                       "league/swarm/elane_seal.py", "league/swarm/elane_review.py", "league/swarm/elane_folds.py",

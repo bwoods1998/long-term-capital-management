@@ -116,6 +116,8 @@ LINE_PENDING = ("league/events/house.py",)
 R3_PENDING = ("league/events/births.py",)
 #: The goal V2's Done judge (the Done reader, A84): league/events/done.py.
 DONE_PENDING = ("league/events/done.py",)
+#: Release 1019i's three (the attempts ledger and the price lane's store and recorders: league/ci.py's comment).
+INFRA_1019I_PENDING = ("league/events/attempts.py", "league/events/pxstore.py", "league/events/pxdata.py")
 #: PREREG-EVL-7's two (release 1019i): the learners' pinned rule and COST-7, behind the wall with the lane's judges.
 LEARNER_PENDING = ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
@@ -388,7 +390,7 @@ class TheWiringIsWhole(unittest.TestCase):
                                            + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING + DONE_PENDING,
                                            E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
                                            + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING + DONE_PENDING
-                                           + LEARNER_PENDING),
+                                           + INFRA_1019I_PENDING + LEARNER_PENDING),
                       "nothing of E2's or E3's waits for the gateway")
         self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")

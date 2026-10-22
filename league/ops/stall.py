@@ -141,7 +141,10 @@ not done by 12:00 ET of the next weekday, a run of passes that are not `ok` over
 to fetch a filing) and `evl_handback` (a real event fill the book owes the lane's `real_fills` over 1 h and not there);
 and `evl_decide` also stands for PREREG-EVL-4's rows of a close still to decide by themselves 2 h after the job first saw
 it (`stall.json` `evl_kept`), `evl_verdicts` reads their `decide-close-evl4` tallies too (release 1019h: PREREG-EVL-5's
-rows the same, `decide-close-evl5`, kept apart under `evl_kept` `five`).
+rows the same, `decide-close-evl5`, kept apart under `evl_kept` `five`). Release 1019i adds `evl_fill_rate` and
+`evl_attempts` (the attempts ledger), `evl_score_parity` (the batched score's parity latch: a sampled intent the two
+paths settled differently, every intent settled by the per-intent path until the captain clears it) and `evl_px_store`
+(px.sqlite at its 2 GB line, or the state disk under the PX floor while the recorders run).
 
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
@@ -357,7 +360,8 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
           "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
-          "evl_backfill", "evl_handback", "evl_learner", "elane_dq", "elane_births", "elane_idle", "elane_refused")
+          "evl_backfill", "evl_handback", "evl_learner", "evl_fill_rate", "evl_attempts", "evl_score_parity", "evl_px_store", "elane_dq",
+          "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
 #: league/tests/test_elane_xs.py) and their Train runs on the House are their own: none masks a stalled options

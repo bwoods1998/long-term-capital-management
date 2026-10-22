@@ -607,6 +607,86 @@ verdict reads), `run.py` (which program gets which rows, the shadow's 15:30 reac
 schema); `house.py`, `gw.py` and `report.py` stay outside, so their fixes can ship through the updater. R3 adds
 `births.py` behind the wall (the grammar a seated birth's rule is read by, the validator's budget, the facts' wall); the
 registered lines under `docs/births/` are data the House appends, never read back from the tree, and stay outside.
+Release 1019i adds `attempts.py` (the attempts ledger: league/events/attempts.py), `pxstore.py` and `pxdata.py` (the
+price lane's store and recorders), all three behind the wall with the lane's rule inputs, and splits universe.py's
+`eligible` into its pure core `eligible_row` and the writer (below, **Release 1019i**).
+
+## Release 1019i: the batched score, the attempts ledger, the price lane's data (not deployed)
+
+Harness only (PREREG-EVL-8's harness plan H1 and H2, PREREG-EVL-7's harness changes H3 and H4): no money row, no
+constitution row and no judge's rule moves (the money digest `8e63ce64` and the constitution `c3026eba` are release
+1019h's, read with the tree's own functions on 3.14 and 3.11). Operating steps: docs/operations.md, **Release 1019i
+infrastructure**.
+
+- THE BATCHED SCORE (league/events/score.py's docstring, `prefetch`, `Prefetch`, `order_due`, `parity_window`,
+  `latched`): the night's score reads the daily bars (raw and adjusted) of every due intent's symbol and both
+  benchmarks ONCE over the union window, 200 symbols a request (the House prefetches 400 intents at a time,
+  `house.PREFETCH_WINDOW`, so a pass its bound cuts read no bars for intents it never reached), INTO A CACHE THAT LIVES
+  ONLY FOR THE PASS, and each intent settles with no bar request of its own when the cache holds every bar it reads:
+  its ratios come from the cache and it writes to `bars` exactly the rows its own two fetches would have written
+  ({symbol, benchmark} x {raw, all} x [entry, exit]), so `bars` ends every pass as under release 1019h (release 1019i's
+  review: an earlier draft wrote the whole union window to `bars`, re-basing settled days after a split, which moved
+  Done's fill gaps, league/events/done.py `_ratio`). A bar the vendor did not send falls back to the intent's own two
+  fetches. Alpaca adjusts every bar to today's basis whatever the window, so the outcome rows and the `bars` rows are
+  the same byte for byte (league/tests/test_events_score_batch.py: a golden synthetic tape with a split inside a hold,
+  a missing bar, a ladder exit, both skips and a failed chunk, compared in both directions, and two nights with a
+  split between them, Done's gap unmoved). The seating versions and their controls settle first; prints stay read once
+  per (symbol, day, label). `events.score_batch` (on; false is release 1019h's per-intent path). THE PARITY NIGHT:
+  every night until the first on which a flag is written, and all of that night (meta `evl:score:batch:first_night`,
+  kept with the first flag: a night whose prefetch failed or whose sample the cache served none of tested nothing
+  batched and is not the parity night), 5% of each prefetch's intents (by sha256 of the key) are settled twice IN
+  MEMORY BEFORE ANY OF THEM IS WRITTEN, by the cache and by the
+  per-intent path's own two requests (read, never stored), and only an equality flag is kept (`score_parity`: 1 or 0,
+  never a value); an intent the cache does not serve gets no flag (it is the per-intent path itself).
+  `events.score_parity` true every night, false never. A FLAG 0 FAILS CLOSED: the parity latch (meta
+  `evl:score:batch:latched`, the intent's identifiers and a time) turns the batched score off for that pass and every
+  later one, whatever `events.score_batch` says, until the captain clears it (`python3 -m league.events --state
+  /workspace/state/events score-unlatch`; the next batched night is then a parity night again); `evl_score_parity`
+  stands meanwhile. Each score receipt carries its requests
+  by kind (bars, trades), its seconds, the flags and the latch: the daily report's SETTLE-PACE LINE
+  (league/events/report.py `settle_pace`; the mail's `settle`, "BATCHED SCORE OFF" while latched).
+- THE ATTEMPTS LEDGER (league/events/attempts.py; `real_attempts` beside `real_fills`): every event order the House's
+  book sent or tried (the buys' limit-on-open and limit-on-close orders, the sales' market-on-open and market-on-close,
+  the fallback ladder's day sales, A80's re-sends), keyed by its client id, with the venue's own order states as the
+  book read them (sent, accepted, cancelled, filled, expired, rejected, lost, refused; final or not), the venue's last
+  word, its quantities asked and filled, the average fill price, the limit, A80's cancel time and the venue's stamps;
+  and every planned real buy that ended with no order, with its binding. The book writes it each minute after the real
+  fills (league/equity/live.py `_event_attempts`), reading its own orders and never sending, changing or cancelling one
+  (a test pins the order bodies byte-identical with it on and off). The first write after the deploy carries every
+  event order on record, so the sessions before the release enter COST-7's population where the House's order records
+  are complete. The daily report's FILL-RATE LINES: by auction over the trailing 3 and 20 sessions, the buys sent and
+  filled and the rate, the venue's cancels at once over the buy orders sent, the re-sends and the picks that ended
+  unsent.
+- THE PRICE LANE'S DATA (league/events/pxstore.py, pxdata.py; `events.px_data`, OFF): px.sqlite beside
+  events.sqlite (`<state>/events/px.sqlite`), its own tables only: `px_bars` (an adjustment the vendor publishes later
+  is kept in `px_bar_moves`), the write-once `px_minutes` (the PX1530 mark, the premarket indication, the volume
+  through 15:30), `px_flags` (FLAGGED(D) from P's adjusted close read at or after 09:00 ET of D), `px_eligibility` and
+  `px_universe` (PXU(D)'s base: the lane's own eligibility rule, `universe.eligible_row`, on px.sqlite's bars and its
+  own operating-company cache, then P's raw close >= $5, ADV20 >= $10,000,000 and adjusted bars on each of the 61
+  sessions before D), `px_features` (a decided value set, written once with its decision time, the latest fetch time
+  of its inputs, the bar times it read, its source and its run) and `px_runs` (every recorder run, its id on every row
+  it writes). Every read is the gateway's existing SIP bars route with `sip_end`'s 16-minute clamp, through a token
+  bucket of 150 requests a minute the lane's own reads share, the lane first (a 50-token reserve PX never takes). The
+  House runs the recorders last of its tasks, bounded (60 s, reads cut at the bound), never within 10 minutes of a
+  decision or inside the close decision's lead, each failure its own: the 270-session daily backfill and the
+  operating cache on the first nights, the nightly bars after the score, the universe from 07:40 ET, FLAGGED from
+  09:00 ET, the premarket marks from 09:35 ET and the 15:30 marks after the close. With the flag on they only WARM the
+  store: nothing that decides, judges or trades reads px.sqlite until PREREG-EVL-8's programs ship (H3; a test holds
+  run.py, book.py, screen.py, score.py, bands.py, done.py, programs.py, universe.py and league/equity/ to it). THE
+  STORE'S ROOM (release 1019i's review; the harness plan's "a size line and a 2 GB alarm"; league/events/pxstore.py
+  `room`): a recorder writes only while px.sqlite and its WAL hold under 2 GiB and the state disk keeps 5 GiB free (the
+  swarm guard's 3 GB floor and 2 GB more; an unread free space is no room), checked before every PX run (a run without
+  room is `disk` and opens nothing) and before every request of one (`pxdata.PxRoom`); every PX run then waits 10
+  minutes, `px_runs` keeps each run's free space at its start and px.sqlite's size at its end, lane.json says the last
+  check (`px_store`), the mail carries a PX line (size, free space, the day's runs by status) and `evl_px_store`
+  stands while a line is crossed.
+- ALARMS: `evl_fill_rate` (an auction's real buys filled under 85% of those sent over the last 3 sessions, at least 5
+  sent, or more than 10 points under their last 20) and `evl_attempts` (an order sent with no final state an hour after
+  its auction, a day sale's after its session's close, or an order of the book's the ledger lacks or holds in an older
+  state an hour after its last change); both worded in the gateway's mail (deploy the gateway first). From the review:
+  `evl_score_parity` (the parity latch stands: the batched score is off) and `evl_px_store` (px.sqlite at its 2 GB
+  line, or the state disk under the PX floor while the recorders run).
+- THE FACTS' WALL: league/events/births.py `FACTS_DENY` gains `real_attempts`, `score_parity` and every `px_*` table.
 
 ## Where it runs (shadow)
 
@@ -709,6 +789,10 @@ mail at its pace:
 | `evl_entries` (release 1019f) | an auction of the last 24 hours (judged 15 minutes after its cross) at which under 90% of the planned real buys filled, or one was never sent: from the book's own rows in `live.sqlite` (`eq_event_intents` buys, `eq_intents`, `eq_orders`). The numbers: planned, filled, the venue's cancels at once (A80: an auction buy ended `canceled` within 60 s of its own `submitted_at`, nothing filled), the re-sends after one and how many filled, the never-sent by reason (the day order count, cash, the loss budget, the 10% a name, the invested cap, the program's room, one share too dear, the gateway, a gate of real opens (release 1019g: a PREREG-EVL-5 buy `part_hold` held, waiting for the lane's close decision or never traded after its part failed), ...), and the constraint that bound the auction most (cash, budget, room, order line, name wall, invested) |
 | `evl_backfill` (release 1019f) | a weekday of the daily-index backfill's reach not `done` by 12:00 ET of the next weekday, a run of its passes that are not `ok` (`waiting`, `partial`) lasting over 6 hours, or a done day whose passes failed to fetch a filing; the day and its counts named. The screen's looks wait for every weekday of the reach, so this says why one waits |
 | `evl_handback` (release 1019f) | a real event fill the book made (`eq_orders` of a real event lot with `filled_qty` > 0) owed to the lane's `real_fills` over an hour and not there (a buy once its intent ended, a sale once its lot closed: as the book hands them back): the lane computes Sized, demotion and retirement from those rows |
+| `evl_fill_rate` (release 1019i) | an auction's real buys (the attempts ledger, `real_attempts`) filled under 85% of those sent over the last 3 sessions (at least 5 sent), or more than 10 points under their last 20 sessions' rate (at least 5 sent in each) |
+| `evl_attempts` (release 1019i) | an event order sent with no final state in the attempts ledger an hour after its auction (a day sale's after its session's close), or an order of the book's (`live.sqlite`) the ledger lacks, or holds in an older state, an hour after its last change |
+| `evl_score_parity` (release 1019i) | the batched score's parity latch stands (league/events/score.py `latched`): a sampled intent the batched path and the per-intent path settled differently, in memory, before anything was written; every intent settles by the per-intent path until the captain clears the latch (`score-unlatch`). The numbers: the night's flags (checked, equal) and the intent's program and version, never a value |
+| `evl_px_store` (release 1019i) | px.sqlite and its WAL at or over 2 GiB, or, with `events.px_data` on, the state disk under the PX floor (5 GiB: the swarm guard's 3 GB and 2 GB more) or its free space unread (league/events/pxstore.py `room`); the recorders write nothing while it stands. Judged while `events.px_data` is on or px.sqlite exists |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |
 
 None is judged while `<state>/events/STOP` stands, nor for 30 minutes after it goes; `evl_verdicts` is not judged while

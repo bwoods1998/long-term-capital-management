@@ -8,7 +8,9 @@ older decision a release without them made) | births [--day D] [--specs
 FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own specs from FILE, a JSON list of
 {spec, why}, with no call; validated and registered through the gateway's docs route, `--dry-run` validated only) |
 facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts) | learners (PREREG-EVL-7's
-owed decisions, nothing while REGISTERED_AT_7 is None). Prints one JSON summary.
+owed decisions, nothing while REGISTERED_AT_7 is None) | score-unlatch (release 1019i: the captain's clearing of the
+batched score's parity latch, league/events/score.py `unlatch`, once its flag 0 is explained; no gateway is read).
+Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -136,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     fa = sub.add_parser("facts")
     fa.add_argument("--day", type=_day, default=None)
     fa.add_argument("--specs", default=None)
+    sub.add_parser("score-unlatch")
     args = ap.parse_args(argv)
+    if args.cmd == "score-unlatch":     # (release 1019i: the parity latch, cleared with no gateway and no program read)
+        with S.Store(args.state) as st:
+            out = {"cleared": SC.unlatch(st)}
+        json.dump(out, sys.stdout, default=str, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
     with S.Store(args.state) as st:
         P.load_births(st)       # (R3: the registered births, after every PREREG program)
         gw = G.Gateway(G.token_from_env(), min_interval=0.05)
