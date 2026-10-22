@@ -35,8 +35,9 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   // of Probe+ rows and its reach (four for the fixture's two rows).
   // Release 1019i: the attempts ledger's fill rates (two lines an auction), the batched score's settle pace (two) and,
   // its review, the PX line (one).
-  assert.ok(text.length <= 62, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2 + 1; no Probe buy: 61)
-  assert.equal(text.length, 61);
+  // Release 1019j: PREREG-EVL-7's learner line (counts only) makes 62.
+  assert.ok(text.length <= 62, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2 + 1 + 1; no Probe buy: 62)
+  assert.equal(text.length, 62);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',

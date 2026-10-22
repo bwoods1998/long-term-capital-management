@@ -10,6 +10,18 @@ is built and not deployed); the running House release is release 1019g (live sin
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019j (Oct 23, 2026): release 1019i + PREREG-EVL-7's learners + the batched score and attempts ledger (A130-A132): `rel/1019j`, not deployed
+
+Release 1019i (PREREG-EVL-6's code, the section below) ships ALONE first (A132: its D7 guard must be live before the Oct 28
+close). Release 1019j is that head plus `feat/evl-7` (the learners, pinned: shipping it starts EVL-LRN-ON's real money at
+learning size from its first live decision) and `feat/infra-1019i` (the section after; the PX recorders stay OFF). Deploy
+exactly as release 1019i: THE GATEWAY FIRST from the head (`gateway/lib/email.mjs` has the learners' and the ledger's cause
+words), the gateway's health through the House, then `ship_house.sh <head> <PR> r1019j d52a5af5 9c8b2221` (the pair is
+release 1019i's; this release moves no digest). Rollback: the House to release 1019i's head, the gateway to release 1019i's
+version. After it: `python -m league.events --state /workspace/state/events learners` shows the learners' owed decisions;
+the report's learner lines show counts only; the alarm `evl_learner` names their stalls. Owed before any PREREG-EVL-6
+version's first stay look (about Nov 20): the stay-look majors of `feat/evl-6`'s re-review and the learners' stays.
+
 ## Release 1019i (Oct 22, 2026): PREREG-EVL-6, one money-weighted session-block screen for every seat (A116): `feat/evl-6`, not deployed
 
 Cut from `rel/1019h` (`59663f06`, not deployed); a draft PR with base `rel/1019h`. It carries [PREREG-EVL-6](prereg/PREREG-EVL-6.md)
