@@ -177,12 +177,18 @@ def closing_print_exchange(gw: Any, symbol: str, session: Any) -> str | None:
     return None
 
 
-def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
-             assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, now: dt.datetime | None = None,
-             live: bool = True, listing: Callable[[str], str | None] | None = None) -> dict[str, Any] | None:
-    """`listing(symbol)` -> the listing exchange name for a BACKFILLED day (the previous session's closing-print
-    exchange: PREREG section 2); a live day reads the Alpaca asset's exchange."""
-    """The universe row for (cik, entry session `day`), or None. Needs the 20 sessions' raw bars already fetched."""
+def eligible_row(store: Any, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
+                 assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, live: bool = True,
+                 listing: Callable[[str], str | None] | None = None,
+                 bars_of: Callable[[str, list[dt.date]], Mapping[str, Mapping[str, Any]]] | None = None
+                 ) -> dict[str, Any] | None:
+    """THE PURE CORE of the eligibility test (release 1019i, PREREG-EVL-8's harness plan H2: the PX universe judges by
+    this rule and never writes the lane's tables): the universe row `eligible` writes for (cik, entry session `day`), or
+    None, WRITING NOTHING. The sessions are `store`'s calendar; the 20 sessions' raw daily bars are read by
+    `bars_of(symbol, days)` (the lane's own `bars` by default, so the lane's test is exactly as before).
+    `listing(symbol)` -> the listing exchange name for a BACKFILLED day (the previous session's closing-print exchange:
+    PREREG section 2); a live day reads the Alpaca asset's exchange."""
+    read = bars_of or (lambda symbol, days: bars(store, symbol, days, "raw"))
     prior = C.previous(store, day, ADV_SESSIONS)
     if len(prior) < ADV_SESSIONS or not operating_ok:
         return None
@@ -190,7 +196,7 @@ def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, li
     for symbol, title in tickers.get(cik, []):
         if not _listed(assets.get(symbol), live):
             continue
-        got = bars(store, symbol, [s.day for s in prior], "raw")
+        got = read(symbol, [s.day for s in prior])
         if len(got) < ADV_SESSIONS or any(got[s.day.isoformat()].get("c") is None for s in prior):
             continue
         closes = [float(got[s.day.isoformat()]["c"]) for s in prior]
@@ -206,6 +212,18 @@ def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, li
             continue  # a backfilled name with no closing print on a listed exchange the session before D
         best = {"day": day.isoformat(), "symbol": symbol, "cik": cik, "name": title, "exchange": exchange,
                 "prev_close": prev_close, "adv20": adv, "bench": "IWM" if adv < BENCH_SPLIT else "SPY"}
+    return best
+
+
+def eligible(store: S.Store, cik: str, day: dt.date, *, tickers: Mapping[str, list[tuple[str, str]]],
+             assets: Mapping[str, Mapping[str, Any]], operating_ok: bool, now: dt.datetime | None = None,
+             live: bool = True, listing: Callable[[str], str | None] | None = None) -> dict[str, Any] | None:
+    """The universe row for (cik, entry session `day`), or None, WRITTEN to the lane's `universe` when eligible: the pure
+    core (`eligible_row`, release 1019i's split) and its writer. Needs the 20 sessions' raw bars already fetched.
+    `listing(symbol)` -> the listing exchange name for a BACKFILLED day (the previous session's closing-print exchange:
+    PREREG section 2); a live day reads the Alpaca asset's exchange."""
+    best = eligible_row(store, cik, day, tickers=tickers, assets=assets, operating_ok=operating_ok, live=live,
+                        listing=listing)
     if best is not None:
         store.db.execute("INSERT OR REPLACE INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
                          "VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL)",
@@ -284,6 +302,7 @@ def seen_live(store: S.Store, day: dt.date, kind: str, stored: Mapping[str, str 
     return {cik for cik, when in stored.items() if when and S.parse_iso(when) < started}
 
 
-__all__ = ["sip_end", "fetch_daily_bars", "bars", "sec_tickers", "alpaca_assets", "operating", "eligible", "EXCHANGES",
+__all__ = ["sip_end", "fetch_daily_bars", "bars", "sec_tickers", "alpaca_assets", "operating", "eligible",
+           "eligible_row", "EXCHANGES",
            "EXCHANGE_CODES", "CODE_EXCHANGES", "closing_print_exchange", "results", "record_result", "combined",
            "seen_live"]

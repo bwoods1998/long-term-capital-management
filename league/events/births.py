@@ -158,6 +158,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from . import calendar as C
 from . import gw as G
 from . import programs as P
+from . import pxstore as PXS
 from . import screen as SN
 from . import store as S
 from . import verdicts as V
@@ -315,6 +316,10 @@ FACTS_DENY = frozenset({"bars", "marks", "outcomes", "looks", "bands", "band_his
 #: RELEASE 1019i: the attempts ledger (`real_attempts`: the venue's fill prices and states, PREREG-EVL-7's H6) and the
 #: batched score's parity flags (`score_parity`: one per settled intent) are outcome-derived: the facts never read them.
 FACTS_DENY = FACTS_DENY | frozenset({"real_attempts", "score_parity"})
+#: ... and every table of the price lane's store (league/events/pxstore.py `TABLES`: SIP bars, minute marks, the flags,
+#: the PX universe's prices and the decided values): px.sqlite is a file of its own, which the facts never open, and
+#: each of its tables is refused by name as well.
+FACTS_DENY = FACTS_DENY | PXS.TABLES
 #: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
 #: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
 #: of their programs has a selection count and every candidate a Jaccard against them.
