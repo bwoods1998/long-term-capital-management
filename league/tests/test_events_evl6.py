@@ -15,7 +15,9 @@ The frozen text (docs/prereg/PREREG-EVL-6.md, tag prereg-evl-6, sha256 0f67f94e.
 - RUNS (sections 2-3): the 60th block ends the run; run n + 1 with its own tag, charged 0.13 when it starts, only when
   the lane's budget (3.9) holds it, in registration order; a waiting version has no look; births after waiting runs.
 - STAYS (section 3): the fixed reads at p <= 0.15 at every 100th Probe+ event, the 10% money stop over the whole stay,
-  the order at a close, the stay's lower tail, Sized's real-money conditions.
+  the order at a close once its own real-money events have settled (final or not: only the look waits), an older
+  unsettled event never holding a later close, one unsettled past the ladder judged without, the stay's lower tail,
+  Sized's real-money conditions.
 - THE MONEY (section 6): `event.max_open_v6.probe` 14 for these versions alone, the under-bar skip before a slot, the
   seat's room and issuers with the superseded version's open lots, a superseded seat's instance retired.
 - THE COUNT (section 5): 0.13 a version or run of 3.9, three ways, per version beside; R3's validator.
@@ -658,6 +660,84 @@ class TheStays(LaneCase):
         self.stay_day(self.days[9], [-0.9] * 10, base=900)
         [moved] = self.review(self.days[9])
         self.assertIn("fixed read", moved["why"], "the fixed reads first, then the money stop (section 3's order)")
+
+    def stay_looks(self) -> list[dict]:
+        return [r for r in SC.look_rows(self.st, *self.prog.key) if SC.key_of6(int(r["k"]))[0] == "stay"]
+
+    def test_a_stay_look_due_at_a_close_not_final_never_holds_back_that_closes_reads_and_money_stop(self):
+        """Section 3's order runs at each close once its real-money events have settled; only the stay's look waits
+        for the close to be final (release 1019i's review, the judges' lens)."""
+        for i, day in enumerate(self.days[:21]):
+            self.stay_day(day, [0.002, 0.001], base=100 * i)
+        self.stay_day(self.days[21], [-0.9] * 10, base=2100)    # the 22nd block: a stay look falls due at its close
+        with final(self.days[20]):                              # (that close is not final yet: the fast path waits)
+            [moved] = BA.review(self.st, now=et(self.days[21], 20, 40))
+        self.assertEqual(moved["band"], "learning")
+        self.assertIn("the money stop: the stay's 52 real-money Probe+ events", moved["why"])
+        self.assertEqual(self.stay_looks(), [], "the look waited for its record; the stop did not wait for the look")
+        self.assertEqual(BA.bands(self.st)[self.prog.key], "learning")
+        self.assertGreaterEqual(SC.stays6(self.st, *self.prog.key)[-1]["until"], et(self.days[21], 16, 0))
+
+    def test_only_the_look_waits_for_finality_and_it_is_held_as_of_its_close_once_final(self):
+        for i, day in enumerate(self.days[:23]):
+            self.stay_day(day, [0.002, -0.001], base=100 * i)
+        state = lambda: json.loads(self.st.meta(BA.STAY_KEY.format(program=self.prog.id, version=3, n=1)))
+        with final(self.days[20]):
+            self.assertEqual(BA.review(self.st, now=et(self.days[21], 20, 40)), [])
+        self.assertEqual(self.stay_looks(), [])
+        self.assertEqual((state()["through"], state()["looked"]), (self.days[21].isoformat(), self.days[20].isoformat()),
+                         "the reads and the stop judged the 22nd close; its look waits")
+        with final(self.days[20]):
+            BA.review(self.st, now=et(self.days[22], 20, 40))
+        self.assertEqual(self.stay_looks(), [], "still not final: the look waits, the next close's reads and stop go on")
+        self.assertEqual(state()["through"], self.days[22].isoformat())
+        with final(self.days[22]):
+            BA.review(self.st, now=et(self.days[22], 21, 40))
+        [look] = self.stay_looks()
+        self.assertEqual(S.parse_iso(look["at"]), et(self.days[21], 16, 0), "the look is as of the close it fell due at")
+        self.assertEqual(SC.key_of6(int(look["k"]))[2], 22)
+
+    def test_one_lot_whose_sale_never_fills_never_holds_a_later_closes_reads_and_money_stop(self):
+        """A real-money event still unsettled holds only its own close; the stop counts the stay's settled events
+        (release 1019i's review, the money lens)."""
+        [event] = self.lane.settled(self.prog, self.days[0], [("09999", 0.0, 0.0)])
+        BA.record_fill(self.st, program=self.prog.id, version=3, event=event, side="buy", qty=10, price=10.0, fee=0.0,
+                       filled_at=S.iso(et(self.days[0], 9, 30)), band="probe", target_usd=100.0, sized_usd=100.0)
+        self.stay_day(self.days[0], [-0.4] * 5, base=100)
+        self.assertEqual(self.review(self.days[0]), [], "its own close waits for its sale (the ladder may still sell it)")
+        for i, day in enumerate(self.days[1:6]):
+            self.stay_day(day, [-0.4] * 5, base=200 + 100 * i)
+        [moved] = self.review(self.days[1])
+        self.assertEqual(moved["band"], "learning")
+        self.assertIn("the money stop: the stay's 10 real-money Probe+ events lost $400.00 net, more than 10% of their "
+                      "$1000.00 buy cost", moved["why"], "the next close is judged on every settled event so far")
+
+    def test_a_close_still_to_come_is_never_judged(self):
+        self.stay_day(self.days[0], [-0.01] * 5, base=0)
+        state = lambda: json.loads(self.st.meta(BA.STAY_KEY.format(program=self.prog.id, version=3, n=1)))
+        with final(self.days[0]):
+            self.assertEqual(BA.review(self.st, now=et(self.days[1], 0, 30)), [])     # (after midnight: day 1 is open)
+        self.assertEqual(state()["through"], self.days[0].isoformat())
+        with final(self.days[0]):
+            BA.review(self.st, now=et(self.days[1], 12, 0))
+        self.assertEqual(state()["through"], self.days[0].isoformat(), "its close has not passed")
+
+    def test_a_close_whose_own_lot_is_unsettled_past_the_ladder_is_judged_without_it(self):
+        self.assertEqual(BA.STUCK_AFTER, EB.LADDER_CLOSES + 1, "the ladder's closing crosses, then its first day sale")
+        for i, day in enumerate(self.days[:22]):
+            self.stay_day(day, [0.002, -0.001], base=100 * i)
+        [event] = self.lane.settled(self.prog, self.days[21], [("08888", 0.0, 0.0)])
+        BA.record_fill(self.st, program=self.prog.id, version=3, event=event, side="buy", qty=10, price=10.0, fee=0.0,
+                       filled_at=S.iso(et(self.days[21], 9, 30)), band="probe", target_usd=100.0, sized_usd=100.0)
+        state = lambda: json.loads(self.st.meta(BA.STAY_KEY.format(program=self.prog.id, version=3, n=1)))
+        for wait in range(BA.STUCK_AFTER):
+            self.review(self.days[21 + wait])
+            self.assertEqual(self.stay_looks(), [], f"{wait} sessions after: the look at its close waits for its lot")
+            self.assertEqual(state()["unsettled"], [])
+        self.review(self.days[21 + BA.STUCK_AFTER])
+        [look] = self.stay_looks()
+        self.assertEqual(S.parse_iso(look["at"]), et(self.days[21], 16, 0))
+        self.assertEqual(state()["unsettled"], [event], "past the ladder: judged without it, and named")
 
     def test_the_stays_lower_tail_at_a_stay_look_demotes_and_a_fresh_run_follows(self):
         early = self.lane.days(dt.date(2026, 10, 1), 22)
