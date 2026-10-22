@@ -4,12 +4,18 @@ birth (league/tests/test_events_book.py's harness, league/tests/test_events_birt
 
 fix/a85-probe-cash-reservation was built on release 1019d, before births: its round-robin and its reservation read a
 program's BAND (`PRIORITY`), never its ROOM tier. On release 1019e a birth has its own tier (`book.BIRTH_ROOM`, R3-SPEC
-section 4: a birth comes after every PREREG program, whatever its band). Held here (the independent check of the A85
-branch, its major): `book.send_key`'s tier is `room_key`'s, round-robin only inside the PREREG Sized and Probe tiers
-(`ROUND_ROBIN_TIERS`); `book.allocate` groups by that tier (a birth at Probe never round-robins with a PREREG Probe
-program, and never takes a PREREG program's name before it is full); `EquityBook._event_reserve` holds room only for
-PREREG Probe and Sized programs (`book.reserved_for`), and a birth's buy at any band leaves that room as a PREREG
-learning buy does (`book.leaves_room`)."""
+section 4). Held here (the independent check of the A85 branch, its major): `book.send_key`'s tier is `room_key`'s,
+round-robin only inside the Sized and Probe tiers (`ROUND_ROBIN_TIERS`); `book.allocate` groups by that tier;
+`EquityBook._event_reserve` holds room only for Probe and Sized programs (`book.reserved_for`), and a learning buy
+leaves that room (`book.leaves_room`).
+
+RELEASE 1019h (the captain's A97, PL-2; R3-SPEC section 4 as A97 amends it, before any birth registered): a birth AT
+LEARNING stays after every PREREG program (`BIRTH_ROOM`: never reserved for, never round-robins, its buy leaves the
+room); a PROMOTED birth (Probe or Sized) takes ITS BAND'S TIER after that band's PREREG rows and before every learning
+row (PREREG-EVL-5 section 1.3's frozen ROOM text: within a band the tables' order, R3's births after every file's rows):
+it round-robins with them (last in each pass), A85's reservation holds room for it, and its own buy never leaves the
+room. Before it, a birth at Probe was after every PREREG learning program and sized less a PREREG Probe's reservation,
+so a promoted birth's Probe buys rarely reached Done's size."""
 
 from __future__ import annotations
 
@@ -54,39 +60,58 @@ class Births(unittest.TestCase):
         self.assertEqual((self.birth.id, self.birth.entry_at), (BIRTH, "open"))
 
     # ------------------------------------------------------------------------------------------- the order (pure)
-    def test_the_tiers_a_birth_is_after_every_prereg_program_whatever_its_band(self):
-        self.assertEqual(EB.room_key(BIRTH, "probe")[0], EB.BIRTH_ROOM)
+    def test_the_tiers_a_birth_at_learning_is_after_every_prereg_program_a_promoted_one_in_its_bands_tier(self):
+        self.assertEqual(EB.room_key(BIRTH, "learning")[0], EB.BIRTH_ROOM, "A97: a birth at learning stays last")
+        self.assertEqual(EB.room_key(BIRTH, "probe")[0], EB.PRIORITY["probe"], "A97 (PL-2): a promoted birth, its band's")
+        self.assertEqual(EB.room_key(BIRTH, "sized")[0], EB.PRIORITY["sized"])
+        # after that band's PREREG rows (the tables' order: births after every file's rows) and before every learning row
+        prereg = [p for p in P.SEATING if p.spec is None]
+        self.assertEqual(len(prereg), 15)
+        for prog in prereg:
+            self.assertLess(EB.room_key(prog.id, "probe"), EB.room_key(BIRTH, "probe"), prog.id)
+            self.assertLess(EB.room_key(BIRTH, "probe"), EB.room_key(prog.id, "learning"), prog.id)
+            self.assertLess(EB.room_key(prog.id, "learning"), EB.room_key(BIRTH, "learning"), prog.id)
         self.assertEqual(EB.ROUND_ROBIN_TIERS, (EB.PRIORITY["sized"], EB.PRIORITY["probe"]))
-        self.assertEqual([EB.reserved_for(BIRTH, b) for b in ("sized", "probe", "learning")], [False] * 3)
+        self.assertEqual([EB.reserved_for(BIRTH, b) for b in ("sized", "probe", "learning")], [True, True, False],
+                         "A97: A85 reserves for a promoted birth, never for one at learning")
         self.assertEqual([EB.reserved_for(PREREG_OPEN, b) for b in ("sized", "probe", "learning")], [True, True, False])
         self.assertEqual([EB.leaves_room(BIRTH, b) for b in ("sized", "probe", "learning", "retired")],
-                         [True, True, True, False])
+                         [False, False, True, False], "A97: a promoted birth's buy leaves no room, as its band's")
         self.assertEqual([EB.leaves_room(PREREG_OPEN, b) for b in ("sized", "probe", "learning", "retired")],
                          [False, False, True, False])
 
-    def test_the_sends_a_birth_at_probe_goes_after_prereg_learning_and_never_round_robins(self):
+    def test_the_sends_a_birth_at_probe_round_robins_last_in_each_pass_and_one_at_learning_goes_last(self):
         rows = [(BIRTH, "probe", 0), (BIRTH, "probe", 1), (PREREG_OPEN, "probe", 0), (PREREG_OPEN, "probe", 1),
                 (LEARN_ON, "learning", 0), (LEARN_ON, "learning", 1), (PREREG_CLOSE, "sized", 0)]
         order = sorted(rows, key=lambda r: EB.send_key(*r))
-        self.assertEqual(order, [(PREREG_CLOSE, "sized", 0), (PREREG_OPEN, "probe", 0), (PREREG_OPEN, "probe", 1),
-                                 (LEARN_ON, "learning", 0), (LEARN_ON, "learning", 1), (BIRTH, "probe", 0),
-                                 (BIRTH, "probe", 1)])
-        self.assertEqual(EB.send_key(BIRTH, "probe", 5), EB.send_key(BIRTH, "probe", 0), "a birth's tier: no pass")
+        self.assertEqual(order, [(PREREG_CLOSE, "sized", 0), (PREREG_OPEN, "probe", 0), (BIRTH, "probe", 0),
+                                 (PREREG_OPEN, "probe", 1), (BIRTH, "probe", 1), (LEARN_ON, "learning", 0),
+                                 (LEARN_ON, "learning", 1)],
+                         "A97 (PL-2): the promoted birth in the Probe tier, after the PREREG Probe row in each pass, "
+                         "before every learning buy")
+        self.assertNotEqual(EB.send_key(BIRTH, "probe", 1), EB.send_key(BIRTH, "probe", 0), "a promoted birth: passes")
+        at_learning = sorted([(BIRTH, "learning", 0), (BIRTH, "learning", 1), (LEARN_ON, "learning", 0),
+                              (PREREG_OPEN, "probe", 0)], key=lambda r: EB.send_key(*r))
+        self.assertEqual(at_learning, [(PREREG_OPEN, "probe", 0), (LEARN_ON, "learning", 0), (BIRTH, "learning", 0),
+                                       (BIRTH, "learning", 1)], "a birth at learning: after every PREREG program")
+        self.assertEqual(EB.send_key(BIRTH, "learning", 5), EB.send_key(BIRTH, "learning", 0), "no pass at learning")
         # release 1019e's order (room_key, then the buy's own place) is kept for every tier that does not round-robin
-        for program, band in ((BIRTH, "probe"), (BIRTH, "learning"), (LEARN_ON, "learning")):
+        for program, band in ((BIRTH, "learning"), (LEARN_ON, "learning")):
             self.assertEqual(EB.send_key(program, band, 3)[0::2], EB.room_key(program, band))
 
-    def test_allocate_a_birth_at_probe_takes_no_prereg_programs_name_before_it_is_full(self):
+    def test_allocate_a_birth_at_probe_round_robins_after_the_prereg_probe_rows_and_before_learning(self):
         wanted = {PREREG_OPEN: [pick("X"), pick("Y")], BIRTH: [pick("Y"), pick("Z")]}
         given, passed = EB.allocate(wanted, {PREREG_OPEN: 2, BIRTH: 2}, {PREREG_OPEN: "probe", BIRTH: "probe"})
-        self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()}, {PREREG_OPEN: ["X", "Y"], BIRTH: ["Z"]},
-                         "the PREREG Probe program first, whole; the birth after it (one shared round-robin group "
-                         "would have given the birth Y in the first pass)")
-        self.assertEqual(passed[BIRTH], {"name_given": 1})
+        self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()}, {PREREG_OPEN: ["X"], BIRTH: ["Y", "Z"]},
+                         "A97 (PL-2): one round-robin group, the PREREG row first in each pass (the birth takes Y in "
+                         "the first pass, as a later PREREG Probe row would)")
+        self.assertEqual(passed[PREREG_OPEN], {"name_given": 1})
         self.assertEqual(list(given), [PREREG_OPEN, BIRTH])
-        # ... and after a PREREG learning program too, as release 1019e gave it
+        # ... and BEFORE a PREREG learning program now; a birth at learning stays after it, as release 1019e gave it
         wanted = {BIRTH: [pick("Q")], LEARN_ON: [pick("Q")]}
         given, _ = EB.allocate(wanted, {BIRTH: 1, LEARN_ON: 1}, {BIRTH: "probe", LEARN_ON: "learning"})
+        self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()}, {BIRTH: ["Q"], LEARN_ON: []})
+        given, _ = EB.allocate(wanted, {BIRTH: 1, LEARN_ON: 1}, {BIRTH: "learning", LEARN_ON: "learning"})
         self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()}, {LEARN_ON: ["Q"], BIRTH: []})
 
     # ------------------------------------------------------------------------------------- the reservation (book)
@@ -108,7 +133,9 @@ class Births(unittest.TestCase):
         self.assertGreater(risk, 0)
         self.assertIn(PREREG_CLOSE, note)
 
-    def test_a_birth_at_probe_is_never_reserved_for_and_its_own_buy_leaves_the_room(self):
+    def test_a_birth_at_probe_is_reserved_for_and_its_own_buy_leaves_no_room(self):
+        """A97 (PL-2): the open's only Probe program is a promoted birth: a close-entry learning buy holds room for it
+        (A85, as for a PREREG Probe program), and the birth's own Probe buy sizes less nobody's reservation."""
         h = self.h
         h.lane.band(BIRTH, "probe", version=1)
         seed_history(h, BIRTH, (3, 3, 3, 3, 3), at="open")
@@ -116,20 +143,28 @@ class Births(unittest.TestCase):
         s = EB.settings()
         on = h.book._instance(L.instance_key(LEARN_ON, 2))
         self.assertEqual(on.band, "learning")
-        self.assertEqual(h.book._event_reserve(on, TB.DAY.isoformat(), "close", s, D(2000)), (D(0), D(0), ""),
-                         "the open's only Probe program is a birth: nothing is held for it")
+        cash, risk, note = h.book._event_reserve(on, TB.DAY.isoformat(), "close", s, D(2000))
+        self.assertEqual(cash, 3 * s.share("probe") * D(2000), "min(6, median 3) x Probe's share x E, for the birth")
+        self.assertGreater(risk, 0)
+        self.assertIn(BIRTH, note)
         born = h.book._instance(L.instance_key(BIRTH, 1))
         self.assertEqual(born.band, "probe")
         self.assertEqual(h.book._event_reserve(born, TB.DAY.isoformat(), "open", s, D(2000)), (D(0), D(0), ""),
-                         "no PREREG Probe or Sized program at the close: nothing to leave")
+                         "a promoted birth's buy leaves no room")
         h.lane.band(PREREG_CLOSE, "probe")
         seed_history(h, PREREG_CLOSE, (2, 2, 2, 2, 2), at="close")
         h.book._event_sync(0.0, TB.DAY, s, h.book._event_adapter(), h.book._event_lane_store())
+        self.assertEqual(h.book._event_reserve(h.book._instance(L.instance_key(BIRTH, 1)), TB.DAY.isoformat(), "open",
+                                               s, D(2000)), (D(0), D(0), ""),
+                         "nor with a PREREG Probe program at the close: it is a Probe buy (before A97 it sized less "
+                         "that program's room)")
+        # A birth back at learning leaves the room again, as release 1019f held.
+        h.lane.band(BIRTH, "learning", version=1)
+        h.book._event_sync(0.0, TB.DAY, s, h.book._event_adapter(), h.book._event_lane_store())
         cash, _, note = h.book._event_reserve(h.book._instance(L.instance_key(BIRTH, 1)), TB.DAY.isoformat(), "open",
                                               s, D(2000))
-        self.assertEqual(cash, 2 * s.share("probe") * D(2000), "a birth at Probe sizes less a PREREG Probe's room")
+        self.assertEqual(cash, 2 * s.share("probe") * D(2000), "a birth at learning sizes less a PREREG Probe's room")
         self.assertIn(PREREG_CLOSE, note)
-        self.assertNotIn(BIRTH, note)
 
     def test_a_births_buy_cut_by_the_reservation_is_refused_and_its_shadow_keeps_the_event(self):
         self.h.venue.cash = D("250")

@@ -49,8 +49,12 @@ reach the architect. Eligibility is the lane's kept result (`eligibility`: liste
 session), the session's own or else the issuer's nearest. The reactions of the react families are prices after the
 event: never read, so their counts are UPPER BOUNDS (every event passes the reaction) and say so.
 
-THE VALIDATOR (`validate`, code, not a model): the grammar; a new id and sha; a minimum rate, >= `MIN_RATE` (3)
-selected events a session over the last 20 sessions by selection count; no duplicate, the Jaccard of the last 20
+THE VALIDATOR (`validate`, code, not a model): the grammar; a new id and sha; a minimum rate: a SEATABLE birth >=
+`MIN_RATE` (20; SUP-3's rate rule, the captain's A97, release 1019h) selected events a session over the sessions of
+the last 20 that hold a COMPLETE RECORD PASS (`recorded_sessions`: an outage session is left out, at least
+`MIN_RECORDED`, 3, of them), so that it can fill a Probe row's slots after the real-money funnel through the season (a
+react family's count is an upper bound, so the floor barely binds it); a RECORD >= `RECORD_MIN_RATE` (3) a session over
+the calendar's last 20 sessions by selection count, as before; no duplicate, the Jaccard of the last 20
 sessions' selected events < `JACCARD_MAX` (0.8) against every registered program (records, controls and births too:
 stricter than "every live program", and it reads no band) and every birth accepted before it the same night; and THE
 FALSE-PASS BUDGET (R3-SPEC section 3 as the captain's A81 states it, 16:25Z Oct 21, 2026): each seatable birth adds
@@ -146,7 +150,16 @@ CONTROL_SUFFIX = "-CTRL"
 
 #: THE VALIDATOR'S RULES (R3-SPEC sections 2 and 3).
 SESSIONS = 20
-MIN_RATE = 3
+#: THE RATE A SEATABLE BIRTH MUST SELECT (SUP-3's rate rule, the captain's A97, release 1019h; R3-SPEC is the captain's,
+#: no frozen text names it): at least `MIN_RATE` selected events a session, over THE SESSIONS OF THE LAST `SESSIONS`
+#: THAT HOLD A COMPLETE RECORD PASS (`recorded_sessions`: an outage session is left out, never counted at a low count),
+#: at least `MIN_RECORDED` of them. A seatable birth must fill a Probe row's slots after the real-money funnel, through
+#: the season; release 1019e's 3 over the calendar's 20 fell toward 3 a session as the window filled.
+MIN_RATE = 20
+MIN_RECORDED = 3
+#: A RECORD (`seatable` false) keeps release 1019e's rate, free as before: `RECORD_MIN_RATE` a session over the
+#: calendar's last `SESSIONS` sessions (the store must hold them all).
+RECORD_MIN_RATE = 3
 JACCARD_MAX = 0.8
 #: The false-pass budget (A81), in tenths of an expected false pass (integers: no float drift): each seatable birth the
 #: screen's FALSE_PASS_RATE, 1 (0.10); every seatable version ever registered at most the lane's stated lifetime budget,
@@ -570,6 +583,50 @@ class _Eligible:
         return out
 
 
+def recorded_sessions(store: Any, days: Sequence[dt.date]) -> list[dt.date]:
+    """THE SESSIONS OF `days` THAT HOLD A COMPLETE RECORD PASS (SUP-3's denominator, the captain's A97, release 1019h),
+    oldest first: D's whole event span, from the prior session's 09:00 ET (the open window's start, the earliest of D's
+    windows: league/events/programs.py `open_window`) to D's close decision (`close_window`'s end, the latest), was
+    recorded with no OUTAGE: a CLEAN record pass (league/ops/evl_health.py's own reading, `_failing`: finished `ok`, its
+    8-K, Form 4 and news reads without error) finished at or before the span's start within `RECORD_MINUTES` (30, the
+    `evl_record` alarm's line), every two consecutive clean passes inside the span at most that far apart, and the last
+    at most that far before its end. An outage session (the alarm's stall inside the span), a session before the
+    recorder ran and one the calendar cannot place are left out (never counted at a low count). Reads `receipts` only
+    (outcome-free: no price, return, look or band)."""
+    from ..ops import evl_health as EH
+
+    gap = dt.timedelta(minutes=EH.RECORD_MINUTES)
+    spans: list[tuple[dt.date, dt.datetime, dt.datetime]] = []
+    for day in days:
+        d = C.session(store, day)
+        prior = C.previous(store, day, 1)
+        if d is None or not prior:
+            continue
+        spans.append((day, prior[0].open_cutoff, d.close_decide))
+    if not spans or "receipts" not in _tables(store.db):
+        return []
+    lo, hi = min(a for _, a, _ in spans) - gap, max(b for _, _, b in spans)
+    clean: list[dt.datetime] = []
+    for row in store.db.execute("SELECT finished_at, status, summary FROM receipts WHERE job='record' AND status='ok' AND "
+                                "finished_at IS NOT NULL AND finished_at>=? AND finished_at<=? ORDER BY finished_at",
+                                (S.iso(lo), S.iso(hi))):
+        try:
+            at = S.parse_iso(str(row["finished_at"]))
+        except (TypeError, ValueError):
+            continue
+        if not EH._failing({"summary": row["summary"]}):
+            clean.append(at)
+    clean.sort()
+    out: list[dt.date] = []
+    for day, start, end in spans:
+        inside = [t for t in clean if start - gap <= t <= end]
+        if not inside or inside[0] > start or end - inside[-1] > gap:
+            continue
+        if all(b - a <= gap for a, b in zip(inside, inside[1:])):
+            out.append(day)
+    return out
+
+
 class Facts:
     """THE OUTCOME-FREE FACTS of the last `sessions` sessions through `today` (the module docstring): the event rows of
     each session's windows as the lane's decisions read them (registration aside: a rule's count is what it WOULD have
@@ -589,11 +646,26 @@ class Facts:
                 kind = "doc" if r["prompt_sha"] == doc else "news"
                 self.scores[f"{kind}|{r['event']}"] = (int(r["score"]), r["guidance"] if kind == "doc" else None)
             self.rows = {day: self._windows(day) for day in self.days}
+            self.recorded = recorded_sessions(store, self.days)
         self._selected: dict[str, dict[dt.date, list[str]]] = {}
 
     @property
     def complete(self) -> bool:
+        """The calendar holds the window's `SESSIONS` sessions (a record's rate is read over them)."""
         return len(self.days) >= SESSIONS
+
+    @property
+    def rated(self) -> bool:
+        """At least `MIN_RECORDED` of the window's sessions hold a complete record pass (a seatable birth's rate is read
+        over them, `recorded`)."""
+        return len(self.recorded) >= MIN_RECORDED
+
+    def rate(self, prog: P.Program) -> tuple[int, float]:
+        """(the events `prog` selects on the window's sessions holding a complete record pass, that a session over
+        them; 0.0 with none): a seatable birth's rate (`MIN_RATE`)."""
+        by = self.selected(prog)
+        n = sum(len(by.get(day, ())) for day in self.recorded)
+        return n, (round(n / len(self.recorded), 2) if self.recorded else 0.0)
 
     def _windows(self, day: dt.date) -> dict[str, list[Mapping[str, Any]]]:
         st = self.store
@@ -664,8 +736,10 @@ class Facts:
                 continue
             by = self.selected(program(sp, born_at=S.iso(EPOCH)))
             total = sum(len(v) for v in by.values())
+            rated = sum(len(by[d]) for d in self.recorded)
             out[sp["id"]] = {"selected": total, "per_session": round(total / len(self.days), 2) if self.days else 0.0,
                              "by_session": [len(by[d]) for d in self.days],
+                             "per_recorded_session": round(rated / len(self.recorded), 2) if self.recorded else 0.0,
                              "upper_bound": sp["family"] in REACT_FAMILIES}
         return out
 
@@ -690,6 +764,8 @@ class Facts:
                         forms["8-K" if family.startswith("ern") else "4"].add(str(row.get("accession")))
                 for row in self.rows[day].get("8k", []):
                     forms["8-K"].add(str(row.get("accession")))
+            recorded = set(self.recorded)
+            on_recorded: dict[str, int] = {}
             for day in self.days:
                 for family, rows in self.rows[day].items():
                     slot = fam.setdefault(family, {"events": 0, "eligible": 0})
@@ -704,6 +780,8 @@ class Facts:
                         if uni is None or (family in NEWS_FAMILIES and uni["symbol"] != row.get("symbol")):
                             continue
                         slot["eligible"] += 1
+                        if day in recorded:
+                            on_recorded[family] = on_recorded.get(family, 0) + 1
                         ident = str(row.get("accession") or row.get("id"))
                         first = (family, ident) not in seen
                         seen.add((family, ident))
@@ -732,8 +810,10 @@ class Facts:
                             values[band] += 1
                             d, o = bool(row.get("by_director")), bool(row.get("by_officer"))
                             roles["both" if d and o else "director" if d else "officer"] += 1
-            for slot in fam.values():
+            k = len(self.recorded)
+            for family, slot in fam.items():
                 slot["per_session"] = round(slot["eligible"] / n, 2) if n else 0.0
+                slot["per_recorded_session"] = round(on_recorded.get(family, 0) / k, 2) if k else 0.0
             covered_items: set[str] = set(P.OTHER_ITEMS)
             for p in progs:
                 if p.spec is not None and p.family == "8k":
@@ -748,13 +828,16 @@ class Facts:
                 total = self.count(p)
                 listed.append({"id": p.id, "family": p.family, "seatable": bool(p.can_seat or p.seatable),
                                "birth": p.spec is not None, "selected": total,
-                               "per_session": round(total / n, 2) if n else 0.0})
+                               "per_session": round(total / n, 2) if n else 0.0,
+                               "per_recorded_session": self.rate(p)[1]})
         busy = {p.family for p in progs}
         return {
             "as_of": self.today.isoformat(), "sessions": n,
             "first": self.days[0].isoformat() if self.days else None,
             "last": self.days[-1].isoformat() if self.days else None,
-            "families": {f: fam.get(f, {"events": 0, "eligible": 0, "per_session": 0.0}) for f in FAMILIES},
+            "recorded_sessions": len(self.recorded),
+            "families": {f: fam.get(f, {"events": 0, "eligible": 0, "per_session": 0.0, "per_recorded_session": 0.0})
+                         for f in FAMILIES},
             "forms": {"8-K": len(forms["8-K"]), "4-buys": len(forms["4"])},
             "items_8k": dict(sorted(items.items())),
             "news_sources": dict(sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))[:15]),
@@ -765,7 +848,8 @@ class Facts:
             "programs": listed,
             "unprogrammed": {"families": [f for f in FAMILIES if f not in busy],
                              "items_8k": sorted(i for i in items if i not in covered_items)},
-            "react_counts": "upper bounds: a reaction is a price after the event, never read here",
+            "react_counts": "upper bounds: a reaction is a price after the event, never read here (so the rate floor "
+                            "barely binds a react rule)",
         }
 
 
@@ -855,12 +939,24 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
         prog = program(spec, born_at=S.iso(EPOCH))
         mine = _events(facts.selected(prog))
         entry["selected"] = len(mine)
-        entry["per_session"] = round(len(mine) / len(facts.days), 2) if facts.days else 0.0
-        if not facts.complete:
-            why.append(f"the store holds {len(facts.days)} sessions, not the {SESSIONS} the rate is read over")
-        elif len(mine) < MIN_RATE * SESSIONS:
-            why.append(f"{len(mine)} selected events over the last {SESSIONS} sessions: under {MIN_RATE} a session"
-                       + (" (an upper bound: the reaction is never read)" if spec["family"] in REACT_FAMILIES else ""))
+        bound = " (an upper bound: the reaction is never read)" if spec["family"] in REACT_FAMILIES else ""
+        if spec["seatable"]:
+            # SUP-3 (A97, release 1019h): MIN_RATE a session over the window's sessions holding a complete record pass.
+            rated, rate = facts.rate(prog)
+            entry["per_session"] = rate
+            if not facts.rated:
+                why.append(f"{len(facts.recorded)} of the last {SESSIONS} sessions hold a complete record pass, under "
+                           f"the {MIN_RECORDED} a seatable birth's rate is read over")
+            elif rated < MIN_RATE * len(facts.recorded):
+                why.append(f"{rated} selected events over the {len(facts.recorded)} sessions of the last {SESSIONS} "
+                           f"with a complete record pass: under {MIN_RATE} a session" + bound)
+        else:
+            entry["per_session"] = round(len(mine) / len(facts.days), 2) if facts.days else 0.0
+            if not facts.complete:
+                why.append(f"the store holds {len(facts.days)} sessions, not the {SESSIONS} the rate is read over")
+            elif len(mine) < RECORD_MIN_RATE * SESSIONS:
+                why.append(f"{len(mine)} selected events over the last {SESSIONS} sessions: under {RECORD_MIN_RATE} a "
+                           "session" + bound)
         worst = (0.0, None)
         for other, events in registered + accepted:
             j = jaccard(mine, events)
@@ -921,13 +1017,17 @@ USER = """THE GRAMMAR. A spec is a JSON object with exactly these fields:
 - "rank": "score", "reaction" (react families), "value" (Form 4) or "none".
 - "seatable": true (trades real money at learning size from its first event and is judged by the screen) or false (a
   record, free). An ins (Form 4 cluster) spec must be seatable false: a record only.
-THE VALIDATOR refuses a spec that selects fewer than <<MIN_RATE>> events a session over the last <<SESSIONS>>
-sessions, or whose selected events overlap any existing program's with a Jaccard of <<JACCARD>> or more. Each seatable
-spec costs 0.10 of the false-pass budget: <<BUDGET>>. Propose at most <<K>> specs, at most <<SEATABLE>> of them
-seatable. Prefer rules a reader could explain in one line, over events and items no program covers yet.
+THE VALIDATOR refuses a seatable spec that selects fewer than <<MIN_RATE>> events a session over the sessions of the
+last <<SESSIONS>> that hold a complete record pass ("recorded_sessions" in the facts, at least <<MIN_RECORDED>>; each
+count's "per_recorded_session"), a record spec that selects fewer than <<RECORD_MIN_RATE>> a session over the last
+<<SESSIONS>> sessions, and any spec whose selected events overlap any existing program's with a Jaccard of <<JACCARD>>
+or more. Each seatable spec costs 0.10 of the false-pass budget: <<BUDGET>>. Propose at most <<K>> specs, at most
+<<SEATABLE>> of them seatable. Prefer rules a reader could explain in one line, over events and items no program covers
+yet. Propose no spec of an earnings-only family (ern, ern-react) after Nov 6, 2026 (the facts' "as_of"): the earnings
+season ends and such a rule would not fill its slots.
 
 THE FACTS (counts over the last <<SESSIONS>> sessions; "eligible" are the events of listed, liquid operating
-companies the lane can trade; react counts are upper bounds):
+companies the lane can trade; react counts are upper bounds, so the rate floor barely binds a react rule):
 <<FACTS>>
 
 Answer with JSON only: {"specs": [{"spec": {...}, "why": "one line"}]}"""
@@ -943,6 +1043,7 @@ def render(facts: Mapping[str, Any], budget_: Mapping[str, Any], *, k: int = K) 
     text = json.dumps(facts, sort_keys=True, separators=(",", ":"))
     left = int(budget_.get("seatable_left_tonight", 0))
     return (USER.replace("<<READ_ITEMS>>", ", ".join(READ_ITEMS_8K)).replace("<<MIN_RATE>>", str(MIN_RATE))
+            .replace("<<MIN_RECORDED>>", str(MIN_RECORDED)).replace("<<RECORD_MIN_RATE>>", str(RECORD_MIN_RATE))
             .replace("<<SESSIONS>>", str(SESSIONS)).replace("<<JACCARD>>", str(JACCARD_MAX))
             .replace("<<BUDGET>>", f"{budget_['used']:.1f} of {budget_['limit']:.1f} used")
             .replace("<<K>>", str(k)).replace("<<SEATABLE>>", str(left)).replace("<<FACTS>>", text))
@@ -1210,5 +1311,6 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "parse", "canonical", "sha", "reads", "control_spec", "control_id", "program", "registered_programs",
            "select", "unread_reaction", "outcome_free", "Facts", "jaccard", "budget", "budget_used_tenths", "validate",
            "SYSTEM", "USER", "prompt_sha", "render", "worst_usd", "parse_answer", "propose", "path_of", "line_of",
-           "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "JACCARD_MAX", "CHARGE_TENTHS",
+           "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED", "RECORD_MIN_RATE",
+           "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS",
            "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "K", "NIGHT_USD", "MODEL", "FACTS_DENY", "DOCS_ROUTE", "JOB"]

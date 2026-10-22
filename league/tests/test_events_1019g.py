@@ -169,22 +169,29 @@ class RoomOrder(unittest.TestCase):
                 (FOUR_ON, "probe", 0), (FOUR_ON, "probe", 1), (DROP, "learning", 0), (DROP, "learning", 1),
                 (LEARN_ON, "learning", 0), (BIRTH, "probe", 0)]
         order = sorted(rows, key=lambda r: EB.send_key(*r))
-        self.assertEqual(order, [(FOUR_ON, "probe", 0), ("EVL-NEWS-NIGHT2-ON", "probe", 0), (FOUR_ON, "probe", 1),
-                                 ("EVL-NEWS-NIGHT2-ON", "probe", 1), (LEARN_ON, "learning", 0), (DROP, "learning", 0),
-                                 (DROP, "learning", 1), (BIRTH, "learning", 0), (BIRTH, "probe", 0)],
-                         "Probe round-robin, PREREG-EVL-4's row first in each pass; learning in the tables' order; "
-                         "the birth after every file's rows, whatever its band")
+        self.assertEqual(order, [(FOUR_ON, "probe", 0), ("EVL-NEWS-NIGHT2-ON", "probe", 0), (BIRTH, "probe", 0),
+                                 (FOUR_ON, "probe", 1), ("EVL-NEWS-NIGHT2-ON", "probe", 1), (LEARN_ON, "learning", 0),
+                                 (DROP, "learning", 0), (DROP, "learning", 1), (BIRTH, "learning", 0)],
+                         "Probe round-robin, PREREG-EVL-4's row first in each pass and the promoted birth last in it "
+                         "(release 1019h, A97 PL-2: its band's tier after every file's rows of that band); learning in "
+                         "the tables' order; a birth at learning after every file's rows")
         wanted = {FOUR_ON: [pick("X"), pick("Y")], "EVL-NEWS-NIGHT2-ON": [pick("Y"), pick("Z")],
                   DROP: [pick("Z"), pick("Q")], BIRTH: [pick("Q"), pick("R")]}
         bands = {FOUR_ON: "probe", "EVL-NEWS-NIGHT2-ON": "probe", DROP: "learning", BIRTH: "probe"}
         given, passed = EB.allocate(wanted, {FOUR_ON: 2, "EVL-NEWS-NIGHT2-ON": 2, DROP: 2, BIRTH: 2}, bands)
         self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()},
-                         {FOUR_ON: ["X"], "EVL-NEWS-NIGHT2-ON": ["Y", "Z"], DROP: ["Q"], BIRTH: ["R"]},
-                         "Probe round-robin (NIGHT2's Y in the first pass, before FOUR_ON's second); DROP at learning "
-                         "after them; the birth at Probe after every PREREG row")
-        self.assertEqual(list(given), [FOUR_ON, "EVL-NEWS-NIGHT2-ON", DROP, BIRTH])
+                         {FOUR_ON: ["X"], "EVL-NEWS-NIGHT2-ON": ["Y", "Z"], BIRTH: ["Q", "R"], DROP: []},
+                         "Probe round-robin (NIGHT2's Y in the first pass, before FOUR_ON's second; the promoted birth "
+                         "last in each pass, release 1019h A97 PL-2); DROP at learning after every Probe row")
+        self.assertEqual(list(given), [FOUR_ON, "EVL-NEWS-NIGHT2-ON", BIRTH, DROP])
         self.assertEqual((passed[FOUR_ON], passed[DROP], passed[BIRTH]),
-                         ({"name_given": 1}, {"name_given": 1}, {"name_given": 1}))
+                         ({"name_given": 1}, {"name_given": 2}, {}))
+        # A birth at learning stays after every PREREG row, as release 1019g gave it.
+        bands[BIRTH] = "learning"
+        given, passed = EB.allocate(wanted, {FOUR_ON: 2, "EVL-NEWS-NIGHT2-ON": 2, DROP: 2, BIRTH: 2}, bands)
+        self.assertEqual({k: [p.symbol for p in v] for k, v in given.items()},
+                         {FOUR_ON: ["X"], "EVL-NEWS-NIGHT2-ON": ["Y", "Z"], DROP: ["Q"], BIRTH: ["R"]})
+        self.assertEqual(list(given), [FOUR_ON, "EVL-NEWS-NIGHT2-ON", DROP, BIRTH])
 
 
 class RoomCash(TB.EventTest):

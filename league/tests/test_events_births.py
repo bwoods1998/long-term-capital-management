@@ -138,6 +138,27 @@ def sessions_between(st: S.Store, first: dt.date, last: dt.date) -> list[dt.date
     return [s.day for s in C.sessions(st, first, last)]
 
 
+#: A clean record pass's summary (league/events/house.py `_record_steps`' blocks; league/ops/evl_health.py `_failing`).
+CLEAN_PASS = {"8-K": {"new": 1, "fetched": 1, "failed": 0, "unlisted": 0}, "4": {"new": 0, "fetched": 0, "failed": 0},
+              "news": {"new": 2}}
+
+
+def record_passes(st: S.Store, first: dt.datetime, last: dt.datetime, *, every: dt.timedelta = dt.timedelta(minutes=10),
+                  outages: tuple[tuple[dt.datetime, dt.datetime], ...] = (), summary: dict | None = None,
+                  status: str = "ok") -> int:
+    """The House's record passes as their receipts tell them (league/events/house.py `_record`): one every `every` from
+    `first` to `last`, none inside an outage [start, end); each finished `status` with `summary` (a clean one by
+    default). Returns how many."""
+    at, n = first, 0
+    while at <= last:
+        if not any(a <= at < b for a, b in outages):
+            st.db.execute("INSERT INTO receipts(job, started_at, finished_at, status, summary) VALUES('record', ?, ?, ?, ?)",
+                          (S.iso(at - dt.timedelta(seconds=20)), S.iso(at), status, json.dumps(summary or CLEAN_PASS)))
+            n += 1
+        at += every
+    return n
+
+
 # ======================================================================================================== the grammar
 class TheGrammar(unittest.TestCase):
     def test_every_family_the_lane_reads_parses_with_its_own_fields(self):
@@ -466,7 +487,11 @@ class PreregIntentsAreUnchanged(unittest.TestCase):
 # ======================================================================================================== the facts
 class Validation(unittest.TestCase):
     """Twenty invented sessions (Oct 12 to Nov 6): four 8-Ks a session of each of items 5.02, 1.02, 2.03 and 3.01, two of
-    1.05, three earnings 8-Ks with their verdicts, and bars, marks, outcomes, looks and bands the facts must not read."""
+    1.05, three earnings 8-Ks with their verdicts, and bars, marks, outcomes, looks and bands the facts must not read; a
+    clean record pass every 10 minutes from Oct 8 to Nov 10 (every session holds a complete record pass). This class
+    holds the grammar, the duplicate, the budget, the proposer and registration on figures worked at release 1019e's
+    rate of 3 a session, so a seatable birth's `MIN_RATE` is set to that 3 here (`SeatableRate` holds release 1019h's
+    20 over the complete-record sessions on its own sessions)."""
 
     AS_OF = dt.date(2026, 11, 6)
 
@@ -477,6 +502,10 @@ class Validation(unittest.TestCase):
         self.s = Synth(Path(self.tmp.name))
         self.addCleanup(self.s.st.close)
         st = self.s.st
+        rate = mock.patch.object(BI, "MIN_RATE", 3)
+        rate.start()
+        self.addCleanup(rate.stop)
+        record_passes(st, et(dt.date(2026, 10, 8), 0), et(dt.date(2026, 11, 10), 23))
         self.days = [x.day for x in C.previous(st, self.AS_OF + dt.timedelta(days=1), 20)]
         self.assertEqual((self.days[0], len(self.days)), (dt.date(2026, 10, 12), 20))
         syms = list(ISSUERS.values())
@@ -537,7 +566,8 @@ class Validation(unittest.TestCase):
         counts = facts.candidates([self.candidate("EVL-B-8K-102", ["1.02"])["spec"],
                                    spec("EVL-B-R", "ern-react", {"react_min": 1.05}, exit_="open"), {"id": "EVL-B-BAD"}])
         self.assertEqual(counts["EVL-B-8K-102"], {"selected": 80, "per_session": 4.0, "by_session": [4] * 20,
-                                                  "upper_bound": False})
+                                                  "per_recorded_session": 4.0, "upper_bound": False})
+        self.assertEqual(sheet["recorded_sessions"], 20, "every session holds a complete record pass here")
         self.assertEqual((counts["EVL-B-R"]["selected"], counts["EVL-B-R"]["upper_bound"]), (60, True),
                          "a react rule's count: every earnings 8-K, the reaction never read")
         self.assertIn("missing fields", counts["EVL-B-BAD"]["refused"][0])
@@ -546,7 +576,8 @@ class Validation(unittest.TestCase):
         self.assertEqual(sheet["guidance_ern"], {"none": 40, "raised": 20})
         self.assertEqual(sheet["unprogrammed"]["items_8k"], ["1.02", "1.05", "2.03", "3.01", "5.02"])
         self.assertIn("news-react", [p["family"] for p in sheet["programs"]])
-        self.assertNotIn("p", json.dumps(sheet["programs"][0]).replace('"per_session"', ""), "no look's p")
+        self.assertNotIn("p", json.dumps(sheet["programs"][0]).replace('"per_session"', "")
+                         .replace('"per_recorded_session"', ""), "no look's p")
 
     def test_the_validator_refuses_by_rate_duplicate_id_and_grammar_and_accepts_the_rest(self):
         st = self.s.st
@@ -564,7 +595,8 @@ class Validation(unittest.TestCase):
         ], night=self.AS_OF)
         self.assertEqual([c["ok"] for c in out], [True, False, False, False, False, False, True])
         self.assertEqual((out[0]["selected"], out[0]["per_session"], out[0]["charge"]), (80, 4.0, 1))
-        self.assertIn("40 selected events over the last 20 sessions: under 3 a session", out[1]["reasons"][0])
+        self.assertIn("40 selected events over the 20 sessions of the last 20 with a complete record pass: under 3 a "
+                      "session", out[1]["reasons"][0])
         self.assertEqual(out[2]["jaccard"], {"max": 1.0, "with": "EVL-B-8K-502"})
         self.assertIn("a duplicate of EVL-B-8K-502", out[2]["reasons"][0])
         self.assertIn("a duplicate of EVL-B-8K-102", out[3]["reasons"][0])
@@ -630,11 +662,143 @@ class Validation(unittest.TestCase):
                             night=self.AS_OF)
         self.assertTrue(rec["ok"], "records are free")
 
-    def test_twenty_sessions_or_no_rate(self):
+    def test_twenty_sessions_or_no_rate_for_a_record_and_a_seatable_birth_over_its_complete_record_sessions(self):
         st = self.s.st
-        out = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10), [self.candidate("EVL-B-8K-102", ["1.02"])])
+        out = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10),
+                          [self.candidate("EVL-B-8K-102", ["1.02"], seatable=False)])
         self.assertFalse(out[0]["ok"])
-        self.assertIn("not the 20 the rate is read over", out[0]["reasons"][0])
+        self.assertIn("not the 20 the rate is read over", out[0]["reasons"][0], "a record: release 1019e's rule")
+        [seat] = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10), [self.candidate("EVL-B-8K-102", ["1.02"])])
+        self.assertTrue(seat["ok"], "a seatable birth: its rate over the sessions holding a complete record pass")
+        self.assertEqual(seat["per_session"], 4.0)
+
+
+class SeatableRate(unittest.TestCase):
+    """SUP-3's RATE RULE (the captain's A97, release 1019h): a seatable birth must select >= `MIN_RATE` (20) events a
+    session over the sessions of the last 20 that hold a COMPLETE RECORD PASS (an outage session left out, at least 3 of
+    them); a record keeps release 1019e's 3 a session over the calendar's 20, free. Twenty invented sessions (Oct 12 to
+    Nov 6): 21 issuers file an 8-K of item 5.02 and 19 one of item 3.01 each session (one event an issuer a decision)."""
+
+    AS_OF = dt.date(2026, 11, 6)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(unload)
+        self.s = Synth(Path(tmp.name))
+        self.addCleanup(self.s.st.close)
+        st = self.s.st
+        self.days = [x.day for x in C.previous(st, self.AS_OF + dt.timedelta(days=1), 20)]
+        syms = list(ISSUERS.values())
+        for sym in syms:
+            self.s.eligible(self.days[0], sym)
+        for day in self.days:
+            prior = C.previous(st, day, 1)[0].day
+            for k in range(21):
+                self.s.filing(syms[k], et(prior, 17, k), ("5.02",))
+            for k in range(19):
+                self.s.filing(syms[k], et(prior, 18, k), ("3.01",))
+
+    def candidate(self, ident: str, items, *, seatable: bool = True) -> dict:
+        return {"spec": spec(ident, "8k", {"items": list(items)}, seatable=seatable), "why": f"{ident} in one line"}
+
+    def judge(self, *candidates) -> list[dict]:
+        return BI.validate(self.s.st, BI.Facts(self.s.st, self.AS_OF), list(candidates), night=self.AS_OF)
+
+    def span(self, day: dt.date) -> tuple[dt.datetime, dt.datetime]:
+        """A session's event span: the prior session's 09:00 ET to its close decision."""
+        prior = C.previous(self.s.st, day, 1)[0]
+        return prior.open_cutoff, C.session(self.s.st, day).close_decide
+
+    def test_the_rows(self):
+        self.assertEqual((BI.MIN_RATE, BI.MIN_RECORDED, BI.RECORD_MIN_RATE, BI.SESSIONS), (20, 3, 3, 20))
+        from league.ops import evl_health as EH
+
+        self.assertEqual(EH.RECORD_MINUTES, 30, "an outage is the evl_record alarm's own line")
+
+    def test_twenty_a_session_over_the_complete_record_sessions_and_records_free_as_before(self):
+        record_passes(self.s.st, et(dt.date(2026, 10, 8), 0), et(dt.date(2026, 11, 7), 0))
+        self.assertEqual(BI.Facts(self.s.st, self.AS_OF).recorded, self.days, "every session recorded whole")
+        out = self.judge(self.candidate("EVL-B-8K-502", ["5.02"]), self.candidate("EVL-B-8K-301", ["3.01"]),
+                         self.candidate("EVL-B-8K-301-REC", ["3.01"], seatable=False))
+        self.assertEqual([c["ok"] for c in out], [True, False, True])
+        self.assertEqual((out[0]["selected"], out[0]["per_session"]), (420, 21.0))
+        self.assertEqual(out[1]["reasons"], ["380 selected events over the 20 sessions of the last 20 with a complete "
+                                             "record pass: under 20 a session"])
+        self.assertEqual((out[2]["per_session"], out[2]["charge"]), (19.0, 0), "a record: 3 a session, free")
+
+    def test_an_outage_session_is_left_out_never_counted_at_a_low_count(self):
+        """Three sessions with a feed outage recorded only 2 of 5.02's 21 events (the rest never stored): counted, the
+        rule's rate would read (17 x 21 + 3 x 2) / 20 = 18.15, under 20; left out, 21 over the 17 recorded whole."""
+        st = self.s.st
+        out_days = self.days[5:8]
+        for day in out_days:
+            lo, hi = self.span(day)
+            st.db.execute("DELETE FROM filings WHERE accession IN (SELECT accession FROM filings WHERE items='[\"5.02\"]' "
+                          "AND accepted_at>=? AND accepted_at<? ORDER BY accepted_at LIMIT 19)",
+                          (S.iso(lo), S.iso(hi)))
+        outages = tuple((self.span(d)[0] + dt.timedelta(hours=10), self.span(d)[0] + dt.timedelta(hours=11))
+                        for d in out_days)
+        record_passes(st, et(dt.date(2026, 10, 8), 0), et(dt.date(2026, 11, 7), 0), outages=outages)
+        facts = BI.Facts(st, self.AS_OF)
+        self.assertEqual(facts.recorded, [d for d in self.days if d not in out_days])
+        [seat] = self.judge(self.candidate("EVL-B-8K-502", ["5.02"]))
+        self.assertTrue(seat["ok"], seat["reasons"])
+        self.assertEqual(seat["per_session"], 21.0)
+        with mock.patch.object(BI, "recorded_sessions", lambda store, days: list(days)):
+            [counted] = self.judge(self.candidate("EVL-B-8K-502", ["5.02"]))
+        self.assertFalse(counted["ok"], "had the outage sessions counted, the birth would be refused")
+        self.assertIn("363 selected events over the 20 sessions", counted["reasons"][0])
+
+    def test_fewer_than_three_complete_record_sessions_rates_nothing(self):
+        st = self.s.st
+        lo = self.span(self.days[-2])[0] - dt.timedelta(minutes=5)
+        record_passes(st, lo, et(dt.date(2026, 11, 7), 0))           # the recorder began two sessions ago
+        self.assertEqual(BI.Facts(st, self.AS_OF).recorded, self.days[-2:])
+        [seat, rec] = self.judge(self.candidate("EVL-B-8K-502", ["5.02"]),
+                                 self.candidate("EVL-B-8K-502-REC", ["5.02"], seatable=False))
+        self.assertEqual(seat["reasons"], ["2 of the last 20 sessions hold a complete record pass, under the 3 a "
+                                           "seatable birth's rate is read over"])
+        self.assertTrue(rec["ok"], "a record reads the calendar's 20, as before")
+        record_passes(st, self.span(self.days[-3])[0] - dt.timedelta(minutes=5), lo)
+        [seat] = self.judge(self.candidate("EVL-B-8K-502", ["5.02"]))
+        self.assertTrue(seat["ok"], "three sessions recorded whole: 21 a session over them")
+
+    def test_what_a_complete_record_pass_is(self):
+        st = self.s.st
+        day = self.days[10]
+        lo, hi = self.span(day)
+        gap, TEN = dt.timedelta(minutes=30), dt.timedelta(minutes=10)
+
+        def recorded(*runs) -> bool:
+            st.db.execute("DELETE FROM receipts")
+            for kw in runs:
+                record_passes(st, **kw)
+            return BI.recorded_sessions(st, [day]) == [day]
+        self.assertTrue(recorded({"first": lo - gap, "last": hi}), "a clean pass every 10 minutes through the span")
+        self.assertTrue(recorded({"first": lo, "last": hi}), "one at the span's start")
+        self.assertFalse(recorded({"first": lo + dt.timedelta(minutes=1), "last": hi}), "none at or before its start")
+        self.assertFalse(recorded({"first": lo - gap, "last": hi - dt.timedelta(minutes=40)}), "its end not recorded")
+        self.assertTrue(recorded({"first": lo - gap, "last": hi, "outages": ((lo + gap, lo + gap + 2 * TEN),)}),
+                        "a 30-minute gap is no outage (the alarm's line)")
+        self.assertFalse(recorded({"first": lo - gap, "last": hi, "outages": ((lo + gap, lo + gap + 3 * TEN),)}),
+                         "a 40-minute gap is")
+        bad = {"8-K": {"error": "HTTPError: 503"}, "4": CLEAN_PASS["4"], "news": CLEAN_PASS["news"]}
+        self.assertFalse(recorded({"first": lo - gap, "last": hi, "summary": bad}), "a feed that failed: not clean")
+        self.assertFalse(recorded({"first": lo - gap, "last": hi, "status": "failed"}), "a failed pass")
+        self.assertFalse(recorded({"first": lo - gap, "last": hi, "summary": {**CLEAN_PASS, "news": {"error": "x"}}}))
+        self.assertTrue(recorded({"first": lo - gap, "last": hi, "every": dt.timedelta(minutes=30)}))
+
+    def test_the_proposer_is_told_the_rule_and_the_nov_6_line_with_no_steering(self):
+        user = BI.render({"as_of": "2026-11-06"}, {"used": 1.5, "limit": 3.0, "seatable_left_tonight": 3})
+        flat = " ".join(user.split())
+        self.assertIn("refuses a seatable spec that selects fewer than 20 events a session over the sessions of the "
+                      "last 20 that hold a complete record pass", flat)
+        self.assertIn("a record spec that selects fewer than 3 a session over the last 20 sessions", flat)
+        self.assertIn("Propose no spec of an earnings-only family (ern, ern-react) after Nov 6, 2026", flat)
+        self.assertIn("the rate floor barely binds a react rule", flat)
+        for steering in ("close-entry", "overnight evidence", "attention", "intraday reversal"):
+            self.assertNotIn(steering, flat, "SUP-3's check: no steering line")
 
 
 # ======================================================================================================== the proposer
@@ -858,8 +1022,12 @@ class TheBook(unittest.TestCase):
         h.tick(9, 33)
         self.assertEqual([(f["program"], f["version"], f["side"], f["band"]) for f in h.lane.fills()],
                          [(sp["id"], 1, "buy", "learning")], "its fill handed back to the lane at its own version")
-        self.assertGreater(EB.room_key(sp["id"], "sized"), EB.room_key("EVL-NEWS-REACT-ON", "learning"),
-                           "a birth comes after every PREREG program, whatever the bands (R3-SPEC section 4)")
+        self.assertGreater(EB.room_key(sp["id"], "learning"), EB.room_key("EVL-NEWS-REACT-ON", "learning"),
+                           "a birth at learning comes after every PREREG program (R3-SPEC section 4)")
+        self.assertGreater(EB.room_key(sp["id"], "sized"), EB.room_key("EVL-NEWS-NIGHT2-ON", "sized"),
+                           "a promoted birth comes after its band's PREREG rows (R3-SPEC section 4 as A97 amends it)")
+        self.assertLess(EB.room_key(sp["id"], "sized"), EB.room_key("EVL-ERN-READ-O1", "probe"),
+                        "... and before every lower band's row (A97, PL-2: release 1019h)")
         self.assertEqual(EB.room_key("EVL-NEWS-REACT-ON", "sized"), (0, 8), "the PREREG keys are as before")
 
 
