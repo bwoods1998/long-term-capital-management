@@ -40,62 +40,14 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
-### Release 1019h's minors: release 1019g's reviewed minors (the alarms, the births' facts, the lead, PREREG-EVL-5's waiting room, the docs), on `fix/1019h-minors` (unreleased; cut from `feat/done-speed` `88ecf37f`, so on top of release 1019g, which is live; it ships IN release 1019h, the same owner deploy: the gateway step and THE SAME PAIR `8e63ce64` / `c3026eba`; NO IDENTITY MOVES FROM `feat/done-speed`: the money digest `8e63ce64`, the constitution `c3026eba`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11 before and after; the births prompt's sha `890806ff` and `births.PARSE_VERSION` 3 do not move; no money row, no setting, no judge's rule, no gateway file; docs/prereg/PREREG-EVL-5.md and docs/prereg/evl-5/ byte for byte the tag's)
+### Release 1019h: Done speed, release 1019g's minors, the births architect on Opus 5.5 (the captain's A97, A100, A113 and A109), on `rel/1019h` (unreleased; cut from `fix/1019h-minors` `8e83ad1b` (PR 598, reviewed ship), which was cut from `feat/done-speed` `88ecf37f` (PR 597, reviewed ship: cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in), then A109 on top and origin/main merged with rerere off (`b374d862`, already in: main fast-forwards to the release); a draft PR with base main; an owner deploy after release 1019g, which is live: THE GATEWAY FIRST (`gateway/lib/email.mjs`, feat/done-speed's report composer: the Done supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR `8e63ce64` / `c3026eba`; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100; the minors and A109 move neither), so the standing grant re-ratifies at the House's start; S2's instant rollback is the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; THE BIRTHS PROMPT'S SHA MOVES `8294fe77` -> `0cae215b` WITH `births.PARSE_VERSION` 2 -> 4 (SUP-3's `890806ff` at 3, A109's architect at 4; 3 was never live); the Done rule `54241925` is untouched; the full rollback is to release 1019g, `b374d862`)
 
-The open minors of release 1019g's two reviews (A108), and the captain's decision on PREREG-EVL-5's money re-review
-(its option 1), each with a test that fails without it (league/tests/test_events_1019h_minors.py):
+Three parts in one owner deploy, each held by tests that fail without it. Parts 1 and 2 are their reviewed branches'
+entries as they were written (each "do not move" is that part's own: the births prompt's sha and `PARSE_VERSION`
+moved again in part 3).
 
-- **The tape's word is the score's own** (league/ops/evl_health.py `TAPE_LABELS`): `evl_score`'s "waiting on the tape"
-  excuse read every `marks` row with no price, whatever its label; PREREG-EVL-5's `_marks_0930` stores the gap's 09:30
-  minute with no price ('0930') when that minute had no trade, which excused an unrelated stuck intent of the name. It
-  now reads the score's own labels alone ('open', 'close', 'first', `score.tape_print`'s).
-- **The births' facts see PREREG-EVL-4's and -5's rows** (league/events/births.py `FILE_FAMILIES`, `Facts._file_windows`,
-  `facts_reaction`, `unread_gap`; PREREG-EVL-5 section 7, "births.py's facts for the new families"): release 1019g's
-  facts windowed none of their families, so all nine rows selected 0 in the architect's facts and every candidate's
-  Jaccard against them was 0. They are now windowed as their close decision reads them (`close_rows_4`,
-  `close_rows_5`), outcome-free: every price unread, so a count that reads one is an upper bound (EVL-8K-REACT-ON's
-  reaction as any react family's; PREREG-EVL-5's reaction passes each row's own band and its gap passes; TAKEN (a), (c)
-  and the <= 0.96 skip skip nothing, (b) reads the stored PROMPT-NEWS verdicts, no issuer waits; NO NEW INFORMATION (i)
-  names by the kept eligibility's ticker, since SEC's copy lives in `meta`, which the facts never read). On the
-  invented week of PREREG-EVL-5's tests each row's count covers its shadow's events and the rows that read no price
-  count exactly them; the trace shows no refused table read. The architect's family statistics are the grammar's
-  families' as before; the grammar, the rates and `PARSE_VERSION` do not move (more Jaccard targets can only refuse
-  more).
-- **The alarms reach `decide-close-evl5`** (league/ops/evl_health.py `FILE_WAITS`, `four_waiting(prereg=)`,
-  `four_decisions(prereg=)`): `evl_decide` stands on a close the judge's `made_without(prereg=5)` names (decided by a
-  release without PREREG-EVL-5's rows, or its part for them failed or ran past its bound) two hours after the stall job
-  first saw it, while its `decide-close-evl5` is not `ok` or is stale (first sight kept in stall.json `evl_kept`
-  `five`; numbers `five_*` beside `four_*`; the text names the file); `evl_verdicts` reads `decide-close-evl5`'s
-  tallies.
-- **The lead after a failed live run** (league/events/house.py `LEAD_ENDS`, `_live_next`, `_lead`, `_close_hold`,
-  `_deadline`, the turn loop): release 1019g's lead ended at ANY receipt of today's live close decision, so after one
-  failed run (an exception, a gateway 429) another decision could start with its whole DECIDE_BUDGET and the retry came
-  after the book's 15:49:00 cut-off (the review's probe: a re-decision at 15:47:23, the retry at 15:50:03). The lead now
-  ends only when a run has finished `ok` or `pending` (the book's own reading, `book.decided`, `part_hold`), or once the
-  decision is no longer live: a task that raises inside the lead never ends the turn, no other decision starts before
-  the failed run's retry (its start + DECIDE_RETRY), every other task is bounded to end DECISION_MARGIN before it, and
-  the held turn starts the retry at its time (a failure at 15:47:00 is retried at 15:48:00 in the same turn, before a
-  queued re-decision). test_events_evl5.py's `test_inside_the_lead_no_other_decision_is_due_whatever_its_rank` now
-  holds the new end (a run that has only started, or failed, keeps the others waiting).
-- **PREREG-EVL-5's waiting room once overdue, THE CAPTAIN'S DECISION (option 1 of its money re-review)**
-  (league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead.overdue`, `for_buy`, `_room_free`, `_prereg_row`;
-  league/events/book.py `room_free_overdue`, `prereg_row`): from one book minute before the close window's cut-off
-  (15:48:00 ET on a full day) while the lane's close receipt is still unfinished, a waiting PREREG-EVL-5 buy keeps no
-  room from a row of PREREG-EVL-1 to -4 after it in ROOM's order (cash, invested room, loss budget, name wall, line
-  slots); it still keeps it from R3's births and its own file's rows. So when its part runs late the cost never falls
-  on an earlier file's real money at that minute (the re-review's case: a Probe DROP row's wait left a learning
-  REACT-C1 row unsent at the cut-off). The post-close alert is a WARNING whenever a later buy that ended unsent waiting
-  for that room is a PREREG row (any file's, not a birth's: `room_waited_prereg` in the `equity.alert` record), else as
-  before. A buy can only go earlier than release 1019g sends it; no wall, money row or judge moves.
-- **The docs and the shipped files**: the deployed state (this paragraph's running release, the entries of releases
-  1019c to 1019g and their deploys, docs/operations.md's section headers, docs/events.md's and README.md's status
-  lines); the births budget after PREREG-EVL-5 (1.5 used, 0.10 a seatable birth, at most fifteen seatable births:
-  docs/events.md, README.md, the births.py docstring); and docs/prereg/evl-3/calibrate_events.py, the module
-  docs/prereg/evl-5/calib_evl5.py imports (`sys.path` ../evl-3, its `signflip_p`), shipped byte for byte from the tags
-  (`prereg-evl-3` and `prereg-evl-5` hold the same blob `c3c42371`), so the shipped script runs from the tree; the
-  script and PREREG-EVL-5.md are untouched (their sha256 pinned).
-
-### Release 1019h: Done speed (the captain's A97 and A100): Probe+ buys at Done's size, promoted births in their band, the births' supply floor, the Done supply line, on `feat/done-speed` (unreleased; cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in; a draft PR with base `rel/1019g`; an owner deploy after release 1019g is live: THE GATEWAY (`gateway/lib/email.mjs`: the supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100), so the standing grant re-ratifies at the House's start; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`, the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; the births proposer's prompt sha moves `8294fe77` -> `890806ff` with `births.PARSE_VERSION` 2 -> 3; the Done rule `54241925` is untouched)
+**Part 1, Done speed** (`feat/done-speed` `88ecf37f`, PR 597; the captain's A97 and A100: Probe+ buys at Done's size,
+promoted births in their band, the births' supply floor, the Done supply line).
 
 The brief is `goal-2026-10-19/speed/KEPT-1019h.md` (the done-speed designs and their adversarial checks, whose
 conditions bind); the captain records it as A97, and A100 names S2's rows. Four items, each with tests that fail
@@ -179,6 +131,117 @@ test_events_a86.py, test_events_births.py (`SeatableRate`; `Validation` sets a s
 test_daily_report.py (`DoneSupply`), league/tests/equity_design.py (`DIGESTS`, `DIGESTS_A86`, `before_1019h`),
 league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notice.test.mjs.
 
+**Part 2, release 1019g's minors** (`fix/1019h-minors` `8e83ad1b`, PR 598; A108's open minors: the alarms, the births'
+facts, the lead, PREREG-EVL-5's waiting room (the captain's A113), the docs; no money row, no setting, no judge's rule,
+no gateway file; docs/prereg/PREREG-EVL-5.md and docs/prereg/evl-5/ byte for byte the tag's).
+
+The open minors of release 1019g's two reviews (A108), and the captain's decision on PREREG-EVL-5's money re-review
+(its option 1), each with a test that fails without it (league/tests/test_events_1019h_minors.py):
+
+- **The tape's word is the score's own** (league/ops/evl_health.py `TAPE_LABELS`): `evl_score`'s "waiting on the tape"
+  excuse read every `marks` row with no price, whatever its label; PREREG-EVL-5's `_marks_0930` stores the gap's 09:30
+  minute with no price ('0930') when that minute had no trade, which excused an unrelated stuck intent of the name. It
+  now reads the score's own labels alone ('open', 'close', 'first', `score.tape_print`'s).
+- **The births' facts see PREREG-EVL-4's and -5's rows** (league/events/births.py `FILE_FAMILIES`, `Facts._file_windows`,
+  `facts_reaction`, `unread_gap`; PREREG-EVL-5 section 7, "births.py's facts for the new families"): release 1019g's
+  facts windowed none of their families, so all nine rows selected 0 in the architect's facts and every candidate's
+  Jaccard against them was 0. They are now windowed as their close decision reads them (`close_rows_4`,
+  `close_rows_5`), outcome-free: every price unread, so a count that reads one is an upper bound (EVL-8K-REACT-ON's
+  reaction as any react family's; PREREG-EVL-5's reaction passes each row's own band and its gap passes; TAKEN (a), (c)
+  and the <= 0.96 skip skip nothing, (b) reads the stored PROMPT-NEWS verdicts, no issuer waits; NO NEW INFORMATION (i)
+  names by the kept eligibility's ticker, since SEC's copy lives in `meta`, which the facts never read). On the
+  invented week of PREREG-EVL-5's tests each row's count covers its shadow's events and the rows that read no price
+  count exactly them; the trace shows no refused table read. The architect's family statistics are the grammar's
+  families' as before; the grammar, the rates and `PARSE_VERSION` do not move (more Jaccard targets can only refuse
+  more).
+- **The alarms reach `decide-close-evl5`** (league/ops/evl_health.py `FILE_WAITS`, `four_waiting(prereg=)`,
+  `four_decisions(prereg=)`): `evl_decide` stands on a close the judge's `made_without(prereg=5)` names (decided by a
+  release without PREREG-EVL-5's rows, or its part for them failed or ran past its bound) two hours after the stall job
+  first saw it, while its `decide-close-evl5` is not `ok` or is stale (first sight kept in stall.json `evl_kept`
+  `five`; numbers `five_*` beside `four_*`; the text names the file); `evl_verdicts` reads `decide-close-evl5`'s
+  tallies.
+- **The lead after a failed live run** (league/events/house.py `LEAD_ENDS`, `_live_next`, `_lead`, `_close_hold`,
+  `_deadline`, the turn loop): release 1019g's lead ended at ANY receipt of today's live close decision, so after one
+  failed run (an exception, a gateway 429) another decision could start with its whole DECIDE_BUDGET and the retry came
+  after the book's 15:49:00 cut-off (the review's probe: a re-decision at 15:47:23, the retry at 15:50:03). The lead now
+  ends only when a run has finished `ok` or `pending` (the book's own reading, `book.decided`, `part_hold`), or once the
+  decision is no longer live: a task that raises inside the lead never ends the turn, no other decision starts before
+  the failed run's retry (its start + DECIDE_RETRY), every other task is bounded to end DECISION_MARGIN before it, and
+  the held turn starts the retry at its time (a failure at 15:47:00 is retried at 15:48:00 in the same turn, before a
+  queued re-decision). test_events_evl5.py's `test_inside_the_lead_no_other_decision_is_due_whatever_its_rank` now
+  holds the new end (a run that has only started, or failed, keeps the others waiting).
+- **PREREG-EVL-5's waiting room once overdue, THE CAPTAIN'S DECISION (option 1 of its money re-review)**
+  (league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead.overdue`, `for_buy`, `_room_free`, `_prereg_row`;
+  league/events/book.py `room_free_overdue`, `prereg_row`): from one book minute before the close window's cut-off
+  (15:48:00 ET on a full day) while the lane's close receipt is still unfinished, a waiting PREREG-EVL-5 buy keeps no
+  room from a row of PREREG-EVL-1 to -4 after it in ROOM's order (cash, invested room, loss budget, name wall, line
+  slots); it still keeps it from R3's births and its own file's rows. So when its part runs late the cost never falls
+  on an earlier file's real money at that minute (the re-review's case: a Probe DROP row's wait left a learning
+  REACT-C1 row unsent at the cut-off). The post-close alert is a WARNING whenever a later buy that ended unsent waiting
+  for that room is a PREREG row (any file's, not a birth's: `room_waited_prereg` in the `equity.alert` record), else as
+  before. A buy can only go earlier than release 1019g sends it; no wall, money row or judge moves.
+- **The docs and the shipped files**: the deployed state (this paragraph's running release, the entries of releases
+  1019c to 1019g and their deploys, docs/operations.md's section headers, docs/events.md's and README.md's status
+  lines); the births budget after PREREG-EVL-5 (1.5 used, 0.10 a seatable birth, at most fifteen seatable births:
+  docs/events.md, README.md, the births.py docstring); and docs/prereg/evl-3/calibrate_events.py, the module
+  docs/prereg/evl-5/calib_evl5.py imports (`sys.path` ../evl-3, its `signflip_p`), shipped byte for byte from the tags
+  (`prereg-evl-3` and `prereg-evl-5` hold the same blob `c3c42371`), so the shipped script runs from the tree; the
+  script and PREREG-EVL-5.md are untouched (their sha256 pinned).
+
+**Part 3, the births architect on Claude Opus 5.5** (the captain's A109, 06:05Z Oct 22, 2026, on `rel/1019h`
+`ded2771c`; league/tests/test_events_1019h_architect.py, ten of whose twelve tests fail on part 2's head, the other two
+guards):
+
+- **Why** (A109): the Oct 21 night's one re-run (receipt 3068, prompt `8294fe77`, $0.0080) accepted none: every spec
+  failed the rate (part 1's SUP-3 fixes the denominator), and the architect, Haiku 4.5, proposed narrow rules and a
+  duplicate. From this release the births architect is `claude-opus-5-5` (league/events/births.py `MODEL`); the verdict
+  reader stays Haiku 4.5 (league/events/verdicts.py `MODEL`); both are in the gateway's CLAUDE_MODELS allowlist.
+- **The worst case at the model's own prices** (`PRICES`, `GEO_MAX`, `PRICE_IN`, `PRICE_OUT`, `worst_usd`): the
+  gateway's row of the model, $4 input and $20 output a million tokens and its `geo` {"us": 1.1}, held equal to
+  gateway/wrangler.jsonc by a test, at the row's dearest geography as the gateway reserves (US-only inference bills
+  1.1x every rate): $4.40 and $22. The night's call is made only when that worst case fits under what is left of
+  `NIGHT_USD` ($0.25, unchanged; the night's first call counts) and of the lane's line (unchanged). A cap or a line
+  between Haiku's worst case and Opus's refuses the call, which part 2's code made.
+- **The call's form for Opus 5.5** (`request_body`; A109 AS BUILT, for the captain's record): Claude Opus 5.5 takes no
+  sampling parameter, so a `temperature` is Anthropic's own 400 (the gateway's note in gateway/lib/claude.mjs), and the
+  births code never asks a 4xx again: with part 2's temperature 0 the new architect would have proposed nothing every
+  night. The body carries no temperature (`TEMPERATURE` None). Opus 5.5 always thinks (adaptive; its default effort
+  "medium") and the thinking is output inside `max_tokens`: `EFFORT` "low" (short thinking, and an unstreamed answer
+  well inside Cloudflare's 100-second wait in front of Anthropic) and `MAX_TOKENS` 3000 -> 6000, the instruction's
+  "unless the worst case needs it" (3000 could be spent thinking before the six specs). Every key is one the gateway
+  admits; 6000 is inside its unstreamed 16,000. An answer cut at `max_tokens` is stored `cut` (its cost counted), never
+  parsed, never asked again. The answer is not sampled deterministically, but a night's answer is asked once, stored and
+  read again, as before.
+- **The cost**: the worst case is about $0.14 on an ordinary night and $0.16 on the fullest night the facts can describe
+  (20,100 characters: every 8-K item, fifteen sources, every hour and score, every program and forty births at five-digit
+  counts), so a night's whole $0.25 always holds it. What a night is billed is the gateway's stated cost: not yet
+  measured on Opus 5.5 (an estimate at effort low: $0.05-0.10 a night, against A109's $0.03 and Haiku's measured
+  $0.008), inside the lane's $3 line and the budget rule's measure of the lane, as before.
+- **The prompt's sha and `PARSE_VERSION`**: the model, the temperature, the effort and `max_tokens` are in `prompt_sha`'s
+  spec, so the sha moves `890806ff` -> `0cae215b` and `births.PARSE_VERSION` 3 -> 4 (A95's rule: a new architect can
+  turn a refused answer into an accepted one; 3 was never live). A night's answer stored under an older sha or model
+  is never read by this code (it stays stored and counted); a night whose receipts are at an older version and
+  accepted and registered none is due its one re-run before 12:55Z of the session day after it, as A95 says. With the
+  release live from 20:05Z Oct 22, the Oct 21 night's one re-run is spent and Oct 22's own births job (21:15 ET) is the
+  first under Opus; live only after that job ran on release 1019g and accepted none, the House re-runs the Oct 22 night
+  once on Opus before 12:55Z Oct 23.
+- **Docs**: births.py's docstring and comments, league/events/house.py, league/site_lane.py and league/ops/budget.py
+  docstrings, league/config.json's `_about`, docs/events.md, README.md and this entry. No identity moves.
+
+**Tests (the release head)**: the full suite on Python 3.14 in six shards, 13,072 tests OK (33 skipped;
+`test_swarm_d2a_sentinel`, known to fail on a module-order artifact on the base, passed in its shard and passes alone);
+the events, equity, live, ci, constitution and ops modules (114) on Python 3.11 in six shards, 2,962 tests OK but ten
+in one shard: `test_equity_e2e` and `test_equity_fx_daily` (which reuses its world) after `test_equity_decider` in one
+process. Each passes alone, the shard's other 492 pass, and `test_equity_decider` then `test_equity_e2e` fails the same
+way on part 2's own tree `8e83ad1b` on both Pythons (the base's order dependency of `test_equity_e2e`; part 1's entry
+names it after `test_equity_design`). league/tests/test_events_1019h_architect.py passes on both (ten of its twelve
+fail on `8e83ad1b`); the gateway's 507 tests and `npm run check` pass; `python -m league.ci --base origin/main --branch
+rel/1019h --no-tests` passed.
+
+**Deploy and rollback**: docs/operations.md, **Release 1019h** (the gateway first, then the House with the new pair;
+S2's instant rollback, the `reach_bar` rows to "0", one money-digest move the grant re-ratifies; the full rollback,
+the House to release 1019g's deployed head `b374d862`, then the gateway).
+
 ### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (DEPLOYED 05:36Z Oct 22 in PR 595, the gateway first at 05:34Z; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
 - **Deployed 05:36Z Oct 22, 2026** (PR 595): House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`.
@@ -194,7 +257,7 @@ league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notic
     the probe size's record, the screen after the open, the backfill's retries, Sail's spend fields, the alarms, the Done
     reader), PREREG-EVL-5's three rows and control (real money at learning size from the first close decision after the
     release), the births fix (A95: canonical names, two examples, one re-run of an empty night before 12:55Z) and the held
-    turn for the live close decision. The open minors are release 1019h's (**Release 1019h's minors**, above).
+    turn for the live close decision. The open minors are release 1019h's (**Release 1019h**, above, part 2).
   - Rollback: `scripts/floor_box.py rollback` to release 1019e's head and the gateway by `wrangler rollback 68363043`,
     with no order in flight (operations.md, **Release 1019g**).
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
