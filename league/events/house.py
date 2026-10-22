@@ -15,18 +15,28 @@ started on the House's one-slot feeds lane with `house._background("feeds:evl", 
 so every legacy path behaves as it does today.
 
 ONE TURN, ONE TASK, BOUNDED. `run()` does the single most urgent due task, never raises (a failure is a warning at most
-once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time:
+once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time. One exception
+(PREREG-EVL-5 section 1.3, release 1019g's money review): from `HOLD_LEAD` before today's live close decision a turn
+keeps going, runs each task that falls due (each still bounded to end before the decision), waits between them and
+starts the decision at its time (`_close_hold`, `_wait_until`), because real money buys that file's rows only once the
+decision has finished, by the close - 11 minutes. The order of the tasks:
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
    one again (the hourly re-decision of the last three sessions, as the desktop's catchup, waits for the record pass;
    so does PREREG-EVL-4'S ROWS' OWN DECISION, `decide-close-evl4`, of every older close a release without them decided:
-   release 1019c's review, `_refill_redecide`; and THE BIRTHS' OWN DECISION, `decide-open-births` and
-   `decide-close-births`, of every older decision a release or a turn without the registered births made: release
-   1019e's review);
+   release 1019c's review, `_refill_redecide`; PREREG-EVL-5'S ROWS' OWN DECISION, `decide-close-evl5`, of every close a
+   release without them decided or whose PREREG-EVL-5 part failed or ran past its own bound: PREREG-EVL-5 section 3;
+   and THE BIRTHS' OWN DECISION, `decide-open-births` and `decide-close-births`, of every older decision a release or a
+   turn without the registered births made: release 1019e's review);
 2. VERDICTS for a decision within 30 minutes (today's open or close), or for a decision that is pending (a close
    decision waiting on verdicts only its session's OPEN decision asks, PREREG-EVL-4's PM rows, has those asked by the
-   open decision's own code; a wait no call of the pass could answer backs off like one the gateway refused);
+   open decision's own code; a wait no call of the pass could answer backs off like one the gateway refused); and
+   PREREG-EVL-5's PRE-PASS (its section 1.3): today's close's verdict pass is also due from D's 09:30 minute on the
+   Basic plan's tape (09:47 ET, league/events/run.py `pre_from`) while meta `evl5:pre:<day>` is not stored, whatever
+   the verdicts, and once more inside the last 30 minutes once the earlier rows' verdicts are all stored, so the close
+   decision's PREREG-EVL-5 part reads EVL-NEWS-NIGHT2-ON's eligibility and 09:30 minutes as stored (`_pre_due`; a pass
+   whose pre-read failed waits VERDICT_BACKOFF; one its own bound cut goes on at once, from what it stored);
 3. the RECORD pass every 2 minutes: EDGAR's current feeds and the news, at most 90 s, resumable (a new filing is stored
    `listed` at once and fetched in order, so a pass cut short loses nothing), then today's verdicts with the time
    left (its open decision's, then its close decision's: PREREG-EVL-2's day news is read through the session);
@@ -134,8 +144,27 @@ FOUR_KIND = SN.FOUR_KIND
 #: births made and the hourly re-decision no longer reaches (league/events/screen.py `births_made_without`, the judge's:
 #: until it is made the session is not final for those births). Its PREREG rows are never decided again by it.
 BIRTH_KINDS = dict(SN.BIRTHS_KIND)
-BACKFILL_KINDS = (FOUR_KIND, *BIRTH_KINDS.values())
+#: PREREG-EVL-5'S ROWS DECIDED BY THEMSELVES (its section 3): the decision kind (receipt `decide-close-evl5:<day>`,
+#: league/events/run.py `decide_close` with `evl5_only`) the lane runs, once and as a backfill, oldest first, for every
+#: close since PREREG-EVL-5's registration that a release without its rows decided, or whose PREREG-EVL-5 part failed or
+#: ran past its own bound (league/events/screen.py `made_without(prereg=5)`, the judge's), and the hourly re-decision no
+#: longer reaches; such a close's events of these rows are never traded (league/events/book.py `part_hold`).
+FIVE_KIND = SN.FIVE_KIND
+BACKFILL_KINDS = (FOUR_KIND, *BIRTH_KINDS.values(), FIVE_KIND)
 URGENT_BEFORE = dt.timedelta(minutes=30)
+#: PREREG-EVL-5 section 1.3, THE LANE KEEPS ITS TURN FOR ITS LIVE CLOSE DECISION (the money review of release 1019g):
+#: real money buys this file's rows only once the lane's close decision of D has finished (league/events/book.py
+#: `part_hold`) and only until the close - 11 minutes, while a turn starts only on the House's publishes (a minute or
+#: more apart in session), so the decision could start a publish after its time (the close decision + CLOSE_GRACE) and
+#: leave the book no minute to send them. From HOLD_LEAD before that time a turn keeps going instead of ending: it runs
+#: every task that falls due meanwhile (each bounded to end DECISION_MARGIN before the decision, as before; none inside
+#: that margin), waits between them (HOLD_STEP a look; the House closing, the STOP file or a clock that does not move
+#: ends the wait, and the turn), and starts the decision at its time; `due()` looks again no later than HOLD_LEAD
+#: before it, so the publish that starts the turn falls inside the lead. Only while PREREG-EVL-5 has programs, at
+#: most HOLD_TURNS tasks a turn.
+HOLD_LEAD = dt.timedelta(seconds=150)
+HOLD_STEP = 1.0
+HOLD_TURNS = 40
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
@@ -251,9 +280,11 @@ class LaneContext(R.Context):
     snapshots outlive one turn, so a turn does not download either again."""
 
     def __init__(self, lane: "EventLane", store: S.Store, gw: LaneGateway, sec: Callable[[str], bytes],
-                 now: Callable[[], dt.datetime]):
+                 now: Callable[[], dt.datetime], deadline: float | None = None):
         super().__init__(store, gw, sec, now=now)
         self._lane = lane
+        self.deadline = deadline        # (the task's bound: PREREG-EVL-5's part never runs past it, run.py `part_until`)
+        self.mono = lane._mono
 
     def _parsed(self, sha: str) -> dict[str, list[tuple[str, str]]]:
         cache = self._lane._tickers
@@ -307,6 +338,8 @@ class EventLane:
         self._redecide: set[tuple[str, dt.date]] = set()
         self._redecide_next = self._born
         self._four: set[dt.date] = set()        # closes whose PREREG-EVL-4 rows wait for their own decision
+        self._five: set[dt.date] = set()        # closes whose PREREG-EVL-5 rows wait for their own decision
+        self._pre_failed: dict[dt.date, dt.datetime] = {}     # PREREG-EVL-5's pre-reads that failed (VERDICT_BACKOFF)
         self._births_redo: set[tuple[str, dt.date]] = set()   # decisions whose births wait for their own (`BIRTH_KINDS`)
         self._looks: dict[tuple[str, dt.date], VerdictLook] = {}
         self._events_at = self._born            # when a record pass last stored something new
@@ -524,19 +557,41 @@ class EventLane:
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
-                now = self.now()
-                self._maintain(st, now)
-                task, _ = self._plan(st, now)
-                if task is not None:
-                    name = task.name
+                for _ in range(HOLD_TURNS):
+                    now = self.now()
+                    self._maintain(st, now)
+                    task, _ = self._plan(st, now)
+                    if task is not None:
+                        name = task.name
+                        with self._lock:
+                            self._running = name
+                        status, summary = self._do(st, task)
+                        self._note(name, status, summary, began)
+                    now = self.now()
+                    follow, at = self._plan(st, now)
+                    next_look = self.house.clock() if follow is not None else \
+                        self.house.clock() + max(0.0, (at - now).total_seconds())
+                    hold = self._close_hold(st, now)
+                    if hold is None:
+                        lead = self._hold_from(st, now)
+                        if lead is not None:
+                            next_look = min(next_look, self.house.clock() + max(0.0, (lead - now).total_seconds()))
+                        break
+                    # (PREREG-EVL-5 section 1.3: the turn is kept for the live close decision, HOLD_LEAD)
+                    step = dt.timedelta(seconds=HOLD_STEP)
+                    if follow is None:
+                        wake = min(max(at, now + step), hold)      # (the next task due, or the decision)
+                    elif now >= hold - dt.timedelta(seconds=DECISION_MARGIN):
+                        wake = hold                                 # (inside the decision's margin: the decision first)
+                    elif task is not None and self._mono() - began < HOLD_STEP:
+                        wake = now + step                           # (a task that took no time is not run again at once)
+                    else:
+                        wake = now
+                    if not self._wait_until(wake):
+                        break
+                    began, name = self._mono(), "turn"
                     with self._lock:
-                        self._running = name
-                    status, summary = self._do(st, task)
-                    self._note(name, status, summary, began)
-                now = self.now()
-                follow, at = self._plan(st, now)
-                next_look = self.house.clock() if follow is not None else \
-                    self.house.clock() + max(0.0, (at - now).total_seconds())
+                        self._running = "planning"
         except Exception as exc:  # noqa: BLE001 - a turn's failure is a warning, never the tick's
             self._failed[name] = self.now()
             self._note(name, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, began)
@@ -547,6 +602,39 @@ class EventLane:
                 self._next_look = next_look
             self._write_health()
 
+    def _close_hold(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When today's LIVE CLOSE DECISION starts (its time + CLOSE_GRACE), while that is at most HOLD_LEAD ahead of
+        `now` and PREREG-EVL-5 has programs (their real money waits for it, `book.part_hold`); else None."""
+        at = self._hold_at(st, now)
+        return at if at is not None and now < at <= now + HOLD_LEAD else None
+
+    def _hold_from(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When a turn should start to keep itself for today's live close decision (HOLD_LEAD before it), when that is
+        still ahead of `now`; else None."""
+        at = self._hold_at(st, now)
+        return at - HOLD_LEAD if at is not None and now < at - HOLD_LEAD else None
+
+    @staticmethod
+    def _hold_at(st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        if not R.five_programs():
+            return None
+        session = C.session(st, now.astimezone(C.NY).date())
+        return None if session is None else session.close_decide + CLOSE_GRACE
+
+    def _wait_until(self, when: dt.datetime) -> bool:
+        """Wait on the House's clock until `when`, HOLD_STEP a look (`sleep`). False, at once, when the House is closing,
+        the STOP file is there or the store is gone, or a look found the clock where it was (a clock that does not move:
+        nothing could come due)."""
+        while True:
+            now = self.now()
+            if now >= when:
+                return True
+            if self.closing() or not self.ready():
+                return False
+            self._sleep(min(HOLD_STEP, max(0.0, (when - now).total_seconds())))
+            if self.now() <= now:
+                return False
+
     def _do(self, st: S.Store, task: Task) -> tuple[str, dict[str, Any]]:
         """Run `task` under its bound; its Claude calls are counted into a `verdicts` receipt."""
         now = self.now()
@@ -554,7 +642,7 @@ class EventLane:
         gw = LaneGateway(self.gateway(), self, deadline, cut=task.cut)
         self._paused = bool(self._house_paused())
         self._spend_today(st, now)
-        ctx = LaneContext(self, st, gw, self._sec_for(deadline, task.cut), self.now)
+        ctx = LaneContext(self, st, gw, self._sec_for(deadline, task.cut), self.now, deadline)
         try:
             out = task.run(ctx, deadline) or {}
             status = str(out.pop("_status", "ok"))
@@ -710,8 +798,9 @@ class EventLane:
 
     def _decision_times(self, st: S.Store, first: dt.date, last: dt.date) -> Iterable[tuple[C.Session, str, dt.datetime, dt.datetime]]:
         """(session, kind, scheduled time, the time it is run from) for every decision of the sessions in [first, last],
-        PREREG-EVL-4's rows' own decision (`FOUR_KIND`) of each close that waits for it (`_four`) and the births' own
-        decision (`BIRTH_KINDS`) of each decision whose births wait for it (`_births_redo`)."""
+        PREREG-EVL-4's rows' own decision (`FOUR_KIND`) of each close that waits for it (`_four`), PREREG-EVL-5's
+        (`FIVE_KIND`, `_five`) and the births' own decision (`BIRTH_KINDS`) of each decision whose births wait for it
+        (`_births_redo`)."""
         for s in C.sessions(st, first, last):
             yield s, "open", s.open_decide, s.open_decide
             if ("open", s.day) in self._births_redo:
@@ -719,6 +808,8 @@ class EventLane:
             yield s, "close", s.close_decide, s.close_decide + CLOSE_GRACE
             if s.day in self._four:
                 yield s, FOUR_KIND, s.close_decide, s.close_decide + CLOSE_GRACE
+            if s.day in self._five:
+                yield s, FIVE_KIND, s.close_decide, s.close_decide + CLOSE_GRACE
             if ("close", s.day) in self._births_redo:
                 yield s, BIRTH_KINDS["close"], s.close_decide, s.close_decide + CLOSE_GRACE
 
@@ -732,6 +823,10 @@ class EventLane:
         the hourly re-decision no longer reaches. A close it still reaches is decided again whole by it, and a close
         whose latest decision is pending is decided again whole by its retry: each names their rows then. One decided
         by themselves and then again by such a release (stale) is decided again.
+
+        PREREG-EVL-5'S ROWS (its section 3) the same way (`FIVE_KIND`, `made_without(prereg=5)`): every close since its
+        registration that a release without its rows decided, or whose PREREG-EVL-5 part failed or ran past its own
+        bound, and the hourly re-decision no longer reaches, gets their own decision, once, as a backfill, oldest first.
 
         THE BIRTHS' OWN DECISIONS (release 1019e's review) the same way: every older open and close decision that a
         release or a turn without the registered births made last (league/events/screen.py `births_made_without`) gets
@@ -756,6 +851,15 @@ class EventLane:
             if stale:
                 self._redecide.add((FOUR_KIND, day))
         self._four = four
+        five: set[dt.date] = set()
+        for day, stale in SN.made_without(st, today, first=(now - LOOKBACK).astimezone(C.NY).date(), prereg=5).items():
+            status = latest.get(f"decide-close:{day.isoformat()}", (None, None))[0]
+            if day in reached or status != "ok":
+                continue    # (decided again whole, by the hourly re-decision or its pending retry: naming them then)
+            five.add(day)
+            if stale:
+                self._redecide.add((FIVE_KIND, day))
+        self._five = five
         births: set[tuple[str, dt.date]] = set()
         for (kind, day), again in SN.births_made_without(st, today, first=(now - LOOKBACK).astimezone(C.NY).date()).items():
             status = latest.get(f"decide-{kind}:{day.isoformat()}", (None, None))[0]
@@ -828,6 +932,8 @@ class EventLane:
                 out = R.decide_open(ctx, day, backfill_run=not live)
             elif kind == FOUR_KIND:
                 out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
+            elif kind == FIVE_KIND:
+                out = R.decide_close(ctx, day, backfill_run=True, evl5_only=True)
             elif kind == BIRTH_KINDS["open"]:
                 out = R.decide_open(ctx, day, backfill_run=True, births_only=True)
             elif kind == BIRTH_KINDS["close"]:
@@ -850,6 +956,8 @@ class EventLane:
         self._cut.discard(key)
         if out.get("evl4_error"):   # (A83 (3)(i): PREREG-EVL-4's part failed alone; its own decision or the next whole one)
             self.warn("PREREG-EVL-4 part of a close decision", f"{day.isoformat()}: {out['evl4_error']}")
+        if out.get("evl5_error"):   # (PREREG-EVL-5 section 1.3: its part failed alone; decide-close-evl5, never traded)
+            self.warn("PREREG-EVL-5 part of a close decision", f"{day.isoformat()}: {out['evl5_error']}")
         missing = sum((out.get("pending") or {}).values())
         self._look(key, missing, self._stored_verdicts(ctx.store) - before, ctx.gw)
         return {"day": day.isoformat(), "live": live, "pending": missing,
@@ -878,7 +986,8 @@ class EventLane:
                 if now < ready:
                     soon.append(ready)
                     continue
-                if not self._verdicts_due((kind, today), now, soon, fresh=True):
+                if not self._verdicts_due((kind, today), now, soon, fresh=True) and \
+                        not (kind == "close" and self._pre_due(st, session, now, soon)):
                     continue
                 live = R.live_run(decide_at, now)
                 if status == "pending" or now >= decide_at - URGENT_BEFORE:
@@ -892,12 +1001,57 @@ class EventLane:
             for day, kind in pending:
                 if kind == FOUR_KIND and day not in self._four:
                     continue    # (its close was decided again whole since: that decision's own wait is the one read)
+                if kind == FIVE_KIND and day not in self._five:
+                    continue    # (the same for PREREG-EVL-5's rows' own decision)
                 if kind in BIRTH_KINDS.values() and (_base_kind(kind), day) not in self._births_redo:
                     continue    # (the same for the births' own decision)
                 if day != today and self._verdicts_due((kind, day), now, soon, fresh=False):
                     urgent = (kind, day, False)
                     break
         return urgent, early
+
+    def _pre_due(self, st: S.Store, session: C.Session, now: dt.datetime, soon: list[dt.datetime]) -> bool:
+        """PREREG-EVL-5'S PRE-PASS (its section 1.3; the module docstring's step 2): whether today's close verdict pass
+        is due for EVL-NEWS-NIGHT2-ON's heavy reads alone. From D's 09:30 minute on the tape (run.py `pre_from`) while
+        meta `evl5:pre:<day>` is not stored; inside URGENT_BEFORE of the close decision only once the earlier rows'
+        verdicts of the decision are all stored (the last pass saw no wait), once more when the stored cut is earlier
+        than that mark. Never for a session none of whose attention articles of P can be an event (T29 of P at or
+        before the registration time), nor while a written look of its group keeps EVL-NEWS-NIGHT2-ON (it is asked and
+        fetched nothing, A74 (5)); a pre-read that failed waits VERDICT_BACKOFF (one its own bound cut goes on at once)."""
+        start = R.pre_from(session)
+        if now < start:
+            soon.append(start)
+            return False
+        failed = self._pre_failed.get(session.day)
+        if failed is not None and now < failed + VERDICT_BACKOFF:
+            soon.append(failed + VERDICT_BACKOFF)
+            return False
+        night2 = [p for p in R.five_programs() if p.family == "news-night2"]
+        try:
+            last = P.attention_window(st, session.day)[1]
+        except LookupError:
+            return False
+        if not night2 or all(last <= p.registered_at for p in night2):
+            return False        # (no attention article of P can be an event: every one predates the registration)
+        kept = R._scope(st, "close", session.day, now)
+        if all(kept(p) is not None for p in night2):
+            return False
+        raw = st.meta(f"{R.PRE_KEY}{session.day.isoformat()}")
+        late = session.close_decide - URGENT_BEFORE
+        if now < late:
+            if raw is not None:
+                soon.append(late)
+            return raw is None
+        look = self._looks.get(("close", session.day))
+        if look is None or look.missing > 0:
+            return False
+        if raw is None:
+            return True
+        try:
+            cut = S.parse_iso(json.loads(raw)["cut"])
+        except (TypeError, ValueError, KeyError):
+            return False
+        return cut < late
 
     def _verdicts_due(self, key: tuple[str, dt.date], now: dt.datetime, soon: list[dt.datetime], *, fresh: bool) -> bool:
         look = self._looks.get(key)
@@ -925,6 +1079,9 @@ class EventLane:
         elif kind == FOUR_KIND:     # PREREG-EVL-4's rows' own decision (a backfill): their verdicts alone
             def decide(ctx: Any, day: dt.date, *, backfill_run: bool, ask_only: bool) -> dict[str, Any]:
                 return R.decide_close(ctx, day, backfill_run=True, ask_only=ask_only, evl4_only=True)
+        elif kind == FIVE_KIND:     # PREREG-EVL-5's rows' own decision (a backfill): their verdicts alone
+            def decide(ctx: Any, day: dt.date, *, backfill_run: bool, ask_only: bool) -> dict[str, Any]:
+                return R.decide_close(ctx, day, backfill_run=True, ask_only=ask_only, evl5_only=True)
         elif kind in BIRTH_KINDS.values():      # the births' own decision (a backfill): their verdicts alone
             whole = R.decide_open if kind == BIRTH_KINDS["open"] else R.decide_close
 
@@ -934,7 +1091,7 @@ class EventLane:
             decide = R.decide_close
         try:
             out = decide(ctx, day, backfill_run=not live, ask_only=True)
-            if kind in ("close", FOUR_KIND, BIRTH_KINDS["close"]) and R.waits_on_open(out):
+            if kind in ("close", FOUR_KIND, BIRTH_KINDS["close"], FIVE_KIND) and R.waits_on_open(out):
                 session = C.session(ctx.store, day)
                 opened = R.live_run(session.open_decide, ctx.now()) if session is not None else False
                 R.decide_open(ctx, day, backfill_run=not opened, ask_only=True)
@@ -947,6 +1104,12 @@ class EventLane:
             had = self._looks.get(key)
             self._looks[key] = VerdictLook(self.now(), max(1, had.missing if had else 1), True)
             raise
+        pre = out.get("evl5_pre") if isinstance(out.get("evl5_pre"), Mapping) else None
+        if pre is not None and pre.get("status") == "error":
+            self._pre_failed[day] = self.now()      # (PREREG-EVL-5's pre-read failed: tried again after VERDICT_BACKOFF)
+            self.warn("PREREG-EVL-5 pre-pass", f"{day.isoformat()}: {pre.get('why')}")
+        elif pre is not None and pre.get("status") == "stored":
+            self._pre_failed.pop(day, None)
         missing = sum((out.get("pending") or {}).values())
         stored = self._stored_verdicts(ctx.store) - before
         stalled = self._look(key, missing, stored, gw)
@@ -1104,7 +1267,7 @@ class EventLane:
                 continue
             # its reads stop at the pass's bound too (the eligibility it reads is kept as it is read)
             step = LaneGateway(ctx.gw.inner, self, deadline, cut=True)
-            bounded = LaneContext(self, ctx.store, step, self._sec_for(deadline, True), self.now)
+            bounded = LaneContext(self, ctx.store, step, self._sec_for(deadline, True), self.now, deadline)
             try:
                 out.append(self._verdicts(bounded, kind, today, R.live_run(decide_at, now)))
             except LaneDeadline:

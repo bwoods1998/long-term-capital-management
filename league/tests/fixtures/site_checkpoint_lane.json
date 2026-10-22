@@ -745,6 +745,39 @@
         }
       },
       {
+        "id": "ern-drop-on",
+        "name": "Earnings fall overnight",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
+        "id": "ern-under-on",
+        "name": "Muted earnings read overnight",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
+        "id": "news-night2-on",
+        "name": "News second night",
+        "band": "learning",
+        "real": 0,
+        "shadow": 0,
+        "look": {
+          "need": 60,
+          "to_go": 60
+        }
+      },
+      {
         "id": "ern-read-o3",
         "name": "Earnings read, longer hold",
         "band": "shadow",
@@ -831,12 +864,20 @@
         "real": 0,
         "shadow": 0,
         "look": null
+      },
+      {
+        "id": "ctrl-ern-under-on",
+        "name": "All muted earnings overnight",
+        "band": "shadow",
+        "real": 0,
+        "shadow": 0,
+        "look": null
       }
     ],
     "funnel": {
       "since": "2026-10-19T01:08:38.000Z",
-      "shadow": 23,
-      "learning": 12,
+      "shadow": 27,
+      "learning": 15,
       "probe": 0,
       "sized": 0,
       "retired": 0

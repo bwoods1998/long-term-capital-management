@@ -17,8 +17,10 @@ left as it was, why, and the events it left out of that program's record (`_left
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
+import time
 from typing import Any, Callable, Iterable, Mapping
 
 from . import calendar as C
@@ -41,7 +43,39 @@ LIVE_WITHIN = S.LEGACY_LIVE_WITHIN
 class Deadline(Exception):
     """A read past the bound of the task that runs a decision (the House's lane raises its `LaneDeadline`, a subclass):
     the task stops and its next turn goes on from what it stored. Never a failure of a decision's part
-    (`decide_close`'s PREREG-EVL-4 part lets it through)."""
+    (`decide_close`'s PREREG-EVL-4 and PREREG-EVL-5 parts let it through)."""
+
+
+class PartDeadline(Exception):
+    """PREREG-EVL-5 section 1.3: THE PART OF A CLOSE DECISION THAT DECIDES ITS ROWS ran past ITS OWN time bound
+    (`EVL5_BUDGET`, never past the task's own bound less `EVL5_FINISH`). NOT a `Deadline` (the task's): it is the part's
+    failure alone, so the decision finishes with the earlier rows' results and names none of PREREG-EVL-5's rows
+    (`decide_close`), which `decide-close-evl5` then decides by themselves as a backfill, never traded."""
+
+
+#: PREREG-EVL-5 section 1.3, THE PART'S OWN TIME BOUND (the adversarial check's third major): the seconds the part that
+#: decides PREREG-EVL-5's rows may run inside a close decision, and never past the task's own bound (the House's
+#: `DECIDE_BUDGET`, league/events/house.py, which hands the decision its deadline: `Context.deadline`) less EVL5_FINISH,
+#: the time the receipt's finish needs. The session's verdict pre-passes (`ask_only`) run the part's reads under
+#: EVL5_PRE_BUDGET the same way. Behind league/ci.py's wall, as this module is.
+EVL5_BUDGET = 45.0
+EVL5_PRE_BUDGET = 60.0
+EVL5_FINISH = 15.0
+#: Inside this long before D's close decision, the pre-pass reads EVL-NEWS-NIGHT2-ON's rows only once the earlier rows'
+#: verdicts of that decision are all stored (the code plan's schedule: the earlier rows' asks come first).
+EVL5_PRE_URGENT = dt.timedelta(minutes=30)
+#: meta `evl5:pre:<day>`: what the session's verdict pre-pass read for EVL-NEWS-NIGHT2-ON (JSON {cut, survivors, ...}),
+#: written last, once its eligibility results and 09:30 marks are stored (league/events/house.py schedules the pass).
+PRE_KEY = "evl5:pre:"
+#: THE GAP'S MINUTE (PREREG-EVL-5 section 1.1): the regular-session SIP 1-minute bar starting at 09:30:00 ET of D, its
+#: OPEN (raw), stored once read under this label. A row with no price says the tape served the name and that minute
+#: had no trade (no gap); only a decision's own read of the name alone writes one (`_marks_0930`), never a batch and
+#: never a pre-pass, so an empty or partial answer stores nothing and removes nothing (PREREG-EVL-1 section 3).
+GAP_LABEL = "0930"
+#: The window of a decision's read of ONE name whose 09:30 minute no batch held (`_marks_0930` with `alone`): 09:30:00
+#: through 09:35:00 ET. A bar of a later minute of it with none starting at 09:30 is the tape's word that the minute had
+#: no trade; an answer with no bar at all is no answer (nothing stored, read again by the next decision).
+GAP_ALONE = dt.timedelta(minutes=5)
 
 
 def live_run(scheduled: dt.datetime, now: dt.datetime) -> bool:
@@ -57,6 +91,10 @@ class Context:
         self.store, self.gw, self.sec, self.now = store, gw, sec, now
         self._tickers_by_sha: dict[str, dict[str, list[tuple[str, str]]]] = {}
         self._assets: dict[str, dict[str, Mapping[str, Any]]] = {}
+        #: The bound of the task that runs this pass, on `mono`'s clock (the House's lane sets it: house.py `_do`), None
+        #: when none (the CLI): PREREG-EVL-5's part of a close decision never runs past it less EVL5_FINISH.
+        self.deadline: float | None = None
+        self.mono: Callable[[], float] = time.monotonic
 
     # SEC's company_tickers.json is snapshotted into the store with its fetch time (meta `tickers@<iso>` = document
     # sha); a decision for entry session D reads the latest snapshot fetched before 07:30 ET of D (PREREG draft 2
@@ -375,14 +413,17 @@ def _scope(st: S.Store, kind: str, day: dt.date, now: dt.datetime) -> Callable[[
 def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
               eligible: Callable[[str], Mapping[str, Any] | None],
               guidance: Callable[[Mapping[str, Any]], str | None] | None = None,
-              reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None
+              reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
+              gap: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None
               ) -> dict[str, list[str]]:
     """WHAT A DECISION THAT KEEPS `prog` LEAVES OUT OF ITS RECORD (release 1019c's judges review; PREREG-EVL-1 section
     3: an outage removes nothing, the late share is reported): `events`, the events of the decision's windows its rule
     takes on the verdicts and prices already stored and its record does not hold (no intent, planned or skipped);
     `unjudged`, those it would take only on a verdict or a price no one has stored yet (a kept program is never asked a
     verdict and never fetched a price: `reaction` reads stored prices only). `rows` are the windows' rows after its
-    registration; nothing is written. The daily report counts both (league/events/report.py `kept_out`)."""
+    registration; nothing is written. The daily report counts both (league/events/report.py `kept_out`). PREREG-EVL-5's
+    rows hope for the price their own rule takes (`HOPED`: a fall to 0.96, a muted 1.00) and EVL-NEWS-NIGHT2-ON for a
+    gap of 1.02 (`gap`, stored marks only); every earlier row hopes for 1.04, as before."""
     def answer(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
         news = "accession" not in row
         return V.stored(st, f"news:{row['id']}" if news else f"8k:{row['accession']}",
@@ -405,19 +446,26 @@ def _left_out(st: S.Store, prog: P.Program, rows: list[Mapping[str, Any]], *,
 
     def hoped_reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
         got = reaction(row, uni) if reaction is not None else None
-        return P.REACT_RATIO if got is None else got
+        return HOPED.get(prog.family, P.REACT_RATIO) if got is None else got
+
+    def hoped_gap(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+        got = gap(row, uni) if gap is not None else None
+        return P.GAP_RATIO if got is None else got
 
     def held(event: str) -> bool:
         return st.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND event=?",
                              (prog.id, prog.version, event)).fetchone() is not None
 
     taken = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=score, reaction=reaction,
-                                       guidance=guidance)}
+                                       guidance=guidance, gap=gap)}
     maybe = {c.event for c in P.select(prog, rows, eligible=eligible, verdict=hoped, reaction=hoped_reaction,
-                                       guidance=hoped_guidance)}
+                                       guidance=hoped_guidance, gap=hoped_gap)}
     return {"events": sorted(e for e in taken if not held(e)),
             "unjudged": sorted(e for e in maybe - taken if not held(e))}
 
+
+#: The price a kept PREREG-EVL-5 earnings row hopes for when none is stored (`_left_out`): one its own rule takes.
+HOPED = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
 
 #: R3: the decision summary's map of the registered births whose own part of a decision raised ({key: why}).
 BIRTHS_FAILED = "births_failed"
@@ -740,8 +788,399 @@ def _skip_excluded(st: S.Store, day: dt.date, excluded: set[str], filed: set[str
     return moved
 
 
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-5
+class _PartGateway:
+    """The gateway of PREREG-EVL-5's part of a close decision (section 1.3): every read and call goes through the
+    task's own gateway (its bound, its counts, the lane's line) and stops at the part's own bound first, with
+    `PartDeadline` (the part's failure alone, never the task's `Deadline`)."""
+
+    def __init__(self, inner: Any, until: float, mono: Callable[[], float]):
+        self.__dict__.update(inner=inner, until=until, mono=mono)
+
+    def _check(self, what: str) -> None:
+        if self.mono() >= self.until:
+            raise PartDeadline(f"PREREG-EVL-5's part ran past its own time bound before {str(what)[:80]}")
+
+    @property
+    def last_headers(self) -> Mapping[str, str]:
+        return getattr(self.inner, "last_headers", {}) or {}
+
+    def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        self._check(path)
+        return self.inner.get_json(path, params)
+
+    def post_json(self, path: str, body: Any, headers: Mapping[str, str] | None = None) -> tuple[int, Any]:
+        self._check(path)
+        return self.inner.post_json(path, body, headers)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.__dict__["inner"], name)
+
+
+def part_until(ctx: Context, budget: float) -> float:
+    """The part's own bound on `ctx.mono`'s clock: `budget` seconds from now, and never past the task's own bound
+    (`ctx.deadline`) less EVL5_FINISH (PREREG-EVL-5 section 1.3: the part never cuts the earlier rows' receipt)."""
+    mono = getattr(ctx, "mono", None) or time.monotonic
+    until = mono() + float(budget)
+    deadline = getattr(ctx, "deadline", None)
+    if deadline is not None:
+        until = min(until, float(deadline) - EVL5_FINISH)
+    return until
+
+
+def bounded(ctx: Context, until: float) -> Context:
+    """`ctx` with its gateway and SEC reads held to `until` (`_PartGateway`): a shallow copy sharing the store, the
+    caches and the clock."""
+    mono = getattr(ctx, "mono", None) or time.monotonic
+    sub = copy.copy(ctx)
+    sub.gw = _PartGateway(ctx.gw, until, mono)
+    inner = ctx.sec
+
+    def sec(url: str) -> bytes:
+        if mono() >= until:
+            raise PartDeadline(f"PREREG-EVL-5's part ran past its own time bound before {url[:80]}")
+        return inner(url)
+    sub.sec = sec
+    return sub
+
+
+def pre_from(session: C.Session) -> dt.datetime:
+    """When D's 09:30 minute bar is on the Basic plan's tape (the bar's end plus `universe.SIP_DELAY`: 09:47 ET): from
+    then on the session's verdict pre-passes read EVL-NEWS-NIGHT2-ON's rows (PREREG-EVL-5 section 1.3)."""
+    return session.open_at + dt.timedelta(minutes=1) + U.SIP_DELAY
+
+
+def _gap_mark(st: S.Store, symbol: str, day: dt.date) -> tuple[bool, float | None]:
+    """(read, the open) of `symbol`'s stored 09:30 minute of `day` (`GAP_LABEL`): (False, None) when none is stored,
+    (True, None) when the tape said that minute had no trade (`_marks_0930`'s read of the name alone)."""
+    row = st.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=?",
+                        (symbol, day.isoformat(), GAP_LABEL)).fetchone()
+    if row is None:
+        return False, None
+    return True, (float(row["px"]) if row["px"] is not None else None)
+
+
+def _minute_bars(ctx: Context, names: list[str], start: dt.datetime, end: dt.datetime) -> dict[str, list[Mapping[str, Any]]]:
+    """{symbol: its SIP 1-minute bars (raw) in [start, end)} for `names` in one request, paged (`MARK_PAGES`)."""
+    got: dict[str, list[Mapping[str, Any]]] = {}
+    token = None
+    for _ in range(MARK_PAGES):
+        page = ctx.gw.get_json("/v1/alpaca/v2/stocks/bars", {"symbols": ",".join(names), "timeframe": "1Min",
+                                                             "start": S.iso(start), "end": S.iso(end), "feed": "sip",
+                                                             "adjustment": "raw", "limit": 10000,
+                                                             "page_token": token}) or {}
+        for sym, bars in (page.get("bars") or {}).items():
+            got.setdefault(str(sym).upper(), []).extend(bars or [])
+        token = page.get("next_page_token")
+        if not token:
+            break
+    return got
+
+
+def _open_of(bars: Iterable[Mapping[str, Any]], start: dt.datetime) -> float | None:
+    """The OPEN of the bar starting exactly at `start` in `bars`, when it is a positive price; else None."""
+    for bar in bars:
+        try:
+            if S.parse_iso(str(bar["t"])) == start and bar.get("o") is not None and float(bar["o"]) > 0:
+                return float(bar["o"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _marks_0930(ctx: Context, symbols: Iterable[str], day: dt.date, *, alone: bool = False) -> int:
+    """THE GAP'S MINUTE of `symbols` on session `day` (PREREG-EVL-5 section 1.1): the regular-session SIP 1-minute bar
+    starting at 09:30:00 ET (raw), read in batched requests (`MARK_BATCH` names each, paged) and stored once read under
+    `GAP_LABEL` with its OPEN. A BATCH STORES ONLY A PRICE (as `_marks_1530`'s T29 batch): a name its answer holds no
+    such bar of gets nothing, so an empty or partial answer (an outage at the 09:47 ET pre-pass, say) removes nothing
+    and the name is read again. `alone` (a decision's own read, never a pre-pass's): each name still unmarked after the
+    batch is read ONCE MORE BY ITSELF over 09:30-09:35 ET (`GAP_ALONE`): its 09:30 bar's open is stored when it holds
+    one; when it holds a later minute's bar and none starting at 09:30, the tape served the name and that minute had no
+    trade, stored with no price (no gap: the event is not taken); an answer with no bar stores nothing (no gap at this
+    decision; the next decision reads it again). So the pre-pass and the close decision store exactly what one
+    computation at the close stores. Names already stored are not read again; nothing is read before the bar is on the
+    Basic plan's tape (`pre_from`). Each chunk's and each name's reads are stored as read (a part its bound cuts keeps
+    them). Returns how many rows were stored."""
+    st = ctx.store
+    session = C.session(st, day)
+    if session is None or ctx.now() < pre_from(session):
+        return 0
+    start, end = session.open_at, session.open_at + dt.timedelta(minutes=1)
+    have = {str(r[0]) for r in st.db.execute("SELECT symbol FROM marks WHERE day=? AND label=?",
+                                              (day.isoformat(), GAP_LABEL))}
+    names = sorted({str(x).upper() for x in symbols if x} - have)
+    stored = 0
+
+    def store(rows: list[tuple[str, float | None]]) -> int:
+        with st.tx() as db:
+            for sym, px in rows:
+                db.execute("INSERT OR REPLACE INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, ?, "
+                           "?, ?, ?)", (sym, day.isoformat(), GAP_LABEL, px, S.iso(start),
+                                        "sip-1min" if px is not None else "sip-1min:none", S.iso(ctx.now())))
+        return len(rows)
+    found: set[str] = set()
+    for i in range(0, len(names), MARK_BATCH):
+        chunk = names[i:i + MARK_BATCH]
+        got = _minute_bars(ctx, chunk, start, end)
+        rows = [(sym, px) for sym in chunk if (px := _open_of(got.get(sym, []), start)) is not None]
+        found |= {sym for sym, _ in rows}
+        stored += store(rows)
+    if not alone:
+        return stored
+    wide = min(start + GAP_ALONE, ctx.now() - U.SIP_DELAY)
+    wide = max(end, wide.replace(second=0, microsecond=0))
+    for sym in names:
+        if sym in found:
+            continue
+        bars = _minute_bars(ctx, [sym], start, wide).get(sym, [])
+        px = _open_of(bars, start)
+        if px is None and not any(_after(b, start) for b in bars):
+            continue        # (no bar at all: no answer, nothing stored)
+        stored += store([(sym, px)])
+    return stored
+
+
+def _after(bar: Mapping[str, Any], start: dt.datetime) -> bool:
+    """Whether `bar` is a minute bar starting after `start` (the tape served its name: `_marks_0930`)."""
+    try:
+        return S.parse_iso(str(bar["t"])) > start
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _stored_results(st: S.Store, day: dt.date, ciks: Iterable[str], *, live: bool) -> dict[str, Mapping[str, Any] | None]:
+    """The eligibility results already kept for `ciks` (`universe.results`), read only: the live rule's for a live
+    decision, every result's (`universe.combined`) for a backfill; None for a CIK with none. A kept program fetches
+    nothing (A74 (5)), so what it leaves out is read on these."""
+    known = U.results(st, day)
+    out: dict[str, Mapping[str, Any] | None] = {}
+    for cik in ciks:
+        have = known.get(str(cik)) or {}
+        out[str(cik)] = (have.get(S.LIVE_RULE) if live else U.combined(have)) if have else None
+    return out
+
+
+def _rows_5(ctx: Context, day: dt.date, by_ticker: Mapping[str, str], elig: Mapping[str, Mapping[str, Any] | None], *,
+            live: bool, ask_only: bool, earnings: bool, night2: bool, fetch_earnings: bool, fetch_night2: bool,
+            needed: set[tuple[str, str]], unanswered: set[tuple[str, str]], check: Callable[[str], None]
+            ) -> dict[str, Any]:
+    """PREREG-EVL-5's reads for the close decision of D = `day` (its section 1), ALL WITH NO REGISTRATION FLOOR for the
+    sets that skip: ERN(D) (the item 2.02 8-Ks of D's close window), DAY(D) (PREREG-EVL-2's day-news window, each article
+    with its issuer's CIK by D's tickers), the attention articles of P, and NO NEW INFORMATION's three windows (i)-(iii).
+
+    `earnings` (DROP, UNDER and its control are read): the eligibility of ERN(D)'s event issuers (knowable after
+    the registration time; most judged already by the earlier rows' call, `elig`, untouched), their reactions (C1's: the
+    T29 close of D over the last close before the acceptance, the T29 minutes read together, `_marks_1530`), the
+    day-news reactions of their DAY(D) issuers (the T29 close over the universe row's previous close), section 1.2's NO
+    NEW PROMPT AND NO SECOND VERDICT (the PROMPT-NEWS verdict of a DAY(D) article, and the PROMPT-DOC verdict of an
+    eligible ERN(D) filing, that these rows read and that no row has stored, asked here with the earlier row's event id,
+    prompt and rendering), then TAKEN AT D'S CLOSE BY AN EARLIER ROW (`programs.taken_close_5`) and the <= 0.96 skip.
+    `night2` (EVL-NEWS-NIGHT2-ON is read): the eligibility of the attention issuers with NO NEW INFORMATION
+    whose attention article is an event, and the 09:30 minutes of the eligible ones (`_marks_0930`: a batch stores only
+    a price; a decision, not a pre-pass, reads each one still unmarked by itself once, `alone`). With `ask_only` no
+    reaction is read (the T29 bar is not on the tape before the decision): the asks are those of every eligible ERN(D)
+    event. Only with `fetch_earnings` (an earnings row is decided or asked) and `fetch_night2` (EVL-NEWS-NIGHT2-ON is) is
+    anything fetched or asked for that group; otherwise (every program of it kept: A74 (5)) the stored results, marks
+    and verdicts only. `check(where)` raises `PartDeadline` once the part's bound has passed; every network read is held to
+    it too (`bounded`). Every result is stored as it is read (eligibility, marks, verdicts), so a pre-pass's reads are
+    the close decision's. Returns {rows: {family: rows}, elig, skips: {family: CIKs}, pending: {program id: n}, ...}."""
+    st = ctx.store
+    session = C.session(st, day)
+    if session is None:
+        raise LookupError(f"no session {day}")
+    times = [p.registered_at for p in P.PROGRAMS if p.prereg == 5 and p.family in P.CLOSE_FAMILIES_5]
+    since = min(times) if times else None
+    if since is None:
+        return {"rows": {f: [] for f in P.CLOSE_FAMILIES_5}, "elig": dict(elig), "skips": {}, "pending": {},
+                "reactions": {}, "gaps": {}, "counts": {}, "survivors": set()}
+
+    def after(row: Mapping[str, Any]) -> bool:
+        return S.parse_iso(str(row["knowable_at"])) > since
+
+    def with_cik(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [dict(a) | {"cik": by_ticker.get(a["symbol"])} for a in rows]
+    lo, hi = P.close_window(st, day)
+    ern = [r for r in P.filings_window(st, "8-K", lo, hi) if P.items_of(r) & P.ERN_ITEMS and r.get("cik")]
+    ern_events = [r for r in ern if after(r)]
+    ern_issuers = {str(r["cik"]) for r in ern_events}
+    day_all = with_cik(P.news_rows(st, *P.day_news_window(st, day)))
+    attention = with_cik(P.news_rows(st, *P.attention_window(st, day)))
+    windows = P.night2_windows(st, day)
+    named = P.named_ciks(P.news_named(st, *windows["named"]), P.ciks_by_ticker(ctx.tickers_for(day)))
+    filed = P.filed_ciks(P.filings_window(st, "8-K", *windows["filed"]))
+    bought = P.bought_ciks(P.ins_buys_window(st, *windows["bought"]))
+    quiet = named | filed | bought
+    att_events = [a for a in attention if a.get("cik") and after(a) and str(a["cik"]) not in quiet]
+    survivors = {str(a["cik"]) for a in att_events}
+    check("the eligibility of PREREG-EVL-5's issuers")
+    table: dict[str, Mapping[str, Any] | None] = dict(elig)
+    fetched = ((ern_issuers if earnings and fetch_earnings else set())
+               | (survivors if night2 and fetch_night2 else set())) - set(table)
+    need = sorted(fetched)
+    if need:
+        rows_of = [r for r in ern_events if str(r["cik"]) in fetched] + [a for a in att_events if str(a["cik"]) in fetched]
+        table.update(eligibility(ctx, day, need, live=live, kind="close", stored=_first_fetched(st, rows_of)))
+    rest = sorted(((ern_issuers if earnings else set()) | (survivors if night2 else set())) - set(table))
+    if rest:
+        table.update(_stored_results(st, day, rest, live=live))
+
+    def symbol_of(cik: str) -> str | None:
+        uni = table.get(str(cik))
+        return None if uni is None else uni.get("symbol")
+    eligible_ern = {c for c in ern_issuers if table.get(c)} if earnings else set()
+    day5 = [a for a in day_all if a.get("cik") and str(a["cik"]) in eligible_ern and symbol_of(a["cik"]) == a.get("symbol")]
+    reactions: dict[str, float | None] = {}
+    day_react: dict[str, float | None] = {}
+    if earnings and not ask_only:
+        check("the T29 minutes of ERN(D)")
+        fetch = fetch_earnings
+        if fetch:
+            _marks_1530(ctx, [str(symbol_of(c)) for c in sorted(eligible_ern)], day)
+        for r in ern:
+            cik = str(r["cik"])
+            if cik in eligible_ern:
+                uni = table[cik]
+                base = _last_close_before(ctx, uni["symbol"], S.parse_iso(r["accepted_at"]), fetch=fetch)
+                mark = _mark_1530(ctx, uni["symbol"], day, fetch=fetch)
+                reactions[str(r["accession"])] = None if not base or mark is None else mark / base
+        for cik in sorted({str(a["cik"]) for a in day5}):
+            uni = table[cik]
+            mark = _mark_1530(ctx, uni["symbol"], day, fetch=fetch)
+            prev = float(uni.get("prev_close") or 0.0)
+            day_react[cik] = mark / prev if mark is not None and prev > 0 else None
+
+    def react(row: Mapping[str, Any]) -> float | None:
+        return reactions.get(str(row.get("accession")))
+    news_prompt, doc_prompt = V.PROMPTS["news"], V.PROMPTS["doc"]
+
+    def answer(a: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        return V.stored(st, f"news:{a['id']}", news_prompt)
+    # (a) and (c) first (prices), so a PROMPT-NEWS verdict is asked only for an issuer they leave (section 1.2)
+    first, _ = P.taken_close_5(ern, day5, symbol_of=symbol_of, reaction=react, day_reaction=day_react.get,
+                               news_answer=lambda a: {"status": "unparsed"})
+    for a in day5:
+        if str(a["cik"]) in first:
+            continue
+        event = (f"news:{a['id']}", news_prompt.sha)
+        needed.add(event)
+        if answer(a) is None and fetch_earnings:
+            check("a DAY(D) verdict")
+            news_verdict(ctx, a)
+        if answer(a) is None:
+            unanswered.add(event)
+    taken, waiting = P.taken_close_5(ern, day5, symbol_of=symbol_of, reaction=react, day_reaction=day_react.get,
+                                     news_answer=answer)
+    dropped = P.dropped_ciks([r for r in ern if str(r["cik"]) in eligible_ern], react)
+
+    def band(r: Mapping[str, Any]) -> bool:
+        ratio = react(r)
+        return ask_only or (ratio is not None and P.DROP_RATIO < ratio < P.REACT_RATIO)
+    under = [r for r in ern_events if str(r["cik"]) in eligible_ern and str(r["cik"]) not in taken | waiting | dropped
+             and band(r) and r.get("text_sha") and (r.get("text_len") or 0) >= 200]
+    for r in under:
+        event = (f"8k:{r['accession']}", doc_prompt.sha)
+        needed.add(event)
+        if V.stored(st, event[0], doc_prompt) is None and fetch_earnings:
+            check("an ERN(D) verdict")
+            doc_verdict(ctx, r, table[str(r["cik"])])
+        if V.stored(st, event[0], doc_prompt) is None:
+            unanswered.add(event)
+    unanswered_news = {cik: sum(1 for a in day5 if str(a["cik"]) == cik and answer(a) is None) for cik in waiting}
+    falls = {str(r["cik"]) for r in ern_events if ask_only or (react(r) is not None and react(r) <= P.DROP_RATIO)}
+    muted = {str(r["cik"]) for r in ern_events if band(r)} - dropped
+    pending = {
+        "EVL-ERN-DROP-ON": sum(n for cik, n in unanswered_news.items() if cik in falls),
+        "EVL-ERN-UNDER-ON": sum(n for cik, n in unanswered_news.items() if cik in muted)
+        + sum(1 for r in under if V.stored(st, f"8k:{r['accession']}", doc_prompt) is None),
+    }
+    pending["EVL-CTRL-ERN-UNDER-ON"] = pending["EVL-ERN-UNDER-ON"]
+    gaps: dict[str, float | None] = {}
+    marks = 0
+    if night2:
+        check("the 09:30 minutes of the attention issuers")
+        live_symbols = sorted({str(symbol_of(c)) for c in survivors if symbol_of(c)})
+        if fetch_night2:
+            marks = _marks_0930(ctx, live_symbols, day, alone=not ask_only)
+        for cik in sorted(survivors):
+            uni = table.get(cik)
+            if uni is None:
+                continue
+            read, px = _gap_mark(st, str(uni["symbol"]), day)
+            prev = float(uni.get("prev_close") or 0.0)
+            gaps[cik] = px / prev if read and px is not None and prev > 0 else None
+    rows = P.close_rows_5(ern, P.no_new_info(attention, named, filed, bought, symbol_of) if night2 else [],
+                          taken=taken, waiting=waiting, dropped=dropped)
+    attention_issuers = {str(a["cik"]) for a in attention if a.get("cik") and after(a)}
+    counts = {"ern": len(ern), "ern_events": len(ern_events), "ern_issuers": len(ern_issuers),
+              "ern_eligible": len(eligible_ern), "taken": len(taken & eligible_ern), "waiting": len(waiting),
+              "dropped": len(dropped), "falls": len(falls & eligible_ern - taken), "muted": len(muted - taken - waiting),
+              "attention": len(attention_issuers), "named": len(attention_issuers & named),
+              "filed": len(attention_issuers & filed - named), "bought": len(attention_issuers & bought - named - filed),
+              "survivors": len(survivors), "survivors_eligible": sum(1 for c in survivors if table.get(c)),
+              "gaps_read": sum(1 for v in gaps.values() if v is not None),
+              "gap_pass": sum(1 for v in gaps.values() if v is not None and v >= P.GAP_RATIO), "marks_0930": marks}
+    return {"rows": rows, "elig": table, "skips": {"ern-drop": taken, "ern-under": taken | dropped, "news-night2": quiet},
+            "pending": pending, "reactions": reactions, "gaps": gaps, "counts": counts, "survivors": survivors}
+
+
+def _skip_taken_5(st: S.Store, day: dt.date, skips: Mapping[str, set[str]], *,
+                  keep: Callable[[P.Program], bool] | None = None) -> int:
+    """PREREG-EVL-5's re-decision (as PREREG-EVL-4's `_skip_excluded`, A75 (2)): a re-decision of D's close marks an
+    intent of PREREG-EVL-5's rows for D that has not settled (planned or entered) `skipped:taken` when a row stored after
+    the intent was written now puts its issuer in a set that skips it (`skips` by family: TAKEN AT D'S CLOSE BY AN
+    EARLIER ROW for EVL-ERN-DROP-ON; that or the <= 0.96 skip for EVL-ERN-UNDER-ON and its control; NO NEW INFORMATION
+    for EVL-NEWS-NIGHT2-ON): the shadow is the rule over every event knowable at the decision time, whenever the
+    recorder stored it. A settled intent, or one skipped already, stays as it is; a program `keep` names (a written look
+    of its group freezes it over D) is never touched. Returns how many moved."""
+    whys = {"ern-drop": "TAKEN AT D'S CLOSE BY AN EARLIER ROW, by a row stored after the decision",
+            "ern-under": "TAKEN AT D'S CLOSE BY AN EARLIER ROW or an ERN(D) reaction <= 0.96, by a row stored after the "
+                         "decision",
+            "news-night2": "NEW INFORMATION on D (an article naming the issuer, an 8-K or an insider buy), stored after "
+                           "the decision"}
+    moves: list[tuple[P.Program, str, str]] = []
+    for prog in P.PROGRAMS:
+        if prog.prereg != 5 or prog.family not in P.CLOSE_FAMILIES_5 or prog.entry_at != "close":
+            continue
+        if keep is not None and keep(prog):
+            continue
+        drop = skips.get(prog.family) or set()
+        if not drop:
+            continue
+        for r in st.db.execute("SELECT event, cik FROM intents WHERE program=? AND version=? AND entry_day=? AND status IN "
+                               "('planned', 'entered')", (prog.id, prog.version, day.isoformat())).fetchall():
+            if r["cik"] and str(r["cik"]) in drop:
+                moves.append((prog, str(r["event"]), whys[prog.family]))
+    if not moves:
+        return 0
+    moved = 0
+    with st.tx():
+        for prog, event, why in moves:
+            moved += bool(st.move_intent(prog.id, prog.version, event, "skipped:taken", why))
+    return moved
+
+
+def five_programs() -> list[P.Program]:
+    """PREREG-EVL-5's programs, every one a close-entry program (`decide_close`'s last part decides them)."""
+    return [p for p in P.PROGRAMS if p.prereg == 5 and p.entry_at == "close" and p.family in P.CLOSE_FAMILIES_5]
+
+
+def _pre_tails(st: S.Store, day: dt.date, survivors: set[str]) -> dict[str, Any] | None:
+    """What the close decision added to the session's pre-pass (meta `evl5:pre:<day>`): its cut, and the attention
+    issuers that survive NO NEW INFORMATION now and did not then (`added`: an attention article stored after the cut)
+    and those that did then and do not now (`removed`: the tails of (i)-(iii)). None with no pre-pass stored."""
+    raw = st.meta(f"{PRE_KEY}{day.isoformat()}")
+    if raw is None:
+        return None
+    try:
+        pre = json.loads(raw)
+        before = {str(c) for c in pre.get("survivors") or []}
+    except (TypeError, ValueError, AttributeError):
+        return {"unreadable": True}
+    return {"cut": pre.get("cut"), "added": len(survivors - before), "removed": len(before - survivors)}
+
+
 def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_only: bool = False,
-                 evl4_only: bool = False, births_only: bool = False) -> dict[str, Any]:
+                 evl4_only: bool = False, births_only: bool = False, evl5_only: bool = False) -> dict[str, Any]:
     """Shadow intents for every close-entry program at session `day`'s close: C1 (PREREG-EVL-1) and PREREG-EVL-2's
     REACT-ON, REACT-READ-C1 and the day-news programs (NEWS-READ-ON, its control, NEWS-REACT-ON), then PREREG-EVL-4's
     (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their two controls: `_rows_4`).
@@ -782,14 +1221,39 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
 
     `births_only` (release 1019e's review): R3'S REGISTERED BIRTHS DECIDED BY THEMSELVES, as `decide_open`'s: the
     decision's reads and its eligibility call as the whole decision makes them, then the close-entry births alone (no
-    PREREG row, PREREG-EVL-4's part not run); its receipt `decide-close-births:<day>` (screen.BIRTHS_KIND)."""
-    if evl4_only and births_only:
-        raise ValueError("a decision of PREREG-EVL-4's rows by themselves or of the births by themselves, not both")
+    PREREG row, PREREG-EVL-4's part not run); its receipt `decide-close-births:<day>` (screen.BIRTHS_KIND).
+
+    PREREG-EVL-5'S PART RUNS LAST, UNDER ITS OWN TIME BOUND, ISOLATED (its section 1.3, "the earlier rows' decision comes
+    first"): after every earlier row and PREREG-EVL-4's part, its reads (`_rows_5`: ERN(D), DAY(D), the attention
+    articles of P and NO NEW INFORMATION's windows, with no registration floor for the sets that skip; the eligibility of
+    its own issuers, the T29 and 09:30 minutes, the verdicts section 1.2 says it asks), `_skip_taken_5` and its programs'
+    intents run under `EVL5_BUDGET` seconds and never past the task's bound (`Context.deadline`) less `EVL5_FINISH`
+    (`bounded`: `PartDeadline`). Its bound's expiry, or any other exception in it that is not the task's own `Deadline`,
+    is its own: the decision finishes with the earlier rows' results (PREREG-EVL-1 to -4 and the births, whole), the
+    error in the summary's `evl5_error`, and PREREG-EVL-5's programs NAMED NOWHERE in it, so the judge reads that close as
+    made without their rows (league/events/screen.py `final_until`, `made_without(prereg=5)`), `decide-close-evl5`
+    decides them by themselves, and real money never trades that close's events of them (league/events/book.py
+    `part_hold`). With `ask_only` the part is the same reads under `EVL5_PRE_BUDGET`, and, for a live decision from
+    D's 09:30 minute on the tape (`pre_from`), EVL-NEWS-NIGHT2-ON'S HEAVY READS made ahead (the eligibility of its
+    surviving attention issuers and their 09:30 minutes, each stored as read; meta `evl5:pre:<day>` written last, the
+    summary's `evl5_pre`); inside `EVL5_PRE_URGENT` of the decision only once the earlier rows' verdicts are all stored.
+    What counts is the stored record at D's close decision time, wherever it is read: the close decision reads every
+    window whole from the store (the pre-pass's reads and the rows stored after it), and the network reads the pre-pass
+    made are read as stored.
+
+    `evl5_only`: PREREG-EVL-5'S ROWS DECIDED BY THEMSELVES, for a close a release without them decided, or whose part
+    failed (`screen.made_without(prereg=5)`; the House's lane and the CLI's catchup run it once, as a backfill): the
+    decision's reads and its eligibility call as the whole decision makes them, then that part alone, under the task's
+    bound only (no own bound: the part is the decision), NO EARLIER ROW's verdict asked or intent written; its receipt
+    `decide-close-evl5:<day>` (screen.FIVE_KIND); its exception is the decision's own and propagates."""
+    if sum((evl4_only, births_only, evl5_only)) > 1:
+        raise ValueError("a decision of one file's rows by themselves, or of the births by themselves: one at a time")
     st = ctx.store
     session = C.session(st, day)
     if session is None:
         return {"skipped": "no session"}
-    kind = SN.FOUR_KIND if evl4_only else SN.BIRTHS_KIND["close"] if births_only else "close"
+    kind = (SN.FOUR_KIND if evl4_only else SN.FIVE_KIND if evl5_only else SN.BIRTHS_KIND["close"] if births_only
+            else "close")
     job = f"decide-{kind}:{day}"
     rid = None if ask_only else st.start_receipt(job, now=ctx.now())
     lo, hi = P.close_window(st, day)
@@ -968,6 +1432,84 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         for prog, rows, table in [] if ask_only else [x for x in later if x[0].family in P.CLOSE_FAMILIES_4]:
             _decide_one(prog, lambda prog, rows=rows, table=table: left(prog, rows, table), out)
 
+    def five_part() -> None:
+        """PREREG-EVL-5's part of the decision (the docstring): its reads (`_rows_5`), `_skip_taken_5`, its programs'
+        intents and what each of its kept programs leaves out, held to the part's own bound (`bounded`)."""
+        progs = five_programs()
+        if not progs:
+            return
+        if evl5_only:
+            sub, until = ctx, None
+        else:
+            until = part_until(ctx, EVL5_PRE_BUDGET if ask_only else EVL5_BUDGET)
+            sub = bounded(ctx, until)
+        mono = getattr(ctx, "mono", None) or time.monotonic
+
+        def check(where: str) -> None:
+            if until is not None and mono() >= until:
+                raise PartDeadline(f"PREREG-EVL-5's part ran past its own time bound before {where}")
+        check("its reads")
+        active = [p for p in progs if kept(p) is None]
+        earnings = any(p.family in P.FAMILY_ERN_5 for p in active)
+        night2 = any(p.family == "news-night2" for p in active)
+        live = not backfill_run
+        pre = False
+        if ask_only and night2:
+            pre = live and ctx.now() >= pre_from(session) and (
+                ctx.now() < session.close_decide - EVL5_PRE_URGENT or not out["pending"])
+            night2 = pre
+        cut = ctx.now()
+        f = _rows_5(sub, day, by_ticker, {**elig, **elig4}, live=live, ask_only=ask_only,
+                    earnings=earnings or not ask_only, night2=night2 or not ask_only, fetch_earnings=earnings,
+                    fetch_night2=night2, needed=needed, unanswered=unanswered, check=check)
+        check("its intents")        # (reads that ended past the bound expire the part; its writes are never cut)
+        if pre:
+            out["evl5_pre"] = {"status": "stored", "cut": S.iso(cut), "survivors": len(f["survivors"]),
+                               "eligible": f["counts"].get("survivors_eligible", 0),
+                               "marks": f["counts"].get("marks_0930", 0)}
+            st.set_meta(f"{PRE_KEY}{day.isoformat()}", json.dumps(
+                {"cut": S.iso(cut), "survivors": sorted(f["survivors"]), "attention": f["counts"].get("attention", 0),
+                 "eligible": f["counts"].get("survivors_eligible", 0), "marks": f["counts"].get("marks_0930", 0)},
+                sort_keys=True))
+        if not ask_only:
+            late = _skip_taken_5(st, day, f["skips"], keep=lambda prog: kept(prog) is not None)
+            if late:
+                out["skipped_taken"] = late
+        table = f["elig"]
+
+        def read5(row: Mapping[str, Any]) -> int | None:
+            got = V.stored(st, f"8k:{row['accession']}", V.PROMPTS["doc"]) if row.get("accession") else None
+            return got["score"] if got and got["status"] == "ok" else None
+
+        def guidance5(row: Mapping[str, Any]) -> str | None:
+            got = V.stored(st, f"8k:{row['accession']}", V.PROMPTS["doc"]) if row.get("accession") else None
+            return got["guidance"] if got and got["status"] == "ok" else None
+
+        def react5(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+            return f["reactions"].get(str(row.get("accession")))
+
+        def gap5(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+            return f["gaps"].get(str(row.get("cik")))
+        for prog in progs:
+            rows = [r for r in f["rows"][prog.family] if S.parse_iso(r["knowable_at"]) > prog.registered_at]
+            frozen = kept(prog)
+            if frozen is not None:     # (A66 owed, a look of its group: asked nothing, fetched nothing, written nothing)
+                out.setdefault("kept", {})[_key(prog)] = frozen
+                if not ask_only:
+                    out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: table.get(c),
+                                                         guidance=guidance5, reaction=react5, gap=gap5)
+                continue
+            waiting = int(f["pending"].get(prog.id) or 0)
+            if waiting:
+                out["pending"][_key(prog)] = waiting   # decided by a later pass, once every answer it waits for is stored
+                continue
+            if ask_only:
+                continue
+            cands = P.select(prog, rows, eligible=lambda c: table.get(c), verdict=read5, reaction=react5,
+                             guidance=guidance5, gap=gap5)
+            out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.close_decide, why=why)
+        out["evl5"] = f["counts"] | ({"pre": _pre_tails(st, day, f["survivors"])} if not ask_only else {})
+
     # THE EARLIER ROWS FIRST, exactly as before PREREG-EVL-4 (their reads, verdicts and intents), then PREREG-EVL-4's
     # part (`four_part`), whose own reads come after them; an exception in that part other than the task's time bound
     # finishes the decision with the earlier rows' results and leaves PREREG-EVL-4's programs unnamed (the docstring,
@@ -975,13 +1517,13 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     # nothing, fetched nothing, written nothing (no intent, no `skipped:excluded` move: `_skip_excluded` passes it
     # over). R3's registered births (close entry: ern-react, news-day, news-react) are decided in the earlier part,
     # after every PREREG row.
-    if not evl4_only:       # (PREREG-EVL-4's rows by themselves: no earlier row is decided again)
+    if not evl4_only and not evl5_only:       # (one file's rows by themselves: no earlier row is decided again)
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
-                    not (births_only and prog.spec is None):
+                    prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None):
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
-        if not births_only:     # (the births by themselves: no PREREG-EVL-4 row is decided again)
+        if not births_only and not evl5_only:     # (the births, or PREREG-EVL-5's rows, by themselves: no PREREG-EVL-4 row)
             four_part()
     except Deadline:
         raise
@@ -993,6 +1535,24 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
             if prog.entry_at == "close" and prog.family in P.CLOSE_FAMILIES_4:
                 for where in (out, out["pending"], out.get("kept") or {}):
                     where.pop(_key(prog), None)
+        if "kept" in out and not out["kept"]:
+            del out["kept"]
+    # PREREG-EVL-5's part LAST (its section 1.3), under its own bound; its failure or expiry is its own (the docstring)
+    try:
+        if not births_only and not evl4_only:
+            five_part()
+    except Deadline:
+        raise
+    except Exception as exc:  # noqa: BLE001 - PREREG-EVL-5's part fails alone (section 1.3); never with evl5_only
+        if evl5_only:
+            raise
+        out["evl5_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        if ask_only and "evl5_pre" not in out:
+            out["evl5_pre"] = {"status": "cut" if isinstance(exc, PartDeadline) else "error", "why": out["evl5_error"]}
+        for prog in five_programs():
+            for where in (out, out["pending"], out.get("kept") or {}):
+                where.pop(_key(prog), None)
+        out.pop("evl5", None)
         if "kept" in out and not out["kept"]:
             del out["kept"]
     for prog, rows, table in [] if ask_only else [x for x in later if x[0].family not in P.CLOSE_FAMILIES_4]:
@@ -1007,4 +1567,5 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
 
 
 __all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run",
-           "waits_on_open", "Deadline", "PM_ASKER"]
+           "waits_on_open", "Deadline", "PM_ASKER", "PartDeadline", "EVL5_BUDGET", "EVL5_PRE_BUDGET", "EVL5_FINISH",
+           "EVL5_PRE_URGENT", "PRE_KEY", "GAP_LABEL", "part_until", "bounded", "pre_from", "five_programs"]

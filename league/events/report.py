@@ -7,9 +7,12 @@ TRADABLE events, the market direction); for a seatable program its next look and
 between the auction prints and the daily bars of the day's settled events; the expected false passes (0.10 x every
 seatable version registered, of the lane's stated budget); the events its decisions KEPT OUT of each program's record
 (release 1019c: a session a look of its group stands over is decided again for nothing, and its decision receipt lists
-what it left out, PREREG-EVL-4's rows' own decision `decide-close-evl4` included; PREREG-EVL-1 section 3's late share);
-the shadow's difference from real money by storage time (`late_rows`: events whose row was stored after their
-decision, intents a later row excluded); and the receipts of the day's jobs, the missed and failed ones listed. `build`
+what it left out, PREREG-EVL-4's and PREREG-EVL-5's rows' own decisions `decide-close-evl4` and `decide-close-evl5`
+included; PREREG-EVL-1 section 3's late share); the shadow's difference from real money by storage time (`late_rows`:
+events whose row was stored after their decision, intents a later row excluded or, PREREG-EVL-5, put in a set that
+skips them); PREREG-EVL-5's funnels of the day's close decision and the closes whose part for its rows failed or ran
+past its own bound (`evl5`, section 6's "the report counts each row's funnel"); and the receipts of the day's jobs, the
+missed and failed ones listed. `build`
 returns the report as JSON-ready data, `render` as a few lines of plain text.
 
 Licensing: Alpaca's data and Benzinga's headlines are not redistributed. Neither form carries a price, a headline, a
@@ -23,6 +26,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
+import sqlite3
+from pathlib import Path
 from typing import Any, Mapping
 
 from . import calendar as C
@@ -115,14 +121,16 @@ def _programs(store: S.Store) -> list[tuple[str, int]]:
 def kept_out(store: S.Store, day: dt.date) -> dict[str, dict[str, set[str]]]:
     """{decision key (`id`, or `id@vN` for a later version): {"events", "unjudged"}}: the event ids the finished decisions
     of the entry sessions through `day` left out of each program's record (their summaries' `kept` entries, written by
-    league/events/run.py `_left_out`; PREREG-EVL-4's rows' own decision, `decide-close-evl4`, and the births' own,
+    league/events/run.py `_left_out`; PREREG-EVL-4's and PREREG-EVL-5's rows' own decisions, `decide-close-evl4` and
+    `decide-close-evl5`, and the births' own,
     `decide-open-births` and `decide-close-births`, included), each event once; an event listed unjudged by one run and
     taken on a stored verdict by a later one counts as left out (`events`) only."""
     events: dict[str, set[str]] = {}
     unjudged: dict[str, set[str]] = {}
     for row in store.db.execute("SELECT job, summary FROM receipts WHERE (job LIKE 'decide-open:%' OR job LIKE "
                                 "'decide-close:%' OR job LIKE 'decide-close-evl4:%' OR job LIKE 'decide-open-births:%' "
-                                "OR job LIKE 'decide-close-births:%') AND status IN ('ok', 'pending')"):
+                                "OR job LIKE 'decide-close-births:%' OR job LIKE 'decide-close-evl5:%') AND status IN "
+                                "('ok', 'pending')"):
         if str(row["job"]).split(":", 1)[1] > day.isoformat():
             continue
         try:
@@ -173,12 +181,14 @@ def late_rows(store: S.Store, program: str, version: int, day: dt.date) -> dict[
     stored later counts in the shadow only, and the report counts the difference"): of the program's intents entering
     by `day`, those taken whose event row the lane stored after the intent's decision time (real money could not read
     it), today and to date, and those a re-decision marked `skipped:excluded` (PREREG-EVL-4: a row stored later put the
-    issuer in EXCLUDED or the F8K(D) skip; real money read the rows stored before its decision)."""
+    issuer in EXCLUDED or the F8K(D) skip; real money read the rows stored before its decision) or `skipped:taken`
+    (PREREG-EVL-5 section 1.3: a row stored later put the issuer in TAKEN AT D'S CLOSE BY AN EARLIER ROW, the <= 0.96 skip
+    or NO NEW INFORMATION), counted under `excluded_late` too."""
     out = {"stored_late_today": 0, "stored_late": 0, "excluded_late": 0}
     for r in store.db.execute("SELECT event, decided_at, entry_day, status FROM intents WHERE program=? AND version=? AND "
                               "entry_day<=?", (program, version, day.isoformat())):
         status = str(r["status"])
-        if status == "skipped:excluded":
+        if status in ("skipped:excluded", "skipped:taken"):
             out["excluded_late"] += 1
             continue
         if status.startswith("skipped"):
@@ -306,6 +316,105 @@ def jobs(store: S.Store, day: dt.date, now: dt.datetime) -> dict[str, Any]:
     return {"receipts": len(receipts), "by_job": by_job, "missed": missed, "failed": failed}
 
 
+def evl5(store: S.Store, day: dt.date) -> dict[str, Any] | None:
+    """PREREG-EVL-5 (section 6: "the report counts each row's funnel"; section 1.3's two room effects are the House's
+    event book's, in its decisions' summaries): {funnel: the counts its part of the day's latest finished close decision
+    of `day` read (league/events/run.py `_rows_5`'s `counts`: ERN(D) -> eligible -> taken -> the <= 0.96 falls and the
+    muted band; the attention issuers of P -> (i) named -> (ii) filed -> (iii) bought -> survivors -> eligible -> gaps
+    read -> gap >= 1.02; the pre-pass's cut and what the close added and removed), failed: the closes of the last 45 days
+    whose latest finished close decision has an `evl5_error` (its part failed or ran past its own bound: decided later
+    by themselves, never traded), each with whether a `decide-close-evl5` receipt decided them since}; None before its
+    registration (no programs)."""
+    if not any(p.prereg == 5 for p in _registered()):
+        return None
+    latest: dict[str, tuple[int, str, Any]] = {}
+    lo = (day - dt.timedelta(days=45)).isoformat()
+    for row in store.db.execute("SELECT id, job, status, summary FROM receipts WHERE (job LIKE 'decide-close:%' OR job "
+                                "LIKE 'decide-close-evl5:%') AND status IN ('ok', 'pending') ORDER BY id"):
+        job = str(row["job"])
+        if job.split(":", 1)[1] < lo or job.split(":", 1)[1] > day.isoformat():
+            continue
+        latest[job] = (int(row["id"]), str(row["status"]), row["summary"])
+    funnel = None
+    failed = []
+    for job, (rid, _, summary) in sorted(latest.items()):
+        if not job.startswith("decide-close:"):
+            continue
+        try:
+            body = json.loads(summary or "{}")
+        except (TypeError, ValueError):
+            continue
+        when = job.split(":", 1)[1]
+        if when == day.isoformat() and isinstance(body.get("evl5"), dict):
+            funnel = body["evl5"]
+        if body.get("evl5_error"):
+            own = latest.get(f"decide-close-evl5:{when}")
+            failed.append({"day": when, "error": str(body["evl5_error"])[:160],
+                           "decided_since": bool(own and own[0] > rid)})
+    return {"funnel": funnel, "failed": failed, "room": room_effects(store, day)}
+
+
+#: The House's event book's state beside the lane's store (`<state>/live.sqlite`, league/equity/live.py's tables).
+LIVE_DB = "live.sqlite"
+#: An event entry the event kind's day order line refused (league/equity/live.py `_count_refusal`), and an entry sizing
+#: refused for cash, invested or loss-budget room (league/equity/sizing.py's binding caps, `_size_event`'s words).
+LINE_REFUSAL = "the event kind's day order count"
+ROOM_REFUSAL = re.compile(r"no whole share fits \((sleeve_cash|invested|cash|budget)\)")
+#: A PREREG-EVL-5 buy that waited for the lane's own close decision of D (league/events/book.py `PART_WAIT`, the same
+#: words), and a later buy that waited for the room or the line slots kept for such buys (league/equity/live.py
+#: `HELD_AHEAD`): each counted when it ENDED UNSENT ("never sent", `_event_finish`'s words).
+HELD_UNSENT = "waits for the lane's own close decision"
+ROOM_WAIT = "wait for the lane's close decision"
+
+
+def room_effects(store: S.Store, day: dt.date) -> dict[str, int] | None:
+    """PREREG-EVL-5 section 1.3's TWO STATED ROOM EFFECTS on real money (counted, never prevented), read READ-ONLY from
+    the House's event book beside the lane's store (`<state>/live.sqlite`): (a) `line_refused`, the buys of this file's
+    rows at session `day` that the event kind's day order line refused (it refuses entries in ROOM's order, this file's
+    rows first among the PREREG rows), and `exits_held`, the sales of this file's lots at `day`'s open (each kept one
+    order of that day's line for its exit); (b) `open_lost`, the earlier rows' open-entry LEARNING buys at `day`'s open
+    that sizing refused for cash, invested or loss-budget room while this file's overnight lots were open there (A85
+    reserves the next auction's cash for Probe and Sized only). And THE COST OF THE WAIT for the lane's close decision
+    (section 1.3, the earlier rows' decision first; the money review of release 1019g): `held_unsent`, this file's buys
+    at `day`'s close that ended unsent while they waited for that decision (league/events/book.py `part_hold`), and
+    `room_waited`, the later buys there that ended unsent waiting for the room or the line slots ROOM kept for them. None when the book's
+    state is not beside the store or cannot be read."""
+    path = Path(store.root).parent / LIVE_DB
+    if not path.is_file():
+        return None
+    five = {p.id for p in _registered() if p.prereg == 5}
+    try:
+        db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT e.program, e.side, e.band, e.at, i.status, i.why FROM eq_event_intents e JOIN "
+                              "eq_intents i ON i.iid=e.iid WHERE e.day=?", (day.isoformat(),)).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    mine = [r for r in rows if str(r["program"]) in five]
+    exits = sum(1 for r in mine if r["side"] == "sell" and r["at"] == "open")
+    lost = 0
+    if exits:
+        lost = sum(1 for r in rows if str(r["program"]) not in five and r["side"] == "buy" and r["at"] == "open"
+                   and str(r["band"] or "") == "learning" and str(r["status"]) in ("refused", "missed")
+                   and ROOM_REFUSAL.search(str(r["why"] or "")))
+    def unsent(r: Any, words: str) -> bool:
+        why = str(r["why"] or "")
+        return r["side"] == "buy" and r["at"] == "close" and str(r["status"]) == "missed" and "never sent" in why and \
+            words in why
+    return {"line_refused": sum(1 for r in mine if r["side"] == "buy" and LINE_REFUSAL in str(r["why"] or "")),
+            "exits_held": exits, "open_lost": lost, "held_unsent": sum(1 for r in mine if unsent(r, HELD_UNSENT)),
+            "room_waited": sum(1 for r in rows if str(r["program"]) not in five and unsent(r, ROOM_WAIT))}
+
+
+def _registered() -> tuple[Any, ...]:
+    from .programs import PROGRAMS
+
+    return PROGRAMS
+
+
 def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> dict[str, Any]:
     """The day's report as data (no prices, headlines or symbols)."""
     now = now or S.utc_now()
@@ -317,7 +426,7 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "events": events(store, day), "verdicts": verdicts(store, day), "programs": programs,
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
-        "births": _births(store), "jobs": jobs(store, day, now),
+        "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
     }
 
 
@@ -390,6 +499,27 @@ def render(report: Mapping[str, Any]) -> str:
     if efp.get("budget") is not None:
         line += f" of the lane's stated {efp['budget']:.1f} (PREREG-EVL-4 section 3; {efp['left']:.1f} left)"
     lines.append(line)
+    e5 = report.get("evl5") or {}
+    if e5.get("funnel") or e5.get("failed") or any((e5.get("room") or {}).values()):
+        fu = e5.get("funnel") or {}
+        line = ("PREREG-EVL-5: ERN(D) " + "/".join(str(fu.get(k, 0)) for k in ("ern_issuers", "ern_eligible", "taken",
+                                                                              "falls", "muted"))
+                + " (issuers/eligible/taken/falls/muted); attention " + "/".join(
+                    str(fu.get(k, 0)) for k in ("attention", "named", "filed", "bought", "survivors",
+                                                "survivors_eligible", "gaps_read", "gap_pass"))
+                + " (issuers/(i)/(ii)/(iii)/left/eligible/gaps/>=1.02)")
+        pre = fu.get("pre") or {}
+        if pre:
+            line += f"; pre-pass cut {pre.get('cut')}, +{pre.get('added', 0)}/-{pre.get('removed', 0)} at the close"
+        room = e5.get("room") or {}
+        if room:
+            line += (f"; room: line refused {room.get('line_refused', 0)}, exits held {room.get('exits_held', 0)}, "
+                     f"earlier open buys lost {room.get('open_lost', 0)}, unsent waiting for the close decision "
+                     f"{room.get('held_unsent', 0)} (later buys {room.get('room_waited', 0)})")
+        if e5.get("failed"):
+            line += "; part failed: " + ", ".join(f"{x['day']}{' (decided since)' if x['decided_since'] else ''}"
+                                                   for x in e5["failed"][-5:])
+        lines.append(line)
     bi = report.get("births") or {}
     if bi.get("registered") or bi.get("last_night"):
         night = bi.get("last_night") or {}
@@ -405,4 +535,4 @@ def render(report: Mapping[str, Any]) -> str:
 
 
 __all__ = ["build", "render", "events", "verdicts", "program_status", "kept_out", "late_rows", "gaps", "jobs",
-           "day_bounds", "FAMILIES", "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS"]
+           "day_bounds", "FAMILIES", "VERDICT_STATUSES", "SESSION_JOBS", "WEEKDAY_JOBS", "evl5", "room_effects"]

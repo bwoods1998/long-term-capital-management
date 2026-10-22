@@ -7,10 +7,10 @@ module READS what that takes, read-only, from the House's state root, and the pu
 
 - PROGRAMS (`read_programs`, the lane's store `<state>/events/events.sqlite`, its registered births loaded by
   league/events/book.py `open_lane`): one row per registered program, the SEATING version of each seatable program
-  (`Program.can_seat`: version 2 of PREREG-EVL-1's and -2's nine, version 1 of PREREG-EVL-4's three and of each
-  seatable birth of R3; real money at learning size from its first event; its band is the lane's,
+  (`Program.can_seat`: version 2 of PREREG-EVL-1's and -2's nine, version 1 of PREREG-EVL-4's and PREREG-EVL-5's three
+  and of each seatable birth of R3; real money at learning size from its first event; its band is the lane's,
   league/events/bands.py) and version 1 of every program that never seats (the records and controls of PREREG-EVL-1,
-  -2 and -4, and R3's records and its READ births' controls: band "shadow"). Each row: a short plain name (`NAMES`, a
+  -2, -4 and -5, and R3's records and its READ births' controls: band "shadow"). Each row: a short plain name (`NAMES`, a
   fixed table, or for a birth its family's name and its place among the births: never a program's code or parameters),
   its band, its settled events with real money (both sides filled, any band) and in shadow (the lane's settled
   outcomes), and its next look's events to go (league/events/screen.py `next_look_v2`: the look's threshold of settled
@@ -104,10 +104,17 @@ NAMES = {
     "EVL-NEWSPM-READ-ON": "Premarket news read overnight",
     "EVL-CTRL-8K-ON": "All 8-Ks overnight",
     "EVL-CTRL-NEWSPM-ON": "All premarket news overnight",
+    # PREREG-EVL-5's (registered 2026-10-21T21:26:21Z; each enters at D's close and exits at the next open)
+    "EVL-ERN-DROP-ON": "Earnings fall overnight",
+    "EVL-ERN-UNDER-ON": "Muted earnings read overnight",
+    "EVL-NEWS-NIGHT2-ON": "News second night",
+    "EVL-CTRL-ERN-UNDER-ON": "All muted earnings overnight",
 }
 FAMILY_NAMES = {"ern": "Earnings", "ern-react": "Earnings reaction", "8k": "8-K", "news": "Morning news", "news-day": "Day news",
                 "news-react": "News reaction", "ins": "Insider cluster", "ins-buy": "Insider buy",
-                "8k-react": "8-K reaction overnight", "8k-day": "8-K overnight", "news-pm": "Premarket news"}
+                "8k-react": "8-K reaction overnight", "8k-day": "8-K overnight", "news-pm": "Premarket news",
+                "ern-drop": "Earnings fall overnight", "ern-under": "Muted earnings overnight",
+                "news-night2": "News second night"}
 #: A registered birth's control (league/events/births.py `CONTROL_SUFFIX`): its name is its birth's and this.
 BIRTH_CONTROL = "-CTRL"
 

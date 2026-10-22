@@ -20,10 +20,17 @@ they are and how the code runs them. When this page and a pre-registration disag
   under the same goal; amendment A71): three NEW seatable programs, each entering at D's CLOSE and exiting at the next
   session's OPEN, at PREREG-EVL-3's learning band from birth (their VERSION 1 is their seating version), and two
   controls; judged by PREREG-EVL-3's screen unchanged ("PREREG-EVL-4" below).
+- [PREREG-EVL-5](prereg/PREREG-EVL-5.md), registered 2026-10-21T21:26:21Z (tag `prereg-evl-5`, commit `b73f205f`, the
+  captain's hand births under the same goal; amendment A92, the latest of the commit's time, GitHub's activity time for
+  the branch push and the pushing client's clock after the tag push returned): three NEW seatable programs (an earnings
+  fall, a muted earnings read, a second news night), each entering at D's CLOSE and exiting at the next session's OPEN,
+  at PREREG-EVL-3's learning band from birth (VERSION 1 their seating version), and one control; judged by
+  PREREG-EVL-3's screen unchanged ("PREREG-EVL-5" below). Code on `feat/evl-5` (release 1019g), not yet deployed.
 - An event counts for a program only when it is knowable after that program's own registration time. A change to a
-  registered program is a new version with a new registration time. Expected false passes: 1.2 (0.10 x 12 seatable
-  versions: the nine version 2 rows and PREREG-EVL-4's three) of the lane's stated lifetime budget of 3.0
-  (PREREG-EVL-4 section 3; 1.8 left for later births, each later file stating its draw).
+  registered program is a new version with a new registration time. Expected false passes: 1.5 (0.10 x 15 seatable
+  versions: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three) of the lane's stated lifetime
+  budget of 3.0 (PREREG-EVL-4 section 3, PREREG-EVL-5 section 3; 1.5 left for later births with none registered
+  before PREREG-EVL-5, each seatable birth 0.10, as SEATING sums them).
 - [R3's births](#births-r3-not-yet-deployed) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free facts by
   the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`, judged
   by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable birth,
@@ -45,18 +52,21 @@ they are and how the code runs them. When this page and a pre-registration disag
 | EVL-8K-REACT-ON | 4 | yes (version 1) | F8K(D): 8-K items 1.01, 2.01, 7.01, 8.01 (no 2.02) in D's close window, issuer not EXCLUDED, move >= +4% at T29 | D's close | next OPEN |
 | EVL-8K-READ-ON | 4 | yes (version 1) | the same filings, stored PROMPT-DOC score >= 2 | D's close | next OPEN |
 | EVL-NEWSPM-READ-ON | 4 | yes (version 1) | PM(D): pre-market single-stock news, issuer not EXCLUDED and with no F8K(D) filing, stored PROMPT-NEWS score >= 2 | D's close | next OPEN |
+| EVL-ERN-DROP-ON | 5 | yes (version 1) | ERN(D): an earnings 8-K of D's close window, issuer not TAKEN AT D'S CLOSE BY AN EARLIER ROW, move <= -4% at T29 (ranked by the fall) | D's close | next OPEN |
+| EVL-ERN-UNDER-ON | 5 | yes (version 1) | the same filings, issuer also with no fall, move above -4% and below +4% at T29 and stored PROMPT-DOC score >= 2 (ranked by the score, +0.5 when guidance "raised") | D's close | next OPEN |
+| EVL-NEWS-NIGHT2-ON | 5 | yes (version 1) | the attention articles of P (single-stock news after P''s close and by T29 of P), issuer with NO NEW INFORMATION on D, D's 09:30 gap >= +2% (ranked by it) | D's close | next OPEN |
 
 Records (never seated): EVL-ERN-READ-O3, EVL-INS-CLUSTER-O5 (file 1); EVL-INS-BUY-O5, EVL-ERN-REACT-READ-C1,
 EVL-ERN-READ3-O1 (file 2). Controls (what the verdicts add): EVL-CTRL-ERN-ALL-O1, EVL-CTRL-8K-ALL-O1,
-EVL-CTRL-NEWS-ALL-O1 (file 1), EVL-CTRL-NEWS-DAY-ON (file 2), EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON (file 4). File 2's
-and file 4's programs (and every version 2) are not filled when the entry auction is above 1.25 x the previous close
-(real money's limit).
+EVL-CTRL-NEWS-ALL-O1 (file 1), EVL-CTRL-NEWS-DAY-ON (file 2), EVL-CTRL-8K-ON and EVL-CTRL-NEWSPM-ON (file 4),
+EVL-CTRL-ERN-UNDER-ON (file 5). File 2's, file 4's and file 5's programs (and every version 2) are not filled when the
+entry auction is above 1.25 x the previous close (real money's limit).
 
 ## Bands (the seating versions: real money)
 
 The versions that may seat (`programs.Program.can_seat`, the one gate in the lane and the House's book): version 2 of
-the nine seatable programs of files 1 and 2 (PREREG-EVL-3) and version 1 of PREREG-EVL-4's three. Version 1 of the
-earlier files' programs, every record and every control never seat.
+the nine seatable programs of files 1 and 2 (PREREG-EVL-3), version 1 of PREREG-EVL-4's three and version 1 of
+PREREG-EVL-5's three. Version 1 of the earlier files' programs, every record and every control never seat.
 
 | band | size | how a program gets there |
 |---|---|---|
@@ -246,6 +256,131 @@ program's, once named; their verdicts are in each decision's tally (the stall jo
 day order count stays 150 with the twelve seatable programs (A78): on a day that needs more, entries stop in ROOM's
 order, so these rows are refused first; exits never.
 
+## PREREG-EVL-5: three programs from births (a fall, a muted read, a second night), seatable at version 1
+
+[PREREG-EVL-5](prereg/PREREG-EVL-5.md) (registered 2026-10-21T21:26:21Z, A92) holds the two earnings nights the earlier
+overnight rows leave (after a large fall, and after a positive release the price has not followed) and the SECOND night
+after a news attention day. For entry session D, P the session before it and P' the one before P (league/events/
+programs.py; every set that skips an issuer read with NO registration floor, the events each program's own, knowable
+after 21:26:21Z Oct 21):
+
+- ERN(D) FILINGS: the fetched 8-Ks (form exactly `8-K`) of D's close window with item 2.02 (`filings_window`). THE
+  REACTION of one: C1's (the T29 minute close of D over the raw daily close of the last session that closed before its
+  acceptance); none when a price is missing (not taken). DAY(D): PREREG-EVL-2's day-news window of D (single-symbol,
+  the issuer's eligible ticker, after 09:00 ET and by T29, the non-live exclusion applied); the DAY-NEWS REACTION of an
+  issuer: the T29 close of D over the universe row's previous close.
+- TAKEN AT D'S CLOSE BY AN EARLIER ROW (`taken_close_5`): an issuer (a) with an ERN(D) filing whose reaction is >= 1.04,
+  (b) with a DAY(D) article whose stored PROMPT-NEWS verdict is `ok` with score >= 2, or (c) in DAY(D) with a day-news
+  reaction >= 1.04; an answer `unparsed`, `refused` or under 2 is no (b). A DAY(D) article with NO stored answer makes
+  the issuer's events WAIT in the shadow (the program's decision is `pending`) and skips the issuer in real money.
+- EVL-ERN-DROP-ON: an ERN(D) filing of an eligible issuer not TAKEN, reaction <= 0.96 (no model), the earliest knowable
+  filing the rule takes, ranked by the fall (1 - reaction), then ADV. EVL-ERN-UNDER-ON: the same filings of issuers with
+  NO ERN(D) filing whose reaction is <= 0.96 (`dropped_ciks`), reaction above 0.96 and below 1.04 and the stored
+  PROMPT-DOC verdict of `8k:<accession>` `ok` with score >= 2 (the very verdict EVL-ERN-READ-O1 and
+  EVL-ERN-REACT-READ-C1 read; a TEXT under 200 characters has none), one an issuer (the highest score, then the
+  earliest), ranked by the score plus 0.5 when its guidance is "raised". EVL-CTRL-ERN-UNDER-ON: every such muted filing,
+  with or without a verdict, by the same order (a filing with no stored `ok` score after every one with it); it waits for
+  the scores it ranks by, never for a TEXT that gets none. The three reaction ranges part every ERN(D) filing.
+- THE ATTENTION ARTICLES OF P (`attention_window`): single-symbol articles, that symbol the issuer's eligible ticker for D,
+  knowable after P''s close and at or before T29 of P. NO NEW INFORMATION on D (`no_new_info`): (i) no article of ANY
+  source with ANY number of symbols naming a ticker SEC's copy of D maps to the issuer, knowable after T29 of P and at or
+  before D's close decision (`news_named`: a live article counts; a backfilled one only when edited at most 10 minutes
+  after its creation, exactly as `news_rows`); (ii) no 8-K of the issuer, any items, knowable at or after P''s close
+  decision and before D's (the close windows of P and of D); (iii) no Form 4 of the issuer with PREREG-EVL-2's INSIDER
+  BUY knowable at or after 09:00 ET of P and before D's close decision (`ins_buys_window`, `ins_buys`' rule).
+  EVL-NEWS-NIGHT2-ON: the issuer's earliest attention article knowable after the registration time (event `news:<id>`),
+  taken when THE GAP (the open of D's regular-session SIP 1-minute bar starting at 09:30:00 ET, raw, over P's close: the
+  universe row's previous close) is >= 1.02 (no model; no trade in that minute: no gap, not taken), ranked by the gap.
+- Each enters at D's close (decided at the close - 14 minutes) and exits at the next session's open auction, with the
+  fallback ladder; the limit at entry (1.25 x the previous close) binds shadow and real alike. The three share no
+  (issuer, D) with one another and no (issuer, entry, exit) with any seatable program of files 1 to 4.
+- NO NEW PROMPT AND NO SECOND VERDICT (section 1.2): a PROMPT-DOC verdict of an eligible ERN(D) filing, or a PROMPT-NEWS
+  verdict of a DAY(D) article, that these rows read and no row has stored by their decision is asked by it with the same
+  event id, prompt and rendering as the earlier row that reads it (`doc_verdict`, `news_verdict`), stored once; the asks
+  are in the decision's verdict tally. A verdict already stored is never asked again.
+- THE SCREEN is PREREG-EVL-3's with version 1 in place of version 2 (seed strings `{id}|v1|look{k}`); EVL-ERN-UNDER-ON
+  must beat EVL-CTRL-ERN-UNDER-ON over its own block sessions; the other two have no control condition. THE FINAL RECORD
+  for these rows (section 2; `screen._fast_block` for prereg 5 only): A69's span begins at P''s close decision (where the
+  close window of P, which (ii) reads, begins; the attention articles begin at P''s close), with no registration floor
+  (the skips it feeds carry none: the reading that waits), A74 (3)'s daily-index backfill must have run for every weekday
+  from P' through X, and the passes are judged by `screen._fast_passes` from before that start through the span's end:
+  A84's per-feed clean reads once `fix/a84-fast-path-per-feed` is merged (release 1019f; it changes `_fast_passes` and
+  `_feed_problems` only, this file's change is in `_fast_block`, so the two merge without a conflict), A69's every-pass
+  reading before it; otherwise A66's wait. A close decided at or before 21:26:21Z Oct 21 is made for them.
+- REAL MONEY (section 1.3; league/events/book.py `rows_5`, `picks`): the three seat at learning from birth (2% of equity,
+  whole shares, one share up to 5%, at most 8 open), in ROOM's order after PREREG-EVL-4's rows and before R3's births.
+  A real-money decision is the shadow rule over the rows STORED, and the verdicts ANSWERED, before D's close decision
+  time: TAKEN, the <= 0.96 skip and NO NEW INFORMATION read from those rows (NO NEW INFORMATION's (i) maps symbols by
+  the lane's tickers copy of D, `lane_tickers`), and a DAY(D) article with no PROMPT-NEWS answer by then skips its
+  issuer. The reactions are the book's (`reaction_reader`); the gap is the lane's stored 09:30 mark (label `0930`, made
+  by the pre-passes and the decisions; a stored minute with no trade is no gap), else the book's own batched read of
+  that minute (`gap_reader`, league/equity/live.py `_event_open_minutes`; a price it cannot read is not bought). EVL-ERN-DROP-ON and
+  EVL-ERN-UNDER-ON NEVER BUY for a filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok`
+  with score >= 2, or `ok` with score >= 1 and guidance "raised", or not yet answered, at the decision time
+  (`next_open_event` with `raised`, `RAISED_GUARD`: EVL-ERN-READ-O1's or EVL-ERN-GUIDE-O1's event at the next open;
+  PREREG-EVL-4's guard is unchanged); for UNDER that is every such filing. The sale gate keeps them out of a name an
+  event lot sells at the same close.
+- THE EARLIER ROWS' DECISION COMES FIRST (section 1.3; league/events/run.py `decide_close`): the part that decides these
+  rows runs LAST, after every earlier row and PREREG-EVL-4's part, under its own time bound (`EVL5_BUDGET` 45 s, never
+  past the close task's own bound less `EVL5_FINISH` 15 s: `part_until`, `bounded`, `PartDeadline`, which is not the
+  task's `Deadline`). Its bound's expiry, or any failure in it, is its own: the receipt finishes with the earlier rows'
+  results (PREREG-EVL-1 to -4 and the births, whole), the error in the summary's `evl5_error` (the House warns), none of
+  these rows named, so the judge reads that close as made without them and `decide-close-evl5` decides them later by
+  themselves; and REAL MONEY NEVER TRADES THAT CLOSE FOR THEM: their buys are planned at the book's close decision and
+  go only once the lane's first finished close decision of D names their program (`book.part_hold`; a buy waits while
+  there is none, sent again each minute of the window, and is refused when it does not name it). The task's own bound
+  inside the part stops the whole task as before (the next turn decides the close again). ROOM HOLDS WHILE IT WAITS
+  (release 1019g's money review): a waiting buy that every other gate lets go keeps its room from every buy after it in
+  ROOM's order at that auction (league/equity/live.py `HeldAhead`, `_event_keep_room`: its whole shares at its limit as
+  `_size_event` would size them now, out of their cash, invested room and name wall, those at its own weight out of
+  their loss budget, and its send and its exit out of the event line and the House-wide line, `_count_refusal`'s
+  `held`), so R3's births, and every learning row behind one of these rows at Probe or Sized, never take what ROOM gives
+  it; a later buy that fits only without that room waits too (`HELD_ROOM`) instead of being refused. Made afresh each
+  minute: a buy the lane's decision names, or never will, keeps nothing the next. THE LANE STARTS THAT DECISION AT ITS
+  TIME (league/events/house.py `HOLD_LEAD`): a turn from 150 s before the live close decision (the close decision + a
+  minute, 15:47:00 ET) keeps going, running what falls due and waiting between, and starts the decision at 15:47:00, not
+  at the next House publish; `due()` looks again no later than the lead's start.
+- THE PRE-PASS (section 1.3): EVL-NEWS-NIGHT2-ON's heavy reads (its attention articles of P, (ii) and (iii) so far, the
+  eligibility of the issuers that survive them by the live rule, and their 09:30 minutes, `_marks_0930`, batched: A
+  BATCH STORES ONLY A PRICE, so an empty or partial answer stores nothing and removes nothing, PREREG-EVL-1 section 3;
+  a decision, never a pre-pass, reads each survivor still unmarked BY ITSELF once over 09:30-09:35 ET and stores "no
+  trade" only when the tape served the name, a later minute's bar with none at 09:30; an answer with no bar stores
+  nothing, no gap at that decision, and the next decision reads it again) are
+  made by the session's close verdict pre-passes (`decide_close` with `ask_only`, the same part under `EVL5_PRE_BUDGET`
+  60 s) from 09:47 ET of D (`pre_from`: the 09:30 bar on the Basic plan's tape), each stored as it is read, meta
+  `evl5:pre:<day>` ({cut, survivors, ...}) written last; inside the last 30 minutes only once the earlier rows'
+  verdicts are all stored, and the House schedules it (`house._pre_due`). The close decision reads every window whole
+  from the store (the pre-pass's reads and what came after its cut: the tails of (i) to (iii) and any attention article
+  stored late) and the network reads the pre-pass made as stored (eligibility results, marks), so it decides exactly
+  what one computation at the close decides (league/tests/test_events_evl5.py `ThePrePass`); its summary's `evl5`
+  counts the funnels and `pre` what the close added and removed. A75's known edge, restated: the pre-pass's live
+  checks become the session's one eligibility result for every program (A70 (8)).
+- THE RECORD BEFORE THE RELEASE (section 3): every close from 21:26:21Z Oct 21 that a release without these rows
+  decided (releases 1019e and 1019f), and every later close whose part failed or ran past its bound, gets these rows
+  decided BY THEMSELVES, once, oldest first, as a backfill (`decide_close` with `evl5_only`, receipt
+  `decide-close-evl5:<day>`, `screen.made_without(prereg=5)`): the House's lane for each such close its hourly
+  re-decision no longer reaches (`house._refill_redecide`, `_five`; a close it still reaches is decided again whole),
+  and the CLI's `catchup` (or `decide-close --day D --evl5-only`). No earlier row is decided again; none of those
+  events is ever traded. A re-decision marks an unsettled intent of these rows `skipped:taken` when a row stored later
+  puts its issuer in TAKEN, the <= 0.96 skip or NO NEW INFORMATION (`_skip_taken_5`, as A75 (2) reads it for file 4).
+- WHAT IS COUNTED, NOT PREVENTED (the lane's report, `report.evl5`): each row's funnel at the day's close (ERN(D) issuers
+  -> eligible -> TAKEN -> the falls and the muted band; attention issuers -> (i) -> (ii) -> (iii) -> survivors -> eligible
+  -> gaps read -> >= 1.02), the closes whose part failed, and section 1.3's two room effects from the House's event book
+  (`room_effects`, read-only: this file's buys the event kind's day order line refused, its lots' exits that use the
+  next session's line, and the earlier rows' open-entry learning buys at the next open that sizing refused for cash,
+  invested or loss-budget room while this file's overnight lots were open), and THE COST OF THE WAIT for the lane's
+  close decision (`held_unsent`: this file's buys at the close that ended unsent waiting for it; `room_waited`: the
+  later buys that ended unsent waiting for the room kept for them); the House's event book says such a close after it
+  ends (`equity.alert`, info; a WARNING when another close of the last five sessions had one too: the lane's close
+  decision finishes too late for the window, so read its `decide-close` seconds in `lane.json`); the shadow's
+  difference from real money by
+  storage time (`late_rows`, `skipped:taken` counted with `skipped:excluded`); an earlier row's buy lost to this file's
+  sale at the same auction (the book's `sale_to_later`).
+- THE PROOF that no earlier program changes: league/tests/test_events_evl5.py decides a synthetic week
+  (league/tests/evl5_world.py: every family of files 1, 2 and 4, two registered births and this file's events) with
+  and without these rows, and every earlier program's shadow intents and real-money picks are the same; the same week
+  decided by release 1019e's own code gives them too (`python league/tests/evl5_world.py OUT.json`).
+
 ## The code
 
 `league/events/` (standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
@@ -293,6 +428,9 @@ turn, the most urgent due first.
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
+| - | PREREG-EVL-5's rows decided by themselves (`decide-close-evl5`) for each close a release without them decided, or whose part for them failed or ran past its own bound | from the first turn after the record pass, once each, oldest first | 150 s |
+| 2/6 | PREREG-EVL-5's pre-pass: today's close verdict pass, for EVL-NEWS-NIGHT2-ON's heavy reads | from 09:47 ET (D's 09:30 minute on the tape) until meta `evl5:pre:<day>` is stored; once more inside the last 30 minutes once the earlier rows' verdicts are stored | 90 s (the part's own 60 s inside it) |
+| 1 | PREREG-EVL-5's hold for the live close decision: a turn from `HOLD_LEAD` (150 s) before it keeps going, runs what falls due (each ending 5 s before the decision), waits between, and starts the decision at 15:47:00 ET | each session, while PREREG-EVL-5 has programs | at most 40 tasks a turn; the House closing, STOP or a clock that does not move ends it |
 | 4 | nightly: the account equity, the score, the screen (then the band review of the real fills), the report; then R3's births job (`events.births`) | close + 3 min; 20:30 ET; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |

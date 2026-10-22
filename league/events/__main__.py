@@ -1,9 +1,10 @@
 """`python -m league.events --state DIR <command>`: the event lane's passes (see league/events/run.py).
 
 Commands: sessions --from D --to D | record | backfill --from D --to D | decide-open --day D [--backfill] |
-decide-close --day D [--backfill] [--evl4-only] | catchup (every past decision from the registration time not yet made,
-as a backfill, PREREG-EVL-4's rows of every older close a release without them decided, and the registered births of
-every older decision a release without them made) | births [--day D] [--specs
+decide-close --day D [--backfill] [--evl4-only | --evl5-only] | catchup (every past decision from the registration time
+not yet made, as a backfill, PREREG-EVL-4's rows of every older close a release without them decided, PREREG-EVL-5's
+rows of every close a release without them decided or whose part for them failed, and the registered births of every
+older decision a release without them made) | births [--day D] [--specs
 FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own specs from FILE, a JSON list of
 {spec, why}, with no call; validated and registered through the gateway's docs route, `--dry-run` validated only) |
 facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts). Prints one JSON summary.
@@ -45,7 +46,8 @@ def catchup(ctx: R.Context) -> dict:
     Then PREREG-EVL-4'S ROWS (release 1019c's review): every close since its registration that a release without its
     rows decided last (league/events/screen.py `made_without`: the closes older than the re-decision reach, which the
     loop above leaves as they are) gets their own decision, once, as a backfill (`decide_evl4`), and the earlier rows of
-    those closes are never decided again. Then R3'S REGISTERED BIRTHS the same way (release 1019e's review): every
+    those closes are never decided again. Then PREREG-EVL-5'S ROWS the same way (its section 3: `made_without(prereg=5)`,
+    `decide_evl5`, oldest first, once), and R3'S REGISTERED BIRTHS the same way (release 1019e's review): every
     decision a release or a turn without them made last (`births_made_without`) gets the births' own decision
     (`births_only`), as a backfill, and no PREREG row of it is decided again."""
     st = ctx.store
@@ -64,6 +66,8 @@ def catchup(ctx: R.Context) -> dict:
             out[f"close:{s.day}"] = R.decide_close(ctx, s.day, backfill_run=not live_close)
     for day in SN.made_without(st, now.astimezone(C.NY).date()):
         out[f"{SN.FOUR_KIND}:{day}"] = decide_evl4(ctx, day)
+    for day in sorted(SN.made_without(st, now.astimezone(C.NY).date(), prereg=5)):
+        out[f"{SN.FIVE_KIND}:{day}"] = decide_evl5(ctx, day)
     for kind, day in SN.births_made_without(st, now.astimezone(C.NY).date()):
         decide = R.decide_open if kind == "open" else R.decide_close
         out[f"{SN.BIRTHS_KIND[kind]}:{day}"] = decide(ctx, day, backfill_run=True, births_only=True)
@@ -79,6 +83,12 @@ def decide_evl4(ctx: R.Context, day: dt.date) -> dict:
         R.decide_open(ctx, day, backfill_run=True, ask_only=True)
         out = R.decide_close(ctx, day, backfill_run=True, evl4_only=True)
     return out
+
+
+def decide_evl5(ctx: R.Context, day: dt.date) -> dict:
+    """PREREG-EVL-5's rows of the close of `day` decided by themselves, as a backfill (`decide_close` with `evl5_only`:
+    its section 3); they ask only the verdicts this file's rows read (section 1.2), never one of the OPEN decision."""
+    return R.decide_close(ctx, day, backfill_run=True, evl5_only=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         if name == "decide-close":
             d.add_argument("--evl4-only", action="store_true",
                            help="PREREG-EVL-4's rows alone, as a backfill (their own receipt, decide-close-evl4)")
+            d.add_argument("--evl5-only", action="store_true",
+                           help="PREREG-EVL-5's rows alone, as a backfill (their own receipt, decide-close-evl5)")
     sub.add_parser("catchup")
     sub.add_parser("tickers")
     sub.add_parser("equity")
@@ -131,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             out = R.decide_open(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "decide-close" and args.evl4_only:
             out = decide_evl4(ctx, args.day)
+        elif args.cmd == "decide-close" and args.evl5_only:
+            out = decide_evl5(ctx, args.day)
         elif args.cmd == "decide-close":
             out = R.decide_close(ctx, args.day, backfill_run=args.backfill)
         elif args.cmd == "tickers":

@@ -45,10 +45,11 @@ class V2Test(unittest.TestCase):
         # PREREG-EVL-4's three seat at their version 1 beside the nine (their ids are new: its section 2)
         self.assertEqual(sorted((p.id, p.version) for p in P.SEATING),
                          sorted([(i, 2) for i in NINE] + [(i, 1) for i in ("EVL-8K-REACT-ON", "EVL-8K-READ-ON",
-                                                                           "EVL-NEWSPM-READ-ON")]))
+                                                                           "EVL-NEWSPM-READ-ON", "EVL-ERN-DROP-ON",
+                                                                           "EVL-ERN-UNDER-ON", "EVL-NEWS-NIGHT2-ON")]))
         self.assertTrue(all(p.version == 1 for p in P.BY_ID.values()))
-        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 12)
-        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 1.2)
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 15)
+        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 1.5)
 
     def test_registration_gates_version_two(self):
         row = {"accession": "0000000001-26-000009", "cik": "0000000001", "items": '["2.02"]',

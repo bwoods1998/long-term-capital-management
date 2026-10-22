@@ -10,7 +10,7 @@ module of league/events but through league/equity/kinds.py `BOOKS["event"]`.
 
 THE RULES ARE THE FROZEN ONES: docs/prereg/PREREG-EVL-3.md section 2 (the owner's goal as re-set at 05:15Z Oct 19,
 2026), with PREREG-EVL-1 sections 3, 5 and 8 and PREREG-EVL-2 for everything it does not change, and
-docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
+docs/prereg/PREREG-EVL-4.md and PREREG-EVL-5.md section 1.3 for those files' three programs each:
 - THE PROGRAMS are the lane's own `SEATING` rows of league/events/programs.py (`Program.can_seat`, the one gate:
   VERSION 2 of the nine seatable programs of PREREG-EVL-1 and -2, `REAL_VERSION`, and VERSION 1 of PREREG-EVL-4's three,
   their seating version; `seatable()`, `program_of()` by `BY_KEY`), in the tables' order (PREREG-EVL-1's four, then
@@ -22,6 +22,15 @@ docs/prereg/PREREG-EVL-4.md section 1.3 for that file's three programs:
   never buy for a filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok` with score >= 2, or
   not yet answered, at the decision time: EVL-8K-READ-O1's event at the next open (`NEXT_OPEN_GUARD`). The shadow keeps
   every such event.
+- PREREG-EVL-5 (section 1.3): its rows' real-money events are the shadow rule over the rows STORED, and the verdicts
+  ANSWERED, before the decision time, TAKEN AT D'S CLOSE BY AN EARLIER ROW, the <= 0.96 skip and NO NEW INFORMATION
+  read from those rows too, a DAY(D) article with no PROMPT-NEWS answer by then skipping its issuer (`rows_5`); the gap
+  is the lane's stored 09:30 minute, else the book's own read (`gap_reader`); EVL-ERN-DROP-ON and EVL-ERN-UNDER-ON
+  never buy for a filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok` with score >= 2, or
+  `ok` with score >= 1 and guidance "raised", or not yet answered, at the decision time (`NEXT_OPEN_GUARD` with
+  `RAISED_GUARD`). And THE EARLIER ROWS' DECISION COMES FIRST: a close whose lane decision finished without deciding this
+  file's rows (its part failed or ran past its own bound) is never traded for them, so their buys wait for the lane's
+  own close decision of D to name them and go only then, inside the auction's window (`part_hold`).
 - THE BANDS are the lane's, read by the lane's own reader (league/events/bands.py `bands(store)` over its store's
   `bands` table; the lane computes promotion at a passed look, Sized, demotion and retirement from its looks and the
   House's real fills, `write_fills` through `bands.record_fill`): LEARNING from birth (a seating version with no row
@@ -114,7 +123,11 @@ REAL_VERSION = 2
 #: filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok` with score >= 2, or is not yet
 #: answered, at D's close decision time (EVL-8K-READ-O1's event at the next open, whose buy this row's sale there would
 #: take by the sale gate).
-NEXT_OPEN_GUARD = ("EVL-8K-REACT-ON", "EVL-8K-READ-ON")
+NEXT_OPEN_GUARD = ("EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-ERN-DROP-ON", "EVL-ERN-UNDER-ON")
+#: PREREG-EVL-5 section 1.3: its two earnings rows' guard bars, beside PREREG-EVL-4's, a filing whose stored PROMPT-DOC
+#: verdict is `ok` with score >= 1 and guidance "raised" (EVL-ERN-GUIDE-O1's event at the next open). PREREG-EVL-4's rows
+#: keep their guard exactly as it was (score >= 2, or not answered).
+RAISED_GUARD = ("EVL-ERN-DROP-ON", "EVL-ERN-UNDER-ON")
 #: PREREG-EVL-3 section 2's bands, and the ones that trade.
 BANDS = ("learning", "probe", "sized", "retired")
 LIVE_BANDS = ("learning", "probe", "sized")
@@ -273,6 +286,7 @@ class Lane:
         self.root = self.path.parent
         self.db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
         self.db.row_factory = sqlite3.Row
+        self.cache: dict[str, Any] = {}     # (PREREG-EVL-5's reads of one decision, and the parsed tickers copies)
 
     def close(self) -> None:
         self.db.close()
@@ -567,17 +581,128 @@ def rows_4(lane: Lane, day: dt.date, decided_at: dt.datetime) -> dict[str, list[
                           with_cik(P.news_rows(lane, *P.news_window(lane, day))), symbol_of)
 
 
-def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime) -> list[Mapping[str, Any]]:
+def _answer_before(lane: Lane, event: str, prompt: Any, decided_at: dt.datetime) -> Mapping[str, Any] | None:
+    """The stored verdict of `event` when it was ANSWERED (any status) at or before the decision time (PREREG-EVL-1
+    section 3), else None (none stored, or answered after it)."""
+    got = V.stored(lane, event, prompt)
+    if not got or not got.get("answered_at"):
+        return None
+    try:
+        return got if S.parse_iso(str(got["answered_at"])) <= decided_at else None
+    except ValueError:
+        return None
+
+
+def lane_tickers(lane: Lane, day: dt.date) -> dict[str, list[tuple[str, str]]]:
+    """SEC's company_tickers.json as the lane's decision of entry session `day` reads it (league/events/run.py
+    `Context.tickers_for`: the latest copy fetched before 07:30 ET of `day`, or, with none that early, the earliest),
+    parsed once a copy; {} when the lane holds none."""
+    from . import universe as U
+
+    snaps = [(S.parse_iso(str(r["key"]).split("@", 1)[1]), str(r["value"])) for r in
+             lane.db.execute("SELECT key, value FROM meta WHERE key LIKE 'tickers@%' ORDER BY key")]
+    if not snaps:
+        return {}
+    cutoff = dt.datetime.combine(day, dt.time(7, 30), tzinfo=C.NY).astimezone(dt.timezone.utc)
+    before = [sha for at, sha in snaps if at < cutoff]
+    sha = before[-1] if before else snaps[0][1]
+    key = f"tickers:{sha}"
+    if key not in lane.cache:
+        data = lane.get_document(sha)
+        for old in [k for k in lane.cache if k.startswith("tickers:")]:
+            lane.cache.pop(old)     # (one parsed copy kept: the House's book holds its lane open for days)
+        lane.cache[key] = U.sec_tickers(lambda url: data)
+    return lane.cache[key]
+
+
+def rows_5(lane: Lane, day: dt.date, decided_at: dt.datetime, *,
+           reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]) -> dict[str, list[Mapping[str, Any]]]:
+    """PREREG-EVL-5's rows for a real-money decision of entry session `day` (its section 1.3: "the shadow rule over the
+    events STORED, and the verdicts ANSWERED, before D's close decision time. It applies TAKEN AT D'S CLOSE BY AN EARLIER
+    ROW and NO NEW INFORMATION to the filings and articles stored before that time, and a DAY(D) article with no
+    PROMPT-NEWS answer before that time skips its issuer"): ERN(D)'s fetched filings, DAY(D)'s and the attention
+    articles of P (each with the CIK of the live rule's eligible universe row whose symbol it names), and NO NEW
+    INFORMATION's articles (any symbols, mapped by the lane's tickers copy of D), 8-Ks and insider buys, each STORED
+    before `decided_at` (`_stored_before`) and read with NO registration floor; the reactions are the book's
+    (`reaction(row, universe_row)`: the T29 close over the last close before the filing's acceptance, or the article's
+    knowable time, which for a DAY(D) article is P's close, the universe row's previous close); then
+    `programs.close_rows_5`. {"ern-drop", "ern-under", "news-night2": rows}; `rows_for` keeps a program's events. One
+    decision's reads are made once (the lane's `cache`)."""
+    key = (day.isoformat(), S.iso(decided_at))
+    have = lane.cache.get("rows5")
+    if have is not None and have[0] == key and have[1] is reaction:
+        return have[2]
+    lo, hi = P.close_window(lane, day)
+    uni = universe_rows(lane, day)
+    by_symbol = {str(r["symbol"]).upper(): str(cik) for cik, r in uni.items()}
+
+    def stored(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        return [r for r in rows if _stored_before(r, decided_at, lane)]
+
+    def with_cik(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [dict(r) | {"cik": by_symbol.get(str(r.get("symbol") or "").upper())} for r in stored(rows)]
+
+    def symbol_of(cik: str) -> str | None:
+        row = uni.get(str(cik))
+        return None if row is None else row["symbol"]
+    ern = [r for r in stored(P.filings_window(lane, "8-K", lo, hi)) if P.items_of(r) & P.ERN_ITEMS and r.get("cik")]
+    day_all = with_cik(P.news_rows(lane, *P.day_news_window(lane, day)))
+    ratios: dict[str, float | None] = {}
+
+    def react(row: Mapping[str, Any]) -> float | None:
+        cik = str(row.get("cik"))
+        if cik not in uni:
+            return None
+        if str(row["accession"]) not in ratios:
+            ratios[str(row["accession"])] = reaction(row, uni[cik])
+        return ratios[str(row["accession"])]
+    firsts: dict[str, Mapping[str, Any]] = {}
+    for a in day_all:
+        if a.get("cik") and symbol_of(str(a["cik"])) == a.get("symbol"):
+            firsts.setdefault(str(a["cik"]), a)
+    day_ratios: dict[str, float | None] = {}
+
+    def day_reaction(cik: str) -> float | None:
+        if cik not in day_ratios:
+            day_ratios[cik] = reaction(firsts[cik], uni[cik]) if cik in firsts and cik in uni else None
+        return day_ratios[cik]
+    ern_of = {str(r["cik"]) for r in ern if str(r["cik"]) in uni}
+    day5 = [a for a in day_all if a.get("cik") and str(a["cik"]) in ern_of]
+    taken, waiting = P.taken_close_5(ern, day5, symbol_of=symbol_of, reaction=react, day_reaction=day_reaction,
+                                     news_answer=lambda a: _answer_before(lane, f"news:{a['id']}", V.PROMPTS["news"],
+                                                                          decided_at))
+    dropped = P.dropped_ciks(ern, react)
+    windows = P.night2_windows(lane, day)
+    named = P.named_ciks(stored(P.news_named(lane, *windows["named"])), P.ciks_by_ticker(lane_tickers(lane, day)))
+    filed = P.filed_ciks(stored(P.filings_window(lane, "8-K", *windows["filed"])))
+    bought = P.bought_ciks(stored(P.ins_buys_window(lane, *windows["bought"])))
+    attention = with_cik(P.news_rows(lane, *P.attention_window(lane, day)))
+    out = P.close_rows_5(ern, P.no_new_info(attention, named, filed, bought, symbol_of), taken=taken, waiting=waiting,
+                         dropped=dropped)
+    lane.cache["rows5"] = (key, reaction, out)
+    return out
+
+
+def rows_for(lane: Lane, program: P.Program, day: dt.date, decided_at: dt.datetime, *,
+             reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None
+             ) -> list[Mapping[str, Any]]:
     """The events `program`'s decision of entry session `day` reads (league/events/run.py's windows), STORED before
     `decided_at` and knowable after the program's own registration time. News rows carry their eligible issuer's CIK
     (the universe row whose symbol is the article's). PREREG-EVL-4's rows: `rows_4`. Every family a seatable program can
     have reads its rows here as the lane's decision reads them (release 1019e's review: R3's `ins` family, Form 4
     cluster triggers, is a record only (A89): its cluster reads Form 4s that may be stored after the decision, so the
-    book reads no rows for it and a seatable `ins` birth is refused by the births' grammar)."""
+    book reads no rows for it and a seatable `ins` birth is refused by the births' grammar). PREREG-EVL-5's rows:
+    `rows_5`, which needs the book's `reaction` (without one it reads no rows: LookupError, that program plans nothing)."""
     family = program.family
     if program.entry_at == "close" and family in P.CLOSE_FAMILIES_4:
         since = program.registered_at
         return [r for r in rows_4(lane, day, decided_at)[family] if S.parse_iso(r["knowable_at"]) > since]
+    if program.entry_at == "close" and family in P.CLOSE_FAMILIES_5:
+        if reaction is None:
+            raise LookupError("PREREG-EVL-5's rows are read with the book's reaction reader (TAKEN AT D'S CLOSE)")
+        since = program.registered_at
+        return [r for r in rows_5(lane, day, decided_at, reaction=reaction)[family]
+                if S.parse_iso(r["knowable_at"]) > since]
     if program.entry_at == "open":
         lo, hi = P.open_window(lane, day)
         if family in ("ern", "8k"):
@@ -616,14 +741,17 @@ def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> boo
     return row is not None
 
 
-def next_open_event(lane: Lane, row: Mapping[str, Any], session: C.Session | None, decided_at: dt.datetime) -> bool:
+def next_open_event(lane: Lane, row: Mapping[str, Any], session: C.Session | None, decided_at: dt.datetime, *,
+                    raised: bool = False) -> bool:
     """PREREG-EVL-4 section 1.3 (NO REAL-MONEY TAKING FROM AN EARLIER ROW), for `NEXT_OPEN_GUARD`'s programs: True when
     real money does NOT buy for this filing, being EVL-8K-READ-O1's event at the next open: knowable at or after 09:00 ET
     of D (`session`, D) and its stored PROMPT-DOC verdict `ok` with score >= 2, or not yet answered at `decided_at` (no
     stored answer, or one answered after it; a filing whose TEXT gets no verdict is never answered: the reading that
     trades less). A filing knowable before 09:00 ET of D is EVL-8K-READ-O1's at D's open, whose sale at D's close the
     sale gate already keeps this buy out of; an answer that is not `ok` (unparsed, refused) or scores under 2 leaves the
-    buy. Unreadable inputs read as barred (fail closed)."""
+    buy. Unreadable inputs read as barred (fail closed). `raised` (PREREG-EVL-5 section 1.3, `RAISED_GUARD`'s programs):
+    an `ok` answer with score >= 1 and guidance "raised" bars it too (EVL-ERN-GUIDE-O1's event at the next open); without
+    it the guard is PREREG-EVL-4's, unchanged."""
     if session is None:
         return True
     try:
@@ -642,12 +770,16 @@ def next_open_event(lane: Lane, row: Mapping[str, Any], session: C.Session | Non
         score = None if got.get("score") is None else int(got["score"])
     except (TypeError, ValueError):
         return True
+    if raised and got.get("status") == "ok" and score is not None and score >= P.GUIDE_MIN_SCORE and \
+            got.get("guidance") == "raised":
+        return True
     return got.get("status") == "ok" and score is not None and score >= P.READ_MIN_SCORE
 
 
 def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
           reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
-          held: Callable[[str], bool] | None = None) -> list[Pick]:
+          held: Callable[[str], bool] | None = None,
+          gap: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None) -> list[Pick]:
     """THE REAL-MONEY PICKS of `program` for entry session `day` (the module docstring): the shadow rule
     (league/events/programs.py `select`) over the events stored before `decided_at`, with the verdicts answered before
     it; one per issuer (the earliest knowable, after `select`'s own order for the news rows); an issuer the program holds
@@ -655,10 +787,13 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     `held_recently`, and `held(cik)` for real money's own lots and buys) skipped; ranked higher first, then ADV.
     `reaction(row, universe_row)`: the REACT rows' ratio (the book's reading of the SIP bars), None when a price is
     missing. For `NEXT_OPEN_GUARD`'s programs (PREREG-EVL-4 section 1.3) the issuer's one event is not bought when it is
-    EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it."""
+    EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
+    rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
+    price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`)."""
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
     guard = program.id in NEXT_OPEN_GUARD
+    raised = program.id in RAISED_GUARD
     session = C.session(lane, day) if guard else None
 
     def verdict(row: Mapping[str, Any]) -> int | None:
@@ -672,16 +807,17 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
         got = _answered(lane, f"8k:{row['accession']}", V.PROMPTS["doc"], decided_at) if row.get("accession") else None
         return None if got is None else got.get("guidance")
 
-    chosen = P.select(program, rows_for(lane, program, day, decided_at), eligible=lambda cik: uni.get(str(cik)),
-                      verdict=verdict, reaction=reaction, guidance=guidance)
+    chosen = P.select(program, rows_for(lane, program, day, decided_at, reaction=reaction),
+                      eligible=lambda cik: uni.get(str(cik)), verdict=verdict, reaction=reaction, guidance=guidance,
+                      gap=gap)
     out: list[Pick] = []
     taken: set[str] = set()
     for c in sorted(chosen, key=lambda c: (c.knowable_at, c.event)):
         if c.cik in taken:
             continue
         taken.add(c.cik)
-        if guard and next_open_event(lane, c.row, session, decided_at):
-            continue        # (PREREG-EVL-4 section 1.3: the shadow keeps the event)
+        if guard and next_open_event(lane, c.row, session, decided_at, raised=raised):
+            continue        # (PREREG-EVL-4 and -5 section 1.3: the shadow keeps the event)
         if held_recently(lane, program, c.cik, day) or (held is not None and held(str(c.cik))):
             continue
         row = uni[str(c.cik)]
@@ -836,6 +972,105 @@ def reaction_reader(lane: Lane, day: dt.date, *, daily: Callable[[str, dt.date],
     return ratio
 
 
+def opening_minute(rows: Iterable[Mapping[str, Any]], session: C.Session) -> float | None:
+    """PREREG-EVL-5's gap minute: the OPEN of the regular-session SIP 1-minute bar starting at the session's open
+    (09:30:00 ET), None when that minute had no trade (no such bar)."""
+    for bar in rows:
+        try:
+            start = S.parse_iso(str(bar["t"]))
+            px = float(bar["o"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start == session.open_at and math.isfinite(px) and px > 0:
+            return px
+    return None
+
+
+def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], float | None],
+               opens_many: Callable[[Sequence[str], C.Session], Mapping[str, float | None]] | None = None
+               ) -> Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]:
+    """EVL-NEWS-NIGHT2-ON's gap for real-money decisions of `day` (PREREG-EVL-5 sections 1.1 and 1.3): the open of D's
+    09:30 minute bar over the universe row's previous close (the raw SIP close of P). The minute is the lane's stored
+    mark when it holds one (league/events/run.py `GAP_LABEL`, made by the session's pre-passes and its decisions; a
+    stored row with no price is the tape's word that the minute had no trade, which only a decision's read of the name
+    alone writes: no gap, not bought), else the book's own reading: with `opens_many(symbols, session)`, the
+    first name with no mark reads EVERY name of the day's live universe that has none, together (one read a name, never
+    one a row, as `reaction_reader`); `opens(symbol, session)` is asked only for a name outside it. None when a price is
+    missing (not bought)."""
+    session = C.session(lane, day)
+    got: dict[str, float | None] = {}
+    batched: list[bool] = []
+
+    def open_of(symbol: str) -> float | None:
+        if symbol in got:
+            return got[symbol]
+        row = lane.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label='0930'",
+                              (symbol, day.isoformat())).fetchone()
+        if row is not None:
+            got[symbol] = float(row["px"]) if row["px"] is not None and float(row["px"]) > 0 else None
+            return got[symbol]
+        if opens_many is not None and not batched:
+            batched.append(True)
+            names = sorted({str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))} - {
+                str(r["symbol"]).upper() for r in lane.db.execute(
+                    "SELECT symbol FROM marks WHERE day=? AND label='0930'", (day.isoformat(),))})
+            if names:
+                read = dict(opens_many(names, session) or {})
+                for name in names:
+                    got[name] = read.get(name)
+        if symbol not in got:
+            got[symbol] = opens(symbol, session)
+        return got[symbol]
+
+    def gap(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float | None:
+        if session is None:
+            return None
+        try:
+            prev = float(uni["prev_close"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        px = open_of(str(uni["symbol"]).upper())
+        if px is None or not prev > 0:
+            return None
+        return float(px) / prev
+    return gap
+
+
+#: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the
+#: book counts the buys that end unsent so (league/equity/live.py `_event_held_said`), and so does the lane's report
+#: (league/events/report.py `HELD_UNSENT`, the same words).
+PART_WAIT = "waits for the lane's own close decision"
+
+
+def part_hold(lane: Lane | None, program: str, version: int, day: dt.date) -> tuple[str, str] | None:
+    """PREREG-EVL-5 section 1.3, THE EARLIER ROWS' DECISION COMES FIRST, read by real money: a close whose lane decision
+    finished without deciding this file's rows (its part failed or ran past its own bound: the receipt names none of
+    them) is decided later by themselves and is NEVER TRADED for them. So a real-money buy of a PREREG-EVL-5 program at
+    D's close goes only once the lane's FIRST finished close decision of D (`decide-close:<day>`, `ok` or `pending`)
+    names the program (league/events/screen.py `names`): None (it may go). ("wait", why) while no such receipt exists
+    (the buy waits, sent again each minute of its window: the reading that trades less); ("never", why) when that first
+    finished receipt does not name it (the buy is refused; the shadow keeps the events). Every other program: None."""
+    from . import screen as SN
+
+    prog = P.BY_KEY.get((str(program), int(version)))
+    if prog is None or prog.prereg != 5 or prog.spec is not None:
+        return None
+    if lane is None:
+        return ("wait", f"{PART_WAIT}: no lane store to read it from")
+    try:
+        row = lane.db.execute("SELECT summary FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', "
+                              "'pending') ORDER BY id LIMIT 1", (f"decide-close:{day.isoformat()}",)).fetchone()
+    except sqlite3.Error as exc:
+        return ("wait", f"{PART_WAIT}, which cannot be read ({type(exc).__name__})")
+    if row is None:
+        return ("wait", f"{PART_WAIT} of {day.isoformat()} to decide PREREG-EVL-5's rows (section 1.3: a close whose "
+                        "part for them failed is never traded)")
+    if SN.names(row["summary"], SN.program_key(prog.id, prog.version)):
+        return None
+    return ("never", f"the lane's close decision of {day.isoformat()} finished without PREREG-EVL-5's rows (their part "
+                     "failed or ran past its own bound): decided later by themselves, never traded (section 1.3)")
+
+
 # ----------------------------------------------------------------------------------------------------------- sizes
 def limit_price(prev_close: Decimal, ratio: Decimal) -> Decimal:
     """The entry's limit: `ratio` x the previous SIP close, ROUNDED DOWN to the cent (never above the pre-registered
@@ -905,4 +1140,4 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
-           "publish"]
+           "publish", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader", "part_hold", "PART_WAIT"]
