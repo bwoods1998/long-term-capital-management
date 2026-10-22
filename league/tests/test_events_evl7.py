@@ -1254,9 +1254,12 @@ class TheProof(unittest.TestCase):
                     mine = w.st.db.execute("SELECT COUNT(*) FROM intents WHERE program IN (?, ?)",
                                            tuple(sorted(learners))).fetchone()[0]
                 parts = [str(r[0]) for r in w.st.db.execute("SELECT key FROM meta WHERE key LIKE 'evl7:part:%'")]
+                timing = [(str(r["kind"]), str(r["started_at"]), str(r["finished"]), str(r["summary"])) for r in w.st.db.execute(
+                    "SELECT f.kind, f.started_at, r.finished_at AS finished, r.summary FROM learner_fits f JOIN receipts r "
+                    "ON r.id=f.receipt_id WHERE f.kind='live'")] if pinned and not raising else []
                 return {"intents": intents, "receipts": receipts, "picks": picks, "learner_intents": mine,
                         "fits": [tuple(r) for r in w.st.db.execute("SELECT program, day, kind FROM learner_fits")]
-                        if pinned else [], "parts": parts}
+                        if pinned else [], "parts": parts, "timing": timing}
             finally:
                 P.load_births(None)
                 w.close()
@@ -1272,6 +1275,10 @@ class TheProof(unittest.TestCase):
         self.assertEqual(with_["intents"], without["intents"])
         self.assertEqual(with_["picks"], without["picks"])
         self.assertEqual(with_["receipts"], without["receipts"], "the House's receipts: the same, naming no learner")
+        self.assertTrue(with_["timing"])
+        for kind, started, finished, summary in with_["timing"]:
+            self.assertGreaterEqual(started, finished, "each live part starts once the House's receipt is finished")
+            self.assertNotIn("EVL-LRN", summary, "and that receipt names no learner")
 
     def test_a_raising_learner_leaves_every_earlier_rows_intents_and_receipts_byte_identical(self):
         with tempfile.TemporaryDirectory() as tmp:
