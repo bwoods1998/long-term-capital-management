@@ -156,7 +156,9 @@ class TheFactsSeeTheLaterFiles(unittest.TestCase):
         self.assertGreaterEqual(out["jaccard"]["max"], BI.JACCARD_MAX)
 
     def test_no_reading_of_the_grammar_moves(self):
-        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()[:8]), (3, "890806ff"),
+        # The minors moved neither (`fix/1019h-minors` read 3 and 890806ff); release 1019h's A109 (the architect on
+        # Claude Opus 5.5, league/tests/test_events_1019h_architect.py) moved both, the model being in the sha's spec.
+        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()[:8]), (4, "0cae215b"),
                          "more Jaccard targets only refuse more: no refused answer can turn accepted")
         self.assertEqual(set(BI.FILE_FAMILIES), set(P.CLOSE_FAMILIES_4) | set(P.CLOSE_FAMILIES_5))
         self.assertTrue(set(BI.FILE_FAMILIES).isdisjoint(BI.FAMILIES), "no birth names one")

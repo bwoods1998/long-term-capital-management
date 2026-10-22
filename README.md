@@ -21,7 +21,8 @@ activity. The lane's page is [docs/events.md](docs/events.md).
   screened after at least 60 shadow events over at least 10 sessions, at a false-positive rate of at most 15%, with the
   expected false passes stated (0.9 over the nine seatable programs registered on Oct 19).
 - **Births** (R3, live since release 1019e, Oct 21, 2026): new programs born each night from outcome-free facts by the
-  architect (Claude Haiku 4.5, one call, at most $0.25 a night) or the captain, validated by code and registered as
+  architect (Claude Opus 5.5 from release 1019h, A109; one call, at most $0.25 a night at its own prices) or the
+  captain, validated by code and registered as
   lines of `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a
   seatable birth, at most the lane's stated 3.0 in all, counted from every seatable version (1.5 before any birth: the
   fifteen seatable versions of PREREG-EVL-1 to -5), three a night (A81; [docs/events.md](docs/events.md), "Births").

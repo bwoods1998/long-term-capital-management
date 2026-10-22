@@ -42,9 +42,12 @@ et = TB.et
 #: Release 1019e's prompt sha (the first births night asked under it) and this reading's: a prompt change is a new
 #: PARSE_VERSION (A95), so the pair is pinned here together.
 PROMPT_1019E = "2203fda336035feb3786317af09cee9f32b77353999a67e58c18911a41518a77"
-#: (Release 1019h, the captain's A97: SUP-3's rate rule moved the prompt's rate lines and added the Nov 6 line: version 3.)
+#: (Release 1019h, the captain's A97: SUP-3's rate rule moved the prompt's rate lines and added the Nov 6 line: version 3.
+#: Release 1019h too, the captain's A109: the architect on Claude Opus 5.5, with no temperature, effort low and 6000
+#: tokens, all in the sha's spec: version 4. Version 3 was never live.)
 PROMPT_BY_VERSION = {2: "8294fe777c44b1cd06d04c48af9a60dade4f5443e9597a4f77fe853dd9affdce",
-                     3: "890806ff38f09b7e810cbbfef1159ca85f39d568105537d8eca4d7e60c022b06"}
+                     3: "890806ff38f09b7e810cbbfef1159ca85f39d568105537d8eca4d7e60c022b06",
+                     4: "0cae215b0cebb21e9313d392e358c443a4d2caf06554e593f32fbaba8cfe6c21"}
 
 NIGHT = dt.date(2026, 10, 21)           # Wed: the first births night
 RECEIPT_AT = dt.datetime(2026, 10, 22, 2, 11, 33, tzinfo=UTC)
@@ -179,7 +182,7 @@ class ThePrompt(unittest.TestCase):
 
     def test_the_prompt_sha_moved_and_a_prompt_change_is_a_new_parse_version(self):
         self.assertNotEqual(BI.prompt_sha(), PROMPT_1019E)
-        self.assertEqual(BI.PARSE_VERSION, 3, "release 1019h's SUP-3 (A97)")
+        self.assertEqual(BI.PARSE_VERSION, 4, "release 1019h's SUP-3 (A97: 3) and its architect on Opus 5.5 (A109: 4)")
         self.assertEqual(BI.prompt_sha(), PROMPT_BY_VERSION[BI.PARSE_VERSION],
                          "the prompt changed: give it a new PARSE_VERSION (A95) and pin both here")
 

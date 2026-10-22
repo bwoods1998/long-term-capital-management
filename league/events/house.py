@@ -51,8 +51,9 @@ run's retry (its start + DECIDE_RETRY), and the retry starts at its time in the 
    SESSION (release 1019f): the night is today's session from 20:30 ET, else the session before today, so a score that
    ran past midnight ET (or a House that was down that evening) still gets that session's screen and report the next
    day; then, on a session night with `events.births` on, R3's BIRTHS job at 21:15 ET (league/events/births.py
-   `night`: the outcome-free facts, the architect's one Haiku call under $0.25 a night and inside what is left of the
-   lane's line, below, the validator, the registration through the gateway's docs route), once a night (keyed on the
+   `night`: the outcome-free facts, the architect's one call (Claude Opus 5.5 from release 1019h, A109; Haiku 4.5 before
+   it) under $0.25 a night and inside what is left of the lane's line, below, the validator, the registration through
+   the gateway's docs route), once a night (keyed on the
    calendar day, as release 1019e built it), and ONCE MORE for a night whose births receipt accepted and registered
    none under an older reading of the grammar and prompt than the running one (A95: `births.PARSE_VERSION` in the
    receipt; `births.rerun_due`), never from 12:55Z of the session day after it; then THE SCREEN AFTER THE OPEN
@@ -522,10 +523,10 @@ class EventLane:
     def _spend_today(self, st: S.Store, now: dt.datetime) -> None:
         """The day's Claude dollars of the lane so far, from the store, and the line the next call is held to
         (`verdict_line`). THE DAY is the UTC day (`verdict_day`: budget rule 3's, every other line's and the cap
-        breach's). Its Claude dollars are its verdicts' and R3's births call's (`birth_usd`: the births job's one Haiku
-        call a night goes through this lane's gateway, on the same Claude meter, so it is inside the same line; release
-        1019e's review), each at its stated cost (a verdict with none at `VERDICT_USD_UNKNOWN`, a births call at
-        `BIRTH_USD_UNKNOWN`)."""
+        breach's). Its Claude dollars are its verdicts' and R3's births call's (`birth_usd`: the births job's one call a
+        night, Claude Opus 5.5 from release 1019h, goes through this lane's gateway, on the same Claude meter, so it is
+        inside the same line; release 1019e's review), each at its stated cost (a verdict with none at
+        `VERDICT_USD_UNKNOWN`, a births call at `BIRTH_USD_UNKNOWN`)."""
         day, (lo, hi) = verdict_day(now)
         row = st.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(usd IS NULL), 0) FROM verdicts WHERE "
                             "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()

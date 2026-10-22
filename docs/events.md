@@ -34,7 +34,8 @@ they are and how the code runs them. When this page and a pre-registration disag
   budget of 3.0 (PREREG-EVL-4 section 3, PREREG-EVL-5 section 3; 1.5 left for later births with none registered
   before PREREG-EVL-5, each seatable birth 0.10, as SEATING sums them).
 - [R3's births](#births-r3-live-since-release-1019e) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free
-  facts by the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`,
+  facts by the architect (Claude Opus 5.5 from release 1019h, the captain's A109; Claude Haiku 4.5 before it) or the
+  captain, each registered as one line of `docs/births/<night>.jsonl`,
   judged by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable
   birth, 3.0 in all, counted from SEATING's own sum: 1.5 used by PREREG-EVL-1 to -5's fifteen seatable versions, plus
   0.10 for each seatable birth registered; at most 3 a night: at most fifteen seatable births).
@@ -901,13 +902,24 @@ reaction; PREREG-EVL-5's reaction passes each row's own band and its gap passes;
 skip nothing, TAKEN (b) reads the stored PROMPT-NEWS verdicts, an issuer waiting on an unanswered article is counted, and
 NO NEW INFORMATION (i) names an issuer by the kept eligibility's ticker, never SEC's copy, which lives in `meta`); the
 rows that read no price (EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their controls) count as decided. Each row's count is
-therefore at least what it selected, and the validator's Jaccard reads them; the grammar, the rates and
-`births.PARSE_VERSION` (3) are unchanged (more Jaccard targets can only refuse more).
+therefore at least what it selected, and the validator's Jaccard reads them; the grammar and the rates are unchanged
+(more Jaccard targets can only refuse more), and so was `births.PARSE_VERSION` until A109's architect (4, below).
 
-**The architect and the validator.** One gateway call a night (`births.propose`): claude-haiku-4-5-20251001, temperature
-0, max_tokens 3,000, its prompt's sha256 and its answer stored in `birth_calls` like a verdict (a night's answer is read
-again, never asked again, under the same prompt sha), at most 6 specs a night, under a cost cap of $0.25 a night (the
-call's worst case must fit). The prompt shows two valid specs (`births.EXAMPLES`: an 8k spec over items outside the four
+**The architect and the validator.** One gateway call a night (`births.propose`): claude-opus-5-5 from release 1019h
+(the captain's A109: release 1019e to 1019g asked claude-haiku-4-5-20251001 at temperature 0 with max_tokens 3,000,
+whose proposals were narrow rules and duplicates; the verdict reader stays Haiku 4.5). Claude Opus 5.5 takes no
+sampling parameter (a `temperature` is Anthropic's 400, and a 4xx is never asked again) and always thinks, its thinking
+counted in `max_tokens`, so the body (`births.request_body`) carries no temperature, effort `low` (`births.EFFORT`: short
+thinking, and an unstreamed answer well inside Cloudflare's 100-second wait in front of Anthropic) and max_tokens 6,000
+(room for the six specs after the thinking); an answer cut at max_tokens is stored `cut`, never parsed. Its prompt's
+sha256 and its answer are stored in `birth_calls` like a verdict (a night's answer is read again, never asked again,
+under the same prompt sha and model), at most 6 specs a night, under a cost cap of $0.25 a night: the call's worst case
+must fit, AT THE MODEL'S OWN PRICES (`births.PRICES`, held equal to the gateway's CLAUDE_MODELS row of the model by a
+test: Opus 5.5's $4 input and $20 output a million tokens, at the row's dearest inference geography, US-only at 1.1x,
+so $4.40 and $22, as the gateway reserves): every prompt character at a token every 3 and the whole 6,000 tokens out,
+about $0.14 on an ordinary night and $0.16 on the fullest night the facts can describe (Haiku's was about $0.02). What
+a night is billed is the gateway's stated cost: not yet measured on Opus 5.5 (an estimate with its thinking at effort
+low: $0.05-0.10 a night, against A109's $0.03 and Haiku's measured $0.008). The prompt shows two valid specs (`births.EXAMPLES`: an 8k spec over items outside the four
 READ items with no score or guidance field, and a news spec) and says that an 8k spec may carry `score_min`,
 `score_max` or `guidance` only when every item is among the four, and that `guidance` is a list (A95: the first night's
 6 specs were all refused, for ids without the prefix, `"guidance": {"verdict": "none"}`, READ fields on other items and
@@ -977,8 +989,10 @@ after a decision), so the book reads no `ins` rows and the grammar refuses a sea
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
 paused or over the day's verdict line, made only when its worst case fits under what is left of that line, and counted
 in it). THE ONE RE-RUN OF AN EMPTY NIGHT (A95, `births.rerun_due`): every births receipt records the running
-`births.PARSE_VERSION` (3 from release 1019h, whose SUP-3 rate rule and prompt lines moved the prompt's sha again,
-`8294fe77` -> `890806ff`; 2 before it; release 1019e's receipts record none, read as 1). When the latest night's receipts accepted
+`births.PARSE_VERSION` (4 from release 1019h: its SUP-3 rate rule and prompt lines moved the prompt's sha `8294fe77` ->
+`890806ff`, version 3, and its A109 architect, whose model, temperature, effort and max_tokens are in the sha's spec,
+moved it again to `0cae215b`, version 4, the one release 1019h runs; 2 before it; release 1019e's receipts record none,
+read as 1). When the latest night's receipts accepted
 none and registered none (no accepted id, no candidate row accepted, unknown or registered, no birth of the night) and
 were all written by an older version, the House runs that night's job once more, its receipt marked `rerun` (written
 when it starts, so a re-run that dies is still the one), never from 12:55Z of the session day after the night (a
@@ -992,5 +1006,5 @@ window), and a birth registered among them would begin part-way through a sessio
 night stays empty and the next night's job proposes again: either way no event before a birth's registration is
 counted. It ships false: switching it on needs the gateway release with the births
 route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
-fallback after two failing nights of Haiku proposals, and a ranking of learning room by look statistics (a later,
-pre-registered version).
+fallback after two failing nights of Haiku proposals (moot since A109's Opus architect), and a ranking of learning
+room by look statistics (a later, pre-registered version).

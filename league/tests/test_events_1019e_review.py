@@ -53,7 +53,8 @@ spec, et, unload = TB.spec, TB.et, TB.unload
 # ======================================================================================================== the line
 class TheBirthsCallIsInsideTheLine(TH.LaneCase):
     """The births job at 21:15 ET of Tue Oct 20 (01:15Z Wed Oct 21, the UTC day the line holds) with the lane's line at
-    $0.10 and the gateway stating $0.20 for the call (the reviewer's case)."""
+    $0.20 and the gateway stating $0.20 for the call (the reviewer's case had a $0.10 line; release 1019h's architect,
+    Claude Opus 5.5 (A109), has a worst case of about $0.14 at its own prices, over $0.10, so the line here is $0.20)."""
 
     def night(self, *, line: float, cost: str) -> None:
         self.addCleanup(unload)
@@ -76,8 +77,8 @@ class TheBirthsCallIsInsideTheLine(TH.LaneCase):
         return json.loads(row["summary"])
 
     def test_its_cost_counts_in_the_lanes_line_the_budgets_measure_and_the_bill(self):
-        self.night(line=0.10, cost="0.20")
-        self.assertEqual(self.births_receipt()["call"]["status"], "ok", "its worst case fit under the $0.10 left")
+        self.night(line=0.20, cost="0.20")
+        self.assertEqual(self.births_receipt()["call"]["status"], "ok", "its worst case fit under the $0.20 left")
         with self.store() as st:
             [row] = [dict(r) for r in st.db.execute("SELECT answered_at, usd FROM birth_calls")]
         self.assertEqual(row["usd"], 0.2)

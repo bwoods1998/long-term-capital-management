@@ -88,13 +88,20 @@ release 1019g), and 0.10 for every seatable birth once loaded; never a figure wr
 `SEATABLE_A_NIGHT` (3) seatable births a night: so at most fifteen seatable births before the budget is spent. A
 retired program's past looks stay counted (a test that was run is never refunded). Records are free.
 
-THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 at temperature 0 (the lane's
-`/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict
+THE PROPOSER (`propose`): ONE gateway call a night to claude-opus-5-5 (`MODEL`: Claude Opus 5.5 from release 1019h,
+the captain's A109; claude-haiku-4-5-20251001 to release 1019g, whose proposals were narrow rules and duplicates; the
+verdict reader, league/events/verdicts.py `MODEL`, stays Haiku 4.5) with NO SAMPLING PARAMETER and effort "low"
+(`request_body`: Opus 5.5 answers a temperature with a 400 and always thinks, its thinking counted in `MAX_TOKENS`
+6000; release 1019g's Haiku call was at temperature 0 with 3000) through the lane's `/v1/claude/messages`, as the
+verdicts, its prompt's sha256 recorded and its answer stored like a verdict
 (`birth_calls`, keyed by night, prompt sha and model: a night's stored answer is read again, never asked again, while
 the prompt is the same; a new prompt sha is a new prompt, whose answer a night has not been given), at most `K` specs
 a night, under a cost cap
 of `NIGHT_USD` ($0.25) a night: the call's worst case (its input at about 3 characters a token and its max_tokens, at
-Haiku 4.5's $1 and $5 a million tokens) must fit under what the night has left, or no call is made. On the House the
+THE MODEL'S OWN PRICES, `PRICES`: Opus 5.5's $4 and $20 a million tokens in the gateway's CLAUDE_MODELS row, at that
+row's dearest inference geography, US-only at 1.1x, so $4.40 and $22, never under what the gateway can settle: $0.132
+for the 6,000 tokens out, thinking included, and about $1.47 a million characters in, so the night's whole $0.25 holds
+a prompt of about 80,000 characters) must fit under what the night has left, or no call is made. On the House the
 call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is left of the lane's
 line today (league/events/house.py `line_left`), and its stored cost counts in that line, in the budget rule's measure
 of the lane (league/ops/budget.py `lane_spend`) and in the site's bill (league/site_lane.py `verdict_usd`).
@@ -106,10 +113,11 @@ every item is among `READ_ITEMS_8K`, and that guidance is a list. That moved the
 cost stays counted in its night's cap and its day's line), and a night run by this code asks under the new sha.
 
 THE ONE RE-RUN OF AN EMPTY NIGHT (A95; `rerun_due`, the House's lane): every births receipt records the running
-`PARSE_VERSION` (3 from release 1019h, whose SUP-3 moved the prompt's sha again, to 890806ff...; 2 before it;
-release 1019e's record none, read as 1). When the latest night's receipts accepted none and registered none and were
-all written by an older version, the House runs that night's job once more (its receipt says
-`rerun`), before 12:55Z of the session day after the night: it reuses the night's stored answer when its prompt sha is
+`PARSE_VERSION` (4 from release 1019h: its SUP-3 moved the prompt's sha to 890806ff... at 3, and its A109's model,
+part of the sha's spec, moved it again, to 0cae215b...; 2 before it; release 1019e's record none, read as 1). When the
+latest night's receipts accepted none and registered none and were all written by an older version, the House runs
+that night's job once more (its receipt says `rerun`), before 12:55Z of the session day after the night: it reuses the
+night's stored answer when its prompt sha is
 the running one (no call), else makes the night's call inside `NIGHT_USD` (the first call counts) and the lane's line.
 A re-run birth is registered like any (the later of GitHub's commit time and the House's receipt), so it counts only
 events knowable after the re-run; `rerun_due` says why the cut-off is safe either way.
@@ -193,10 +201,12 @@ CONTROL_SUFFIX = "-CTRL"
 #: as its role and shows the prompt's two valid examples and its 8k line; 3 (release 1019h, the captain's A97, SUP-3's
 #: rate rule) reads a seatable birth's rate over the sessions holding a complete record pass (so a store whose calendar
 #: holds fewer than 20 sessions may accept one) and tells the proposer both rates and "no earnings-only family after Nov
-#: 6". A night whose receipt is older than this and accepted and registered none is run ONCE more (`rerun_due`). It
-#: moves with any change of `parse`, of the validator or of the prompt that could turn a refused answer into an accepted
-#: one.
-PARSE_VERSION = 3
+#: 6"; 4 (release 1019h too, the captain's A109) asks Claude Opus 5.5 (`MODEL`), a new architect whose answer may be
+#: accepted where Haiku 4.5's was refused, and the model is part of `prompt_sha`'s spec, so the sha moved again (3 was
+#: never live: release 1019h ships both). A night whose receipt is older than this and accepted and registered none is
+#: run ONCE more (`rerun_due`). It moves with any change of `parse`, of the validator, of the prompt or of the model that
+#: could turn a refused answer into an accepted one.
+PARSE_VERSION = 4
 PARSE_VERSION_BEFORE = 1
 #: A night's one re-run starts before this UTC time of the session day after the night (A95): the start of the
 #: deploy-blocked session window (12:55Z, 08:55 ET in daylight time and 07:55 ET in standard time), at least 5 (65)
@@ -226,14 +236,36 @@ CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
 
-#: THE PROPOSER (R3-SPEC section 2).
-MODEL = V.MODEL
-TEMPERATURE = 0
-MAX_TOKENS = 3000
+#: THE PROPOSER (R3-SPEC section 2). THE ARCHITECT (the captain's A109, 06:05Z Oct 22, 2026; release 1019h): Claude
+#: Opus 5.5, in the gateway's CLAUDE_MODELS allowlist (gateway/wrangler.jsonc; a model absent from it is a 403). Release
+#: 1019e to 1019g asked the verdict reader's model, Haiku 4.5 (`V.MODEL`, which stays the verdicts' own).
+MODEL = "claude-opus-5-5"
+#: THE CALL'S FORM FOR OPUS 5.5 (A109 as built): Claude Opus 5.5 takes NO SAMPLING PARAMETER (`temperature` is
+#: Anthropic's own 400, unbilled: gateway/lib/claude.mjs's note on `temperature`, and a 4xx is never asked again, so a
+#: body with release 1019g's temperature 0 would have proposed nothing every night); the body carries none (`None`:
+#: omitted). The answer is not sampled deterministically, but a night's answer is still asked once, stored and read
+#: again (`birth_calls`), so the record is the store's, never a re-ask. Opus 5.5 ALWAYS THINKS (adaptive; thinking
+#: cannot be disabled, its default effort is "medium") and its thinking is OUTPUT inside `max_tokens`: `EFFORT` "low"
+#: keeps the thinking short and the unstreamed answer inside Cloudflare's 100-second wait in front of Anthropic (a
+#: non-streamed high-effort answer ran past it: gateway/lib/claude.mjs `MAX_TOKENS_STREAM`'s note), and `MAX_TOKENS`
+#: 6000 (3000 to release 1019g, Haiku's, which never thinks here) leaves the six specs' answer (about 1,000-1,500 tokens)
+#: room after the thinking, while the worst case stays inside the night's $0.25 (`worst_usd`: $0.132 out at $22 a
+#: million, the rest for the prompt). An answer cut at `max_tokens` is stored as `cut` (`propose`), never as `ok`.
+TEMPERATURE: int | None = None
+EFFORT = "low"
+MAX_TOKENS = 6000
 K = 6
 NIGHT_USD = 0.25
-PRICE_IN = 1.0 / 1_000_000          # USD a token in: Claude Haiku 4.5
-PRICE_OUT = 5.0 / 1_000_000         # USD a token out
+#: THE MODEL'S OWN PRICES (A109): USD a million tokens, the gateway's CLAUDE_MODELS row of `MODEL`
+#: (gateway/wrangler.jsonc, the price table and the allowlist; a test holds the two equal): its uncached input (the call
+#: marks no cache), its output, and its inference geographies' multipliers. The gateway settles a call at the
+#: geography Anthropic reports (Claude 4.6 and later bill US-only inference at 1.1x every rate, and a workspace whose
+#: default geography is "us" is billed so without asking) and reserves at the dearest, so the worst case prices every
+#: token at the dearest too (`GEO_MAX`), as league/claude.py's ceilings do: never under what the night can be billed.
+PRICES = {"input": 4.0, "output": 20.0, "geo": {"us": 1.1}}
+GEO_MAX = max([1.0, *PRICES["geo"].values()])
+PRICE_IN = PRICES["input"] * GEO_MAX / 1_000_000     # USD a token in: Claude Opus 5.5 at $4, x1.1 US-only ($4.40)
+PRICE_OUT = PRICES["output"] * GEO_MAX / 1_000_000   # USD a token out: $20, x1.1 ($22)
 CHARS_A_TOKEN = 3                   # the cap's worst case counts a token every 3 characters (JSON runs nearer 3.5)
 WHY_MAX = 200
 DOCS_ROUTE = "/v1/github/docs"
@@ -1221,8 +1253,9 @@ Answer with JSON only: {"specs": [{"spec": {...}, "why": "one line"}]}""".replac
 
 
 def prompt_sha() -> str:
-    """The proposer's prompt version: model, temperature, max_tokens, the system text and the user template."""
-    spec = {"model": MODEL, "temperature": TEMPERATURE, "max_tokens": MAX_TOKENS, "system": SYSTEM, "user": USER}
+    """The proposer's prompt version: model, temperature, effort, max_tokens, the system text and the user template."""
+    spec = {"model": MODEL, "temperature": TEMPERATURE, "effort": EFFORT, "max_tokens": MAX_TOKENS, "system": SYSTEM,
+            "user": USER}
     return hashlib.sha256(json.dumps(spec, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -1234,6 +1267,16 @@ def render(facts: Mapping[str, Any], budget_: Mapping[str, Any], *, k: int = K) 
             .replace("<<SESSIONS>>", str(SESSIONS)).replace("<<JACCARD>>", str(JACCARD_MAX))
             .replace("<<BUDGET>>", f"{budget_['used']:.1f} of {budget_['limit']:.1f} used")
             .replace("<<K>>", str(k)).replace("<<SEATABLE>>", str(left)).replace("<<FACTS>>", text))
+
+
+def request_body(user_text: str) -> dict[str, Any]:
+    """The architect's request (`propose`): the model, `max_tokens`, its effort, the system text and the rendered user
+    text; a temperature only when `TEMPERATURE` is not None (Opus 5.5 has no sampling parameter)."""
+    body: dict[str, Any] = {"model": MODEL, "max_tokens": MAX_TOKENS, "output_config": {"effort": EFFORT},
+                            "system": SYSTEM, "messages": [{"role": "user", "content": user_text}]}
+    if TEMPERATURE is not None:
+        body["temperature"] = TEMPERATURE
+    return body
 
 
 def worst_usd(user_text: str) -> float:
@@ -1298,8 +1341,7 @@ def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, no
                        "why": f"the call's worst case ${worst:.4f} over the ${max(0.0, line_left):.4f} left of the lane's "
                               "line today"}
     request_id = f"evl-births:{night.isoformat()}:{psha[:12]}"
-    body = {"model": MODEL, "max_tokens": MAX_TOKENS, "temperature": TEMPERATURE, "system": SYSTEM,
-            "messages": [{"role": "user", "content": user}]}
+    body = request_body(user)
     asked = now()
     for _ in range(2):
         try:
@@ -1318,7 +1360,8 @@ def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, no
             usd = worst      # (no stated cost: the night counts the worst case)
         text = "".join(b.get("text") or "" for b in payload.get("content") or []
                        if isinstance(b, Mapping) and b.get("type") == "text")
-        status = "refused" if payload.get("stop_reason") == "refusal" else "ok"
+        stop = payload.get("stop_reason")
+        status = "refused" if stop == "refusal" else "cut" if stop == "max_tokens" else "ok"
         with store.tx() as db:
             db.execute("INSERT OR IGNORE INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, "
                        "status, user_sha, facts_sha, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1578,9 +1621,8 @@ def summary(store: Any) -> dict[str, Any]:
 __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "ITEMS_8K", "READ_ITEMS_8K", "SpecError",
            "parse", "canonical", "sha", "reads", "control_spec", "control_id", "program", "registered_programs",
            "select", "unread_reaction", "outcome_free", "Facts", "jaccard", "budget", "budget_used_tenths", "validate",
-           "SYSTEM", "USER", "prompt_sha", "render", "worst_usd", "parse_answer", "propose", "path_of", "line_of",
-           "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED", "RECORD_MIN_RATE",
-           "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS",
-           "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "K", "NIGHT_USD", "MODEL", "FACTS_DENY", "DOCS_ROUTE", "JOB",
-           "ID_PREFIX", "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY",
-           "rerun_due"]
+           "SYSTEM", "USER", "prompt_sha", "render", "request_body", "worst_usd", "parse_answer", "propose", "path_of",
+           "line_of", "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED",
+           "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT",
+           "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
+           "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due"]

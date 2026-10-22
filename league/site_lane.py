@@ -23,9 +23,10 @@ module READS what that takes, read-only, from the House's state root, and the pu
   is at Probe.
 - THE VERDICT SPEND (`verdict_usd`): every Claude call the lane paid for, from its store: its verdicts (an answered
   verdict whose cost the gateway did not state counts `VERDICT_USD_UNKNOWN`, as the lane's own daily line does) and R3's
-  births calls (`birth_calls`, the births job's one Haiku call a night through the lane's gateway; one stored with no
-  cost counts `BIRTH_USD_UNKNOWN`; release 1019e's review: the bill is never understated). The publisher adds it to the
-  costs' Claude part, which the swarm's ledger alone does not hold.
+  births calls (`birth_calls`, the births job's one call a night through the lane's gateway, Claude Opus 5.5 from
+  release 1019h (A109), Haiku 4.5 before it; one stored with no cost counts `BIRTH_USD_UNKNOWN`; release 1019e's
+  review: the bill is never understated). The publisher adds it to the costs' Claude part, which the swarm's ledger
+  alone does not hold.
 - THE LOTS (`read_lots`, the equity book's tables in `<state>/live.sqlite`): every lot real money held since the reset,
   the event lane's (`lane` "event": `source` "program", `owner` its program's id on the page) and the older equity
   lanes' (`source` "agent", `owner` the agent's id), open and closed. A lot's P&L

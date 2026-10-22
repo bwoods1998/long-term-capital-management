@@ -826,7 +826,7 @@ class FakeArchitect:
 
 
 class TheProposer(Validation):
-    def test_one_haiku_call_at_temperature_0_its_prompt_and_answer_stored_and_never_asked_twice(self):
+    def test_one_architect_call_its_prompt_and_answer_stored_and_never_asked_twice(self):
         st = self.s.st
         answer = json.dumps({"specs": [self.candidate(f"EVL-B-P{i}", ["1.02"]) for i in range(9)]})
         gw = FakeArchitect(answer)
@@ -836,8 +836,11 @@ class TheProposer(Validation):
         self.assertEqual((got["status"], len(got["proposals"]), got["offered"], got["usd"]), ("ok", BI.K, 9, 0.0042),
                          "at most K specs a night")
         [(path, body, headers)] = gw.calls
-        self.assertEqual((path, body["model"], body["temperature"], body["max_tokens"], body["system"]),
-                         (V.PATH, "claude-haiku-4-5-20251001", 0, BI.MAX_TOKENS, BI.SYSTEM))
+        # (Release 1019h, A109: Claude Opus 5.5 at effort low, no sampling parameter; release 1019g's was Haiku 4.5 at
+        # temperature 0 with 3000 tokens.)
+        self.assertEqual((path, body["model"], body.get("temperature"), body["output_config"], body["max_tokens"],
+                          body["system"]),
+                         (V.PATH, "claude-opus-5-5", None, {"effort": "low"}, 6000, BI.SYSTEM))
         self.assertTrue(headers[V.REQUEST_HEADER].startswith("evl-births:2026-11-06:"))
         user = body["messages"][0]["content"]
         self.assertIn(json.dumps(sheet, sort_keys=True, separators=(",", ":")), user, "the facts, whole")
@@ -1061,7 +1064,9 @@ class TheNight(TH.LaneCase):
         self.assertEqual(receipt["status"], "ok")
         self.assertEqual(json.loads(receipt["summary"])["night"], "2026-10-20")
         [call] = [c for c in self.gw.claude_calls if c.get("system") == BI.SYSTEM]
-        self.assertEqual((call["model"], call["temperature"]), (BI.MODEL, 0))
+        # (Release 1019h, A109: the architect is Claude Opus 5.5, which takes no temperature; effort low.)
+        self.assertEqual((call["model"], call.get("temperature"), call["output_config"]),
+                         ("claude-opus-5-5", None, {"effort": "low"}))
 
     def test_off_by_default(self):
         self.assertNotIn("births", self.night())

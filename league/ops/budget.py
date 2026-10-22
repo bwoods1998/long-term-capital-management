@@ -1263,8 +1263,9 @@ BIRTH_USD_UNKNOWN = 0.25
 def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) -> dict[str, Any]:
     """THE LANE'S MEASURED CLAUDE SPEND (RULE_VERSION 3): from `<root>/events/events.sqlite` (league/events/store.py,
     read-only), the gateway's settled cost of every verdict answered over the trailing `days` days and of R3's births
-    call (`birth_calls`, by the time it was answered: the births job's one Haiku call a night goes through the lane's
-    gateway, on the same Claude meter, and the swarm books none of it; release 1019e's review), a day (`usd_day`), its
+    call (`birth_calls`, by the time it was answered: the births job's one call a night, Claude Opus 5.5 from release
+    1019h (A109), goes through the lane's gateway, on the same Claude meter, and the swarm books none of it; release
+    1019e's review), a day (`usd_day`), its
     heaviest UTC day of them (`peak_usd_day`, today's part included: what sizes the lane's part, `cost_rule`), and since
     00:00 UTC (`today_usd`). A verdict with no cost on record counts `VERDICT_USD_UNKNOWN`, a births call
     `BIRTH_USD_UNKNOWN`, as the lane's own line counts them. {usd_day: None, peak_usd_day: None, ...} with no store or
