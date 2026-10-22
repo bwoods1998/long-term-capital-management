@@ -203,25 +203,13 @@ BACKFILL_RETRY = dt.timedelta(hours=1)
 #: or 503 (its archive's answer to a missing file), never 404 (the independent check of fix/backfill-robust): so a
 #: weekday IN THIS TABLE whose index read fails, WHATEVER THE STATUS, is done, "no index: SEC holiday" (EDGAR accepts no
 #: filing that day, so done is right even when the read failed for another reason); a failed read on any other weekday,
-#: whatever its status, waits as an unpublished index does, and a holiday's index that exists is read as any day's. The
-#: federal holidays of
-#: 2026 and 2027 as OPM lists them (https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/, read Oct 21,
-#: 2026), and Fri Dec 31, 2027: New Year's Day 2028 falls on a Saturday, so the Friday before is its holiday (5 U.S.C.
-#: 6103(b)(1)). A closure by executive order (a Christmas Eve) is not in it: add the day before it falls; 2028's before
-#: Jan 2028.
-SEC_HOLIDAYS: dict[dt.date, str] = {
-    dt.date(2026, 1, 1): "New Year's Day", dt.date(2026, 1, 19): "Birthday of Martin Luther King, Jr.",
-    dt.date(2026, 2, 16): "Washington's Birthday", dt.date(2026, 5, 25): "Memorial Day",
-    dt.date(2026, 6, 19): "Juneteenth National Independence Day", dt.date(2026, 7, 3): "Independence Day",
-    dt.date(2026, 9, 7): "Labor Day", dt.date(2026, 10, 12): "Columbus Day", dt.date(2026, 11, 11): "Veterans Day",
-    dt.date(2026, 11, 26): "Thanksgiving Day", dt.date(2026, 12, 25): "Christmas Day",
-    dt.date(2027, 1, 1): "New Year's Day", dt.date(2027, 1, 18): "Birthday of Martin Luther King, Jr.",
-    dt.date(2027, 2, 15): "Washington's Birthday", dt.date(2027, 5, 31): "Memorial Day",
-    dt.date(2027, 6, 18): "Juneteenth National Independence Day", dt.date(2027, 7, 5): "Independence Day",
-    dt.date(2027, 9, 6): "Labor Day", dt.date(2027, 10, 11): "Columbus Day", dt.date(2027, 11, 11): "Veterans Day",
-    dt.date(2027, 11, 25): "Thanksgiving Day", dt.date(2027, 12, 24): "Christmas Day",
-    dt.date(2027, 12, 31): "New Year's Day",
-}
+#: whatever its status, waits as an unpublished index does, and a holiday's index that exists is read as any day's.
+#: THE TABLE IS THE JUDGE'S (release 1019f's review, lens judges): league/events/screen.py `SEC_HOLIDAYS`, behind the
+#: wall, as the reach above is, since a look reads it too: a holiday's eve's late 8-Ks are in the index of the next
+#: weekday EDGAR is open, so a holiday NYSE trades is final only once that index is backfilled as well
+#: (screen.py `index_through`; the judge reads this name too, `_sec_holidays`, so a day only this copy lists still has
+#: the index after it waited for).
+SEC_HOLIDAYS: dict[dt.date, str] = SN.SEC_HOLIDAYS
 SEC_HOLIDAY_WHY = "no index: SEC holiday"
 CALENDAR_EVERY = dt.timedelta(hours=20)
 CALENDAR_RETRY = dt.timedelta(minutes=10)
@@ -1173,7 +1161,7 @@ class EventLane:
             known = [r[0] for r in st.db.execute("SELECT accession FROM filings WHERE form=? ORDER BY accepted_at DESC "
                                                  "LIMIT 2000", (form,))]
             try:
-                entries = E.poll_current(ctx.sec, form, known)
+                entries = E.poll_current(ctx.sec, form, known, prefer=listed)   # (co-registered: a listed filer's)
             except LaneDeadline:
                 raise
             except Exception as exc:  # noqa: BLE001 - one feed's outage never stops the other or the news
@@ -1676,8 +1664,10 @@ class EventLane:
             tried = failed.get(accession)
             if tried is not None and now < tried[1] + FETCH_BACKOFF[tried[0] - 1]:
                 continue    # (its next try is not due yet: the tries-th after the first failure)
+            # (`listed`: a co-registered 8-K the live pass stored under an unlisted co-registrant is moved to this
+            # listed filer's CIK before it is fetched, release 1019f's review)
             status = E.record_filing(st, ctx.sec, row | {"accepted_at": None, "index_url": None, "items": []},
-                                     source="daily-index", now=ctx.now(), fetch=True)
+                                     source="daily-index", now=ctx.now(), fetch=True, listed=listed)
             if tried is not None:
                 counts["retried"] += 1
             if status.startswith("failed"):

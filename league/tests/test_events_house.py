@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from league.events import calendar as C
+from league.events import edgar as E
 from league.events import house as H
 from league.events import programs as P
 from league.events import run as R
@@ -179,13 +180,16 @@ class FakeSEC:
 
     def _atom(self, form):
         out = ["<feed>"]
-        for acc in self.current[form]:
+        for item in self.current[form]:
+            # An accession, or (accession, filer cik, filer name): the feed lists a co-registered filing once per filer.
+            acc, cik, company = (item, None, None) if isinstance(item, str) else item
             f = self.filings[acc]
+            cik, company = cik or f["cik"], company or f["company"]
             wall = dt.datetime.strptime(f["accepted"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=NY)
             items = " ".join(f"Item {i}: x" for i in f["items"])
-            out.append(f'<entry><title>{form} - {f["company"]} ({f["cik"]}) (Filer)</title>'
+            out.append(f'<entry><title>{form} - {company} ({cik}) (Filer)</title>'
                        f'<link rel="alternate" type="text/html" href="https://www.sec.gov/Archives/edgar/data/'
-                       f'{int(f["cik"])}/{acc.replace("-", "")}/{acc}-index.htm"/>'
+                       f'{int(cik)}/{acc.replace("-", "")}/{acc}-index.htm"/>'
                        f'<summary type="html">Filed: x AccNo: {acc} Size: 1 KB {items}</summary>'
                        f'<updated>{wall.isoformat()}</updated></entry>')
         out.append("</feed>")
@@ -905,6 +909,99 @@ class Nightly(LaneCase):
         with self.store() as st:
             keys = [r[0] for r in st.db.execute("SELECT key FROM meta WHERE key LIKE 'tickers@2026-10-20%'")]
         self.assertEqual(keys, [f"tickers@{S.iso(et('2026-10-20', '07:01'))}"])
+
+
+class ACoRegistered8K(LaneCase):
+    """Release 1019f's review (lens judges, a major older than 1019f): a co-registered 8-K (Gamma Inc., listed, CIK 3,
+    and Gamma Subsidiary LLC, unlisted, CIK 888) is listed by EDGAR's current feed and its daily index once per filer.
+    Kept under the first filer the feed listed, an unlisted co-registrant first left the listed issuer's 8-K unfetched
+    by the live pass (no event of it, for the shadow or for real money, and out of A69 (ii)), and A82's backfill
+    fetched it through the listed filer's row yet left it under the unlisted CIK. The live pass keeps it under the
+    listed filer whichever the feed lists first, and the backfill moves one stored under an unlisted filer to the listed
+    filer's CIK before it fetches it."""
+
+    ACC = "0000000888-26-000901"
+    SUB = ("0000000888", "Gamma Subsidiary LLC")
+    LISTED = ("0000000003", "Gamma Inc.")
+
+    def setUp(self):
+        super().setUp()
+        self.sec.add(self.ACC, self.LISTED[0], "2026-10-20 08:10:00", company=self.LISTED[1], current=False)
+        self.sec.daily["20261020"] = [(self.ACC, *self.SUB), (self.ACC, *self.LISTED)]
+
+    def stored(self):
+        with self.store() as st:
+            row = st.db.execute("SELECT cik, company, status FROM filings WHERE accession=?", (self.ACC,)).fetchone()
+        return None if row is None else tuple(row)
+
+    def live(self, *filers):
+        self.sec.current["8-K"][:0] = [(self.ACC, *f) for f in filers]
+        self.at(et("2026-10-20", "08:20"))
+        self.assertEqual(self.turn()["task"], "record")
+
+    def test_the_live_pass_keeps_it_under_the_listed_filer_listed_second(self):
+        self.live(self.SUB, self.LISTED)
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"), "fetched by the live pass, the listed issuer's")
+
+    def test_the_live_pass_keeps_it_under_the_listed_filer_listed_first(self):
+        self.live(self.LISTED, self.SUB)
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"))
+
+    def test_the_backfill_moves_one_stored_under_the_unlisted_filer_to_the_listed_one(self):
+        self.live(self.SUB)     # (the listed filer's entry not read: past the feed's page cap, say)
+        self.assertEqual(self.stored(), (*self.SUB, "listed"), "the live pass skips an unlisted filer's 8-K")
+        self.at(et("2026-10-21", "06:00"))
+        out = TheBackfill.backfill_pass(self, dt.date(2026, 10, 20))
+        self.assertTrue(out["complete"], out)
+        self.assertEqual((out["filings"], out["fetched"], out["unlisted"]), (1, 1, 0))
+        self.assertEqual(self.stored(), (*self.LISTED, "fetched"), "the listed issuer's event")
+        self.assertIn(("open", dt.date(2026, 10, 20)), self.lane._redecide, "its entry session decided again")
+        with self.store() as st:
+            url = st.db.execute("SELECT index_url FROM filings WHERE accession=?", (self.ACC,)).fetchone()[0]
+        self.assertIn("/edgar/data/3/", url)
+
+    def test_the_clis_passes_alike(self):
+        self.sec.current["8-K"][:0] = [(self.ACC, *self.SUB), (self.ACC, *self.LISTED)]
+        self.at(et("2026-10-20", "08:20"))
+        with self.store() as st:
+            ctx = R.Context(st, self.gw, self.sec, now=self.lane.now)
+            out = R.record_pass(ctx)
+            self.assertEqual((out["8-K"]["new"], out["8-K"]["fetched"], out["8-K"]["unlisted"]), (1, 1, 0))
+            self.assertEqual(tuple(st.db.execute("SELECT cik, status FROM filings WHERE accession=?", (self.ACC,))
+                                   .fetchone()), (self.LISTED[0], "fetched"))
+            st.db.execute("UPDATE filings SET cik=?, company=?, status='listed' WHERE accession=?",
+                          (*self.SUB, self.ACC))    # (as a release before this one stored it)
+            R.backfill(ctx, dt.date(2026, 10, 20), dt.date(2026, 10, 20), news=False)
+            self.assertEqual(tuple(st.db.execute("SELECT cik, company, status FROM filings WHERE accession=?",
+                                                 (self.ACC,)).fetchone()), (*self.LISTED, "fetched"))
+
+    def test_a_filing_stored_under_a_listed_filer_keeps_it(self):
+        """Two listed co-registrants: the backfill never moves a filing the live pass stored under a listed filer."""
+        with self.store() as st:
+            E.record_filing(st, self.sec, {"form": "8-K", "cik": "0000000002", "accession": self.ACC, "company": "Beta",
+                                           "accepted_at": et("2026-10-20", "08:10"), "items": []},
+                            source="current", fetch=False)
+            status = E.record_filing(st, self.sec, {"form": "8-K", "cik": "0000000003", "accession": self.ACC,
+                                                    "company": "Gamma Inc.", "accepted_at": None, "index_url": None,
+                                                    "items": []},
+                                     source="daily-index", fetch=True, listed={"0000000002", "0000000003"})
+            self.assertEqual(status, "fetched")
+            self.assertEqual(st.db.execute("SELECT cik FROM filings WHERE accession=?", (self.ACC,)).fetchone()[0],
+                             "0000000002")
+
+    def test_one_filing_on_two_pages_of_the_feed_is_one_entry_under_the_listed_filer(self):
+        def entry(cik, name):
+            return (f'<entry><title>8-K - {name} ({cik}) (Filer)</title><summary type="html">AccNo: {self.ACC}'
+                    f'</summary><updated>2026-10-20T08:10:00-04:00</updated></entry>')
+        pages = {0: "<feed>" + entry(*self.SUB) + "</feed>", E.CURRENT_PAGE: "<feed>" + entry(*self.LISTED) + "</feed>"}
+
+        def get(url):
+            start = int(url.split("start=")[1].split("&")[0])
+            return pages.get(start, "<feed></feed>").encode()
+        [one] = E.poll_current(get, "8-K", [], prefer={"0000000003"})
+        self.assertEqual((one["cik"], one["company"]), self.LISTED)
+        [first] = E.poll_current(get, "8-K", [])
+        self.assertEqual(first["cik"], self.SUB[0], "no tickers copy: the first filer seen, as before")
 
 
 class TheBackfill(LaneCase):

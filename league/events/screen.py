@@ -751,7 +751,8 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 #:   made, so nothing waits for it);
 #: - the EDGAR daily-index backfill (house.py BACKFILL_WEEKDAYS) of every weekday through X that the House still
 #:   backfills has run (meta `evl:backfill:<day>` "done": it adds the filings the live pass missed, and decides their
-#:   sessions again).
+#:   sessions again), through `index_through(X)` when X is an SEC holiday NYSE trades (release 1019f's review: the
+#:   index that holds the 8-Ks of X's eve; `SEC_HOLIDAYS`).
 #: THE REACH IS DEFINED HERE, ONCE (release 1019b's second review): the House's lane takes its REDECIDE_SESSIONS,
 #: LOOKBACK and BACKFILL_WEEKDAYS from these three (league/events/house.py imports them; this file is behind the wall,
 #: house.py is not), and `_reach` waits out the House's own when it is ever larger: a House change can only delay a
@@ -759,6 +760,56 @@ def next_look(store: S.Store, program: str, version: int, today: dt.date) -> dic
 FINAL_SESSIONS = 3
 FINAL_LOOKBACK = dt.timedelta(days=45)
 FINAL_BACKFILL_WEEKDAYS = 3
+#: SEC HOLIDAYS (release 1019f; moved here from league/events/house.py by its review, lens judges, as the reach above
+#: is: the House's lane takes this table, house.py `SEC_HOLIDAYS`, and `_sec_holidays` reads the House's own too, so
+#: a day only the House's copy lists, whose backfill it marks done, still has the index after it waited for): EDGAR
+#: accepts no filing on a US federal holiday and publishes no daily index for it; the House's backfill marks such a
+#: weekday done when its index read fails (house.py `_backfill`). The federal holidays of 2026 and 2027 as OPM lists
+#: them (https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/, read Oct 21, 2026), and Fri Dec 31,
+#: 2027: New Year's Day 2028 falls on a Saturday, so the Friday before is its holiday (5 U.S.C. 6103(b)(1)). A closure
+#: by executive order (a Christmas Eve) is not in it: add the day before it falls; 2028's before Jan 2028.
+#: THE INDEX THAT HOLDS A HOLIDAY'S EVE (the review's major): EDGAR dates an 8-K accepted after 17:30 ET as filed on
+#: the next day it is open (Regulation S-T Rule 13(a)(2); a Section 16 form to 22:00 ET the same day), so on a holiday
+#: NYSE trades (Columbus Day, Veterans Day) the 8-Ks accepted after 17:30 ET of the session before it, events of the
+#: holiday's open decision, are in the index of the next weekday EDGAR is open, not in the eve's, and the holiday has
+#: none. A close X is final (A66's third rule, A69's (iii)) only once the backfill of that index has run too
+#: (`index_through`); on any other session the index of X itself is the last, as before.
+SEC_HOLIDAYS: dict[dt.date, str] = {
+    dt.date(2026, 1, 1): "New Year's Day", dt.date(2026, 1, 19): "Birthday of Martin Luther King, Jr.",
+    dt.date(2026, 2, 16): "Washington's Birthday", dt.date(2026, 5, 25): "Memorial Day",
+    dt.date(2026, 6, 19): "Juneteenth National Independence Day", dt.date(2026, 7, 3): "Independence Day",
+    dt.date(2026, 9, 7): "Labor Day", dt.date(2026, 10, 12): "Columbus Day", dt.date(2026, 11, 11): "Veterans Day",
+    dt.date(2026, 11, 26): "Thanksgiving Day", dt.date(2026, 12, 25): "Christmas Day",
+    dt.date(2027, 1, 1): "New Year's Day", dt.date(2027, 1, 18): "Birthday of Martin Luther King, Jr.",
+    dt.date(2027, 2, 15): "Washington's Birthday", dt.date(2027, 5, 31): "Memorial Day",
+    dt.date(2027, 6, 18): "Juneteenth National Independence Day", dt.date(2027, 7, 5): "Independence Day",
+    dt.date(2027, 9, 6): "Labor Day", dt.date(2027, 10, 11): "Columbus Day", dt.date(2027, 11, 11): "Veterans Day",
+    dt.date(2027, 11, 25): "Thanksgiving Day", dt.date(2027, 12, 24): "Christmas Day",
+    dt.date(2027, 12, 31): "New Year's Day",
+}
+
+
+def _sec_holidays() -> frozenset[dt.date]:
+    """The SEC holidays a look reads: `SEC_HOLIDAYS`, and the House lane's own table as it runs when it holds more
+    (league/events/house.py takes this one; a day only it lists is a backfill it marks done, so the judge reads the
+    index after it too: a copy it widened can only delay a look, as `_reach`)."""
+    days = set(SEC_HOLIDAYS)
+    try:
+        from . import house as H
+
+        days |= set(H.SEC_HOLIDAYS)
+    except Exception:  # noqa: BLE001 - the House's lane cannot be read here: the judge's own table
+        pass
+    return frozenset(days)
+
+
+def index_through(day: dt.date, holidays: Iterable[dt.date] | None = None) -> dt.date:
+    """The last EDGAR daily index that can hold a filing of session `day`'s windows (`SEC_HOLIDAYS`' comment): `day`
+    itself, or, when EDGAR is closed on it (an SEC holiday NYSE trades), the next weekday EDGAR is open."""
+    closed = _sec_holidays() if holidays is None else frozenset(holidays)
+    while day.weekday() >= 5 or day in closed:
+        day += dt.timedelta(days=1)
+    return day
 #: A69 (the captain's amendment of 14:25Z Oct 19, 2026; release 1019c): THE FAST PATH TO A FINAL RECORD. The three
 #: sessions' wait above is for late data; when there is provably none, a close X is final for a program once the
 #: session after X has had its open decision AND
@@ -781,7 +832,9 @@ FINAL_BACKFILL_WEEKDAYS = 3
 #:     that start) is still listed or failed: a failed one, a listed Form 4, or a listed 8-K whose filer is in X's
 #:     tickers copy (an unlisted filer's 8-K is never fetched, and never an event of X);
 #: (iii) the daily-index backfill of every weekday from the session before X through X has run (meta
-#:     `evl:backfill:<day>` = done: the days whose indexes hold filings of X's windows; the reading that waits);
+#:     `evl:backfill:<day>` = done: the days whose indexes hold filings of X's windows; the reading that waits), and,
+#:     when X is an SEC holiday NYSE trades, through the next weekday EDGAR is open (`index_through`: its index holds
+#:     the 8-Ks accepted after 17:30 ET of X's eve; release 1019f's review, lens judges);
 #: (iv) every decision of the program's entry kind through X is made as A66's second rule reads it, and the session
 #:     after X's open decision is made (its receipt `ok` or `pending`).
 #: Otherwise A66's rules apply unchanged. Finality stays contiguous: X is final by the fast path only when every session
@@ -1075,12 +1128,16 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
             day -= dt.timedelta(days=1)
             if day.weekday() < 5:
                 reach.append(day)
+        # (release 1019f's review: a weekday's index holds the windows of the sessions through it, and of an SEC holiday
+        # NYSE trades before it, `index_through`; so a backfill not run holds every session whose last index it is)
+        holidays = _sec_holidays()
         for day in sorted(reach):
             if horizon is None:
                 break
-            if day < first or day > horizon or store.meta(f"evl:backfill:{day.isoformat()}") == "done":
+            if day < first or day > index_through(horizon, holidays) or \
+                    store.meta(f"evl:backfill:{day.isoformat()}") == "done":
                 continue
-            before = [y for y in C.previous(store, day, 1) if y.day >= first]
+            before = [y for y in C.previous(store, day, 3) if y.day >= first and index_through(y.day, holidays) < day]
             horizon = before[-1].day if before else None
             why = f"the daily-index backfill of {day.isoformat()} has not run"
             break
@@ -1128,17 +1185,23 @@ def _fast_block(store: S.Store, prog: Any, first: dt.date, x: C.Session, unmade:
         # PREREG-EVL-5 section 2: FOR ITS ROWS A69's span begins at the earliest window that feeds their decision of
         # close X, the close decision time of P' (two sessions before X: where the close window of P, read by NO NEW
         # INFORMATION (ii), begins; the attention articles of P begin at P''s close), and A74 (3)'s daily-index
-        # backfill must have run for every weekday from P' through X. The skips those windows feed carry no
-        # registration floor, so neither does the span (the reading that waits). A69 (i)'s passes are judged from
-        # before that start through the span's end by `_fast_passes`, whichever reading of A69 (i) the tree holds (A84's
-        # per-feed clean reads once it is merged; every pass whole before); A69 (ii) reads the filings from that start.
+        # backfill must have run for every weekday from P' through X (through the index that holds X's filings when X
+        # is an SEC holiday, `index_through`, as for every program: release 1019f's fix round). The skips those
+        # windows feed carry no registration floor, so neither does the span (the reading that waits). A69 (i)'s
+        # passes are judged from before that start through the span's end by `_fast_passes`, A84's per-feed clean
+        # reads (release 1019g carries both); A69 (ii) reads the filings from that start.
         back = C.previous(store, x.day, 2)
         if len(back) < 2:
             return "not two sessions before it in the calendar"
         day, start = back[0].day, back[0].close_decide
-    while day <= x.day:
+    if "holidays" not in cache:
+        cache["holidays"] = _sec_holidays()
+    last = index_through(x.day, cache["holidays"])
+    while day <= last:
         if day.weekday() < 5 and store.meta(f"evl:backfill:{day.isoformat()}") != "done":
-            return f"the daily-index backfill of {day.isoformat()} has not run"
+            return f"the daily-index backfill of {day.isoformat()} has not run" + (
+                "" if day <= x.day else f" (its index holds the 8-Ks of {prior.day.isoformat()}'s evening: "
+                                        f"{x.day.isoformat()} is an SEC holiday)")
         day += dt.timedelta(days=1)
     end = max(after.open_decide, S.parse_iso(row["started_at"]))
     stuck = _fast_filings(store, x, start, x.close_decide, now, cache)
@@ -1525,8 +1588,9 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
-           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "NAMED_FROM",
-           "FOUR_KIND", "FIVE_KIND", "FILE_KINDS", "file_programs", "BIRTHS_KIND", "program_key", "names", "four_programs", "made_without", "births_made_without",
+           "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "SEC_HOLIDAYS", "index_through",
+           "FAST_RECORD_GAP", "NAMED_FROM", "FOUR_KIND", "FIVE_KIND", "FILE_KINDS", "file_programs", "BIRTHS_KIND",
+           "program_key", "names", "four_programs", "made_without", "births_made_without",
            "birth_group", "B", "TIE", "LOOKS", "SEATABLE",
            "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",

@@ -25,7 +25,7 @@ import html
 import json
 import re
 import xml.etree.ElementTree as ET
-from typing import Any, Iterable, Mapping
+from typing import Any, Collection, Iterable, Mapping
 from zoneinfo import ZoneInfo
 
 from . import store as S
@@ -111,10 +111,16 @@ def parse_current(body: bytes | str) -> list[dict[str, Any]]:
     return out
 
 
-def poll_current(get: Any, form: str, known: Iterable[str], *, max_pages: int = MAX_CURRENT_PAGES) -> list[dict[str, Any]]:
+def poll_current(get: Any, form: str, known: Iterable[str], *, max_pages: int = MAX_CURRENT_PAGES,
+                 prefer: Collection[str] | None = None) -> list[dict[str, Any]]:
     """New entries of `form` (exact type) since the newest known accession: pages are read until a page holds only
-    known accessions or the feed ends. `get(url) -> bytes` raises on a transport failure."""
-    seen = set(known)
+    known accessions or the feed ends. `get(url) -> bytes` raises on a transport failure. A filing the feed lists once
+    per filer is one entry: a Form 4 under its issuer; a co-registered 8-K under a filer in `prefer` (the tickers
+    copy's CIKs) when any of its filers is in it (release 1019f's review, lens judges: kept under the first filer seen,
+    an unlisted co-registrant listed first, a subsidiary or an operating partnership, left the listed issuer's 8-K
+    unfetched by the live pass, out of its events and of A69 (ii); A82 chooses the listed filer's row of the daily
+    index alike), else the first seen. The entries of one filing on two pages are one entry too."""
+    known = set(known)
     fresh: dict[str, dict[str, Any]] = {}
     for page in range(max_pages):
         entries = parse_current(get(current_url(form, start=page * CURRENT_PAGE)))
@@ -123,7 +129,7 @@ def poll_current(get: Any, form: str, known: Iterable[str], *, max_pages: int = 
         new_here = 0
         for entry in entries:
             acc = entry["accession"]
-            if entry["form"] != form or acc in seen:
+            if entry["form"] != form or acc in known:
                 continue
             prior = fresh.get(acc)
             if prior is None:
@@ -133,7 +139,8 @@ def poll_current(get: Any, form: str, known: Iterable[str], *, max_pages: int = 
                 # A Form 4 is listed under its issuer and its reporting owner: keep the issuer's CIK (the XML's
                 # issuerCik overrides it anyway when the filing is fetched).
                 fresh[acc] = entry
-        seen.update(fresh)
+            elif form == "8-K" and prefer is not None and entry["cik"] in prefer and prior["cik"] not in prefer:
+                fresh[acc] = entry      # a co-registered 8-K: the listed filer's
         if new_here == 0:
             break
     return list(fresh.values())
@@ -287,19 +294,28 @@ def parse_form4(body: bytes | str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------------------------------- recording
 def record_filing(store: S.Store, get: Any, entry: Mapping[str, Any], *, source: str,
-                  now: dt.datetime | None = None, fetch: bool = True) -> str:
+                  now: dt.datetime | None = None, fetch: bool = True, listed: Collection[str] | None = None) -> str:
     """Store one filing (idempotent by accession) and, when `fetch`, its index page and document. Returns its status.
-    `get(url) -> bytes`. A filing whose form is not exactly 8-K or 4 is never stored."""
+    `get(url) -> bytes`. A filing whose form is not exactly 8-K or 4 is never stored.
+    `listed` (the daily-index backfill's tickers copy, its CIKs): an 8-K stored, not fetched, under a filer not in it
+    while `entry` is a listed filer's row of the same filing (a co-registered 8-K that the current feed listed first
+    under an unlisted co-registrant) is the listed filer's: its stored CIK, company and index page become the entry's
+    before it is fetched (release 1019f's review, lens judges; A82's "an 8-K is a listed filer's when any of its filers
+    is listed, under that filer's CIK"), so it is an event of the listed issuer and A69 (ii) holds while it is not."""
     form = str(entry["form"])
     if form not in FORMS:
         return "ignored"
     accession = str(entry["accession"])
-    row = store.db.execute("SELECT status FROM filings WHERE accession=?", (accession,)).fetchone()
+    row = store.db.execute("SELECT status, cik FROM filings WHERE accession=?", (accession,)).fetchone()
     if row is not None and str(row["status"]) == "fetched":
         return "fetched"
     now = now or S.utc_now()
     cik = pad(entry["cik"])
     accepted = entry.get("accepted_at")
+    if row is not None and form == "8-K" and listed is not None and str(row["cik"]) not in listed and cik in listed:
+        store.db.execute("UPDATE filings SET cik=?, company=COALESCE(?, company), index_url=? WHERE accession=? AND "
+                         "status!='fetched'",
+                         (cik, entry.get("company"), entry.get("index_url") or index_url(cik, accession), accession))
     if row is None:
         provisional = accepted or now
         store.db.execute(

@@ -31,7 +31,7 @@ from league.events import screen as SN
 from league.events import store as S
 from league.tests import test_events_house as TH
 from league.tests.test_events_book import CIK, DAY, NEXT, PRIOR, EventTest, at, iso
-from league.tests.test_events_screen import decided_summary
+from league.tests.test_events_screen import decided_summary, final_record
 
 UTC = dt.timezone.utc
 NY = C.NY
@@ -477,6 +477,101 @@ class TheBandMark(EventTest):
                         return [("band_history",)]
                     raise sqlite3.DatabaseError("malformed")
         self.assertIsNone(EB.band_mark(Broken()))
+
+
+
+class TheIndexAfterAnSecHoliday(unittest.TestCase):
+    """Release 1019f's review (lens judges, a major): EDGAR dates an 8-K accepted after 17:30 ET as filed on the next
+    day it is open, so on an SEC holiday NYSE trades (Wed Nov 11, 2026, Veterans Day) the 8-Ks accepted after 17:30 ET
+    of Tue Nov 10, events of Nov 11's open decision, are in Thu Nov 12's daily index; Nov 10's does not list them and
+    Nov 11 has none. The holiday's backfill is done (fix/backfill-robust), so a close on the holiday is final, by A69's
+    fast path or by A66's three sessions, only once Nov 12's backfill has run too (league/events/screen.py
+    `index_through`); an ordinary close still waits for its own index alone."""
+
+    from league.tests import test_events_1019c as _T19C   # (the module, so its own tests are not collected again here)
+    from league.tests import test_events_review_1019b as _R19B
+
+    setUp, tearDown, settle = _R19B.LooksOnAFinalRecord.setUp, _R19B.LooksOnAFinalRecord.tearDown, \
+        _R19B.LooksOnAFinalRecord.settle
+    passes, written = _T19C.TheFastPath.passes, _T19C.TheFastPath.written
+    P = "EVL-INS-BUY-O1"
+    HOLIDAY, AFTER = dt.date(2026, 11, 11), dt.date(2026, 11, 12)
+
+    def due_at_the_holiday(self) -> None:
+        """Look 1 of INS-BUY-O1 v2 falls due at the holiday's close (80 events over the 8 sessions through it)."""
+        i = self.days.index(self.HOLIDAY)
+        self.settle(self.P, 2, 10, self.days[i - 7:i + 1], lambda n: 0.01)
+
+    def test_the_index_through_a_session(self):
+        cases = {dt.date(2026, 11, 10): dt.date(2026, 11, 10), dt.date(2026, 11, 11): dt.date(2026, 11, 12),
+                 dt.date(2026, 10, 12): dt.date(2026, 10, 13), dt.date(2027, 10, 11): dt.date(2027, 10, 12),
+                 dt.date(2027, 11, 11): dt.date(2027, 11, 12), dt.date(2026, 7, 3): dt.date(2026, 7, 6),
+                 dt.date(2027, 12, 31): dt.date(2028, 1, 3), dt.date(2026, 11, 27): dt.date(2026, 11, 27),
+                 dt.date(2026, 4, 3): dt.date(2026, 4, 3)}        # (Good Friday: NYSE shut, EDGAR open)
+        for day, last in cases.items():
+            self.assertEqual(SN.index_through(day), last, day)
+
+    def test_the_house_takes_the_judges_table_and_the_judge_reads_a_day_only_the_house_lists(self):
+        self.assertIs(H.SEC_HOLIDAYS, SN.SEC_HOLIDAYS)
+        eve = dt.date(2026, 12, 24)
+        self.assertEqual(SN.index_through(eve), eve)
+        with mock.patch.object(H, "SEC_HOLIDAYS", {**SN.SEC_HOLIDAYS, eve: "Christmas Eve, by executive order"}):
+            self.assertEqual(SN.index_through(eve), dt.date(2026, 12, 28), "Dec 25 a holiday, then the weekend")
+
+    def test_the_fast_path_makes_the_holiday_final_only_after_the_index_that_holds_its_eve(self):
+        self.due_at_the_holiday()
+        now = final_record(self.st, self.AFTER, wall=dt.time(9, 40))
+        self.st.db.execute("DELETE FROM meta WHERE key=?", (f"evl:backfill:{self.AFTER.isoformat()}",))  # (05:00 Nov 13)
+        self.st.db.execute("DELETE FROM receipts WHERE job=?", (f"decide-close:{self.AFTER.isoformat()}",))
+        self.assertEqual(self.st.meta(f"evl:backfill:{self.HOLIDAY.isoformat()}"), "done", "the holiday's own")
+        self.passes(et(self.days[0], 8), et(self.AFTER, 9, 30))
+        horizon, why = SN.final_until(self.st, self.P, 2, self.AFTER, now)
+        self.assertEqual(horizon, dt.date(2026, 11, 10), why)
+        self.assertIn("the fast path (A69) stops at 2026-11-11: the daily-index backfill of 2026-11-12 has not run "
+                      "(its index holds the 8-Ks of 2026-11-10's evening: 2026-11-11 is an SEC holiday)", why)
+        out = SN.run(self.st, self.AFTER, draws=999, now=now)
+        self.assertEqual(out["written"], [], "no look as of the holiday before its eve's index is backfilled")
+        self.st.set_meta(f"evl:backfill:{self.AFTER.isoformat()}", "done")
+        later = et(dt.date(2026, 11, 13), 5, 10)
+        self.assertEqual(SN.final_until(self.st, self.P, 2, dt.date(2026, 11, 13), later)[0], self.HOLIDAY)
+        out = SN.run(self.st, dt.date(2026, 11, 13), draws=999, now=later)
+        self.assertEqual(self.written(out), [(self.P, 1)])
+        self.assertEqual(SN.look_rows(self.st, self.P, 2)[0]["at"][:10], self.HOLIDAY.isoformat(), "the as-of date")
+
+    def test_on_an_ordinary_day_the_close_waits_for_its_own_index_alone(self):
+        x, y = dt.date(2026, 11, 9), dt.date(2026, 11, 10)
+        i = self.days.index(x)
+        self.settle(self.P, 2, 10, self.days[i - 7:i + 1], lambda n: 0.01)
+        now = final_record(self.st, y, wall=dt.time(9, 40))
+        self.st.db.execute("DELETE FROM meta WHERE key=?", (f"evl:backfill:{y.isoformat()}",))
+        self.st.db.execute("DELETE FROM receipts WHERE job=?", (f"decide-close:{y.isoformat()}",))
+        self.passes(et(self.days[0], 8), et(y, 9, 30))
+        horizon, why = SN.final_until(self.st, self.P, 2, y, now)
+        self.assertEqual(horizon, x, "Nov 10's index (not yet read) holds none of Nov 9's windows")
+        self.assertEqual(self.written(SN.run(self.st, y, draws=999, now=now)), [(self.P, 1)])
+
+    def test_a66_holds_the_holiday_until_the_index_that_holds_its_eve(self):
+        self.due_at_the_holiday()
+        monday = dt.date(2026, 11, 16)
+        now = final_record(self.st, monday, wall=dt.time(9, 40))   # (no record pass on record: A66 alone)
+        self.st.db.execute("DELETE FROM meta WHERE key=?", (f"evl:backfill:{self.AFTER.isoformat()}",))
+        horizon, why = SN.final_until(self.st, self.P, 2, monday, now)
+        self.assertEqual(horizon, dt.date(2026, 11, 10), why)
+        self.assertIn("the daily-index backfill of 2026-11-12 has not run", why)
+        self.assertEqual(SN.run(self.st, monday, draws=999, now=now)["written"], [])
+        self.st.set_meta(f"evl:backfill:{self.AFTER.isoformat()}", "done")
+        self.assertEqual(SN.final_until(self.st, self.P, 2, monday, now)[0], self.HOLIDAY, "A66's three sessions")
+        self.assertEqual(self.written(SN.run(self.st, monday, draws=999, now=now)), [(self.P, 1)])
+
+    def test_a66_on_the_day_after_the_holiday_holds_both(self):
+        """Nov 12's index holds the windows of the holiday and of Nov 12: with it not backfilled, A66 at Nov 17's open
+        (its horizon Nov 12) falls back to Nov 10, before the holiday, as the fast path does."""
+        self.due_at_the_holiday()
+        tuesday = dt.date(2026, 11, 17)
+        now = final_record(self.st, tuesday, wall=dt.time(9, 40))
+        self.st.db.execute("DELETE FROM meta WHERE key=?", (f"evl:backfill:{self.AFTER.isoformat()}",))
+        horizon, why = SN.final_until(self.st, self.P, 2, tuesday, now)
+        self.assertEqual(horizon, dt.date(2026, 11, 10), why)
 
 
 if __name__ == "__main__":

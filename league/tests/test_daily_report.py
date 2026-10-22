@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from league.events import calendar as C
+from league.events import programs as P
 from league.events import store as ES
 from league.ops import budget as B
 from league.ops import daily_report as DR
@@ -323,6 +324,81 @@ class DailyReport(ReportCase):
         self.assertEqual(facts["costs"]["allowance"]["research_usd"], 0.34)
         self.assertEqual(facts["costs"]["cap_usd"], B.BASE_USD_DAY, "the day's cap with no usable budget.json")
         self.assertTrue(out["report"]["sent"])
+
+
+class TheBirths(ReportCase):
+    """Release 1019f's review (lens alarms, a major): a seatable birth trades real money at learning size from its first
+    event (A81; births on since A93), so its settled real round trips are in the report like any seating program's:
+    account-shown profit (day and to date), its program row with its buy-and-hold, its 0.10 in the expected false
+    passes, and its line in the Done reader's. The stall job's process never loads the births; the report loads them
+    from the lane's read-only store and leaves the table as it found it."""
+
+    BIRTH = "EVL-B-8K-502"
+
+    def setUp(self):
+        super().setUp()
+        from league.events import births as BI
+        from league.tests.test_events_births import spec
+
+        self.addCleanup(P.load_births, None)
+        st = ES.Store(self.root / "events")
+        try:
+            sp = spec(self.BIRTH, "8k", {"items": ["5.02"]})
+            at = "2026-10-20T01:00:00Z"
+            st.db.execute("INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, "
+                          "received_at, path, commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, 1, ?, ?, ?, "
+                          "'docs/births/2026-10-19.jsonl', ?, 0, '{}', 'invented', 'captain', '2026-10-19')",
+                          (sp["id"], BI.sha(sp), BI.canonical(sp), at, at, at, "c" * 40))
+            # one invented real round trip of the birth at learning size: 10 shares bought at 10.00, sold at 15.00
+            for side, price, wall in (("buy", 10.0, "09:30"), ("sell", 15.0, "16:00")):
+                st.db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) "
+                              "VALUES(?, 1, '8k:born', ?, 10, ?, 0, ?, 'learning')",
+                              (self.BIRTH, side, price, iso(et(TUE, wall))))
+        finally:
+            st.close()
+
+    def test_a_births_real_round_trip_is_in_every_figure_of_the_report(self):
+        self.assertEqual(P.BIRTHS, (), "the stall job's process holds no birth")
+        without = DR.facts(self.ctx(), self.root, self.now_, "2026-10-20", ledger=MT.load(self.root),
+                           budget=json.loads((self.root / "budget.json").read_text()))
+        self.assertEqual(P.BIRTHS, (), "the report leaves the table as it found it")
+        self.store.put("guard", {"last": {"balance": 400.0, "metered_spent": 101.2, "at": self.now_},
+                                 "last_good": {"balance": 400.0, "at": self.now_}})
+        self.health = {"kill_switch": False, "claude": {"settled_usd": "51.970000"}}
+        out = ST.run(self.ctx())
+        self.assertTrue(out["report"]["sent"], out["report"])
+        [facts] = self.reports()
+        self.assertEqual(P.BIRTHS, ())
+        self.assertEqual(facts["profit"], without["profit"], "the stall job's report is the same as `facts`'")
+        # ACCOUNT-SHOWN: the PREREG programs' invented 2.94 and the birth's 10 x (15 - 10) = 50.00
+        self.assertEqual(facts["profit"]["day"]["shown_usd"], 52.94)
+        to_date = facts["profit"]["to_date"]
+        self.assertEqual((to_date["shown_usd"], to_date["events"]), (52.94, 4))
+        rows = {row["id"]: row for row in facts["programs"]}
+        prereg = [p for p in P.SEATING]
+        self.assertEqual([row["id"] for row in facts["programs"]][:len(prereg)], [p.id for p in prereg],
+                         "every PREREG program first, in the tables' order")
+        self.assertEqual([row["id"] for row in facts["programs"]][len(prereg):], [self.BIRTH], "then the birth")
+        born = rows[self.BIRTH]
+        self.assertEqual((born["version"], born["band"], born["real"], born["shown_usd"]), (1, "learning", 1, 50.0))
+        self.assertEqual([(b["band"], b["n"], b["shown_usd"]) for b in born["by_band"]], [("learning", 1, 50.0)])
+        self.assertIn("buy_hold_usd", born)
+        # THE EXPECTED FALSE PASSES: one more seatable version at 0.10
+        self.assertEqual(facts["seatable_versions"], len(prereg) + 1)
+        self.assertAlmostEqual(facts["expected_false_passes"], round(0.1 * (len(prereg) + 1), 2), places=2)
+        self.assertEqual([r["id"] for r in facts["done"]["by_program"]][-1], self.BIRTH, "the Done line by program")
+
+    def test_births_this_process_loaded_already_stay_loaded(self):
+        store = DR.ReadOnlyStore(self.root / "events")
+        try:
+            loaded = P.load_births(store)
+        finally:
+            store.close()
+        self.assertEqual([p.id for p in loaded], [self.BIRTH])
+        facts = DR.facts(self.ctx(), self.root, self.now_, "2026-10-20", ledger=MT.load(self.root),
+                         budget=json.loads((self.root / "budget.json").read_text()))
+        self.assertEqual(P.BIRTHS, loaded, "a table this process loaded is left loaded")
+        self.assertEqual(facts["profit"]["day"]["shown_usd"], 52.94)
 
 
 class OverTheCap(ReportCase):
