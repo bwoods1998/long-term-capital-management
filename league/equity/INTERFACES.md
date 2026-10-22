@@ -1531,16 +1531,6 @@ path.
   while the other auction has no PREREG Probe or Sized program; an error reading it waits the buy a minute, as any
   sizing figure). Release 1019f: each answer writes the buy's `target_usd`, `binding` and `sized_usd` on its side row
   (`_event_sized`, `_event_cut`), the gateway's final refusal `binding` "gateway" (`_event_refused_at_gateway`).
-  RELEASE 1019g (A85's send order with PREREG-EVL-5's `book.part_hold`): `_event_send` passes each close buy `ahead`,
-  the side rows of the PREREG-EVL-5 buys before it in ROOM's order still waiting for the lane's own close decision to
-  name their program (`_event_part_waits`: `part_hold` "wait", no order sent); `_count_refusal(day, exit_=False,
-  event_line=..., ahead=n)` keeps two orders for each (its send and its own exit) on the event kind's line and the
-  House-wide one; `_size_event(..., ahead=...)` has `available_cash`, `invested_now` and `budget_room` less what each
-  will ask (`_event_ahead(ahead, s, E) -> (cash, budget, note)`: its band's target in whole shares at its own limit, or
-  one share within the band's one-share cap, the budget at its own weight), beside A85's reservation; and a buy left no
-  whole share by it WAITS (`AHEAD_HELD` on its intent, sized again next minute, missed at the cut-off if they still
-  wait), never refused for it. So the cash, room, budget and day orders go in ROOM's order whatever the minute each buy
-  goes (the book's close decision waits only `EVENT_DECIDE_WAIT_S` 60 s for the lane's).
   `probe_figures` weighs an
   open event lot by `event_lot_weight` (its `info.evl.weight`; 0.40 from the ladder's first rung or when unreadable; 1
   once at 0) and a working event buy by its side row's weight, and counts every closed event lot in `closes` whatever
