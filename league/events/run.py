@@ -68,8 +68,14 @@ EVL5_PRE_URGENT = dt.timedelta(minutes=30)
 #: written last, once its eligibility results and 09:30 marks are stored (league/events/house.py schedules the pass).
 PRE_KEY = "evl5:pre:"
 #: THE GAP'S MINUTE (PREREG-EVL-5 section 1.1): the regular-session SIP 1-minute bar starting at 09:30:00 ET of D, its
-#: OPEN (raw), stored once read under this label (a row with no price when that minute had no trade: no gap).
+#: OPEN (raw), stored once read under this label. A row with no price says the tape served the name and that minute
+#: had no trade (no gap); only a decision's own read of the name alone writes one (`_marks_0930`), never a batch and
+#: never a pre-pass, so an empty or partial answer stores nothing and removes nothing (PREREG-EVL-1 section 3).
 GAP_LABEL = "0930"
+#: The window of a decision's read of ONE name whose 09:30 minute no batch held (`_marks_0930` with `alone`): 09:30:00
+#: through 09:35:00 ET. A bar of a later minute of it with none starting at 09:30 is the tape's word that the minute had
+#: no trade; an answer with no bar at all is no answer (nothing stored, read again by the next decision).
+GAP_ALONE = dt.timedelta(minutes=5)
 
 
 def live_run(scheduled: dt.datetime, now: dt.datetime) -> bool:
@@ -846,7 +852,7 @@ def pre_from(session: C.Session) -> dt.datetime:
 
 def _gap_mark(st: S.Store, symbol: str, day: dt.date) -> tuple[bool, float | None]:
     """(read, the open) of `symbol`'s stored 09:30 minute of `day` (`GAP_LABEL`): (False, None) when none is stored,
-    (True, None) when the minute had no trade."""
+    (True, None) when the tape said that minute had no trade (`_marks_0930`'s read of the name alone)."""
     row = st.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=?",
                         (symbol, day.isoformat(), GAP_LABEL)).fetchone()
     if row is None:
@@ -854,12 +860,47 @@ def _gap_mark(st: S.Store, symbol: str, day: dt.date) -> tuple[bool, float | Non
     return True, (float(row["px"]) if row["px"] is not None else None)
 
 
-def _marks_0930(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
+def _minute_bars(ctx: Context, names: list[str], start: dt.datetime, end: dt.datetime) -> dict[str, list[Mapping[str, Any]]]:
+    """{symbol: its SIP 1-minute bars (raw) in [start, end)} for `names` in one request, paged (`MARK_PAGES`)."""
+    got: dict[str, list[Mapping[str, Any]]] = {}
+    token = None
+    for _ in range(MARK_PAGES):
+        page = ctx.gw.get_json("/v1/alpaca/v2/stocks/bars", {"symbols": ",".join(names), "timeframe": "1Min",
+                                                             "start": S.iso(start), "end": S.iso(end), "feed": "sip",
+                                                             "adjustment": "raw", "limit": 10000,
+                                                             "page_token": token}) or {}
+        for sym, bars in (page.get("bars") or {}).items():
+            got.setdefault(str(sym).upper(), []).extend(bars or [])
+        token = page.get("next_page_token")
+        if not token:
+            break
+    return got
+
+
+def _open_of(bars: Iterable[Mapping[str, Any]], start: dt.datetime) -> float | None:
+    """The OPEN of the bar starting exactly at `start` in `bars`, when it is a positive price; else None."""
+    for bar in bars:
+        try:
+            if S.parse_iso(str(bar["t"])) == start and bar.get("o") is not None and float(bar["o"]) > 0:
+                return float(bar["o"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _marks_0930(ctx: Context, symbols: Iterable[str], day: dt.date, *, alone: bool = False) -> int:
     """THE GAP'S MINUTE of `symbols` on session `day` (PREREG-EVL-5 section 1.1): the regular-session SIP 1-minute bar
-    starting at 09:30:00 ET (raw), read in batched requests (`MARK_BATCH` names each, paged), stored once read under
-    `GAP_LABEL` with its OPEN; a name the answer holds no such bar for (the minute had no trade) is stored with no price
-    (no gap: the event is not taken). Names already stored are not read again; nothing is read before the bar is on the
-    Basic plan's tape (`pre_from`). Returns how many rows were stored."""
+    starting at 09:30:00 ET (raw), read in batched requests (`MARK_BATCH` names each, paged) and stored once read under
+    `GAP_LABEL` with its OPEN. A BATCH STORES ONLY A PRICE (as `_marks_1530`'s T29 batch): a name its answer holds no
+    such bar of gets nothing, so an empty or partial answer (an outage at the 09:47 ET pre-pass, say) removes nothing
+    and the name is read again. `alone` (a decision's own read, never a pre-pass's): each name still unmarked after the
+    batch is read ONCE MORE BY ITSELF over 09:30-09:35 ET (`GAP_ALONE`): its 09:30 bar's open is stored when it holds
+    one; when it holds a later minute's bar and none starting at 09:30, the tape served the name and that minute had no
+    trade, stored with no price (no gap: the event is not taken); an answer with no bar stores nothing (no gap at this
+    decision; the next decision reads it again). So the pre-pass and the close decision store exactly what one
+    computation at the close stores. Names already stored are not read again; nothing is read before the bar is on the
+    Basic plan's tape (`pre_from`). Each chunk's and each name's reads are stored as read (a part its bound cuts keeps
+    them). Returns how many rows were stored."""
     st = ctx.store
     session = C.session(st, day)
     if session is None or ctx.now() < pre_from(session):
@@ -869,31 +910,42 @@ def _marks_0930(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
                                               (day.isoformat(), GAP_LABEL))}
     names = sorted({str(x).upper() for x in symbols if x} - have)
     stored = 0
-    for i in range(0, len(names), MARK_BATCH):
-        chunk = names[i:i + MARK_BATCH]
-        got: dict[str, list[Mapping[str, Any]]] = {}
-        token = None
-        for _ in range(MARK_PAGES):
-            page = ctx.gw.get_json("/v1/alpaca/v2/stocks/bars", {"symbols": ",".join(chunk), "timeframe": "1Min",
-                                                                 "start": S.iso(start), "end": S.iso(end), "feed": "sip",
-                                                                 "adjustment": "raw", "limit": 10000,
-                                                                 "page_token": token}) or {}
-            for sym, bars in (page.get("bars") or {}).items():
-                got.setdefault(str(sym).upper(), []).extend(bars or [])
-            token = page.get("next_page_token")
-            if not token:
-                break
+
+    def store(rows: list[tuple[str, float | None]]) -> int:
         with st.tx() as db:
-            for sym in chunk:
-                bar = next((b for b in got.get(sym, []) if S.parse_iso(str(b["t"])) == start), None)
-                px = None
-                if bar is not None and bar.get("o") is not None and float(bar["o"]) > 0:
-                    px = float(bar["o"])
+            for sym, px in rows:
                 db.execute("INSERT OR REPLACE INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, ?, "
                            "?, ?, ?)", (sym, day.isoformat(), GAP_LABEL, px, S.iso(start),
                                         "sip-1min" if px is not None else "sip-1min:none", S.iso(ctx.now())))
-                stored += 1
+        return len(rows)
+    found: set[str] = set()
+    for i in range(0, len(names), MARK_BATCH):
+        chunk = names[i:i + MARK_BATCH]
+        got = _minute_bars(ctx, chunk, start, end)
+        rows = [(sym, px) for sym in chunk if (px := _open_of(got.get(sym, []), start)) is not None]
+        found |= {sym for sym, _ in rows}
+        stored += store(rows)
+    if not alone:
+        return stored
+    wide = min(start + GAP_ALONE, ctx.now() - U.SIP_DELAY)
+    wide = max(end, wide.replace(second=0, microsecond=0))
+    for sym in names:
+        if sym in found:
+            continue
+        bars = _minute_bars(ctx, [sym], start, wide).get(sym, [])
+        px = _open_of(bars, start)
+        if px is None and not any(_after(b, start) for b in bars):
+            continue        # (no bar at all: no answer, nothing stored)
+        stored += store([(sym, px)])
     return stored
+
+
+def _after(bar: Mapping[str, Any], start: dt.datetime) -> bool:
+    """Whether `bar` is a minute bar starting after `start` (the tape served its name: `_marks_0930`)."""
+    try:
+        return S.parse_iso(str(bar["t"])) > start
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _stored_results(st: S.Store, day: dt.date, ciks: Iterable[str], *, live: bool) -> dict[str, Mapping[str, Any] | None]:
@@ -924,7 +976,8 @@ def _rows_5(ctx: Context, day: dt.date, by_ticker: Mapping[str, str], elig: Mapp
     eligible ERN(D) filing, that these rows read and that no row has stored, asked here with the earlier row's event id,
     prompt and rendering), then TAKEN AT D'S CLOSE BY AN EARLIER ROW (`programs.taken_close_5`) and the <= 0.96 skip.
     `night2` (EVL-NEWS-NIGHT2-ON is read): the eligibility of the attention issuers with NO NEW INFORMATION
-    whose attention article is an event, and the 09:30 minutes of the eligible ones (`_marks_0930`). With `ask_only` no
+    whose attention article is an event, and the 09:30 minutes of the eligible ones (`_marks_0930`: a batch stores only
+    a price; a decision, not a pre-pass, reads each one still unmarked by itself once, `alone`). With `ask_only` no
     reaction is read (the T29 bar is not on the tape before the decision): the asks are those of every eligible ERN(D)
     event. Only with `fetch_earnings` (an earnings row is decided or asked) and `fetch_night2` (EVL-NEWS-NIGHT2-ON is) is
     anything fetched or asked for that group; otherwise (every program of it kept: A74 (5)) the stored results, marks
@@ -1047,7 +1100,7 @@ def _rows_5(ctx: Context, day: dt.date, by_ticker: Mapping[str, str], elig: Mapp
         check("the 09:30 minutes of the attention issuers")
         live_symbols = sorted({str(symbol_of(c)) for c in survivors if symbol_of(c)})
         if fetch_night2:
-            marks = _marks_0930(ctx, live_symbols, day)
+            marks = _marks_0930(ctx, live_symbols, day, alone=not ask_only)
         for cik in sorted(survivors):
             uni = table.get(cik)
             if uni is None:

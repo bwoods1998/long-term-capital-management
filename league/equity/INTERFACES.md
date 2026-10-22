@@ -1556,7 +1556,9 @@ path.
   `part_hold(lane, program, version, day) -> None | ("wait", why) | ("never", why)` (PREREG-EVL-5 section 1.3: a buy of
   its rows at D's close goes only once the lane's first finished close decision of D names its program; the equity
   book's `_event_work_entry` holds the buy while it waits, sent again each minute of the window, and refuses it when
-  that decision finished without it), `held_recently`,
+  that decision finished without it; while it waits it keeps its room from every buy after it in ROOM's order,
+  `HeldAhead` and `_event_keep_room`, and `PART_WAIT` is the words the book and the lane's report count it by),
+  `held_recently`,
   `allocate(picks, rooms,
   band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
   each program its own ranked picks whose name no earlier-given program was given, until its room is full; inside

@@ -15,7 +15,11 @@ started on the House's one-slot feeds lane with `house._background("feeds:evl", 
 so every legacy path behaves as it does today.
 
 ONE TURN, ONE TASK, BOUNDED. `run()` does the single most urgent due task, never raises (a failure is a warning at most
-once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time:
+once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time. One exception
+(PREREG-EVL-5 section 1.3, release 1019g's money review): from `HOLD_LEAD` before today's live close decision a turn
+keeps going, runs each task that falls due (each still bounded to end before the decision), waits between them and
+starts the decision at its time (`_close_hold`, `_wait_until`), because real money buys that file's rows only once the
+decision has finished, by the close - 11 minutes. The order of the tasks:
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
@@ -162,6 +166,19 @@ BIRTH_KINDS = dict(SN.BIRTHS_KIND)
 FIVE_KIND = SN.FIVE_KIND
 BACKFILL_KINDS = (FOUR_KIND, *BIRTH_KINDS.values(), FIVE_KIND)
 URGENT_BEFORE = dt.timedelta(minutes=30)
+#: PREREG-EVL-5 section 1.3, THE LANE KEEPS ITS TURN FOR ITS LIVE CLOSE DECISION (the money review of release 1019g):
+#: real money buys this file's rows only once the lane's close decision of D has finished (league/events/book.py
+#: `part_hold`) and only until the close - 11 minutes, while a turn starts only on the House's publishes (a minute or
+#: more apart in session), so the decision could start a publish after its time (the close decision + CLOSE_GRACE) and
+#: leave the book no minute to send them. From HOLD_LEAD before that time a turn keeps going instead of ending: it runs
+#: every task that falls due meanwhile (each bounded to end DECISION_MARGIN before the decision, as before; none inside
+#: that margin), waits between them (HOLD_STEP a look; the House closing, the STOP file or a clock that does not move
+#: ends the wait, and the turn), and starts the decision at its time; `due()` looks again no later than HOLD_LEAD
+#: before it, so the publish that starts the turn falls inside the lead. Only while PREREG-EVL-5 has programs, at
+#: most HOLD_TURNS tasks a turn.
+HOLD_LEAD = dt.timedelta(seconds=150)
+HOLD_STEP = 1.0
+HOLD_TURNS = 40
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
@@ -595,19 +612,41 @@ class EventLane:
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
-                now = self.now()
-                self._maintain(st, now)
-                task, _ = self._plan(st, now)
-                if task is not None:
-                    name = task.name
+                for _ in range(HOLD_TURNS):
+                    now = self.now()
+                    self._maintain(st, now)
+                    task, _ = self._plan(st, now)
+                    if task is not None:
+                        name = task.name
+                        with self._lock:
+                            self._running = name
+                        status, summary = self._do(st, task)
+                        self._note(name, status, summary, began)
+                    now = self.now()
+                    follow, at = self._plan(st, now)
+                    next_look = self.house.clock() if follow is not None else \
+                        self.house.clock() + max(0.0, (at - now).total_seconds())
+                    hold = self._close_hold(st, now)
+                    if hold is None:
+                        lead = self._hold_from(st, now)
+                        if lead is not None:
+                            next_look = min(next_look, self.house.clock() + max(0.0, (lead - now).total_seconds()))
+                        break
+                    # (PREREG-EVL-5 section 1.3: the turn is kept for the live close decision, HOLD_LEAD)
+                    step = dt.timedelta(seconds=HOLD_STEP)
+                    if follow is None:
+                        wake = min(max(at, now + step), hold)      # (the next task due, or the decision)
+                    elif now >= hold - dt.timedelta(seconds=DECISION_MARGIN):
+                        wake = hold                                 # (inside the decision's margin: the decision first)
+                    elif task is not None and self._mono() - began < HOLD_STEP:
+                        wake = now + step                           # (a task that took no time is not run again at once)
+                    else:
+                        wake = now
+                    if not self._wait_until(wake):
+                        break
+                    began, name = self._mono(), "turn"
                     with self._lock:
-                        self._running = name
-                    status, summary = self._do(st, task)
-                    self._note(name, status, summary, began)
-                now = self.now()
-                follow, at = self._plan(st, now)
-                next_look = self.house.clock() if follow is not None else \
-                    self.house.clock() + max(0.0, (at - now).total_seconds())
+                        self._running = "planning"
         except Exception as exc:  # noqa: BLE001 - a turn's failure is a warning, never the tick's
             self._failed[name] = self.now()
             self._note(name, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, began)
@@ -617,6 +656,39 @@ class EventLane:
                 self._running = None
                 self._next_look = next_look
             self._write_health()
+
+    def _close_hold(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When today's LIVE CLOSE DECISION starts (its time + CLOSE_GRACE), while that is at most HOLD_LEAD ahead of
+        `now` and PREREG-EVL-5 has programs (their real money waits for it, `book.part_hold`); else None."""
+        at = self._hold_at(st, now)
+        return at if at is not None and now < at <= now + HOLD_LEAD else None
+
+    def _hold_from(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When a turn should start to keep itself for today's live close decision (HOLD_LEAD before it), when that is
+        still ahead of `now`; else None."""
+        at = self._hold_at(st, now)
+        return at - HOLD_LEAD if at is not None and now < at - HOLD_LEAD else None
+
+    @staticmethod
+    def _hold_at(st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        if not R.five_programs():
+            return None
+        session = C.session(st, now.astimezone(C.NY).date())
+        return None if session is None else session.close_decide + CLOSE_GRACE
+
+    def _wait_until(self, when: dt.datetime) -> bool:
+        """Wait on the House's clock until `when`, HOLD_STEP a look (`sleep`). False, at once, when the House is closing,
+        the STOP file is there or the store is gone, or a look found the clock where it was (a clock that does not move:
+        nothing could come due)."""
+        while True:
+            now = self.now()
+            if now >= when:
+                return True
+            if self.closing() or not self.ready():
+                return False
+            self._sleep(min(HOLD_STEP, max(0.0, (when - now).total_seconds())))
+            if self.now() <= now:
+                return False
 
     def _do(self, st: S.Store, task: Task) -> tuple[str, dict[str, Any]]:
         """Run `task` under its bound; its Claude calls are counted into a `verdicts` receipt."""

@@ -342,7 +342,18 @@ green on the exact head):
    first event decision `eq_event_programs` holds fifteen rows (and one a seatable birth).
 4. Real money for the new rows starts at the first close decision after the release is live, and at each close only
    once the lane's own close decision of that day names them (`book.part_hold`): a buy waits in its window for it
-   (its intent's why says so) and is refused when that decision finished without them.
+   (its intent's why says so), keeping its room from every buy after it in ROOM's order (`HeldAhead`), and is refused
+   when that decision finished without them. The lane keeps a turn from 150 s before 15:47:00 ET and starts the
+   decision then (`HOLD_LEAD`). BEFORE RELYING ON THESE ROWS' REAL MONEY (read-only, the captain's): the lane's
+   `decide-close` seconds in `/workspace/state/events/lane.json` (`tasks`) and the `started_at`/`finished_at` of the
+   day's `decide-close:<day>` receipt: the receipt must finish before 15:49:00 ET with a book minute to spare. A close
+   whose buys ended unsent waiting for it is an `equity.alert` (info) after the close, a WARNING when it recurs within
+   five sessions, and the lane's report counts it (`room: ... unsent waiting for the close decision N`).
+5. MERGING ONTO 1019f, `league/equity/live.py`: `_size_event` conflicts with A85's `_event_reserve` (keep both: A85's
+   `held_cash`/`held_risk` and this branch's `ahead.usd`/`ahead.risk` both come off `available`, `budget_room` and the
+   invested room), and A85's record must stay out of a dry sizing (`_event_sized` writes only when `dry` is False:
+   `_event_keep_room` sizes a waiting buy `dry`); `_event_send` conflicts with A85's
+   round-robin `send_key` (keep A85's order and pass `ahead=ahead` to `_event_work_entry`).
 
 **Rollback**: the previous House release (1019f's). The new rows' intents and lots stay in the stores and their lots
 exit by their own plans (the old book plans their exits: `_event_exits` reads each lot's own plan); the old code seats

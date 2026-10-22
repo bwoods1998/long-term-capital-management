@@ -613,6 +613,51 @@ programs trades real money at learning size.
   to fifteen, 1.2 to 1.5). The same week decided by release 1019e's own code (`c485dcfe`, `python
   league/tests/evl5_world.py OUT.json`) gives every earlier program the same 126 shadow intents and 28 real-money pick
   lists.
+- **The review round (three majors, each with a test that fails without its fix)**:
+  (1) THE JUDGES' MAJOR, the gap's minute (league/events/run.py `_marks_0930`): a batch stored a row of "no trade" for
+  every name its answer lacked, so an empty or partial 200 answer at the 09:47 ET pre-pass erased that session's
+  EVL-NEWS-NIGHT2-ON events for good, in the shadow and in real money (PREREG-EVL-1 section 3: an outage removes
+  nothing). Now a batch stores ONLY A PRICE (as `_marks_1530`'s T29 batch); a decision, never a pre-pass, reads each
+  survivor still unmarked BY ITSELF once over 09:30-09:35 ET (`GAP_ALONE`) and stores "no trade" only when the tape
+  served the name (a later minute's bar, none at 09:30); an answer with no bar stores nothing and the next decision
+  reads it again. Tests: `ThePrePass` (an empty and a partial pre-pass answer decide the shadow and the real-money picks
+  exactly as one computation at the close; an empty answer at the close stores nothing and the re-decision takes the
+  events; AAB's no-trade row comes from the close's own read).
+  (2) THE MONEY MAJOR, ROOM while a buy waits (league/equity/live.py): a PREREG-EVL-5 buy waiting for the lane's close
+  decision (`book.part_hold`) held nothing, so every buy after it in ROOM's order (R3's births; every learning row once
+  one of these rows is at Probe or Sized) went first and took its cash and its line slots. Now the waiting buy, once
+  every other gate lets it go, keeps its room from every buy after it at that auction (`HeldAhead`,
+  `_event_keep_room`: its whole shares at its limit as `_size_event` sizes them now, `dry`, out of their cash, invested
+  room and name wall, those at its own weight out of their loss budget, its send and its exit out of the event line and
+  the House-wide line, `_count_refusal(..., held=)`; the band's whole target when a figure cannot be read); a later buy
+  that fits only without that room waits too (`HELD_ROOM`) instead of being refused; made afresh each minute, so a buy
+  named, or never to be, keeps nothing the next. Tests: `TheRoomWhileItWaits` (a close-entry birth behind a waiting
+  learning row and a learning PREREG-EVL-1 row behind a waiting Probe row under binding cash, $45 free; the waiting
+  row under a binding line of two orders; a close that never names the row frees its room).
+  (3) THE MONEY MAJOR, the wait's cost (PLAUSIBLE, not measured): a turn of the lane starts only on a House publish, so
+  the close decision could start up to a publish after 15:47:00 ET and leave the book no minute before the close - 11
+  minutes. Now a turn from `HOLD_LEAD` (150 s) before the live close decision keeps going, runs what falls due (each
+  bounded as before), waits between and starts the decision at 15:47:00 (league/events/house.py `_close_hold`,
+  `_wait_until`; `due()` looks no later than the lead's start; the House closing, STOP or a clock that does not move
+  ends it); the buys that end unsent waiting for the decision are COUNTED per close in the lane's report
+  (`room_effects` `held_unsent`, and `room_waited` for the later buys) and said by the book after the close
+  (`equity.alert`, info; a WARNING when another close of the last five sessions had one: `_event_held_said`, kv
+  `eq_evl5_held_unsent`). Tests: `TheLanesTurnForItsCloseDecision` (a turn at 15:44:40 runs the verdicts, the backfill
+  and the 15:46:40 record pass and starts `decide-close` at 15:47:00 exactly; the next look is the lead's start; no
+  hold without the rows; a frozen clock ends it), `TheRoomWhileItWaits` (book minutes at :40 seconds: a decision that
+  finishes at 15:48:50 leaves the buy unsent, counted and said, a warning the next session; one that finishes at
+  15:47:05 is sent at 15:47:40). NOT MEASURED HERE (the House box is not read): how long the earlier rows' part takes;
+  the captain reads `decide-close`'s seconds in `lane.json` (read-only) before relying on these rows' real money
+  (docs/operations.md, step 4). MERGING ONTO 1019f: `_size_event` and `_event_send` conflict with A85's (keep both;
+  A85's `_event_sized` must not write in a `dry` sizing: docs/operations.md, step 5).
+- **Runs of the review round, on `c3a700a7`**: on 3.14 and on 3.11, the events, evl, equity, live, ci, constitution,
+  daily_report, site_lane, cost_day and event_capacity modules (96 modules, four processes each), 2,369 OK on each; the
+  full league suite on 3.14, every one of league/tests' 470 modules in four processes, 12,782 run (33 skipped), one
+  failure: test_swarm_architect_lenient's wall-clock bound (2.04 s against 1.0 s under the box's load of about 25; that
+  module alone, 31 OK; no league/swarm file changed); the gateway is unchanged (no gateway suite); `python -m league.ci
+  --base origin/main --branch feat/evl-5 --no-tests` passed; the identities, read with the tree's own functions on both
+  Pythons, are the base's (money `055e5313`, constitution `a8d4cbd9`, execution `b60410ad`, equity `78022ca6`, xs
+  `2f0083bc`, gate `397b22b7`).
 - **Runs, on `7f828831`** (the code, its tests and docs): the full league suite on 3.14, every one of league/tests' 470
   test modules in four processes of `python -m unittest <modules>` (the box's load average was about 100, other agents'
   runs, so the one `discover` process would have run past four hours), 12,770 OK (33 skipped: 2,991 + 3,202 + 3,324 +
