@@ -428,6 +428,68 @@ class TheParityNight(GoldenCase):
         self.assertIsNone(st.meta(SC.PARITY_FIRST))
 
 
+class TheParityNightIsTheFirstThatTests(GoldenCase):
+    """THE PARITY NIGHT IS THE FIRST NIGHT A FLAG IS WRITTEN (release 1019i's fix round): a first batched night that
+    tested nothing batched (its prefetch failed, so every intent settled by its own two fetches; or its 5% sample held
+    no intent the cache served) must not use up the parity night, or the batched path would settle every later night
+    unchecked while the report showed no difference."""
+
+    def only(self, events):
+        return lambda intent, share=SC.PARITY_SHARE: any(str(intent["event"]).startswith(e) for e in events)
+
+    def test_a_failed_prefetch_tests_nothing_and_the_next_night_is_the_parity_night(self):
+        st, tape = self.build("pf-failed")
+        tape.fail.add("AAA")        # the raw chunk fails: the cache serves no intent, each fetches its own two
+        with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertTrue(out["batched"])
+        self.assertEqual(out["settled"], 7)
+        self.assertEqual(out["prefetch"]["served"], 0)
+        self.assertEqual(out["parity"], {"sampled": 9, "checked": 0, "equal": 0})
+        self.assertIsNone(st.meta(SC.PARITY_FIRST), "nothing batched was tested: this was no parity night")
+        later = self.NOW + dt.timedelta(days=1)
+        self.assertTrue(SC.parity_due(st, later.astimezone(NY).date()))
+        # the next night the cache serves its intent: the check runs (unforced), and that night is the parity night
+        self.intent(st, "SPL", "EVL-ERN-READ-O3", 1, entry=D2, exit_=D2, prev_close=51.0)
+        with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
+            nxt = SC.settle(st, tape, now=later, batch=True)
+        self.assertEqual(nxt["parity"], {"sampled": 1, "checked": 1, "equal": 1})
+        self.assertEqual(st.meta(SC.PARITY_FIRST), later.astimezone(NY).date().isoformat())
+        self.assertFalse(SC.parity_due(st, later.astimezone(NY).date() + dt.timedelta(days=1)))
+
+    def test_a_sample_the_cache_served_none_of_is_no_parity_night(self):
+        st, tape = self.build("pf-unserved")
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:mis-", "8k:noa-"])):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertEqual(out["prefetch"]["served"], 6)
+        self.assertEqual(out["parity"], {"sampled": 2, "checked": 0, "equal": 0},
+                         "the missing bar's intent fell back and the other skipped before any bar")
+        self.assertIsNone(st.meta(SC.PARITY_FIRST))
+        self.assertTrue(SC.parity_due(st, D2 + dt.timedelta(days=1)))
+
+    def test_the_first_flag_keeps_its_night(self):
+        st, tape = self.build("pf-flag")
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:aaa-"])):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertEqual(out["parity"], {"sampled": 1, "checked": 1, "equal": 1})
+        self.assertEqual(st.meta(SC.PARITY_FIRST), D2.isoformat())
+        self.assertTrue(SC.parity_due(st, D2), "every pass of that night checks")
+        self.assertFalse(SC.parity_due(st, D2 + dt.timedelta(days=1)))
+
+    def test_the_houses_pass_keeps_the_rule(self):
+        st, tape = self.build("pf-house")
+        lane = H.EventLane(FakeHouse(self.NOW), st.root, settings={}, monotonic=Mono(), sleep=lambda s: None)
+        lane.throttle = lambda: None
+        ctx = H.LaneContext(lane, st, H.LaneGateway(tape, lane, None, cut=False), lambda url: b"", lane.now)
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:mis-", "8k:noa-"])):
+            out = lane._score(ctx, lane._mono() + H.SCORE_BUDGET, D2)
+        self.assertTrue(out["batched"])
+        self.assertEqual(out["prefetch"]["served"], 6)
+        self.assertEqual(out["parity"], {"sampled": 2, "checked": 0, "equal": 0})
+        self.assertIsNone(st.meta(SC.PARITY_FIRST), "the House's pass tested nothing batched either")
+        self.assertTrue(SC.parity_due(st, D2 + dt.timedelta(days=1), lane.settings))
+
+
 class TheEndDependentVendor(GoldenCase):
     """THE PARITY NIGHT FAILS CLOSED (release 1019i's review): a vendor whose adjusted bars depend on the request's END
     (SPY's factor 1.01 effective D1, applied only to a window that reaches past it) is the one case the batched and

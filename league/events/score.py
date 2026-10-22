@@ -53,8 +53,9 @@ the seating versions (programs.SEATING) and their controls (screen.control_of) s
 each group in `due`'s order, so a pass its bound cuts has settled what the looks of real money wait for. THE SWITCH:
 league/config.json `events.score_batch` (`batch_on`; a missing key is ON, false restores the per-intent path of release
 1019h exactly: `due`'s order and the two fetches an intent). THE PARITY NIGHT (`parity_due`, `parity_window`,
-`check_parity`): on the first night the batched score settles anything (meta `PARITY_FIRST`), a sample of
-`PARITY_SHARE` (5%) of each prefetch's intents (`parity_sampled`, by sha256 of the intent's key) is settled TWICE IN
+`check_parity`): every night until the first on which a flag is written (meta `PARITY_FIRST`: a night the batched
+score settled only from a failed prefetch, or whose sample the cache served none of, tested nothing and is no parity
+night), a sample of `PARITY_SHARE` (5%) of each prefetch's intents (`parity_sampled`, by sha256 of the intent's key) is settled TWICE IN
 MEMORY BEFORE ANY OF THEM IS WRITTEN, by the batched path (the cache) and by the per-intent path (`Narrow`: the intent's
 own two requests, read and never stored), and only an EQUALITY FLAG is written (`score_parity`: 1 when every outcome
 field and the late exit are identical, else 0; never a value); an intent the cache does not serve is no test of the
@@ -103,7 +104,7 @@ TRADABLE_SHARE = 0.10
 ACCOUNT_PATH = "/v1/alpaca/v2/account"
 #: THE BATCHED SCORE (release 1019i, the module docstring): its switch's default (league/config.json
 #: `events.score_batch`), both benchmarks (PREREG-EVL-1 section 2: IWM under $50,000,000 of ADV, else SPY), the parity
-#: night's sample share and its meta key (the first night the batched score settled an intent), and the outcome fields
+#: night's sample share and its meta key (the first night a parity flag was written), and the outcome fields
 #: the parity compares (every column the settlement writes but its time).
 BATCH_DEFAULT = True
 BENCHMARKS = ("SPY", "IWM")
@@ -727,7 +728,9 @@ def parity_sampled(intent: Mapping[str, Any], share: float = PARITY_SHARE) -> bo
 
 def parity_due(store: S.Store, night: dt.date, settings: Mapping[str, Any] | None = None) -> bool:
     """Whether this night's batched passes run THE PARITY CHECK: `events.score_parity` true every night, false never;
-    else on the first night the batched score settles anything (meta `PARITY_FIRST`, written by `note_first_night`)."""
+    else every night until the first on which a flag is written, and all of that night (meta `PARITY_FIRST`, written
+    by `note_first_night` with the first flag, `check_parity`): a night whose prefetch failed, whose sample was empty or
+    whose sampled intents the cache did not serve tested nothing batched, so the next night is a parity night still."""
     forced = (settings or {}).get("score_parity")
     if forced is True or forced is False:
         return forced
@@ -736,7 +739,7 @@ def parity_due(store: S.Store, night: dt.date, settings: Mapping[str, Any] | Non
 
 
 def note_first_night(store: S.Store, night: dt.date) -> None:
-    """Keep the first night the batched score settled an intent (meta `PARITY_FIRST`, once)."""
+    """Keep the first night a parity flag was written (meta `PARITY_FIRST`, once; `check_parity` calls it)."""
     store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)", (PARITY_FIRST, night.isoformat()))
 
 
@@ -793,6 +796,7 @@ def _check(store: S.Store, gw: Any, intent: Mapping[str, Any], night: dt.date, n
     store.db.execute("INSERT OR REPLACE INTO score_parity(program, version, event, night, equal, checked_at) VALUES(?, ?, ?, "
                      "?, ?, ?)", (intent["program"], int(intent["version"]), intent["event"], night.isoformat(), equal,
                                   S.iso(now)))
+    note_first_night(store, night)      # (the parity night is the first night a flag is written: one was)
     if not equal:
         latch(store, night, intent, now)
     return equal, None
@@ -897,7 +901,6 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bo
         if key == "waiting":
             summary["waits"].append(f"{intent['program']}:{intent['event']}: {status[len('waiting:'):]}")
         if key == "settled" and use is not None:
-            note_first_night(store, night)
             served += int(_key(intent) in use.hits)
     summary.update(batched=batch, requests=dict(counted.counts), seconds=round(time.monotonic() - began, 3))
     if pre is not None:

@@ -95,7 +95,10 @@ memory (`Narrow`: the per-intent path's own two requests, never stored), so it w
 review's case: an unsampled intent on the same benchmark settled on a mix of two bases, b 0.0058 against 1019h's
 0.0159; now 1019h's); only intents the cache served are flagged; a flag 0 sets the parity latch (meta
 `evl:score:batch:latched`), the pass and every later one settle by the per-intent path until `python3 -m league.events
---state DIR score-unlatch`, and the stall cause `evl_score_parity` (worded by the gateway) stands meanwhile. (3) THE PX
+--state DIR score-unlatch`, and the stall cause `evl_score_parity` (worded by the gateway) stands meanwhile; and the parity night is the first night
+on which a flag is written (meta `evl:score:batch:first_night` is kept with the first flag, `check_parity`), so a
+first batched night whose prefetch failed, or whose 5% sample the cache served none of, no longer uses up the parity
+night with nothing tested (`TheParityNightIsTheFirstThatTests`). (3) THE PX
 STORE'S ROOM (league/events/pxstore.py `room`, pxdata.py `PxRoom`, house.py `_px`): PREREG-EVL-8's "a size line and a
 2 GB alarm", with the stall cause `evl_px_store`. The identities do not move.
 

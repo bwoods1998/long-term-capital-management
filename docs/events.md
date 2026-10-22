@@ -542,8 +542,10 @@ infrastructure**.
   the same byte for byte (league/tests/test_events_score_batch.py: a golden synthetic tape with a split inside a hold,
   a missing bar, a ladder exit, both skips and a failed chunk, compared in both directions, and two nights with a
   split between them, Done's gap unmoved). The seating versions and their controls settle first; prints stay read once
-  per (symbol, day, label). `events.score_batch` (on; false is release 1019h's per-intent path). THE PARITY NIGHT: on
-  the first night the batched score settles anything (meta `evl:score:batch:first_night`), 5% of each prefetch's
+  per (symbol, day, label). `events.score_batch` (on; false is release 1019h's per-intent path). THE PARITY NIGHT:
+  every night until the first on which a flag is written, and all of that night (meta `evl:score:batch:first_night`,
+  kept with the first flag: a night whose prefetch failed or whose sample the cache served none of tested nothing
+  batched and is not the parity night), 5% of each prefetch's
   intents (by sha256 of the key) are settled twice IN MEMORY BEFORE ANY OF THEM IS WRITTEN, by the cache and by the
   per-intent path's own two requests (read, never stored), and only an equality flag is kept (`score_parity`: 1 or 0,
   never a value); an intent the cache does not serve gets no flag (it is the per-intent path itself).

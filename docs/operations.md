@@ -74,7 +74,9 @@ off):
    (read-only): promoted, `real_money` true, failures []; the grant NOT re-ratified (the pair did not move).
 3. THEN, as each first happens (read-only): the first night's score receipt (`score`, its summary `batched` true,
    `prefetch` {requests, rows, windows, done, served}, `requests` {bars, trades}, `parity` {sampled, checked, equal}
-   with checked = equal and no `latched`; a flag 0 latches by itself: the pass and every later one settle by the
+   with checked = equal and no `latched`; a night with checked 0 (a failed prefetch, or no sampled intent the cache
+   served) tested nothing, so the next night is the parity night still (meta `evl:score:batch:first_night` is kept
+   only with the first flag); a flag 0 latches by itself: the pass and every later one settle by the
    per-intent path, the receipt says `latched` true, `evl_score_parity` is mailed and the report's Score lines say
    "BATCHED SCORE OFF"; the captain reads why (`SELECT * FROM score_parity WHERE equal=0`, read-only: identifiers and
    a time, never a value) and either clears it on the box (`python3 -m league.events --state

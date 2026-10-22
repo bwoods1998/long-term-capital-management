@@ -1706,7 +1706,6 @@ class EventLane:
             kind = status.split(":")[0]
             counts[kind] = counts.get(kind, 0) + 1
             if kind == "settled" and use is not None:
-                SC.note_first_night(st, day)
                 fetched["served"] += int(key in use.hits)
         summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5],
                    "batched": batch, "requests": dict(gw.counts), "seconds": round(self._mono() - began, 3)}
