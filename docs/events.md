@@ -560,15 +560,27 @@ gets their every p, q and decision):
   after it, or the first decision after a demotion) starts only when the lane's budget holds its 0.13 (`start_runs`,
   in registration order, meta `evl6:run:...`); a waiting version has no look, no pass and no retirement.
 - STAYS (section 3; bands.py `review6`, the night's band review): each close of the current Probe stay in order, once
-  its real-money events have settled (and, when a stay look falls due, once the close is final): the fixed reads at the
-  100th, 200th, ... real-money Probe+ event (p <= 0.15 for a mean below zero, seed `...|stay{n}|read{k}`), then the
-  money stop (the whole stay's net after-fee P&L under -10% of its buy cost), then the stay's look (its lower tail
+  THAT close's real-money events (the stay's Probe+ buys scheduled to exit at it) have settled, WHETHER OR NOT THE CLOSE
+  IS FINAL: the fixed reads at the 100th, 200th, ... real-money Probe+ event (p <= 0.15 for a mean below zero, seed
+  `...|stay{n}|read{k}`), then the money stop (the whole stay's net after-fee P&L under -10% of its buy cost), both over
+  the stay's events settled so far whose scheduled exit is at or before the close (an older one still unsettled never
+  holds a later close: it counts once it settles); then the stay's look when one falls due there (its lower tail
   demotes, its PASS with >= 30 real events at Probe size or above, summed P&L above 0 and fills within 15 bp moves Probe
-  to Sized). PREREG-EVL-3's $150 stop, rolling read, bootstrap Sized and reversed-p retirement are not these versions'.
+  to Sized). ONLY THE LOOK WAITS for the close to be final (with its and its control's intents due by then settled and
+  every copy made); it is then held as of that close, that close's reads and stop judged again first, the looks in
+  their order (meta `evl6:stay:...` keeps `through`, the last close whose reads and stop were judged, and `looked`, the
+  last close whose look is settled). A real-money event still unsettled `bands.STUCK_AFTER` (6 = `book.LADDER_CLOSES` +
+  1) sessions after its scheduled exit no longer holds its close (judged without it, named in the stay state's
+  `unsettled`), and the House holds that version's new Probe and Sized buys while its lot is held, with an error alarm
+  once a session (league/equity/live.py `_event_unsettled`; the readings that demote more and trade less, section 7).
+  PREREG-EVL-3's $150 stop, rolling read, bootstrap Sized and reversed-p retirement are not these versions'.
 - THE MONEY (section 6): `equity_money.event.max_open_v6.probe` 14 (bound 0-14), read for PREREG-EVL-6's versions alone
-  (`book.Settings.max_open(band, program)`); `max_open.probe` stays 6. A Probe or Sized pick of these versions that no
-  whole-share count brings to Done's size bar inside the band's frozen envelope is skipped as `under_bar` before it
-  takes a slot (`book.under_bar`, league/equity/live.py `_event_gate`; release 1019h's S2 alone bought it under the bar).
+  (`book.Settings.max_open(band, program)`); `max_open.probe` stays 6. A Probe or Sized buy of these versions takes THE
+  FEWEST whole shares whose value at the limit reaches Done's size bar (`book.at_size_count`: at E $1,898 and a $5.00
+  limit, 11 shares, $55.00, where release 1019h's floor of the $66.43 target took 13), never above the band's frozen
+  envelope of the walls' equity, that ask judged again by every cap (league/equity/live.py `_size_event`); a cap that
+  cuts it under the bar skips the buy (the reading that trades less), and a pick no whole-share count brings to the bar
+  inside the envelope is skipped as `under_bar` before it takes a slot (`book.under_bar`, `_event_gate`).
   The seat counts the superseded version's open lots in its room and its issuers (`_event_seat_keys`), and the band sync
   retires the superseded seat's instance (its lots exit by their rules).
 - THE PROOF (league/tests/test_events_evl6.py `TheProof`): on an invented week every real-money pick is identical with

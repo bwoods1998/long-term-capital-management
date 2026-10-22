@@ -53,11 +53,14 @@ release branch first when it moved, with rerere off, and wait for CI on the new 
    superseded ones, which the shadow still decides (its records only); no instance of a superseded version stays
    alive (the band sync retires it: "superseded: its new version holds the seat"). The first real-money pick of a new version
    buys at its learning size exactly as its superseded version would have (THE PROOF); a Probe pick the size bar
-   refuses is a skip `under_bar`. The next daily report's "Expected false passes: 1.95 ... of the lane's restated 3.9"
-   line. The births receipt's `parse_version` 5 with `prompt_sha` `1442a2a2...`; THE ONE RE-RUN (A95) only of a latest
-   night that accepted and registered none with every receipt at an older version and the House live before 12:55Z of
-   the session day after it (a weekday deploy from 20:05Z: none; a weekend deploy after an empty Friday night: one Opus
-   call inside its $0.25).
+   refuses is a skip `under_bar`, and a Probe or Sized buy of a new version sends the fewest whole shares that reach
+   Done's bar (a cap that cuts it under the bar refuses it: `sizing: the at-size ask ...`). An error alert "PREREG-EVL-6
+   holds <id> vN's Probe and Sized buys" means a Probe+ lot of that version is still held past the fallback ladder: its
+   buys wait until the lot is sold (look at the name; the lane judges the stay without it). The next daily report's
+   "Expected false passes: 1.95 ... of the lane's restated 3.9" line. The births receipt's `parse_version` 5 with
+   `prompt_sha` `1442a2a2...`; THE ONE RE-RUN (A95) only of a latest night that accepted and registered none with every
+   receipt at an older version and the House live before 12:55Z of the session day after it (a weekday deploy from
+   20:05Z: none; a weekend deploy after an empty Friday night: one Opus call inside its $0.25).
 
 **Rollback**: THE NEW SLOTS ALONE, the instant one, without a deploy of code: `equity_money.event.max_open_v6.probe`
 "0" (`51625225` / `f288d8ec`, which the standing grant re-ratifies like any): no PREREG-EVL-6 Probe buy (a promoted

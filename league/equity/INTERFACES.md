@@ -1889,14 +1889,26 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   Probe holds up to 14; every other version's Probe and every Sized and learning row read `event.max_open` as before
   (`max_open.probe` stays 6). At "0" no PREREG-EVL-6 version buys at Probe (the tighten-only switch, `51625225` /
   `f288d8ec`).
-- **At-size buys** (`book.under_bar(band, target, limit, walls, *, bar)`; live.py `_event_gate`): a Probe or Sized pick
-  of a PREREG-EVL-6 version that no whole-share count brings to Done's size bar (`reach_bar` x its band target) inside
-  the band's frozen envelope of the walls' equity is skipped `under_bar` before it takes a slot; release 1019h's S2
-  round-up sizes the picks that remain (unchanged).
+- **At-size buys** (`book.under_bar(band, target, limit, walls, *, bar)`, `book.at_size_count(...)`; live.py
+  `_event_gate`, `_size_event`): a Probe or Sized pick of a PREREG-EVL-6 version that no whole-share count brings to
+  Done's size bar (`reach_bar` x its band target) inside the band's frozen envelope of the walls' equity is skipped
+  `under_bar` before it takes a slot; a pick that remains buys THE FEWEST whole shares that reach the bar (section 6,
+  clause 2's words: 11 shares at $5.00 of a $66.43 target, where release 1019h's S2 floor took 13), asked of
+  `size_entry` at those dollars so every cap judges them; a cap that cuts the ask under the bar refuses the buy
+  (`sizing: the at-size ask ... was cut under Done's size bar`, its binding recorded). The target stays the band's.
+  Release 1019h's S2 round-up sizes every other version's buys (unchanged); at the band's `reach_bar` row "0" (S2's
+  switch) a PREREG-EVL-6 version's buys floor the target as release 1019f's did, with no skip.
+- **A stay's lot unsettled past the ladder** (live.py `_event_unsettled`, `_event_unsettled_hold`): a PREREG-EVL-6
+  version at Probe or Sized with one of its own Probe+ event lots still held `book.LADDER_CLOSES` + 1 or more sessions
+  after its planned exit (`info.evl_exit.first`, else its `day`) reads no picks at its decisions (`room` 0, `held`
+  "unsettled" in the decision's summary) until the lot is sold, with an error alert once a session (kv
+  `eq_event_unsettled_said`); the lane judges its stay without the lot (league/events/bands.py `review6`,
+  `STUCK_AFTER`).
 - **Identities**: the money digest `8e63ce64` -> `d52a5af5` and the constitution `c3026eba` -> `9c8b2221` (the one
   row); the options execution fingerprint, the equity identity, the xs identity and the gate contract do not move
   (live.py and book.py are the book's plumbing, outside the equity identity).
 - **Tests**: league/tests/test_events_evl6.py `TheMoney`, `TheMoneyInTheBook` (14 slots for a PREREG-EVL-6 version at
-  Probe, 6 for an earlier one; a Probe pick under the bar skipped before its slot; the superseded lots counted in the
-  seat), `TheIssuerRule` (D12 in the shadow and the book), `TheProof` (an invented week's real-money picks identical with
+  Probe, 6 for an earlier one; a Probe pick under the bar skipped before its slot; the fewest whole shares that reach
+  the bar, a cap's cut under it refused; a lot unsold past the ladder holding the version's Probe buys; the superseded
+  lots counted in the seat), `TheIssuerRule` (D12 in the shadow and the book), `TheProof` (an invented week's real-money picks identical with
   and without the change while no version is promoted, the release before the week and inside it).

@@ -71,11 +71,19 @@ calib_v2.py's and demotion_v2.py's own synthetic arrays through this code):
   first decisions (run 2 included) on its own synthetic cells.
 - **THE STAYS** (section 3; bands.py `review6`): the fixed reads every 100th real-money Probe+ event (p <= 0.15), the
   money stop (net under -10% of the stay's buy cost), the stay's look (its lower tail demotes; its PASS with the real
-  conditions moves Probe to Sized), in that order at each close; reproduced exactly: demotion_v2's demotions, their
-  reasons and the Sized moves on its own synthetic cells.
+  conditions moves Probe to Sized), in that order at each close once THAT close's real-money events have settled,
+  whether or not the close is final: only the look waits for finality, held as of its close once final (that close's
+  reads and stop judged again first), and an older event still unsettled never holds a later close (the stop and the
+  reads count the stay's settled events so far); reproduced exactly: demotion_v2's demotions, their reasons and the
+  Sized moves on its own synthetic cells. A real-money event unsettled `STUCK_AFTER` (6 = `LADDER_CLOSES` + 1)
+  sessions after its scheduled exit no longer holds its own close, and the House holds that version's new Probe and
+  Sized buys while its lot is held, with an error alert once a session (live.py `_event_unsettled`).
 - **THE MONEY** (section 6): the money row above, read for PREREG-EVL-6's versions alone (`book.Settings.max_open(band,
   program)`); `max_open.probe` stays 6; a Probe or Sized pick of these versions that no whole-share count brings to
-  Done's size bar inside the frozen envelope is skipped `under_bar` before it takes a slot. The seat counts the
+  Done's size bar inside the frozen envelope is skipped `under_bar` before it takes a slot, and a buy that remains
+  takes THE FEWEST whole shares that reach the bar (`book.at_size_count`, clause 2's words: 11 shares at $5.00 of a
+  $66.43 target where release 1019h's floor took 13), asked of `size_entry` so every cap judges them; a cap that cuts
+  the ask under the bar refuses the buy (the reading that trades less). The seat counts the
   superseded version's open lots (league/equity/live.py `_event_seat_keys`), and the band sync retires the superseded
   seat's instance. THE PROOF: an invented week decided with and without the change gives identical real-money picks
   while no version is promoted, the release before the week and inside it.
@@ -90,6 +98,14 @@ calib_v2.py's and demotion_v2.py's own synthetic arrays through this code):
 - **RELEASE 1019h's RE-REVIEW MINORS** (births.py, house.py): a births call's row is written before the call (status
   `asked`, its worst case counted) and settled after it, any exception after the send stored `lost`; the night's
   reconcile after the call; `BIRTHS_BUDGET` 300 s; the lane client's stream room is its limit plus two gaps.
+- **READINGS FOR THE CAPTAIN TO RECORD AS AMENDMENTS** (section 7: fixed before the new versions' first look, the
+  earliest at a version's 22nd block, about Nov 20; release 1019i's review): (1) section 6 clause 2's at-size buy is
+  the literal fewest whole shares that reach the bar, and a cap that cuts that ask under the bar skips the buy (the
+  reading that trades less); (2) section 3's "once that session's real-money events have settled" is read per close: a
+  close waits for the events scheduled to exit at it alone, and an older one still unsettled counts in the reads and
+  the money stop once it settles (the reading that demotes more); (3) a real-money event still unsettled
+  `STUCK_AFTER` sessions after its scheduled exit no longer holds its close, and its version's new Probe and Sized
+  buys are held while its lot is held, with an error alert (the reading that trades less).
 
 Tests (on `adbecd06`): the full suite on Python 3.14 in six shards, 13,144 tests in 486 modules, all passing (33
 skipped); the event, equity, live, CI, constitution, ops, daily report, site, alarms and Done modules (124 modules,
