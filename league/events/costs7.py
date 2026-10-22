@@ -40,7 +40,9 @@ THE HOUSE (league/events/learner.py kind `live`, never a catch-up's nor a late d
 registration, each with a = a7 and r = r7; its control, the POOL record of those same live decisions (section 6),
 valued on a7. `judge_record` hands them to PREREG-EVL-6's screen as frozen (league/events/screen.py `v6_judge` over
 `blocks6`, PREREG-EVL-6's code), its ranking for the top-CAP guard the intents' rank_key (ahat). With no PREREG-EVL-6
-screen in the tree (this branch alone), no look is judged: the answer says so and nothing moves."""
+screen in the tree (this branch alone), no look is judged: the answer says so and nothing moves. THE LOOKS THEMSELVES
+(the schedule, finality, the band moves, the run's end, the next runs and the lane's count) are league/events/judge7.py's,
+which reads this module and nothing else of PREREG-EVL-6 but `judge_record`."""
 
 from __future__ import annotations
 
@@ -239,6 +241,23 @@ def basis_for(store: Any, before: dt.datetime | None = None) -> dict[str, Any] |
     return None if row is None else dict(row)
 
 
+def night_row(store: Any, night: dt.date) -> dict[str, Any] | None:
+    """THE NIGHT'S `cost_basis` ROW (section 2.2 (d): with none, or one that cannot be read, every look of these
+    versions waits, and the run's end with it: league/events/judge7.py `run`)."""
+    try:
+        row = store.db.execute("SELECT * FROM cost_basis WHERE night=?", (night.isoformat(),)).fetchone()
+        if row is None:
+            return None
+        got = dict(row)
+        for key in ("m_in", "m_out", "g_bp", "fbar_in", "fbar_out"):
+            value = float(got[key])
+            if not math.isfinite(value):
+                return None
+    except Exception:  # noqa: BLE001 - no table, or unreadable: no row (the looks wait)
+        return None
+    return got
+
+
 def _has(store: Any, table: str) -> bool:
     return store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
 
@@ -340,11 +359,39 @@ def selection(attempts: Sequence[Mapping[str, Any]]) -> dict[str, float] | None:
     return {"g_w": g_w, "se": se, "n_f": n_f}
 
 
+#: Section 2.2 (b)'s BUY ATTEMPT is "the first send of an event buy": a ledger row of a buy that WENT to the venue
+#: (release 1019i's `real_attempts.sent` 1, every state but `refused`, which the House or the gateway refused before
+#: anything went, and `unsent`, a planned pick that ended with no order at all: neither is a send). Of the text's ledger
+#: statuses (section 2.3: filled, partial, venue_cancel, expired, rejected, gateway_refused) a gateway refusal with
+#: nothing sent is no send, so no attempt; a buy the gateway refused and the House then sent (A80's re-send of a
+#: reading with nothing sent) is one attempt, its first SENT order. A80's re-send of a sent buy is the same attempt.
+ATTEMPT_STATES_NOT_SENT = ("refused", "unsent")
+#: The shadow intent statuses an attempt's settlement still waits on (score.py: planned, entered, then exited with its
+#: outcome settled); an intent `skipped:<why>` has no outcome and never will (section 2.2 (b): "shadow skips are left
+#: out"), and an attempt with no shadow intent of its program, version and event has no shadow to compare with.
+SHADOW_WAITING = ("planned", "entered", "exited")
+
+
+def _sent_filter(store: Any) -> str:
+    """The SQL condition that keeps a ledger row only when it is a SEND (release 1019i's `sent` 1 where the ledger has
+    the column; else a state that is neither refused nor unsent, and a client id that is not an unsent pick's)."""
+    cols = {str(r[1]) for r in store.db.execute(f"PRAGMA table_info({ATTEMPTS})")}
+    if "sent" in cols:
+        return "a.sent=1"
+    state = "a.status" if "status" in cols else ("a.state" if "state" in cols else None)
+    out = "a.client_id NOT LIKE 'unsent:%'" if "client_id" in cols else "1=1"
+    if state is not None:
+        out += f" AND COALESCE({state}, '') NOT IN ({', '.join(repr(x) for x in ATTEMPT_STATES_NOT_SENT)})"
+    return out
+
+
 def attempts(store: Any, skip: set[str]) -> list[dict[str, Any]]:
-    """Section 2.2 (b)'s population, in (entry session, send time, program, event) order: each first send of an event
-    buy in the ledger since SINCE whose shadow intent of the same program, version and event settled TRADABLE, with
-    whether real_fills holds its buy and its shadow a_g (a re-send is the same attempt); sessions of `skip` left out.
-    Empty with no ledger."""
+    """Section 2.2 (b)'s population, in (entry session, send time, program, event) order: each FIRST SEND of an event
+    buy in the ledger since SINCE (`_sent_filter`: a refused order and an unsent pick are no send; A80's re-send is the
+    same attempt), whose shadow intent of the same program, version and event is on record and NOT SKIPPED (an attempt
+    whose shadow was skipped, or that has none, is left out: it never settles), with whether real_fills holds its buy,
+    whether its shadow settled (`settled`; planned, entered or exited without a settled outcome: not yet), TRADABLE, and
+    its shadow a_g; sessions of `skip` left out. Empty with no ledger."""
     from .learner import gross
 
     if not _has(store, ATTEMPTS):
@@ -353,15 +400,19 @@ def attempts(store: Any, skip: set[str]) -> list[dict[str, Any]]:
         "SELECT program, version, event FROM real_fills WHERE side='buy'")} if _has(store, "real_fills") else set()
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, int, str]] = set()
-    for a in store.db.execute(f"SELECT a.program, a.version, a.event, a.day, a.sent_at, o.entry_px, o.exit_px, "
-                              f"o.bench_entry, o.bench_exit, o.tradable, o.status FROM {ATTEMPTS} a LEFT JOIN outcomes o "
+    for a in store.db.execute(f"SELECT a.program, a.version, a.event, a.day, a.sent_at, i.status AS shadow, o.entry_px, "
+                              f"o.exit_px, o.bench_entry, o.bench_exit, o.tradable, o.status FROM {ATTEMPTS} a JOIN intents "
+                              f"i ON i.program=a.program AND i.version=a.version AND i.event=a.event LEFT JOIN outcomes o "
                               f"ON o.program=a.program AND o.version=a.version AND o.event=a.event WHERE a.side='buy' AND "
-                              f"a.day>=? ORDER BY a.day, a.sent_at, a.program, a.event", (SINCE.isoformat(),)).fetchall():
+                              f"a.day>=? AND {_sent_filter(store)} ORDER BY a.day, a.sent_at, a.program, a.event",
+                              (SINCE.isoformat(),)).fetchall():
         key = (str(a["program"]), int(a["version"]), str(a["event"]))
         if key in seen or str(a["day"]) in skip:
             continue
         seen.add(key)
         settled = a["status"] == "settled"
+        if not settled and str(a["shadow"] or "") not in SHADOW_WAITING:
+            continue        # (a shadow skip, or a status no settlement follows: never in the population)
         out.append({"program": key[0], "version": key[1], "event": key[2], "session": str(a["day"]),
                     "settled": settled, "tradable": bool(a["tradable"]) if settled else None,
                     "filled": key in filled, "a_g": gross(dict(a)) if settled else None})
@@ -565,30 +616,34 @@ def control7(store: Any, learner: P.Program, *, before: dt.datetime | None = Non
             got = costed(parts or {}, dict(row), basis) if (parts and row is not None and row["tradable"]) else None
             exited = store.db.execute("SELECT exit_day FROM intents WHERE program=? AND version=1 AND event=?",
                                       (o["program"], o["event"])).fetchone()
+            scheduled = dt.date.fromisoformat(str(exited[0])) if exited is not None else day
             out.append({"entry_day": day, "issuer": str(c["cik"]), "event": str(o["event"]), "program": str(o["program"]),
-                        "exited": dt.date.fromisoformat(str(exited[0])) if exited is not None else day,
+                        "exit_day": scheduled, "exited": scheduled,
                         "tradable": int(got is not None), "a": None if got is None else got[0],
                         "r": None if got is None else got[1]})
     return out
 
 
 def judge_record(rows: Sequence[Mapping[str, Any]], control_rows: Sequence[Mapping[str, Any]] | None, *, program: str,
-                 version: int, tag: str = "") -> dict[str, Any]:
+                 version: int, tag: str = "", draws: int | None = None) -> dict[str, Any]:
     """THE ONE NARROW INTERFACE TO PREREG-EVL-6's SCREEN (section 3.1, E1): one look of a learner version's record
     (`record7`'s rows covered by the look's as-of close) with its POOL control (`control7`'s), judged by PREREG-EVL-6's
     sections 1-3 AS FROZEN: league/events/screen.py `v6_judge` over `blocks6` (PREREG-EVL-6's code), the version a READ
-    version whose control is its POOL record. With no PREREG-EVL-6 screen in this tree, nothing is judged
-    ({decision: None, why}). The code never edits the judge that judges it."""
+    version whose control is its POOL record (`draws`: the Monte Carlo's vectors, the screen's own 99,999 by default).
+    With no PREREG-EVL-6 screen in this tree, nothing is judged ({decision: None, why}; no `S`): the look runner,
+    league/events/judge7.py, then writes nothing. The code never edits the judge that judges it."""
     from . import screen as SN
 
     judge, blocks = getattr(SN, "v6_judge", None), getattr(SN, "blocks6", None)
     if judge is None or blocks is None:
         return {"decision": None, "why": "PREREG-EVL-6's screen is not in this tree: no look of PREREG-EVL-7 is judged"}
+    extra = {} if draws is None else {"draws": int(draws)}
     return judge(blocks(rows), program=program, version=int(version), tag=tag, control_rows=list(control_rows or []),
-                 control=f"{program}-POOL")
+                 control=f"{program}-POOL", **extra)
 
 
 __all__ = ["VERSIONS", "PS", "applies", "ceilcent", "sigma7", "n_ref", "penny", "impact_bp", "r7", "fixed_parts",
            "write_fixed", "costed", "basis_for", "incomplete_sessions", "gaps", "ucb", "selection", "attempts",
            "checkpoints", "fbar", "nightly", "to_cost", "record7", "control7", "judge_record", "SCHEMA", "TABLES", "knowable",
-           "ensure", "SIG_FLOOR", "SIG_CAP", "SIG_MISSING", "M_FLOOR"]
+           "ensure", "SIG_FLOOR", "SIG_CAP", "SIG_MISSING", "M_FLOOR", "night_row", "ATTEMPT_STATES_NOT_SENT",
+           "SHADOW_WAITING"]
