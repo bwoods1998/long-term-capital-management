@@ -1349,9 +1349,16 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
 # ----------------------------------------------------------------------------------------------------- PREREG-EVL-7
 #: PREREG-EVL-7 section 1.9's DAY ORDER LINE ("refuses this file's entries after every earlier PREREG row's; an exit is
 #: never stopped by it"): a learner's entry keeps, on the event kind's line of its day, every order the earlier PREREG
-#: rows may still send that day after it, across the day's auctions (league/equity/live.py `_event_line_keep`, passed
-#: to `_count_refusal` as `keep`; the money review of release 1019i replaced a fixed keep of 32 slots, which held
-#: inside one auction only).
+#: rows may still send that day after it (league/equity/live.py `_event_line_keep`, passed to `_count_refusal` as
+#: `keep`; the money review of release 1019i replaced a fixed keep of 32 slots). LINE_ACROSS_AUCTIONS True (section
+#: 1.11 (10), the reading that trades less): ACROSS THE DAY'S AUCTIONS, so an EVL-LRN-O1 open entry also keeps, for
+#: every earlier close-entry row, a send and an A80 re-send of each position its band may still open at that close.
+#: STATED EFFECT, for the captain's amendment: with release 1019h's ten close-entry rows at learning (8 positions each),
+#: that keep is 1 + 10 x 2 x 8 = 161 of the line's 150 on an empty day, so EVL-LRN-O1 BUYS NOTHING IN REAL MONEY while
+#: they hold room (its shadow, the record that alone promotes, is unchanged). False (an amendment): the keep holds
+#: inside the learner's own auction only (that auction's earlier buys not yet sent and their re-sends), and an O1 entry
+#: with its exit at the close can take a slot an earlier close entry needs once the day's line is nearly full.
+LINE_ACROSS_AUCTIONS = True
 
 
 def is_learner(program: Any) -> bool:
@@ -1618,6 +1625,10 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish", "band_mark", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader",
            "part_hold", "PART_WAIT", "prereg_row", "room_free_overdue"]
+#: (PREREG-EVL-7, release 1019i: the learners' real money, their gate and their place in ROOM's order; listed here, not
+#: last, so release 1019i's other branches append below without touching these lines)
+__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
+            "learner_pending", "learner_picks", "pick_record", "pick_of", "LINE_ACROSS_AUCTIONS"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)
@@ -1625,7 +1636,3 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
-#: (PREREG-EVL-7, release 1019i: the learners' real money, their gate and their place in ROOM's order)
-__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
-            "learner_pending",
-            "learner_picks", "pick_record", "pick_of"]

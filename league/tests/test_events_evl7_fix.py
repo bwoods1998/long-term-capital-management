@@ -615,6 +615,49 @@ class TheLine(TB.EventTest):
         read_inst = h.book._instance(L.instance_key(read.id, read.version))
         self.assertEqual(h.book._event_line_keep(intent, read_inst, TB.DAY.isoformat(), "open", s, adapter), 0)
 
+    def empty_day(self) -> tuple[TB.Harness, list]:
+        """DAY's open with nothing sent all day but EVL-LRN-O1's one live pick (BETA)."""
+        h = self.harness()
+        T7.TheMoney.live(self, h.lane, O1, TB.DAY, [(TB.CIK2, "BETA", 16.0)])
+        self.ready(h)
+        h.symbol("BETA", last=17.0, sd=0.02)
+        for minute in (15, 16, 17):
+            h.tick(9, minute)
+        s, adapter = EB.settings(), h.book._event_adapter()
+        close_rows = [i for i in h.book._instances(alive=True) if i.kind == L.EVENT_KIND and i.live and not
+                      adapter.is_learner(i.family) and adapter.program_of(i.family, i.version).entry_at == "close"]
+        return h, close_rows
+
+    def test_across_the_days_auctions_o1_buys_nothing_while_the_ten_close_rows_hold_room(self):
+        """THE STATED EFFECT of the reading that trades less (`book.LINE_ACROSS_AUCTIONS`, for the captain's amendment):
+        release 1019h's ten close-entry PREREG rows at learning keep 1 + 10 x 2 x 8 = 161 orders of the 150 line on an
+        EMPTY day, so O1's one open entry is refused, and the refusal says it is this file's line keep (no buy ahead of
+        it waits on the lane's close decision)."""
+        self.assertTrue(EB.LINE_ACROSS_AUCTIONS, "the text's reading until the captain amends it")
+        h, close_rows = self.empty_day()
+        s = EB.settings()
+        self.assertEqual((len(close_rows), {i.band for i in close_rows}, s.max_open("learning"), int(s.max_orders_day)),
+                         (10, {"learning"}, 8, 150), "release 1019h's rows (invented book, the registry's programs)")
+        [buy] = [r for r in h.event_intents("buy") if r["program"] == O1]
+        self.assertEqual(buy["status"], "planned")
+        self.assertIn("0 of 150 sent", buy["why"])
+        self.assertIn("161 for the earlier PREREG rows' orders still to come today", buy["why"])
+        self.assertNotIn("buys ahead of it that", buy["why"], "no held buy is named: the keep is its own")
+        self.assertEqual([b for b in h.bodies() if b.get("side") == "buy"], [], "nothing sent all day: O1 sends nothing")
+
+    def test_with_the_line_held_inside_the_auction_only_o1_buys_on_an_empty_day(self):
+        """The amendment's reading (`LINE_ACROSS_AUCTIONS` False): the keep is the learner's own auction's earlier buys
+        not yet sent and their re-sends, so on an empty day O1's open entry goes."""
+        with mock.patch.object(EB, "LINE_ACROSS_AUCTIONS", False):
+            h, _ = self.empty_day()
+            [buy] = [r for r in h.event_intents("buy") if r["program"] == O1]
+            intent, inst = h.book._intent(int(buy["iid"])), h.book._instance(L.instance_key(O1, 1))
+            keep = h.book._event_line_keep(intent, inst, TB.DAY.isoformat(), "open", EB.settings(),
+                                           h.book._event_adapter())
+        self.assertNotEqual(buy["status"], "planned", buy["why"])
+        self.assertEqual([b["symbol"] for b in h.bodies() if b.get("side") == "buy"], ["BETA"])
+        self.assertEqual(keep, 1, "inside its own auction: no earlier buy there, only the entry's own exit")
+
 
 # ----------------------------------------------------------------------------------------------- the House's night
 from league.events import house as H  # noqa: E402

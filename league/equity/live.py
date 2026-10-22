@@ -1951,7 +1951,10 @@ class EquityBook:
                 if events + 1 + own + reserve + kept_ahead > cap:
                     return (f"the event kind's day order count: {events} of {cap} sent, {reserve + own} kept for "
                             "exiting its lots and buys held and this one" + (
-                                f", {kept_ahead} for the {held} buys ahead of it that {HELD_AHEAD}" if kept_ahead else ""))
+                                f", {2 * max(0, int(held))} for the {held} buys ahead of it that {HELD_AHEAD}"
+                                if held else "") + (
+                                f", {keep} for the earlier PREREG rows' orders still to come today (PREREG-EVL-7 "
+                                "section 1.9's day order line)" if keep else ""))
             else:
                 et = self._et()
                 cap = int(getattr(et, "max_orders_day", 60) if et is not None else 60)
@@ -5549,12 +5552,14 @@ class EquityBook:
         - THIS AUCTION: each earlier row's buy not yet sent (`planned`) keeps its send, its one A80 re-send and, at the
           open, its exit at that day's close (3; 2 at the close, whose exits are a later day's); each sent and not
           finished with no re-send yet keeps that re-send (1);
-        - AT THE OPEN, THE DAY'S CLOSE: every live earlier row whose entry is the close keeps, for each position its band
-          may still open there (`max_open` less what it holds and has on order, its lots whose sale is planned or working
-          today given back), a send and its one re-send (2 each);
+        - AT THE OPEN, THE DAY'S CLOSE, while `book.LINE_ACROSS_AUCTIONS` holds (its comment: with release 1019h's ten
+          close-entry rows at learning this alone is 160 of the line's 150, so EVL-LRN-O1 buys nothing in real money,
+          a stated effect for the captain's amendment): every live earlier row whose entry is the close keeps, for each
+          position its band may still open there (`max_open` less what it holds and has on order, its lots whose sale is
+          planned or working today given back), a send and its one re-send (2 each);
         - plus one for the last entry's own exit as `_count_refusal` counts it (a close entry's exit is a later day's).
         An exit is never stopped by the line; a later day's line is not this one's (EVL-LRN-ON's sales at D+1's open
-        are exits there, a stated effect)."""
+        are exits there, which the line never stops: section 1.9)."""
         test = getattr(adapter, "is_learner", None)
         if test is None or not test(inst.family):
             return 0
@@ -5576,7 +5581,7 @@ class EquityBook:
                 keep += per_planned
             elif len(self._intent_orders(int(r["iid"]))) < 2:
                 keep += 1
-        if at == "open":
+        if at == "open" and getattr(adapter, "LINE_ACROSS_AUCTIONS", True):
             for o in mine.values():
                 program = adapter.program_of(o.family, o.version)
                 if program is None or program.entry_at != "close":
@@ -6410,9 +6415,13 @@ class EquityBook:
                     return
         if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
+        if why is None and keep:
+            # (PREREG-EVL-7 section 1.9: a learner's entry meets the day's line with `keep` more orders kept on it for
+            # the earlier PREREG rows; tighter than the count below, which every other entry meets as before)
+            why = self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders, keep=keep)
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
-                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders, keep=keep)
+                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders)
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why is None and hold is not None:

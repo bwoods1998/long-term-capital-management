@@ -1494,6 +1494,8 @@ class TheCost7(unittest.TestCase):
             w = World(Path(tmp))
             try:
                 pin(self)
+                # (no attempt ledger: release 1019i's store creates `real_attempts` once feat/infra-1019i is merged)
+                w.st.db.execute("DROP TABLE IF EXISTS real_attempts")
                 day = dt.date(2026, 10, 27)
                 self.assertIsNone(C7.basis_for(w.st), "no row: every look of these versions waits")
                 row = C7.nightly(w.st, day, et(day, 21, 0))
@@ -1538,6 +1540,9 @@ class TheLedger(WorldCase):
 
     def test_the_attempt_population_its_fills_and_an_incomplete_session(self):
         day1, day2 = self.days(2)
+        # (section 2.3's shape, in place of release 1019i's own `SCHEMA_1019I` table once feat/infra-1019i is merged:
+        # that one is tested in league/tests/test_events_evl7_fix.py `ThePopulation`)
+        self.st.db.execute("DROP TABLE IF EXISTS real_attempts")
         self.st.db.execute("CREATE TABLE real_attempts(program TEXT, version INTEGER, event TEXT, side TEXT, tif TEXT, "
                            "auction TEXT, day TEXT, decided_at TEXT, sent_at TEXT, client_id TEXT, resend INTEGER, "
                            "status TEXT)")
