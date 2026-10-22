@@ -106,6 +106,11 @@ class FakeGateway:
                                                                        "guidance": "raised", "reasons": []})}],
                      "stop_reason": "end_turn"}
 
+    def post_stream(self, path, body, headers=None, *, limit, gap=None):
+        """A streamed Claude call (R3's births call from release 1019h's fix round), its relayed stream already rebuilt
+        into its message (league/events/gw.py `post_stream`), as `post_json` answers."""
+        return self.post_json(path, body, headers)
+
 
 class FakeSEC:
     """www.sec.gov: the tickers file, the company feed (operating test), the current feeds, index pages, documents and

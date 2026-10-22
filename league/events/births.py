@@ -93,9 +93,15 @@ the captain's A109; claude-haiku-4-5-20251001 to release 1019g, whose proposals 
 verdict reader, league/events/verdicts.py `MODEL`, stays Haiku 4.5) with NO SAMPLING PARAMETER and effort "low"
 (`request_body`: Opus 5.5 answers a temperature with a 400 and always thinks, its thinking counted in `MAX_TOKENS`
 6000; release 1019g's Haiku call was at temperature 0 with 3000) through the lane's `/v1/claude/messages`, as the
-verdicts, its prompt's sha256 recorded and its answer stored like a verdict
+verdicts, STREAMED (release 1019h's fix round, `STREAM`: an unstreamed thinking answer outlasts the lane client's
+45-second read; the socket waits `STREAM_GAP` for a byte, the answer at most `CALL_LIMIT`, and on the House the call
+starts only with both left before the job's bound), its prompt's sha256 recorded and its answer stored like a verdict
 (`birth_calls`, keyed by night, prompt sha and model: a night's stored answer is read again, never asked again, while
-the prompt is the same; a new prompt sha is a new prompt, whose answer a night has not been given), at most `K` specs
+the prompt is the same; a new prompt sha is a new prompt, whose answer a night has not been given). A CALL THAT WENT OUT
+IS NEVER ASKED AGAIN THAT NIGHT (`LOST`): one lost on the way (a stream that broke, went quiet or ran past its limit, no
+answer while waiting, a 5xx the gateway did not settle) is stored `lost` at the gateway's stated cost when it read the
+usage, else at its worst case, so it counts in the night's cap, the lane's line and the site's bill; a night whose call
+ended without an answer finishes its receipt `unanswered` and the House warns. At most `K` specs
 a night, under a cost cap
 of `NIGHT_USD` ($0.25) a night: the call's worst case (its input at about 3 characters a token and its max_tokens, at
 THE MODEL'S OWN PRICES, `PRICES`: Opus 5.5's $4 and $20 a million tokens in the gateway's CLAUDE_MODELS row, at that
@@ -146,9 +152,11 @@ import json
 import math
 import re
 import sqlite3
+import urllib.error
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import calendar as C
+from . import gw as G
 from . import programs as P
 from . import screen as SN
 from . import store as S
@@ -246,14 +254,43 @@ MODEL = "claude-opus-5-5"
 #: omitted). The answer is not sampled deterministically, but a night's answer is still asked once, stored and read
 #: again (`birth_calls`), so the record is the store's, never a re-ask. Opus 5.5 ALWAYS THINKS (adaptive; thinking
 #: cannot be disabled, its default effort is "medium") and its thinking is OUTPUT inside `max_tokens`: `EFFORT` "low"
-#: keeps the thinking short and the unstreamed answer inside Cloudflare's 100-second wait in front of Anthropic (a
-#: non-streamed high-effort answer ran past it: gateway/lib/claude.mjs `MAX_TOKENS_STREAM`'s note), and `MAX_TOKENS`
+#: keeps the thinking short (the call is streamed, `STREAM` below: release 1019h's first build sent it unstreamed,
+#: whose answer could outlast both the lane client's 45-second read and Cloudflare's 100-second wait), and `MAX_TOKENS`
 #: 6000 (3000 to release 1019g, Haiku's, which never thinks here) leaves the six specs' answer (about 1,000-1,500 tokens)
 #: room after the thinking, while the worst case stays inside the night's $0.25 (`worst_usd`: $0.132 out at $22 a
 #: million, the rest for the prompt). An answer cut at `max_tokens` is stored as `cut` (`propose`), never as `ok`.
 TEMPERATURE: int | None = None
 EFFORT = "low"
 MAX_TOKENS = 6000
+#: THE CALL IS STREAMED (release 1019h's fix round, the money and rules reviews of A109): an unstreamed answer comes back
+#: only when Anthropic has finished it (the gateway awaits the whole body), so the House's socket would hear nothing for
+#: the whole generation, and the lane's gateway client waits 45 s a read (league/events/gw.py), under what a thinking
+#: Opus answer can take (the reviews' estimate: 1,750-4,500 tokens out at 50-80 a second, 22-90 s; not yet measured on
+#: the House: the deploy records the first night's seconds beside its cost; Cloudflare's 100-second wait in front
+#: of api.anthropic.com cuts an unstreamed one with a 524). Streamed (`request_body`: `stream` true, the thinking
+#: `summarized` so its deltas keep the bytes flowing while the model thinks; display changes what is shown, never what
+#: is billed), the gateway relays Anthropic's events as they come and ends with its own cost (league/events/gw.py
+#: `post_stream`). The socket waits at most `STREAM_GAP` for a byte and the whole answer at most `CALL_LIMIT`; on the
+#: House the call starts only with both left before the births job's bound (league/events/house.py `LaneGateway`
+#: `post_stream`, BIRTHS_BUDGET 240 s), so it never runs past the job. The stream and the display are not in the prompt
+#: sha's spec (`prompt_sha`): they change how the answer arrives, not what is asked.
+STREAM = True
+THINKING = {"type": "adaptive", "display": "summarized"}
+CALL_LIMIT = 150.0
+STREAM_GAP = 60.0
+#: WHAT A NIGHT'S CALL ENDED AS (`propose`), stored in `birth_calls` with its cost: `ok` (an answer, parsed), `cut` (cut
+#: at max_tokens), `refused` (stop_reason refusal) and `lost`: THE CALL WENT OUT AND NO WHOLE ANSWER CAME BACK (a stream
+#: that broke, went quiet or ran past CALL_LIMIT; no answer while waiting for one; a 5xx the gateway did not settle; an
+#: error the gateway settled at a cost). A lost call may still run and be billed, so it is NEVER ASKED AGAIN that night
+#: (the gateway does not refuse a repeated request id) and its row counts the gateway's stated cost when the gateway read
+#: the usage, else the call's WORST CASE (`worst_usd`: unknown is not free), in the night's cap, the lane's line, the
+#: budget rule's measure of the lane and the site's bill. Not stored (`no answer`): a call the lane refused before it
+#: went out (league/events/house.py `LaneCut`, `G.NotSent`), one whose request never reached the gateway (urllib's
+#: `URLError`), and errors the gateway settled at nothing; only those, a 429 and a 5xx the gateway settled may be asked
+#: once more. A night whose call ended `no answer`, `lost`, `cut` or `refused` finishes its receipt `unanswered`
+#: (`night`): the House warns (league/events/house.py `_births`) and the report lists it among the failed jobs.
+LOST = "lost"
+UNANSWERED = ("no answer", LOST, "cut", "refused")
 K = 6
 NIGHT_USD = 0.25
 #: THE MODEL'S OWN PRICES (A109): USD a million tokens, the gateway's CLAUDE_MODELS row of `MODEL`
@@ -1271,9 +1308,13 @@ def render(facts: Mapping[str, Any], budget_: Mapping[str, Any], *, k: int = K) 
 
 def request_body(user_text: str) -> dict[str, Any]:
     """The architect's request (`propose`): the model, `max_tokens`, its effort, the system text and the rendered user
-    text; a temperature only when `TEMPERATURE` is not None (Opus 5.5 has no sampling parameter)."""
+    text, streamed with its thinking summarized (`STREAM`, `THINKING`); a temperature only when `TEMPERATURE` is not None
+    (Opus 5.5 has no sampling parameter)."""
     body: dict[str, Any] = {"model": MODEL, "max_tokens": MAX_TOKENS, "output_config": {"effort": EFFORT},
                             "system": SYSTEM, "messages": [{"role": "user", "content": user_text}]}
+    if STREAM:
+        body["stream"] = True
+        body["thinking"] = dict(THINKING)
     if TEMPERATURE is not None:
         body["temperature"] = TEMPERATURE
     return body
@@ -1313,13 +1354,29 @@ def parse_answer(text: str, *, k: int = K) -> tuple[list[dict[str, Any]], int]:
     return out, len(items)
 
 
+def _stated(gw: Any) -> float | None:
+    """The gateway's cost of the answer just read (`X-LTCM-Cost-USD`), or None when it stated none or marked it unknown
+    (`X-LTCM-Cost-Known: false`: the gateway could not read the usage)."""
+    headers = getattr(gw, "last_headers", None) or {}
+    if str(headers.get(G.COST_KNOWN_HEADER) or "").lower() == "false":
+        return None
+    try:
+        usd = float(headers.get(V.COST_HEADER))
+    except (TypeError, ValueError):
+        return None
+    return usd if usd == usd and 0.0 <= usd < float("inf") else None
+
+
 def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, now: Callable[[], dt.datetime],
             k: int = K, cap: float = NIGHT_USD, line_left: float | None = None) -> dict[str, Any]:
     """THE ARCHITECT'S ONE CALL A NIGHT (the module docstring): {status, proposals, offered, usd, prompt_sha,
-    facts_sha}. A night's stored answer is read again (never asked again); no answer is stored for a call that got none
-    (a refusal by the gateway or the lane, a transport failure, a 5xx): the night proposes nothing. `line_left` (the
-    House's lane, league/events/house.py `line_left`): what is left of the lane's line today; the call's worst case must
-    fit under it too (release 1019e's review: the call is inside the lane's line), or no call is made."""
+    facts_sha, seconds}. A night's stored answer is read again (never asked again). The call is streamed
+    (`gw.post_stream`, within `CALL_LIMIT`; `STREAM`'s comment) and ends as one of `LOST`'s comment's statuses: an answer
+    (`ok`, `cut`, `refused`) or a LOST call is stored with its cost (a lost one at the gateway's stated cost, else its
+    worst case) and never asked again; a call that went out is never asked twice. `no answer` stores nothing: nothing was
+    billed (the lane refused it, the gateway never had it, or the gateway settled its error at nothing). `line_left`
+    (the House's lane, league/events/house.py `line_left`): what is left of the lane's line today; the call's worst case
+    must fit under it too (release 1019e's review: the call is inside the lane's line), or no call is made."""
     psha = prompt_sha()
     facts_text = json.dumps(facts, sort_keys=True, separators=(",", ":"))
     fsha = hashlib.sha256(facts_text.encode("utf-8")).hexdigest()
@@ -1342,33 +1399,64 @@ def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, no
                               "line today"}
     request_id = f"evl-births:{night.isoformat()}:{psha[:12]}"
     body = request_body(user)
+    user_sha = hashlib.sha256(user.encode("utf-8")).hexdigest()
     asked = now()
+
+    def store_row(status: str, text: str | None, usd: float) -> dict[str, Any]:
+        answered = now()
+        with store.tx() as db:
+            db.execute("INSERT OR IGNORE INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, "
+                       "status, user_sha, facts_sha, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (night.isoformat(), psha, MODEL, request_id, S.iso(asked), S.iso(answered), status, user_sha,
+                        fsha, text, usd))
+        return {"usd": usd, "seconds": round(max(0.0, (answered - asked).total_seconds()), 3)}
+
+    billed = 0.0            # what the gateway settled for errors that carried no answer (a 429 or a 5xx it settled)
+    last = "no call"
     for _ in range(2):
         try:
-            code, payload = gw.post_json(V.PATH, body, headers={V.REQUEST_HEADER: request_id})
-        except OSError as exc:
+            code, payload = gw.post_stream(V.PATH, body, headers={V.REQUEST_HEADER: request_id}, limit=CALL_LIMIT,
+                                           gap=STREAM_GAP)
+        except G.NotSent as exc:            # (the lane refused it: it never went out)
+            last = f"{type(exc).__name__}: {str(exc)[:120]}"
+            break
+        except urllib.error.URLError as exc:   # (sending failed: the gateway never had the whole request)
             last = f"{type(exc).__name__}: {str(exc)[:120]}"
             continue
-        if not (200 <= code < 300 and isinstance(payload, Mapping)):
+        except OSError as exc:              # (it went out: lost while waiting for the answer, or its stream lost)
+            last = f"{type(exc).__name__}: {str(exc)[:120]}"
+            told = exc.cost if isinstance(exc, G.StreamLost) and exc.known else None
+            kept = store_row(LOST, None, billed + (worst if told is None else told))
+            return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+        stated = _stated(gw)
+        if not 200 <= code < 300:
             last = f"HTTP {code}"
+            refusal = isinstance(payload, Mapping) and payload.get("cap") is not None   # (the gateway's own, unsent)
+            if stated is None and code >= 500 and not refusal:
+                # (a 5xx the gateway did not settle: the call may have gone out and run; unknown is not free)
+                kept = store_row(LOST, None, billed + worst)
+                return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+            billed += stated or 0.0
             if 400 <= code < 500 and code != 429:
                 break
+            if already + billed + worst > cap or (line_left is not None and billed + worst > line_left):
+                last += f" (no second ask: ${billed:.4f} settled and the worst case ${worst:.4f} over what is left)"
+                break       # (asked again only inside the night's cap and the lane's line, the first ask's cost counted)
             continue
-        try:
-            usd = float((gw.last_headers or {}).get(V.COST_HEADER))
-        except (TypeError, ValueError):
-            usd = worst      # (no stated cost: the night counts the worst case)
+        if not isinstance(payload, Mapping):
+            last = f"HTTP {code}: no answer read"
+            kept = store_row(LOST, None, billed + (worst if stated is None else stated))
+            return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
         text = "".join(b.get("text") or "" for b in payload.get("content") or []
                        if isinstance(b, Mapping) and b.get("type") == "text")
         stop = payload.get("stop_reason")
         status = "refused" if stop == "refusal" else "cut" if stop == "max_tokens" else "ok"
-        with store.tx() as db:
-            db.execute("INSERT OR IGNORE INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, "
-                       "status, user_sha, facts_sha, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                       (night.isoformat(), psha, MODEL, request_id, S.iso(asked), S.iso(now()), status,
-                        hashlib.sha256(user.encode("utf-8")).hexdigest(), fsha, text, usd))
+        kept = store_row(status, text, billed + (worst if stated is None else stated))     # (no stated cost: the worst)
         props, offered = parse_answer(text, k=k) if status == "ok" else ([], 0)
-        return base | {"status": status, "proposals": props, "offered": offered, "usd": usd}
+        return base | {"status": status, "proposals": props, "offered": offered} | kept
+    if billed > 0:
+        kept = store_row(LOST, None, billed)
+        return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
     return base | {"status": "no answer", "proposals": [], "offered": 0, "usd": 0.0, "why": last}
 
 
@@ -1462,11 +1550,13 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
     """THE BIRTHS JOB of the night of `today` (receipt `births`): the unknown registrations of earlier nights posted
     again; the outcome-free facts; the architect's one call (or `proposals`, the captain's own {spec, why}: no call),
     held to the night's cap and to `line_left` (`propose`); the validator; the accepted lines registered (`dry_run`:
-    validated and recorded, never registered); the births loaded again. Returns its summary. The receipt records the
-    running `PARSE_VERSION` and, for the House's one re-run of an empty night (`rerun`, `rerun_due`'s answer), what it
-    re-runs; both are written when the receipt starts, so a re-run that dies before it finishes is still the night's one
-    re-run. A proposed id the House renamed is kept on its candidate row (`figures.named`: {from, to}) and in the
-    receipt (`named`: {the House's name: the proposed id})."""
+    validated and recorded, never registered); the births loaded again. Returns its summary. A night whose call ended
+    without an answer (`UNANSWERED`: no answer, lost, cut, refused) finishes its receipt `unanswered`, its call's
+    status, cost and seconds in the summary (release 1019h's fix round: the House warns, the report lists it). The
+    receipt records the running `PARSE_VERSION` and, for the House's one re-run of an empty night (`rerun`,
+    `rerun_due`'s answer), what it re-runs; both are written when the receipt starts, so a re-run that dies before it
+    finishes is still the night's one re-run. A proposed id the House renamed is kept on its candidate row
+    (`figures.named`: {from, to}) and in the receipt (`named`: {the House's name: the proposed id})."""
     P.load_births(store)
     rid = store.start_receipt(JOB, now=now())
     out: dict[str, Any] = {"night": today.isoformat(), "parse_version": PARSE_VERSION}
@@ -1485,8 +1575,10 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         if proposals is None:
             call = propose(store, gw, sheet, night=today, now=now, k=k, cap=cap, line_left=line_left)
             proposals = call["proposals"]
-            out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why", "prompt_sha")}
+            out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why", "prompt_sha", "seconds")}
             psha = call.get("prompt_sha")
+            if call.get("status") in UNANSWERED:
+                status = "unanswered"     # (`LOST`'s comment: the House warns, the report lists it)
         else:
             proposals = [dict(p) | {"by": (p.get("by") or "captain")} for p in proposals]
             psha = None
@@ -1614,8 +1706,18 @@ def summary(store: Any) -> dict[str, Any]:
         counts = {str(r[0]): int(r[1]) for r in store.db.execute(
             "SELECT status, COUNT(*) FROM birth_candidates WHERE night=? GROUP BY status", (last[0],))}
         night_ = {"night": str(last[0]), **counts, "usd": round(spent(store, dt.date.fromisoformat(str(last[0]))), 4)}
+    call = store.db.execute("SELECT night, status, usd, asked_at, answered_at FROM birth_calls ORDER BY night DESC, "
+                            "answered_at DESC LIMIT 1").fetchone() if "birth_calls" in _tables(store.db) else None
+    last_call = None
+    if call is not None:
+        try:
+            seconds = round((S.parse_iso(call["answered_at"]) - S.parse_iso(call["asked_at"])).total_seconds(), 1)
+        except (TypeError, ValueError):
+            seconds = None
+        last_call = {"night": str(call["night"]), "status": str(call["status"]), "usd": round(float(call["usd"] or 0), 4),
+                     "seconds": seconds}
     return {"registered": int(reg[0]), "seatable": int(reg[1]), "records": int(reg[0]) - int(reg[1]),
-            "last_night": night_}
+            "last_night": night_, "last_call": last_call}
 
 
 __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "ITEMS_8K", "READ_ITEMS_8K", "SpecError",
@@ -1625,4 +1727,5 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "line_of", "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED",
            "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT",
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
-           "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due"]
+           "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
+           "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED"]

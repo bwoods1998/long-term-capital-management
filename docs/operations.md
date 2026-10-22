@@ -80,7 +80,14 @@ $0.25 and the lane's line, both unchanged: about $0.14 an ordinary night, $0.16 
 no sampling parameter (a `temperature` is Anthropic's 400, and the births code never asks a 4xx again), so the body
 carries none; it always thinks, its thinking inside `max_tokens`, so effort `low` and max_tokens 3000 -> 6000; an
 answer cut at max_tokens is stored `cut`, never parsed or asked again. What a night is billed is the gateway's stated
-cost (not yet measured on Opus: an estimated $0.05-0.10 a night at effort low).
+cost (not yet measured on Opus: an estimated $0.05-0.10 a night at effort low). THE FIX ROUND (the money and rules
+reviews: an unstreamed thinking answer outlasts the lane client's 45-second read, was asked again under the same
+request id and counted $0): the call is STREAMED, its thinking summarized (`births.STREAM`; the socket waits 60 s for a
+byte, the answer at most 150 s, and on the House the call starts only with 210 s left before the births job's 240-s
+bound, else `room`, nothing sent); a call that went out is NEVER ASKED AGAIN that night and, lost on the way, is stored
+`lost` at the gateway's stated cost or else its worst case, counted in the night's $0.25, the lane's line and the
+site's bill; a night whose call ended without an answer finishes its receipt `unanswered` and the House warns. No
+gateway change, no prompt change (`0cae215b`, `PARSE_VERSION` 4), no identity moves.
 
 **Deploy, in order** (after release 1019g is live; from 20:05Z Oct 22 or the weekend, before the first possible
 promotion (A97); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI green
@@ -104,11 +111,17 @@ it moved, with rerere off, and wait for CI on the new head):
    in the store, the House's warning "decide-close failed") shows its retry started one minute after the failed run's
    start and no other `decide-*` receipt started between them; the night's births receipt's facts list PREREG-EVL-4's
    and -5's rows with non-zero selection counts on a store whose sessions hold their events. Part 3's: the night's
-   births receipt with `parse_version` 4 and its `call` `status` `ok` (or `cap` with its why; never `no answer` from a
-   400), a `birth_calls` row with `model` `claude-opus-5-5`, `prompt_sha` `0cae215b...` and the gateway's stated `usd`
-   (the first measured Opus cost: record it), the night's spend at most $0.25; THE ONE RE-RUN (A95) only of a latest
-   night that accepted and registered none with every receipt at an older version and the House live before 12:55Z of
-   the session day after it (from 20:05Z on a weekday that night's cut-off has passed: none; a Friday night's empty
+   births receipt `ok` with `parse_version` 4 and its `call` `status` `ok` (or `cap` with its why; never `no answer` from
+   a 400), a `birth_calls` row with `model` `claude-opus-5-5`, `prompt_sha` `0cae215b...` and the gateway's stated `usd`
+   (the first measured Opus cost: record it) and THE FIRST OPUS NIGHT'S LATENCY BESIDE IT (the receipt's `call`
+   `seconds`, the row's `answered_at` less `asked_at`, the report's "last call ... in N s"; record it: the fix round's
+   150-s limit is sized on the reviews' 22-90 s estimate), the night's spend at most $0.25. A receipt `unanswered` (the
+   House's warning "the births job of <night> ended unanswered: the architect's call ended lost|cut|refused|no answer
+   after N s at $X") is the night's whole births: nothing is asked again that night, a `lost` row counts its stated
+   cost or its worst case (about $0.15), and the next session night asks again; two such nights in a row (or `lost`
+   at about 150 s) are the captain's to read before the third (the limit, the effort or the model); THE ONE RE-RUN
+   (A95) only of a latest night that accepted and registered none with every receipt at an older version and the
+   House live before 12:55Z of the session day after it (from 20:05Z on a weekday that night's cut-off has passed: none; a Friday night's empty
    night with a weekend deploy: one Opus call inside its $0.25).
 
 **Rollback**: S2 ALONE, the instant one, without a deploy of code: the round-up's switch,
@@ -118,7 +131,8 @@ WHOLE RELEASE: the House to release 1019g's deployed head `b374d862` by `floor_b
 to `c2f0a478` and the constitution to `24f73f18`, re-ratified as at release 1019g's deploy; the Probe lots bought
 rounded up exit by their own plans and count as they were sent; a birth registered under `parse_version` 3 or 4 stays
 registered, release 1019g's grammar parses it; its births job asks Haiku again under its own prompt sha, with an Opus
-call's stored cost still counted in that night's $0.25 and the day's line, and it re-runs no night read at version 4),
+call's stored cost (a `lost` one's too) still counted in that night's $0.25 and the day's line, and it re-runs no
+night read at version 4),
 then the gateway by `wrangler rollback` to the version recorded (`354aeab2`), or never (the House's older facts carry
 no `supply`). Constitution-only: `equity_money.event.enabled` False (`973aa2e9` / `3e8cf1c8`) stops every event buy.
 

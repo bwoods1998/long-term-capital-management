@@ -14,8 +14,8 @@ Held here, each failing on release 1019h's minors (`fix/1019h-minors` 8e83ad1b, 
   the cap;
 - THE CALL'S FORM: Opus 5.5 takes no sampling parameter (`temperature` is Anthropic's 400, and a 4xx is never asked
   again) and always thinks, its thinking inside `max_tokens`: the body carries no temperature, effort "low" and 6000
-  tokens, every key one the gateway admits; an answer cut at `max_tokens` is stored `cut`, never parsed, never asked
-  again;
+  tokens, every key one the gateway admits (from the fix round, streamed with its thinking summarized:
+  test_events_1019h_births_stream); an answer cut at `max_tokens` is stored `cut`, never parsed, never asked again;
 - THE PROMPT'S SHA AND `PARSE_VERSION` MOVE (the model, the temperature, the effort and `max_tokens` are in the sha's
   spec): 4 and `0cae215b`; a night's answer stored under the minors' prompt (`890806ff`, Haiku) is never read by this
   code, and a night whose receipts are at version 3 is due its one re-run (A95) before its cut-off."""
@@ -135,16 +135,19 @@ class TheCall(unittest.TestCase):
         self.assertNotIn("temperature", body, "Opus 5.5 answers any temperature with Anthropic's 400")
         self.assertEqual((body["model"], body["output_config"], body["max_tokens"]),
                          ("claude-opus-5-5", {"effort": "low"}, 6000))
-        self.assertNotIn("thinking", body, "Opus 5.5 always thinks (adaptive); effort is the control")
+        # (release 1019h's fix round: the call is STREAMED, its adaptive thinking summarized so its deltas keep the
+        # bytes flowing; test_events_1019h_births_stream holds the stream)
+        self.assertEqual(body["thinking"], {"type": "adaptive", "display": "summarized"},
+                         "Opus 5.5 always thinks (adaptive); effort is the control, the display only what is shown")
         js = gateway_claude()
         [allowed] = re.findall(r"const allowed = new Set\(\[([^\]]*)\]\);", js)
         admitted = set(re.findall(r"'([a-z_]+)'", allowed))
         self.assertLessEqual(set(body), admitted, "every key one the gateway admits")
         [ceiling] = re.findall(r"export const MAX_TOKENS = (\d+);", js)
-        self.assertLessEqual(body["max_tokens"], int(ceiling), "inside the gateway's unstreamed ceiling")
+        self.assertLessEqual(body["max_tokens"], int(ceiling), "inside the gateway's unstreamed ceiling too")
         [efforts] = re.findall(r"export const EFFORTS = \[([^\]]*)\];", js)
         self.assertIn("'low'", efforts)
-        self.assertNotIn("stream", body, "the lane's client reads one JSON answer")
+        self.assertIs(body["stream"], True, "streamed: the lane's client reads the relayed events")
 
     def test_the_nights_cap_holds_the_call_to_opus_prices(self):
         st = self.s.st

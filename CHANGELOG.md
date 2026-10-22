@@ -206,8 +206,9 @@ guards):
   sampling parameter, so a `temperature` is Anthropic's own 400 (the gateway's note in gateway/lib/claude.mjs), and the
   births code never asks a 4xx again: with part 2's temperature 0 the new architect would have proposed nothing every
   night. The body carries no temperature (`TEMPERATURE` None). Opus 5.5 always thinks (adaptive; its default effort
-  "medium") and the thinking is output inside `max_tokens`: `EFFORT` "low" (short thinking, and an unstreamed answer
-  well inside Cloudflare's 100-second wait in front of Anthropic) and `MAX_TOKENS` 3000 -> 6000, the instruction's
+  "medium") and the thinking is output inside `max_tokens`: `EFFORT` "low" (short thinking; the first build said "an
+  unstreamed answer well inside Cloudflare's 100-second wait", never measured, and missed the lane client's own 45-second
+  read: the fix round below streams the call) and `MAX_TOKENS` 3000 -> 6000, the instruction's
   "unless the worst case needs it" (3000 could be spent thinking before the six specs). Every key is one the gateway
   admits; 6000 is inside its unstreamed 16,000. An answer cut at `max_tokens` is stored `cut` (its cost counted), never
   parsed, never asked again. The answer is not sampled deterministically, but a night's answer is asked once, stored and
@@ -227,6 +228,43 @@ guards):
   once on Opus before 12:55Z Oct 23.
 - **Docs**: births.py's docstring and comments, league/events/house.py, league/site_lane.py and league/ops/budget.py
   docstrings, league/config.json's `_about`, docs/events.md, README.md and this entry. No identity moves.
+
+**The fix round** (the money and rules reviews of `2fd0c096`, two majors, one finding: THE ARCHITECT'S CALL OUTLASTED
+THE LANE CLIENT'S READ; league/events/births.py, gw.py, house.py and report.py; tests
+league/tests/test_events_1019h_births_stream.py, eighteen of whose nineteen fail on `2fd0c096`, the other a guard):
+
+- **What the reviews found**: the call went out UNSTREAMED through the lane's gateway client, whose read waits 45 s
+  (league/events/gw.py), while the gateway answers only when Anthropic has finished (gateway/lib/router.mjs
+  `claudeCall` awaits the whole body), and a thinking Opus answer of 1,750-4,500 tokens takes about 22-90 s (the
+  reviews' estimate; Cloudflare's 100-second wait in front of Anthropic cuts an unstreamed one with a 524). On such a
+  night the call timed out, was ASKED AGAIN under the same request id (the gateway does not refuse a repeated id),
+  ended "no answer", stored nothing and counted $0 in the night's cap, the lane's line, the budget rule's measure and
+  the site's bill, while Anthropic could bill both generations; the night's receipt said "ok", so the House never
+  warned. The reviews reproduced it on the release tree; no order path was touched.
+- **The call is streamed** (`births.STREAM`, `THINKING`, `CALL_LIMIT`, `STREAM_GAP`; `gw.Gateway.post_stream`,
+  `gw.read_stream`): `stream` true with the adaptive thinking `summarized` (its deltas keep the bytes flowing while the
+  model thinks; display changes what is shown, never what is billed), as league/claude.py streams the swarm's calls;
+  the gateway relays Anthropic's events (`claudeStream`, since Sept 27) and ends with its own `ltcm.cost`, the stored
+  cost. The socket waits at most 60 s for a byte and the whole answer at most 150 s; ON THE HOUSE the call starts only
+  with 210 s left before the births job's bound (`LaneGateway.post_stream`, refused `room` before it goes out;
+  BIRTHS_BUDGET 240 s, unchanged), so its last read returns inside the job. No gateway change (`stream` and the
+  thinking display are admitted since Sept 27), no prompt change: the stream and the display are not in the prompt
+  sha's spec, so the sha stays `0cae215b` and `PARSE_VERSION` 4.
+- **A call that went out is never asked again that night** (`births.LOST`): one lost on the way (a stream that broke,
+  went quiet or ran past its limit; no answer while waiting for one; a 5xx the gateway did not settle; a body the
+  gateway marked unknown) is stored `lost` at the gateway's stated cost when the gateway read the usage, else at the
+  call's WORST CASE (unknown is not free), so the night's $0.25, the lane's line (`house.birth_usd`), the budget rule's
+  measure and the site's bill (`site_lane.verdict_usd`) all count it, and the night is not asked again (`stored:lost`).
+  Asked once more only when nothing more can be billed than the gateway said: a request that never reached the gateway
+  (urllib's `URLError`, raised only when sending fails), a 429 and a 5xx the gateway settled, their stated costs
+  counted. The lane's own refusal (`LaneCut`, now a `gw.NotSent`) and the gateway's (its `cap`) store nothing.
+- **The night says so**: a night whose call ended `no answer`, `lost`, `cut` or `refused` finishes its births receipt
+  `unanswered` (was `ok`), its `call` with the status, cost and `seconds`; the House warns with them
+  (league/events/house.py `_births`); the daily report lists the receipt among the failed jobs and its Births line
+  reads the last call's status, cost and seconds (`births.summary` `last_call`).
+- **Not taken** (the rules review's option): a `json_schema` answer format; it would move the prompt's sha and the
+  parser for a failure not seen (the answer is parsed as JSON, a fenced block too; an answer that does not parse
+  proposes nothing and is never re-asked).
 
 **Tests (the release head)**: the full suite on Python 3.14 in six shards, 13,072 tests OK (33 skipped;
 `test_swarm_d2a_sentinel`, known to fail on a module-order artifact on the base, passed in its shard and passes alone);

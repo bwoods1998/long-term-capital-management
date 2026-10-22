@@ -521,12 +521,17 @@ def render(report: Mapping[str, Any]) -> str:
                                                    for x in e5["failed"][-5:])
         lines.append(line)
     bi = report.get("births") or {}
-    if bi.get("registered") or bi.get("last_night"):
+    if bi.get("registered") or bi.get("last_night") or bi.get("last_call"):
         night = bi.get("last_night") or {}
+        call = bi.get("last_call") or {}
+        # (release 1019h's fix round: the architect's last call, its status, cost and seconds, so a night whose call
+        # was lost or cut, or that took long, is read here, beside the receipt's `unanswered`)
         lines.append(f"Births: {bi.get('registered', 0)} registered ({bi.get('seatable', 0)} seatable, "
                      f"{bi.get('records', 0)} records); last night {night.get('night') or 'none'}: "
                      + ", ".join(f"{k} {v}" for k, v in sorted(night.items()) if k not in ("night", "usd"))
-                     + f"; model ${float(night.get('usd') or 0):.2f}")
+                     + f"; model ${float(night.get('usd') or 0):.2f}"
+                     + (f"; last call {call.get('night')} {call.get('status')} ${float(call.get('usd') or 0):.4f} in "
+                        f"{call.get('seconds')} s" if call else ""))
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"

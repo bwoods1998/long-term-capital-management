@@ -824,6 +824,12 @@ class FakeArchitect:
             return self.docs(body)
         raise AssertionError(path)
 
+    def post_stream(self, path, body, headers=None, *, limit, gap=None):
+        """The births call streamed (release 1019h's fix round): the gateway's relayed stream, already rebuilt into its
+        message (league/events/gw.py `post_stream`, tested on its own in test_events_1019h_architect), as `post_json`."""
+        self.stream_args = {"limit": limit, "gap": gap}
+        return self.post_json(path, body, headers)
+
 
 class TheProposer(Validation):
     def test_one_architect_call_its_prompt_and_answer_stored_and_never_asked_twice(self):
@@ -860,7 +866,8 @@ class TheProposer(Validation):
         capped = BI.propose(st, gw, sheet, night=self.AS_OF, now=now, cap=0.001)
         self.assertEqual((capped["status"], gw.calls), ("cap", []))
         self.assertLess(BI.worst_usd(BI.render(sheet, BI.budget(st))), BI.NIGHT_USD, "a real night fits the $0.25 cap")
-        refused = FakeArchitect("{}", status=403)
+        # (the gateway's own refusal states no cost: release 1019h's fix round counts a cost the gateway states)
+        refused = FakeArchitect("{}", status=403, cost=None)
         self.assertEqual(BI.propose(st, refused, sheet, night=self.AS_OF, now=now)["status"], "no answer")
         self.assertEqual(len(refused.calls), 1, "a 4xx is not asked again")
         self.assertIsNone(st.db.execute("SELECT 1 FROM birth_calls").fetchone(), "no answer, nothing stored")

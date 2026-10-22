@@ -215,7 +215,11 @@ TICKERS_AT = dt.time(7, 0)
 TICKERS_RETRY = dt.timedelta(minutes=5)
 SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
-#: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once.
+#: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
+#: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
+#: starts only with its whole `CALL_LIMIT` (150 s) and one `STREAM_GAP` (60 s) left before the bound (`LaneGateway`
+#: `post_stream`, `room`), so its last read returns before it; a whole Haiku night took about 10 s on the House (A95,
+#: A109), so the facts before the call leave it its 210 s.
 BIRTHS_AT = dt.time(21, 15)
 BIRTHS_BUDGET = 240.0
 #: THE SCREEN AFTER THE OPEN (release 1019f; the audit's "bands move a session late"). The judge makes a close X final
@@ -283,9 +287,10 @@ VERDICT_USD_UNKNOWN = 0.01                    # a verdict whose cost the gateway
 BIRTH_USD_UNKNOWN = 0.25
 
 
-class LaneCut(OSError):
-    """A Claude call the lane refused itself (past its bound, the House paused, the day's line reached): no answer, so
-    the verdict is asked again later (league.events.verdicts.ask treats it as a transport failure)."""
+class LaneCut(G.NotSent):
+    """A Claude call the lane refused itself (past its bound, the House paused, the day's line reached; a streamed call
+    with less than its limit and gap left before the bound, `room`): no answer and nothing sent, so the verdict is asked
+    again later (league.events.verdicts.ask treats it as a transport failure; an OSError, through `G.NotSent`)."""
 
 
 class LaneDeadline(R.Deadline):
@@ -348,6 +353,35 @@ class LaneGateway:
         if 200 <= code < 300:
             self.counts["answered"] += 1
             self.lane.spent(self.last_headers.get(V.COST_HEADER))
+        elif 400 <= code < 500 and code != 429:
+            self.counts["refused"] += 1
+        else:
+            self.counts["failed"] += 1
+        return code, payload
+
+    def post_stream(self, path: str, body: Any, headers: Mapping[str, str] | None = None, *, limit: float,
+                    gap: float) -> tuple[int, Any]:
+        """A STREAMED Claude call (R3's births call, release 1019h's fix round; league/events/gw.py `post_stream`):
+        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and one `gap` (a read that
+        returns at the gap's end) are left before the task's bound, so it never runs past the bound. A stream lost
+        after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`), and
+        the next task's `_spend_today` reads it from the store."""
+        why = self.lane.claude_refusal(self.deadline)
+        if why is None and self.deadline is not None and self.deadline - self.lane._mono() < float(limit) + float(gap):
+            why = "room"
+        if why:
+            self.counts[f"cut_{why}"] += 1
+            raise LaneCut(why)
+        self.counts["asked"] += 1
+        try:
+            code, payload = self.inner.post_stream(path, body, headers, limit=limit, gap=gap)
+        except OSError:
+            self.counts["failed"] += 1
+            raise
+        if 200 <= code < 300:
+            self.counts["answered"] += 1
+            if str(self.last_headers.get(G.COST_KNOWN_HEADER) or "").lower() != "false":
+                self.lane.spent(self.last_headers.get(V.COST_HEADER))
         elif 400 <= code < 500 and code != 429:
             self.counts["refused"] += 1
         else:
@@ -1625,7 +1659,9 @@ class EventLane:
         through the lane's gateway (refused while the House is paused or over the day's line, and counted), and is made
         only when its worst case fits under what is left of the lane's line today (`line_left`, release 1019e's review:
         the births call is inside the lane's line, as every verdict, never beside it), as well as under the night's own
-        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`). The night is today's, or
+        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`), a lost call's too (release
+        1019h's fix round: births.py `LOST`). A night that ends anything but `ok` warns: `unanswered` with the call's
+        status, seconds, cost and why (a call lost, cut or refused, or no answer), `partial` with its registration. The night is today's, or
         (`night`, `rerun`: A95's one re-run of an empty night, `births.rerun_due`) the earlier night it runs again."""
         from . import births as BI
 
@@ -1634,8 +1670,11 @@ class EventLane:
                        line_left=self.line_left(), rerun=rerun)
         status = str(out.pop("_status", "ok"))
         if status != "ok":
-            self.warn("births", f"the births job of {out.get('night')} ended {status}: "
-                                f"{out.get('error') or out.get('registration') or ''}"[:300])
+            call = out.get("call") or {}
+            told = out.get("error") or out.get("registration") or \
+                f"the architect's call ended {call.get('status')} after {call.get('seconds')} s at " \
+                f"${float(call.get('usd') or 0):.4f}: {call.get('why') or ''}"
+            self.warn("births", f"the births job of {out.get('night')} ended {status}: {told}"[:300])
         brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
         brief["accepted"] = len(out.get("accepted") or [])
         brief["proposed"] = int(out.get("proposed") or 0)

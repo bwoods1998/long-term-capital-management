@@ -910,8 +910,24 @@ therefore at least what it selected, and the validator's Jaccard reads them; the
 whose proposals were narrow rules and duplicates; the verdict reader stays Haiku 4.5). Claude Opus 5.5 takes no
 sampling parameter (a `temperature` is Anthropic's 400, and a 4xx is never asked again) and always thinks, its thinking
 counted in `max_tokens`, so the body (`births.request_body`) carries no temperature, effort `low` (`births.EFFORT`: short
-thinking, and an unstreamed answer well inside Cloudflare's 100-second wait in front of Anthropic) and max_tokens 6,000
-(room for the six specs after the thinking); an answer cut at max_tokens is stored `cut`, never parsed. Its prompt's
+thinking) and max_tokens 6,000 (room for the six specs after the thinking); an answer cut at max_tokens is stored `cut`,
+never parsed. THE CALL IS STREAMED (release 1019h's fix round, the money and rules reviews of A109; `births.STREAM`): sent
+unstreamed, as first built, the answer comes back only when Anthropic has finished it, so the House's socket hears
+nothing for the whole generation, and the lane's gateway client waits 45 s a read (league/events/gw.py), under what a
+thinking Opus answer can take (the reviews' estimate: 22-90 s; Cloudflare's 100-second wait in front of Anthropic cuts
+an unstreamed one with a 524). Streamed, with its thinking `summarized` (its deltas keep the bytes flowing; the display
+is never billed), the gateway relays the events and ends with its own cost (`gw.Gateway.post_stream`); the socket waits
+`births.STREAM_GAP` (60 s) for a byte and the whole answer at most `births.CALL_LIMIT` (150 s), and on the House the
+call starts only with both left before the births job's bound (`LaneGateway.post_stream`: `room`, BIRTHS_BUDGET 240 s).
+A CALL THAT WENT OUT IS NEVER ASKED AGAIN THAT NIGHT (`births.LOST`; the gateway does not refuse a repeated request id,
+so a second ask could be billed twice): one lost on the way (a stream that broke, went quiet or ran past its limit, no
+answer while waiting for one, a 5xx the gateway did not settle) is stored `lost` at the gateway's stated cost when the
+gateway read the usage, else at the call's worst case (unknown is not free), so it counts in the night's cap, the lane's
+line, the budget rule's measure and the site's bill. Only a request that never reached the gateway (urllib's
+`URLError`), a 429 and a 5xx the gateway settled are asked once more (their stated costs counted); the lane's own
+refusal and the gateway's (its `cap`) store nothing. A night whose call ended `no answer`, `lost`, `cut` or `refused`
+finishes its births receipt `unanswered`: the House warns with the call's status, seconds and cost, the report lists
+the receipt among the failed jobs, and its Births line reads the last call's status, cost and seconds. Its prompt's
 sha256 and its answer are stored in `birth_calls` like a verdict (a night's answer is read again, never asked again,
 under the same prompt sha and model), at most 6 specs a night, under a cost cap of $0.25 a night: the call's worst case
 must fit, AT THE MODEL'S OWN PRICES (`births.PRICES`, held equal to the gateway's CLAUDE_MODELS row of the model by a
