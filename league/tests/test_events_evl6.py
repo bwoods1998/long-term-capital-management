@@ -1234,5 +1234,9 @@ class TheDocs(unittest.TestCase):
                 self.assertTrue(ci.guard([path], role), (path, role))
 
 
+# (release 1019j's merge: PREREG-EVL-6's rules on its own table, written before PREREG-EVL-7's learners registered;
+# the lane's count with them is league/tests/test_events_evl7*.py's)
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
+
 if __name__ == "__main__":
     unittest.main()
