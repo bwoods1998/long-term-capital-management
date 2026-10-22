@@ -1,0 +1,11 @@
+fresh seeds: 5 cells of 5 selected
+  fresh 0.0890 (se 0.0045, R 4000) | search 0.1000 | pooled 0.0900 (se 0.0043) | version by 120 0.1683 | true cm<=0 0.0205 <=10bp 0.0393 | picks' issuer effect +5.7 bp, sigma 0.053, COST-7 / replay 20.9 / 19.0 bp | ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58
+  fresh 0.0845 (se 0.0044, R 4000) | search 0.0950 | pooled 0.0855 (se 0.0042) | version by 120 0.1585 | true cm<=0 0.0210 <=10bp 0.0370 | picks' issuer effect +1.6 bp, sigma 0.047, COST-7 / replay 19.5 / 18.3 bp | O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+  fresh 0.0820 (se 0.0043, R 4000) | search 0.1275 | pooled 0.0861 (se 0.0042) | version by 120 0.1497 | true cm<=0 0.0210 <=10bp 0.0367 | picks' issuer effect +2.2 bp, sigma 0.059, COST-7 / replay 21.8 / 19.7 bp | ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58
+  fresh 0.0820 (se 0.0043, R 4000) | search 0.1150 | pooled 0.0850 (se 0.0042) | version by 120 0.1545 | true cm<=0 0.0253 <=10bp 0.0462 | picks' issuer effect +0.0 bp, sigma 0.046, COST-7 / replay 19.6 / 17.9 bp | O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52
+  fresh 0.0810 (se 0.0043, R 4000) | search 0.1000 | pooled 0.0827 (se 0.0042) | version by 120 0.1540 | true cm<=0 0.0170 <=10bp 0.0340 | picks' issuer effect +2.7 bp, sigma 0.049, COST-7 / replay 19.8 / 18.5 bp | ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58
+W7 (the maximum fresh per-run rate) = 0.0890 at ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58; its pooled figure 0.0900
+c7 = max(0.13, W7 rounded up to two decimals) = 0.13
+seatable (W7 <= 0.15): True
+at its real lag, O1 (lag 1): worst fresh 0.0845 at O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+at its real lag, ON (lag 2): worst fresh 0.0890 at ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58

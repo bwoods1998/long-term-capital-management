@@ -1,0 +1,7 @@
+=== repro R=2000 chunk=100 06:01:12Z
+=== phi R=1000 chunk=50 06:09:30Z
+=== tails R=1000 chunk=50 06:30:25Z
+=== drifts R=1000 chunk=50 06:40:05Z
+=== base R=1000 chunk=50 06:48:35Z
+=== life R=400 chunk=25 06:50:52Z
+=== done 06:52:45Z

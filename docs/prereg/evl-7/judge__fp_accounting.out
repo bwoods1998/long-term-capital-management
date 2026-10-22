@@ -1,0 +1,14 @@
+BASIS A (PREREG-EVL-4, 0.10 / 3.0)
+  used before PREREG-EVL-7 : 1.50  (15 seatable versions + 0 births at 0.1)
+  PREREG-EVL-7 adds        : 0.20  (2 learner versions)
+  used after               : 1.70 of 3.0
+  left                     : 1.30  = 13 seatable versions at 0.1
+  if every re-entry is used: 2.10 of 3.0 (re-entries drawn one at a time; refused when the budget cannot hold them)
+  EVL-7's share at most    : 0.60 (6 versions)
+BASIS B (PREREG-EVL-6 draft, 0.14 / 4.2)
+  used before PREREG-EVL-7 : 2.10  (15 seatable versions + 0 births at 0.14)
+  PREREG-EVL-7 adds        : 0.28  (2 learner versions)
+  used after               : 2.38 of 4.2
+  left                     : 1.82  = 13 seatable versions at 0.14
+  if every re-entry is used: 2.94 of 4.2 (re-entries drawn one at a time; refused when the budget cannot hold them)
+  EVL-7's share at most    : 0.84 (6 versions)

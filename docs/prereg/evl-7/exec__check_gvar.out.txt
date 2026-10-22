@@ -1,0 +1,5 @@
+trial 0: sessions 15, attempts 304, fills 165: exact sd 28.093 bp, brute 28.123 bp, brute mean -0.226 bp
+trial 1: sessions 20, attempts 533, fills 270: exact sd 29.501 bp, brute 29.523 bp, brute mean -0.053 bp
+trial 2: sessions 37, attempts 739, fills 418: exact sd 19.726 bp, brute 19.872 bp, brute mean +0.018 bp
+trial 3: sessions 11, attempts 224, fills 110: exact sd 46.836 bp, brute 46.834 bp, brute mean +0.177 bp
+trial 4: sessions 9, attempts 160, fills 84: exact sd 32.134 bp, brute 31.891 bp, brute mean -0.070 bp

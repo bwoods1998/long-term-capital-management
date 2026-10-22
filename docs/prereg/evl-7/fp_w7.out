@@ -1,0 +1,9 @@
+PREREG-EVL-6 frozen basis: 0.13 a version or run, lifetime budget 3.9 (30 x 0.13)
+  USED BEFORE THIS FILE : 1.95  (15 versions x 0.13 = 1.95; 0 births and 0 other charges at 0.13)
+  THIS FILE ADDS        : 0.26  (2 learner versions' run 1 at c7 = 0.13)
+  USED AFTER            : 2.21 of 3.9
+  LEFT                  : 1.69  (= 13.0 charges at 0.13; 13.0 at 0.13)
+  THE LEARNERS' LATER RUNS: at most 0.52 more (4 runs at c7), each drawn when it starts and only when the budget holds it; this file at most 0.78 (6 x c7)
+  IF EVERY LATER LEARNER RUN STARTS: 2.73 of 3.9, left 1.17
+  with 3 births before REGISTERED_AT_7: used before 2.34, after 2.60, left 1.30
+  with 6 births before REGISTERED_AT_7: used before 2.73, after 2.99, left 0.91

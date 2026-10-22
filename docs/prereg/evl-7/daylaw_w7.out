@@ -1,0 +1,5 @@
+t3         mean -0.0012 var 1.0001 skew -2.66 crash share nan count mult mean 1.2321
+crash      mean -0.0004 var 0.9987 skew -1.57 crash share nan count mult mean 1.2643
+crasht3    mean +0.0009 var 0.9850 skew -1.52 crash share 0.0498 count mult mean 1.2303
+crashcl    mean +0.0007 var 0.9994 skew -1.51 crash share 0.0465 count mult mean 1.2627
+crasht3cl  mean +0.0007 var 1.0112 skew +1.04 crash share 0.0466 count mult mean 1.2292

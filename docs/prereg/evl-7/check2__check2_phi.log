@@ -1,0 +1,28 @@
+1/24 C2-N1-worst-notau-phi10 98.1s total 99s
+2/24 C2-N1-worst-notau-phi10 99.6s total 101s
+3/24 C2-N1-worst-notau-phi10 100.3s total 101s
+4/24 C2-N1-worst-notau-phi10 101.7s total 103s
+5/24 C2-N1-worst-notau-phi10 108.4s total 208s
+6/24 C2-N1-worst-notau-phi10 108.0s total 209s
+7/24 C2-N1-worst-notau-phi15 111.9s total 213s
+8/24 C2-N1-worst-notau-phi15 111.1s total 214s
+9/24 C2-N1-worst-notau-phi15 87.7s total 302s
+10/24 C2-N1-worst-notau-phi15 93.0s total 302s
+11/24 C2-N1-worst-notau-phi15 94.6s total 302s
+12/24 C2-N1-worst-notau-phi15 93.5s total 307s
+13/24 C2-N1-worst-notau-phi20 59.0s total 361s
+14/24 C2-N1-worst-notau-phi20 54.8s total 362s
+15/24 C2-N1-worst-notau-phi20 62.2s total 364s
+16/24 C2-N1-worst-notau-phi20 63.2s total 365s
+17/24 C2-N1-worst-notau-phi20 68.0s total 430s
+18/24 C2-N1-worst-tau-phi20 68.4s total 434s
+19/24 C2-N1-worst-notau-phi20 74.4s total 435s
+20/24 C2-N1-worst-tau-phi20 84.4s total 448s
+21/24 C2-N1-worst-tau-phi20 69.2s total 504s
+22/24 C2-N1-worst-tau-phi20 74.8s total 504s
+23/24 C2-N1-worst-tau-phi20 73.5s total 507s
+24/24 C2-N1-worst-tau-phi20 72.8s total 521s
+C2-N1-worst-notau-phi10      R=600  ev6d=0.0917 (se 0.0118)  f6r1=0.0683 (se 0.0103)  f6r12=0.1567 (se 0.0148)
+C2-N1-worst-notau-phi15      R=600  ev6d=0.1267 (se 0.0136)  f6r1=0.1083 (se 0.0127)  f6r12=0.1933 (se 0.0161)
+C2-N1-worst-notau-phi20      R=600  ev6d=0.1267 (se 0.0136)  f6r1=0.1083 (se 0.0127)  f6r12=0.1883 (se 0.0160)
+C2-N1-worst-tau-phi20        R=600  ev6d=0.1417 (se 0.0142)  f6r1=0.1233 (se 0.0134)  f6r12=0.2067 (se 0.0165)

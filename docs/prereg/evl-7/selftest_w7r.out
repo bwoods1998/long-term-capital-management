@@ -1,0 +1,4 @@
+selftest: simulate_r(learner=None) == calib_w7.simulate7 on the same seed: True
+selftest: simulate_r('on', drop=False, lev=False) == rc1.simulate_rc(rmode='ondm') on the same seed: True
+selftest: ridge with two zero columns == ridge without them: True ; zero columns' beta [0.0, 0.0]
+selftest: o1 with levels runs; picks a session 6.6

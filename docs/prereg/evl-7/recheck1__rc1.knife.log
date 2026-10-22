@@ -1,0 +1,76 @@
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/recheck1/rc1.py:235: RuntimeWarning: Mean of empty slice
+  pe_ = np.nanmean(np.where(ok, np.take_along_axis(sig * Ey - c7, top, axis=1), np.nan), axis=1)
+knife: 1/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000001 48.4s total 49s
+knife: 2/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000003 50.0s total 51s
+knife: 3/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000002 50.5s total 51s
+knife: 4/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000006 50.8s total 51s
+knife: 5/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000005 52.1s total 53s
+knife: 6/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000008 55.1s total 56s
+knife: 7/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000004 58.5s total 59s
+knife: 8/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000007 58.7s total 59s
+knife: 9/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000009 52.8s total 102s
+knife: 10/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000010 51.6s total 102s
+knife: 11/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000013 52.6s total 105s
+knife: 12/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000011 54.7s total 106s
+knife: 13/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000014 50.9s total 107s
+knife: 14/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000016 47.6s total 107s
+knife: 15/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000012 56.4s total 108s
+knife: 16/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000015 52.0s total 111s
+knife: 17/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000017 43.5s total 145s
+knife: 18/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000018 46.7s total 149s
+knife: 19/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000019 48.1s total 153s
+knife: 20/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001002 46.7s total 154s
+knife: 21/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57-KNIFE seed 256000020 49.2s total 155s
+knife: 22/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001004 46.5s total 158s
+knife: 23/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001003 50.4s total 158s
+knife: 24/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001001 52.5s total 159s
+knife: 25/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001006 43.1s total 192s
+knife: 26/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001005 53.3s total 199s
+knife: 27/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001007 46.1s total 199s
+knife: 28/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001008 47.9s total 202s
+knife: 29/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001012 45.3s total 204s
+knife: 30/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001009 50.5s total 205s
+knife: 31/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001011 48.0s total 206s
+knife: 32/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001010 51.5s total 209s
+knife: 33/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001013 49.9s total 242s
+knife: 34/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001014 46.6s total 245s
+knife: 35/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001016 47.3s total 249s
+knife: 36/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001015 51.4s total 251s
+knife: 37/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001018 46.2s total 252s
+knife: 38/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001019 48.4s total 255s
+knife: 39/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001017 51.7s total 256s
+knife: 40/60 A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57-KNIFE seed 256001020 48.3s total 257s
+knife: 41/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002002 172.7s total 418s
+knife: 42/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002001 176.9s total 419s
+knife: 43/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002005 169.6s total 421s
+knife: 44/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002004 172.1s total 423s
+knife: 45/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002003 174.5s total 423s
+knife: 46/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002006 169.0s total 424s
+knife: 47/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002007 168.5s total 425s
+knife: 48/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002008 170.6s total 428s
+knife: 49/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002014 145.3s total 569s
+knife: 50/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002010 153.1s total 572s
+knife: 51/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002009 156.7s total 575s
+knife: 52/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002013 151.5s total 575s
+knife: 53/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002012 153.6s total 577s
+knife: 54/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002016 150.9s total 579s
+knife: 55/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002011 158.3s total 580s
+knife: 56/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002015 156.2s total 581s
+knife: 57/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002017 97.5s total 666s
+knife: 58/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002020 98.2s total 673s
+knife: 59/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002019 98.6s total 673s
+knife: 60/60 A-ic08-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D57-KNIFE seed 256002018 102.6s total 675s
