@@ -38,6 +38,53 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019g: release 1019f + PREREG-EVL-5 (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594) and then origin/main `eb5bedac` (the House's scoreboard of Oct 21) merged in, so main fast-forwards to it; on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`)
+
+- **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
+  reservation and round-robin, A86 REVISED, the Probe size's record, the screen after the open, the backfill's retries,
+  Sail's spend fields, the alarms, the Done reader) and PREREG-EVL-5's code (its entry below: EVL-ERN-DROP-ON,
+  EVL-ERN-UNDER-ON and EVL-NEWS-NIGHT2-ON seatable at learning from birth, the control EVL-CTRL-ERN-UNDER-ON, `rows_5`,
+  `RAISED_GUARD`, `part_hold`, the gap reader, the pre-pass, the isolated last part of a close decision and
+  `decide-close-evl5`), merged `--no-ff`, rerere off, each merge committed before the next. The conflicts (CHANGELOG.md,
+  docs/events.md, docs/operations.md, league/equity/INTERFACES.md, league/events/book.py's `__all__`) kept both sides.
+- **The two releases together** (league/tests/test_events_1019g.py; each test fails on either parent alone, and the
+  integration's own change's tests fail with it undone):
+  - ROOM (A85 with the new rows): PREREG-EVL-5's rows come after PREREG-EVL-4's and before R3's births in `room_key`'s
+    tiers, the round-robin and the send order (at Probe or Sized they round-robin with the earlier files' rows); a
+    learning DROP buy at D's close (2% of E, two shares at the $20.00 limit of the invented case) leaves the next open's
+    Probe program A85's reservation (its three buys whole; without A85 it gets two);
+  - THE INTEGRATION'S CHANGE, ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS (league/equity/live.py `_event_send`
+    `ahead`, `_event_ahead`, `_count_refusal(ahead=)`, `AHEAD_HELD`): the book's close decision waits only 60 s for the
+    lane's, so a buy of the new rows waiting for `part_hold` let the buys after it in ROOM's order (a learning buy
+    behind one at Probe, a birth behind one at any band) take its cash, invested room, loss budget and day orders. Each
+    buy is now sent leaving the waiting buys ahead of it what they will ask and two orders each of the lines, and one
+    left no whole share waits for them (never refused for it). No wall, no money row and no judge moves; a buy behind
+    them can only be smaller or later;
+  - the final record: PREREG-EVL-5 section 2's span (from P''s close decision) is judged by A84's per-feed clean reads
+    (one missed read of a feed with clean reads around it within 15 minutes is no break; a 20-minute news gap in the
+    early span holds the new rows alone, the why naming the feed);
+  - the alarms: `evl_score` waits for the next pass on a `decide-close-evl5` catch-up's intents (one written before the
+    pass still stands); `evl_final` judges the three and reads a close decided without them as not made for them until
+    `decide-close-evl5` names them; `evl_entries` names a buy `part_hold` held "a gate of real opens" (was "another
+    reason");
+  - the 150-order line refuses in ROOM's order with the new rows (PREREG-EVL-5 section 1.3 (a): EVL-NEWS-READ-ON takes
+    the last room, DROP is refused; with DROP waiting, a birth behind it keeps DROP's two orders), an exit never stopped
+    by it; each overnight lot keeps one order of the next session's line; A80's one re-send carries a DROP buy the venue
+    cancelled at once (both orders on the line);
+  - A86 REVISED leaves the new rows' learning band as frozen (2%, one share up to 5%, eight open); at Probe they trade
+    3.5% with one share up to 5%, inside PREREG-EVL-1 section 8's envelope as section 2 states.
+- **THE PROOF of both branches on the merged tree** (invented weeks only): league/tests/evl5_world.py's week gives every
+  earlier program (PREREG-EVL-1, -2, -4 and the two births) the same 126 shadow intents and the same real-money picks
+  (28 program-sessions, 19 with picks) on rel/1019e's, rel/1019f's and rel/1019g's trees, and `TheProof` (with and
+  without the new rows) passes on rel/1019g; release 1019f's own proof, the House's lane through four sessions of
+  invented 8-Ks and news, writes the same 111 intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows and 468
+  decision receipts, and the same final records of the twelve earlier seatable programs, on rel/1019f and rel/1019g.
+- **Owner files** (behind league/ci.py's wall or protected): release 1019f's and PREREG-EVL-5's lists; the integration
+  adds league/equity/live.py, league/equity/INTERFACES.md and league/ops/evl_health.py.
+- **Deploy**: docs/operations.md, **Release 1019g** (the gateway first, then the House). **Rollback**: the House first,
+  to release 1019e's head `c485dcfe` (both parts at once), the gateway after it or never; constitution-only:
+  `equity_money.event.enabled` False (`fd9e90c0` / `005745e9`).
+
 ### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (unreleased; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
 
 - **What it carries** (each branch's own entry below, as its branch wrote it; docs/operations.md **Release 1019f** for

@@ -25,7 +25,8 @@ they are and how the code runs them. When this page and a pre-registration disag
   the branch push and the pushing client's clock after the tag push returned): three NEW seatable programs (an earnings
   fall, a muted earnings read, a second news night), each entering at D's CLOSE and exiting at the next session's OPEN,
   at PREREG-EVL-3's learning band from birth (VERSION 1 their seating version), and one control; judged by
-  PREREG-EVL-3's screen unchanged ("PREREG-EVL-5" below). Code on `feat/evl-5` (release 1019g), not yet deployed.
+  PREREG-EVL-3's screen unchanged ("PREREG-EVL-5" below). Code in release 1019g (`rel/1019g`: release 1019f with
+  `feat/evl-5` merged in, A94), not yet deployed.
 - An event counts for a program only when it is knowable after that program's own registration time. A change to a
   registered program is a new version with a new registration time. Expected false passes: 1.5 (0.10 x 15 seatable
   versions: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three) of the lane's stated lifetime
@@ -356,10 +357,12 @@ after 21:26:21Z Oct 21):
   for these rows (section 2; `screen._fast_block` for prereg 5 only): A69's span begins at P''s close decision (where the
   close window of P, which (ii) reads, begins; the attention articles begin at P''s close), with no registration floor
   (the skips it feeds carry none: the reading that waits), A74 (3)'s daily-index backfill must have run for every weekday
-  from P' through X, and the passes are judged by `screen._fast_passes` from before that start through the span's end:
-  A84's per-feed clean reads once `fix/a84-fast-path-per-feed` is merged (release 1019f; it changes `_fast_passes` and
-  `_feed_problems` only, this file's change is in `_fast_block`, so the two merge without a conflict), A69's every-pass
-  reading before it; otherwise A66's wait. A close decided at or before 21:26:21Z Oct 21 is made for them.
+  from P' through X, and the passes are judged by `screen._fast_passes` from before that start through the span's end
+  by A84's per-feed clean reads (release 1019g carries both: A84 changed `_fast_passes` and `_feed_problems`, this file
+  `_fast_block`, and they merged without a conflict): a pass that missed a feed inside that span, with clean reads of
+  the feed at most 15 minutes apart around it, is a missing read, not a broken span; a feed with no clean read for
+  longer breaks the span and the why names the feed (league/tests/test_events_1019g.py `FinalRecord`); otherwise A66's
+  wait. A close decided at or before 21:26:21Z Oct 21 is made for them.
 - REAL MONEY (section 1.3; league/events/book.py `rows_5`, `picks`): the three seat at learning from birth (2% of equity,
   whole shares, one share up to 5%, at most 8 open), in ROOM's order after PREREG-EVL-4's rows and before R3's births.
   A real-money decision is the shadow rule over the rows STORED, and the verdicts ANSWERED, before D's close decision
@@ -372,7 +375,19 @@ after 21:26:21Z Oct 21):
   with score >= 2, or `ok` with score >= 1 and guidance "raised", or not yet answered, at the decision time
   (`next_open_event` with `raised`, `RAISED_GUARD`: EVL-ERN-READ-O1's or EVL-ERN-GUIDE-O1's event at the next open;
   PREREG-EVL-4's guard is unchanged); for UNDER that is every such filing. The sale gate keeps them out of a name an
-  event lot sells at the same close.
+  event lot sells at the same close. WITH RELEASE 1019f (release 1019g): A85's tiers, round-robin and send order place
+  them after PREREG-EVL-4's rows and before the births (at Probe or Sized they round-robin with the earlier files' rows,
+  each pass in the tables' order); a learning buy of theirs at D's close leaves the next open's PREREG Probe and Sized
+  programs A85's reservation, and at Probe or Sized they are reserved for by the open's learning buys; A86 REVISED
+  moves only Probe (3.5% of E, one share up to 5%, six open): their learning rows are as frozen (2%, one share up to 5%,
+  eight open). ROOM'S ORDER WHILE THEIR BUYS WAIT (release 1019g's integration, league/equity/live.py `_event_send`):
+  the book's close decision waits only 60 s for the lane's, so a buy of these rows can wait for `part_hold` while the
+  buys after it in ROOM's order go (a learning buy behind one at Probe, a birth behind one at any band); each such buy
+  is sent leaving the waiting buys ahead of it what they will ask (their band's target in whole shares at their limit,
+  the loss budget at their weight: `_event_ahead`) and two orders each of the day's lines, and one that leaves it no
+  whole share WAITS for them ("waits for the PREREG-EVL-5 buys ahead of it in ROOM's order"), never refused for it; so
+  cash, room, budget and the 150-order line go in ROOM's order whatever the minute each buy is sent (the reading that
+  trades less: a buy behind them can only be smaller or later).
 - THE EARLIER ROWS' DECISION COMES FIRST (section 1.3; league/events/run.py `decide_close`): the part that decides these
   rows runs LAST, after every earlier row and PREREG-EVL-4's part, under its own time bound (`EVL5_BUDGET` 45 s, never
   past the close task's own bound less `EVL5_FINISH` 15 s: `part_until`, `bounded`, `PartDeadline`, which is not the
@@ -413,7 +428,12 @@ after 21:26:21Z Oct 21):
 - THE PROOF that no earlier program changes: league/tests/test_events_evl5.py decides a synthetic week
   (league/tests/evl5_world.py: every family of files 1, 2 and 4, two registered births and this file's events) with
   and without these rows, and every earlier program's shadow intents and real-money picks are the same; the same week
-  decided by release 1019e's own code gives them too (`python league/tests/evl5_world.py OUT.json`).
+  decided by release 1019e's own code gives them too (`python league/tests/evl5_world.py OUT.json`). On release
+  1019g's tree the week gives the earlier programs (files 1, 2 and 4 and the two births) the same 126 shadow intents and
+  the same real-money picks (28 program-sessions) as release 1019f's and release 1019e's trees; and release 1019f's own
+  proof, the House's lane driven through four sessions of invented 8-Ks and news, writes on release 1019g the same 111
+  intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows, 468 decision receipts and earlier programs' final
+  records as on release 1019f.
 
 ## The code
 
@@ -527,10 +547,10 @@ mail at its pace:
 | `evl_record` | no clean record pass in 30 minutes: one finished `ok` whose 8-K, Form 4 and news reads ran without error (the failing feeds are named) |
 | `evl_decide` | a session's open or close decision not made in its 10-minute window (missing, failed, cut, unfinished or finished late); one decided later still stands, its auction missed. Since release 1019f also PREREG-EVL-4's rows of a close still to decide by themselves (the judge's `screen.made_without`) 2 hours after the stall job first saw it and after its latest `decide-close` finished, while its latest `decide-close-evl4` is not `ok` (or is older than that close's latest decision) |
 | `evl_verdicts` | verdicts a decision needs (its receipt's tally `verdicts: {needed, answered}`, the close decision's reading programs included; since release 1019f the `decide-close-evl4` receipts' too) unanswered 15 minutes past it; the day's verdict dollars and the lane's line in the numbers |
-| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart; so, from release 1019f, does an intent a decision wrote after the night's last score pass started, such as a catch-up decision of an older session: the next pass settles it, `after_last_pass`) |
+| `evl_score` | intents due by the latest session still `planned` or `entered` at 23:00 ET (an exit the tape showed absent waits by design and is counted apart; so, from release 1019f, does an intent a decision wrote after the night's last score pass started, such as a catch-up decision of an older session, PREREG-EVL-4's `decide-close-evl4` or, release 1019g, PREREG-EVL-5's `decide-close-evl5`: the next pass settles it, `after_last_pass`) |
 | `evl_fills` | the real fills off the shadow's own auction prints by more than 15 bp either way (worse or better, said), the signed mean of a side over the last 20 priced fills (the House's event twins) |
-| `evl_final` | a seatable program's final record (`screen.final_until`, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named, with the judge's own why (A84, release 1019f; read-only, the judge read and never run for a look; judged through a `PAUSE`; a registered seatable birth judged like any seating program) |
-| `evl_entries` (release 1019f) | an auction of the last 24 hours (judged 15 minutes after its cross) at which under 90% of the planned real buys filled, or one was never sent: from the book's own rows in `live.sqlite` (`eq_event_intents` buys, `eq_intents`, `eq_orders`). The numbers: planned, filled, the venue's cancels at once (A80: an auction buy ended `canceled` within 60 s of its own `submitted_at`, nothing filled), the re-sends after one and how many filled, the never-sent by reason (the day order count, cash, the loss budget, the 10% a name, the invested cap, the program's room, one share too dear, the gateway, ...), and the constraint that bound the auction most (cash, budget, room, order line, name wall, invested) |
+| `evl_final` | a seatable program's final record (`screen.final_until`, what every look waits for) more than 1 session behind what A69's fast path allows (the session before the latest whose open decision has passed): the program lagging most named, with the judge's own why (A84, release 1019f; read-only, the judge read and never run for a look; judged through a `PAUSE`; a registered seatable birth judged like any seating program; release 1019g: PREREG-EVL-5's three by their own span from P''s close decision, and a close a release decided without them, or whose part for them failed, as not made for them until their own `decide-close-evl5` names them) |
+| `evl_entries` (release 1019f) | an auction of the last 24 hours (judged 15 minutes after its cross) at which under 90% of the planned real buys filled, or one was never sent: from the book's own rows in `live.sqlite` (`eq_event_intents` buys, `eq_intents`, `eq_orders`). The numbers: planned, filled, the venue's cancels at once (A80: an auction buy ended `canceled` within 60 s of its own `submitted_at`, nothing filled), the re-sends after one and how many filled, the never-sent by reason (the day order count, cash, the loss budget, the 10% a name, the invested cap, the program's room, one share too dear, the gateway, a gate of real opens (release 1019g: a PREREG-EVL-5 buy `part_hold` held, waiting for the lane's close decision or never traded after its part failed), ...), and the constraint that bound the auction most (cash, budget, room, order line, name wall, invested) |
 | `evl_backfill` (release 1019f) | a weekday of the daily-index backfill's reach not `done` by 12:00 ET of the next weekday, a run of its passes that are not `ok` (`waiting`, `partial`) lasting over 6 hours, or a done day whose passes failed to fetch a filing; the day and its counts named. The screen's looks wait for every weekday of the reach, so this says why one waits |
 | `evl_handback` (release 1019f) | a real event fill the book made (`eq_orders` of a real event lot with `filled_qty` > 0) owed to the lane's `real_fills` over an hour and not there (a buy once its intent ended, a sale once its lot closed: as the book hands them back): the lane computes Sized, demotion and retirement from those rows |
 | `cap_breach` | today's measured metered compute so far, or yesterday's, over the cap the rule set for that UTC day (league/ops/metered.py: the meters themselves), or a meter unread for 6 hours (the cap cannot be judged); while today is over it, the cap breach hold (`cap-hold.json`) holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC |

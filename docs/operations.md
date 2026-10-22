@@ -8,6 +8,54 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5, the pre-open deploy (A94): `rel/1019g`, not deployed
+
+Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
+**PREREG-EVL-5's three event programs**, below) merged in, then origin/main `eb5bedac` (the House's scoreboard of Oct 21)
+so that main fast-forwards to the release; `--no-ff`, rerere off, each merge committed before the next; the five
+conflicts kept both sides. Both parts were cut from release 1019e (`c485dcfe`, live since 21:17Z Oct 21: A93). THE
+INTEGRATION'S ONE CHANGE (league/equity/live.py): ROOM's order holds while a PREREG-EVL-5 buy waits for the lane's own
+close decision to name its program (`book.part_hold`; the book's close decision waits only 60 s for the lane's): every
+buy after it in ROOM's order is sent leaving it what it will ask of the cash, the invested room, the loss budget and the
+day's order lines, and waits for it when that leaves no whole share ("waits for the PREREG-EVL-5 buys ahead of it in
+ROOM's order"); and `evl_entries` names such a held buy "a gate of real opens". league/tests/test_events_1019g.py holds
+every place the two parts meet (CHANGELOG.md, **Release 1019g**). IDENTITIES (the tree's own functions, 3.14 and 3.11,
+equal on `rel/1019f` and `rel/1019g`): money `c2f0a478`, constitution `24f73f18` (release 1019f's pair: A86 REVISED;
+PREREG-EVL-5 moves none), rollback pair (`equity_money.event.enabled` False) `fd9e90c0` / `005745e9`, the options
+execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract
+`397b22b7`; `equity_money_problems()` is `[]`.
+
+**Deploy, in order** (A94: inside the window that closes at 12:55Z Thu Oct 22 when CI is green on the exact head and the
+reviews' blockers and majors are closed by 12:15Z; otherwise from 20:05Z, nothing weakened; never 12:55-20:05Z on a
+trading day, 12:55-21:05Z from Nov 2; never with an order in flight; main moves at 23:30Z nightly: merge origin/main
+into `rel/1019g` first when it moved, and CI green on the exact head):
+1. THE CAPTAIN'S CHECK (PREREG-EVL-5's step 1, A92): from the release's tree, with the House's store opened `mode=ro`
+   and its registered births loaded, `screen.expected_false_passes` prints 1.5 + 0.10 for each seatable birth
+   registered (R3's births run from 21:15 ET Oct 21: at most 3.0); R3's validator then reads the same sum.
+2. THE GATEWAY from this head (`gateway/` is release 1019f's: `gateway/lib/email.mjs`, the four new causes' words, the
+   INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line): `cd gateway && npm run check
+   && npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces (`68363043`, release
+   1019e's). An older gateway answers 400 to a stall notice naming a new cause: the gateway goes first.
+3. THE HOUSE from the same head, by the captain's ship script with the new pair: `ship_house.sh <head> <PR> r1019g
+   c2f0a478 24f73f18`. Verify (read-only): release 1019f's list (promoted, `real_money` true, failures []; the ids
+   `b60410ad` / `78022ca6` / `c2f0a478` / `24f73f18` and the grant re-ratified on `c2f0a478`;
+   `release.live.equity.events.shares.probe` "0.035"; `target_usd`, `binding` and `sized_usd` on `eq_event_intents`
+   and `real_fills`; the nine `evl_` causes at the next stall run, `evl_entries` expected to stand at once on A80's
+   venue cancels; after the night's screen `<state>/events/done.json` with rule `54241925`), then PREREG-EVL-5's
+   (`decide-close-evl5:<day>` receipts: none is owed when the House is live before Oct 22's close decision, since the
+   only close after 21:26:21Z Oct 21 a release without the rows decided, Oct 21's, was decided before it; meta
+   `evl5:pre:<day>` from 09:47 ET; a close decision's summary with `evl5` and no `evl5_error`; at the first event
+   decision `eq_event_programs` with fifteen PREREG rows and the seatable births).
+4. Real money for the new rows from the first close decision after the House is live (Oct 22's close when it ships
+   before the open), and at each close only once the lane's own close decision names them.
+
+**Rollback**: the House first, by `floor_box.py rollback` and repoint release 1019e's deployed head (`c485dcfe`): it
+undoes both parts at once, as **Release 1019f**'s rollback and PREREG-EVL-5's say (the new columns stay NULL; Probe at
+5% again, money `055e5313`; the new rows' intents and lots stay in the stores and their lots exit by their own plans;
+the old code seats none of them, so a later redeploy decides those closes for them by themselves). The gateway after it,
+by `wrangler rollback` to `68363043`, or never. Constitution-only: `equity_money.event.enabled` False (`fd9e90c0` /
+`005745e9`) stops every event buy; release 1019e's Probe rows (`055e5313` / `a8d4cbd9`) are inside the bounds.
+
 ## Release 1019f (Oct 21-22, 2026): the path-to-Done fixes (A84-A86), the alarms, the Done reader: `rel/1019f`, not deployed
 
 Nine merges on release 1019e's head `c485dcfe` (#583, **Release 1019e**, below), `--no-ff`, rerere off, in this order:
@@ -239,7 +287,7 @@ order in flight; CI green on the exact head; before Oct 26 13:00Z, when the firs
 first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
 `evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
 
-## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, release 1019g, not deployed
+## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, in release 1019g, not deployed
 
 Cut from `rel/1019e` (`c485dcfe`); it ships as release 1019g on top of release 1019f (A92: "release 1019g, or 1019f if
 it has not merged"): the frozen [PREREG-EVL-5](prereg/PREREG-EVL-5.md)'s rows (EVL-ERN-DROP-ON, EVL-ERN-UNDER-ON,
