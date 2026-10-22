@@ -360,6 +360,11 @@ LIVE_DB = "live.sqlite"
 #: refused for cash, invested or loss-budget room (league/equity/sizing.py's binding caps, `_size_event`'s words).
 LINE_REFUSAL = "the event kind's day order count"
 ROOM_REFUSAL = re.compile(r"no whole share fits \((sleeve_cash|invested|cash|budget)\)")
+#: A PREREG-EVL-5 buy that waited for the lane's own close decision of D (league/events/book.py `PART_WAIT`, the same
+#: words), and a later buy that waited for the room or the line slots kept for such buys (league/equity/live.py
+#: `HELD_AHEAD`): each counted when it ENDED UNSENT ("never sent", `_event_finish`'s words).
+HELD_UNSENT = "waits for the lane's own close decision"
+ROOM_WAIT = "wait for the lane's close decision"
 
 
 def room_effects(store: S.Store, day: dt.date) -> dict[str, int] | None:
@@ -369,8 +374,11 @@ def room_effects(store: S.Store, day: dt.date) -> dict[str, int] | None:
     rows first among the PREREG rows), and `exits_held`, the sales of this file's lots at `day`'s open (each kept one
     order of that day's line for its exit); (b) `open_lost`, the earlier rows' open-entry LEARNING buys at `day`'s open
     that sizing refused for cash, invested or loss-budget room while this file's overnight lots were open there (A85
-    reserves the next auction's cash for Probe and Sized only). None when the book's state is not beside the store or
-    cannot be read."""
+    reserves the next auction's cash for Probe and Sized only). And THE COST OF THE WAIT for the lane's close decision
+    (section 1.3, the earlier rows' decision first; the money review of release 1019g): `held_unsent`, this file's buys
+    at `day`'s close that ended unsent while they waited for that decision (league/events/book.py `part_hold`), and
+    `room_waited`, the later buys there that ended unsent waiting for the room or the line slots ROOM kept for them. None when the book's
+    state is not beside the store or cannot be read."""
     path = Path(store.root).parent / LIVE_DB
     if not path.is_file():
         return None
@@ -392,8 +400,13 @@ def room_effects(store: S.Store, day: dt.date) -> dict[str, int] | None:
         lost = sum(1 for r in rows if str(r["program"]) not in five and r["side"] == "buy" and r["at"] == "open"
                    and str(r["band"] or "") == "learning" and str(r["status"]) in ("refused", "missed")
                    and ROOM_REFUSAL.search(str(r["why"] or "")))
+    def unsent(r: Any, words: str) -> bool:
+        why = str(r["why"] or "")
+        return r["side"] == "buy" and r["at"] == "close" and str(r["status"]) == "missed" and "never sent" in why and \
+            words in why
     return {"line_refused": sum(1 for r in mine if r["side"] == "buy" and LINE_REFUSAL in str(r["why"] or "")),
-            "exits_held": exits, "open_lost": lost}
+            "exits_held": exits, "open_lost": lost, "held_unsent": sum(1 for r in mine if unsent(r, HELD_UNSENT)),
+            "room_waited": sum(1 for r in rows if str(r["program"]) not in five and unsent(r, ROOM_WAIT))}
 
 
 def _registered() -> tuple[Any, ...]:
@@ -501,7 +514,8 @@ def render(report: Mapping[str, Any]) -> str:
         room = e5.get("room") or {}
         if room:
             line += (f"; room: line refused {room.get('line_refused', 0)}, exits held {room.get('exits_held', 0)}, "
-                     f"earlier open buys lost {room.get('open_lost', 0)}")
+                     f"earlier open buys lost {room.get('open_lost', 0)}, unsent waiting for the close decision "
+                     f"{room.get('held_unsent', 0)} (later buys {room.get('room_waited', 0)})")
         if e5.get("failed"):
             line += "; part failed: " + ", ".join(f"{x['day']}{' (decided since)' if x['decided_since'] else ''}"
                                                    for x in e5["failed"][-5:])

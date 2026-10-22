@@ -991,8 +991,9 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
                ) -> Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]:
     """EVL-NEWS-NIGHT2-ON's gap for real-money decisions of `day` (PREREG-EVL-5 sections 1.1 and 1.3): the open of D's
     09:30 minute bar over the universe row's previous close (the raw SIP close of P). The minute is the lane's stored
-    mark when it holds one (league/events/run.py `GAP_LABEL`, made by the session's pre-passes; a stored row with no price
-    is a minute with no trade: no gap, not bought), else the book's own reading: with `opens_many(symbols, session)`, the
+    mark when it holds one (league/events/run.py `GAP_LABEL`, made by the session's pre-passes and its decisions; a
+    stored row with no price is the tape's word that the minute had no trade, which only a decision's read of the name
+    alone writes: no gap, not bought), else the book's own reading: with `opens_many(symbols, session)`, the
     first name with no mark reads EVERY name of the day's live universe that has none, together (one read a name, never
     one a row, as `reaction_reader`); `opens(symbol, session)` is asked only for a name outside it. None when a price is
     missing (not bought)."""
@@ -1035,6 +1036,12 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
     return gap
 
 
+#: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the
+#: book counts the buys that end unsent so (league/equity/live.py `_event_held_said`), and so does the lane's report
+#: (league/events/report.py `HELD_UNSENT`, the same words).
+PART_WAIT = "waits for the lane's own close decision"
+
+
 def part_hold(lane: Lane | None, program: str, version: int, day: dt.date) -> tuple[str, str] | None:
     """PREREG-EVL-5 section 1.3, THE EARLIER ROWS' DECISION COMES FIRST, read by real money: a close whose lane decision
     finished without deciding this file's rows (its part failed or ran past its own bound: the receipt names none of
@@ -1049,15 +1056,15 @@ def part_hold(lane: Lane | None, program: str, version: int, day: dt.date) -> tu
     if prog is None or prog.prereg != 5 or prog.spec is not None:
         return None
     if lane is None:
-        return ("wait", "no lane store to read PREREG-EVL-5's close decision from")
+        return ("wait", f"{PART_WAIT}: no lane store to read it from")
     try:
         row = lane.db.execute("SELECT summary FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', "
                               "'pending') ORDER BY id LIMIT 1", (f"decide-close:{day.isoformat()}",)).fetchone()
     except sqlite3.Error as exc:
-        return ("wait", f"the lane's close decision cannot be read ({type(exc).__name__})")
+        return ("wait", f"{PART_WAIT}, which cannot be read ({type(exc).__name__})")
     if row is None:
-        return ("wait", f"waits for the lane's own close decision of {day.isoformat()} to decide PREREG-EVL-5's rows "
-                        "(section 1.3: a close whose part for them failed is never traded)")
+        return ("wait", f"{PART_WAIT} of {day.isoformat()} to decide PREREG-EVL-5's rows (section 1.3: a close whose "
+                        "part for them failed is never traded)")
     if SN.names(row["summary"], SN.program_key(prog.id, prog.version)):
         return None
     return ("never", f"the lane's close decision of {day.isoformat()} finished without PREREG-EVL-5's rows (their part "
@@ -1133,4 +1140,4 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "lane_bands", "bands", "sessions_back", "FillWriter", "write_fills", "Pick", "rows_for", "rows_4",
            "held_recently", "picks", "next_open_event", "NEXT_OPEN_GUARD", "allocate", "one_name_an_auction", "t29",
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
-           "publish", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader", "part_hold"]
+           "publish", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader", "part_hold", "PART_WAIT"]

@@ -41,10 +41,13 @@ import sqlite3
 import tempfile
 import unittest
 from decimal import Decimal
+from decimal import Decimal as D_
 from pathlib import Path
+from typing import Callable
 from unittest import mock
 
 from league import ci
+from league.equity import live as L
 from league.events import book as EB
 from league.events import calendar as C
 from league.events import house as H
@@ -57,6 +60,7 @@ from league.events import store as S
 from league.events import verdicts as V
 from league.tests import evl5_world as W
 from league.tests import test_events_book as TB
+from league.tests import test_events_house as TH
 from league.tests.test_events_house import Clock, FakeHouse, Mono
 
 UTC = dt.timezone.utc
@@ -682,10 +686,19 @@ class ThePrePass(WorldCase):
         self.assertEqual(pre["cut"], S.iso(et(D, 9, 47)))
         kept = {r[0] for r in self.st.db.execute("SELECT cik FROM eligibility WHERE day=? AND rule='live'", (D.isoformat(),))}
         self.assertTrue(survivors <= kept, "each survivor's eligibility kept as read (the live rule)")
-        marks = {r[0] for r in self.st.db.execute("SELECT symbol FROM marks WHERE label='0930' AND day=?", (D.isoformat(),))}
-        self.assertEqual(marks, {"SSS", "TTT", "UUU", "YYY", "AAB", "AAC"})
+        marks = {r[0]: r[1] for r in self.st.db.execute("SELECT symbol, px FROM marks WHERE label='0930' AND day=?",
+                                                         (D.isoformat(),))}
+        self.assertEqual(set(marks), {"SSS", "TTT", "UUU", "YYY", "AAC"},
+                         "a batch stores only a price: AAB's 09:30 minute had no trade, so the pre-pass stores nothing")
+        self.assertTrue(all(px is not None for px in marks.values()))
         self.assertEqual(self.intents("EVL-NEWS-NIGHT2-ON"), [], "no intent, no receipt")
         self.assertIsNone(self.st.db.execute("SELECT 1 FROM receipts WHERE job=?", (f"decide-close:{D}",)).fetchone())
+        # the close decision reads AAB alone (09:30-09:35 ET): later minutes traded and 09:30 did not, so no trade there
+        self.w.at(et(D, 15, 47)).decide("close", D)
+        row = self.st.db.execute("SELECT px, source FROM marks WHERE label='0930' AND day=? AND symbol='AAB'",
+                                 (D.isoformat(),)).fetchone()
+        self.assertEqual((row["px"], row["source"]), (None, "sip-1min:none"))
+        self.assertNotIn("AAB", self.taken("EVL-NEWS-NIGHT2-ON"))
 
     def test_the_pre_pass_and_the_close_give_what_one_computation_at_the_close_gives(self):
         """Every rule is unchanged by where it is read: the pre-pass at 09:47 ET and the close decision (which adds
@@ -716,6 +729,83 @@ class ThePrePass(WorldCase):
         self.assertEqual(summary["pre"]["cut"], S.iso(et(D, 15, 17)))
         self.assertEqual((summary["pre"]["added"], summary["pre"]["removed"]), (0, 0), "the 15:17 pass moved the cut")
         self.assertEqual(json.loads(other.st.meta(f"{R.PRE_KEY}{D}") or "null"), None, "no pre-pass in the other")
+
+
+    def night2(self, world: W.World, *, pre: Callable[[W.Gateway], None] | None, close: Callable[[W.Gateway], None]
+               = lambda gw: None) -> tuple[list[tuple], dict]:
+        """D decided as the House decides it: the open, a pre-pass at 09:47 ET under `pre`'s feed (None: no pre-pass),
+        the live close decision under `close`'s feed; EVL-NEWS-NIGHT2-ON's shadow intents and the real-money picks of
+        D's close, read by the book after the lane's close decision (the lane's marks first, the book's own read
+        else)."""
+        W.evl5_rows(world)
+        world.at(et(D, 9, 15, 30)).decide("open", D)
+        if pre is not None:
+            pre(world.gw)
+            world.at(et(D, 9, 47)).decide("close", D, ask_only=True)
+        world.gw.minutes_down, world.gw.minutes_partial = False, set()
+        close(world.gw)
+        world.at(et(D, 15, 47)).decide("close", D)
+        world.gw.minutes_down, world.gw.minutes_partial = False, set()
+        lane = EB.Lane(world.root / S.DB_NAME)
+        try:
+            session = C.session(lane, D)
+            gap = EB.gap_reader(lane, D, opens=W.opening)
+            reaction = EB.reaction_reader(lane, D, daily=lambda symbol, d: W.CLOSES.get((symbol, d), 20.0),
+                                          minutes=lambda symbol, session: W.MINUTE.get(symbol))
+            prog = EB.program_of("EVL-NEWS-NIGHT2-ON", 1)
+            picks = [x.symbol for x in EB.picks(lane, prog, D, decided_at=session.close_decide, reaction=reaction,
+                                                gap=gap)]
+        finally:
+            lane.close()
+        return world.intents(lambda p, v: p == "EVL-NEWS-NIGHT2-ON"), {"picks": picks}
+
+    def test_an_empty_or_partial_pre_pass_answer_removes_nothing(self):
+        """The judges' review of this release (major): a 200 answer with no bar, or one that leaves names out, at the
+        09:47 ET pre-pass stores NO row for the names it lacks (a batch stores only a price), so the close decision
+        reads them and decides EVL-NEWS-NIGHT2-ON exactly as one computation at the close does, in the shadow and in
+        real money (PREREG-EVL-1 section 3: an outage removes nothing; section 1.3: unchanged by where it is read)."""
+        def down(gw: W.Gateway) -> None:
+            gw.minutes_down = True
+
+        def partial(gw: W.Gateway) -> None:
+            gw.minutes_partial = {"SSS", "TTT", "AAC"}
+        worlds = {}
+        for name, pre in (("once", None), ("down", down), ("partial", partial), ("whole", lambda gw: None)):
+            world = W.World(Path(self.tmp.name) / name)
+            self.addCleanup(world.close)
+            worlds[name] = (world, *self.night2(world, pre=pre))
+        once = worlds["once"]
+        self.assertEqual(sorted(r[3] for r in once[1]), ["AAC", "SSS", "TTT", "YYY"])
+        self.assertEqual(sorted(once[2]["picks"]), ["AAC", "SSS", "TTT", "YYY"])
+        for name in ("down", "partial", "whole"):
+            world, intents, real = worlds[name]
+            self.assertEqual(intents, once[1], name)
+            self.assertEqual(real, once[2], name)
+        down_world = worlds["down"][0]
+        self.assertEqual(down_world.st.db.execute("SELECT COUNT(*) FROM marks WHERE label='0930' AND px IS NULL "
+                                                  "AND symbol!='AAB'").fetchone()[0], 0, "no row of no trade but AAB's")
+
+    def test_a_close_read_with_no_bar_stores_nothing_and_the_next_decision_reads_it(self):
+        """A decision's read of a name alone: an answer with no bar at all is no answer (nothing stored: no gap at this
+        decision, the shadow's next decision reads it again); a later minute's bar with none at 09:30 is the tape's
+        word that the minute had no trade (a row with no price, never read again)."""
+        world = self.w
+        W.evl5_rows(world)
+        world.at(et(D, 9, 15, 30)).decide("open", D)
+        world.gw.minutes_down = True
+        world.at(et(D, 15, 47)).decide("close", D)
+        self.assertEqual(world.st.db.execute("SELECT COUNT(*) FROM marks WHERE label='0930'").fetchone()[0], 0)
+        self.assertEqual(self.taken("EVL-NEWS-NIGHT2-ON"), [], "no gap read: nothing taken at this decision")
+        world.gw.minutes_down = False
+        world.at(et(D, 16, 41)).decide("close", D, live=False)
+        self.assertEqual(self.taken("EVL-NEWS-NIGHT2-ON"), ["AAC", "SSS", "TTT", "YYY"], "the shadow's re-decision")
+        none = world.st.db.execute("SELECT symbol FROM marks WHERE label='0930' AND px IS NULL").fetchall()
+        self.assertEqual([r[0] for r in none], ["AAB"])
+        before = len(world.gw.gets)
+        world.at(et(D, 17, 41)).decide("close", D, live=False)
+        reads = [g for g in world.gw.gets[before:] if g[0].endswith("/v2/stocks/bars") and g[1].get("timeframe") == "1Min"
+                 and S.parse_iso(g[1]["end"]) - S.parse_iso(g[1]["start"]) <= dt.timedelta(minutes=5)]
+        self.assertEqual(reads, [], "every survivor's minute is stored: none is read again")
 
 
 class ThePrePassSchedule(WorldCase):
@@ -1087,6 +1177,261 @@ class TheBookLive(TB.EventTest):
         self.assertEqual(h.bodies(), [])
 
 
+class TheRoomWhileItWaits(TB.EventTest):
+    """The money review of release 1019g (major): while a PREREG-EVL-5 buy waits for the lane's close decision
+    (`book.part_hold`), ROOM's order holds at the close auction: every buy AFTER it in ROOM's order is sized and counted
+    as if the waiting buy were already working (its worst case out of their cash, invested room, loss budget and name
+    wall; its send and its exit out of the event line and the House-wide line), and a later buy that fits only without
+    that room waits too instead of being refused; the waiting buy is never held behind them. Invented figures: E is
+    $2,000 and the options book reserves $1,905, so $45 of cash is free (the $50 reserve kept): one learning buy of two
+    shares at its $20.00 limit fits, two do not."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(P.load_births, None)
+
+    def fall(self, h: TB.Harness, symbol: str, cik: str, acc: str, mark: float, *, score: int = 1,
+             day: dt.date = TB.DAY, prior: dt.date = TB.PRIOR) -> None:
+        """An earnings 8-K of `symbol` accepted at 16:30 ET of `prior`, its verdict, its universe row of `day` ($16.00:
+        the $20.00 limit), the raw close of `prior` ($16.00) and the T29 mark of `day` (`mark`)."""
+        h.lane.universe(day, symbol, cik, 16.0)
+        h.lane.filing(acc, cik, accepted=TB.iso(prior, 16, 30), items=("2.02",))
+        h.lane.verdict(acc, score, answered=TB.iso(prior, 16, 40))
+        h.lane.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, '1530', ?, 't', "
+                             "'sip-1min', 'x')", (symbol, day.isoformat(), mark))
+        h.lane.st.db.execute("INSERT OR REPLACE INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES(?, ?, 'raw', "
+                             "16, 16, 16, 16.0, 1e6, 'x')", (symbol, prior.isoformat()))
+        h.symbol(symbol, last=mark)
+        h.venue.prints[(symbol, day.isoformat(), "close")] = D_("15.30")
+
+    def birth(self, h: TB.Harness) -> P.Program:
+        """A registered close-entry birth of R3 (a fall to 0.97 or less with a PROMPT-DOC score >= 1, by the reaction,
+        out at the next open), seatable: ROOM puts it after every PREREG program (`book.BIRTH_ROOM`)."""
+        from league.events import births as BI
+
+        sp = {"id": "EVL-B-ERNREACT-DIP", "version": 1, "family": "ern-react",
+              "rule": {"react_max": 0.97, "score_min": 1}, "entry": BI.ENTRY["ern-react"], "exit": "open", "hold": 1,
+              "rank": "reaction", "seatable": True}
+        at = "2026-11-03T01:00:00Z"
+        h.lane.st.db.execute("INSERT INTO births(id, version, sha, spec, seatable, registered_at, committed_at, "
+                             "received_at, path, commit_sha, seq, line, why, by, night) VALUES(?, 1, ?, ?, 1, ?, ?, ?, "
+                             "'docs/births/2026-11-02.jsonl', ?, 0, '{}', 'x', 'captain', '2026-11-02')",
+                             (sp["id"], BI.sha(sp), BI.canonical(sp), at, at, at, "c" * 40))
+        [born] = [b for b in P.load_births(h.lane.st) if b.id == sp["id"]]
+        return born
+
+    def receipt(self, h: TB.Harness, *names: str, day: dt.date = TB.DAY) -> None:
+        rid = h.lane.st.start_receipt(f"decide-close:{day.isoformat()}")
+        h.lane.st.finish_receipt(rid, "ok", {name: {"planned": 1} for name in names})
+
+    def sent(self, h: TB.Harness) -> list[tuple[str, str]]:
+        return [(b["symbol"], b["qty"]) for b in h.bodies() if b["side"] == "buy"]
+
+    def buy(self, h: TB.Harness, symbol: str) -> dict:
+        [row] = [r for r in h.event_intents("buy") if r["symbol"] == symbol]
+        return row
+
+    def test_a_birth_after_a_waiting_learning_row_leaves_it_the_cash(self):
+        h = self.harness()
+        h.options.reserved_usd = 1905.0
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)                # 0.95: EVL-ERN-DROP-ON (learning, its row first)
+        self.fall(h, "BETA", TB.CIK2, "e-2", 15.44)              # 0.965: the birth's alone (DROP needs <= 0.96)
+        born = self.birth(h)
+        self.assertGreater(EB.room_key(born.id, "learning"), EB.room_key("EVL-ERN-DROP-ON", "learning"))
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        self.assertEqual(sorted((r["program"], r["symbol"]) for r in h.event_intents("buy")),
+                         [(born.id, "BETA"), ("EVL-ERN-DROP-ON", "ACME")])
+        self.assertEqual(self.sent(h), [], "the birth does not take the $40 ROOM keeps for the waiting buy")
+        self.assertIn(EB.PART_WAIT, self.buy(h, "ACME")["why"])
+        self.assertIn(L.HELD_ROOM, self.buy(h, "BETA")["why"], "it waits too: refused only once the room is spent")
+        self.assertEqual(self.buy(h, "BETA")["status"], "planned")
+        self.receipt(h, "EVL-ERN-DROP-ON")
+        h.tick(15, 48)
+        self.assertEqual(self.sent(h), [("ACME", "2")], "the waiting buy gets its two shares: ROOM's order")
+        self.assertEqual(self.buy(h, "BETA")["status"], "refused")
+        self.assertIn("no whole share fits", self.buy(h, "BETA")["why"])
+
+    def test_a_close_that_never_names_the_row_frees_its_room_for_the_buy_after_it(self):
+        h = self.harness()
+        h.options.reserved_usd = 1905.0
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)
+        self.fall(h, "BETA", TB.CIK2, "e-2", 15.44)
+        born = self.birth(h)
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        rid = h.lane.st.start_receipt(f"decide-close:{TB.DAY.isoformat()}")
+        h.lane.st.finish_receipt(rid, "ok", {f"{born.id}@v1": {"planned": 1}, "evl5_error": "PartDeadline: past its bound"})
+        h.tick(15, 48)
+        self.assertEqual(self.buy(h, "ACME")["status"], "refused", "never traded")
+        self.assertEqual(self.sent(h), [("BETA", "2")], "nothing is kept for a buy that will never go")
+
+    def test_a_waiting_probe_row_leaves_a_learning_row_of_preregevl1_after_it_the_cash(self):
+        h = self.harness()
+        h.options.reserved_usd = 1905.0
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)                # EVL-ERN-DROP-ON at Probe: (1, 12)
+        self.fall(h, "GAMA", TB.CIK3, "e-3", 16.8, score=0)      # 1.05: EVL-ERN-REACT-C1 at learning: (2, 1)
+        h.lane.band("EVL-ERN-DROP-ON", "probe", version=1)
+        self.assertLess(EB.room_key("EVL-ERN-DROP-ON", "probe"), EB.room_key("EVL-ERN-REACT-C1", "learning"))
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        programs = {r["symbol"]: (r["program"], r["band"]) for r in h.event_intents("buy")}
+        self.assertEqual(programs, {"ACME": ("EVL-ERN-DROP-ON", "probe"), "GAMA": ("EVL-ERN-REACT-C1", "learning")})
+        self.assertEqual(self.sent(h), [], "the learning row does not take the Probe row's cash while it waits")
+        self.receipt(h, "EVL-ERN-DROP-ON")
+        h.tick(15, 48)
+        self.assertEqual(self.sent(h), [("ACME", "2")], "Probe first: two shares, all the $45 holds")
+        self.assertEqual(self.buy(h, "GAMA")["status"], "refused")
+
+    def test_a_waiting_row_keeps_its_send_and_its_exit_on_the_event_line(self):
+        h = self.harness()
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)
+        self.fall(h, "BETA", TB.CIK2, "e-2", 15.44)
+        born = self.birth(h)
+        h.lane.decided(TB.DAY, "open")
+        tight = dataclasses.replace(EB.settings(), max_orders_day=2)    # (the line: one entry and its exit)
+        with mock.patch.object(EB, "settings", lambda constitution=None: tight):
+            for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            self.assertEqual(self.sent(h), [], "the birth leaves the line's two orders to the waiting buy")
+            self.assertIn("the event kind's day order count", self.buy(h, "BETA")["why"])
+            self.assertIn(L.HELD_AHEAD, self.buy(h, "BETA")["why"])
+            self.receipt(h, "EVL-ERN-DROP-ON", f"{born.id}@v1")
+            h.tick(15, 48)
+        self.assertEqual(self.sent(h), [("ACME", "2")])
+
+    def test_a_decision_started_at_its_time_gives_the_book_a_minute_to_send(self):
+        """The same book minutes (at :40 seconds), the lane's close decision started at 15:47:00 ET (the lane's hold,
+        `house.HOLD_LEAD`) and finished at 15:47:05: the 15:47:40 minute sends the buy, well before the cut-off."""
+        h = self.harness()
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16)):
+            h.tick(hh, mm)
+        h.tick(15, 46, 40)
+        self.receipt(h, "EVL-ERN-DROP-ON")                       # (15:47:05 ET)
+        h.tick(15, 47, 40)
+        self.assertEqual(self.sent(h), [("ACME", "2")])
+
+    def test_buys_left_unsent_waiting_for_the_lanes_decision_are_counted_and_a_recurrence_alarmed(self):
+        """The money review's third finding: at realistic tick spacing (a book minute at :40 seconds) a lane decision
+        that finishes at 15:48:50 ET leaves its rows' buy unsent at the window's cut-off (the close - 11 minutes); the
+        book says it after the close (an `equity.alert`, info), the lane's report counts it per close
+        (`room_effects`), and a second such close within five sessions makes the alarm a warning."""
+        h = self.harness()
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16)):
+            h.tick(hh, mm)
+        for mm in (46, 47, 48):
+            h.tick(15, mm, 40)
+        self.receipt(h, "EVL-ERN-DROP-ON")                       # (15:48:50 ET)
+        h.tick(15, 49, 40)
+        h.tick(16, 2, 10)
+        buy = self.buy(h, "ACME")
+        self.assertEqual(buy["status"], "missed")
+        self.assertIn("never sent", buy["why"])
+        self.assertIn(EB.PART_WAIT, buy["why"])
+        self.assertEqual(self.sent(h), [])
+        [said] = [p for k, p in h.events if k == "equity.alert" and "evl5_held_unsent" in p]
+        self.assertEqual((said["day"], said["evl5_held_unsent"], said["recent"]), (TB.DAY.isoformat(), 1, []))
+        self.assertEqual([lv for lv, text in h.alerts if "PREREG-EVL-5" in text], ["info"])
+        room = RP.room_effects(h.lane.st, TB.DAY)
+        self.assertEqual((room["held_unsent"], room["room_waited"]), (1, 0))
+        self.assertEqual(RP.HELD_UNSENT, EB.PART_WAIT)
+        self.assertEqual(RP.ROOM_WAIT, L.HELD_AHEAD)
+        self.assertNotIn(RP.ROOM_WAIT, EB.PART_WAIT, "a waiting buy of these rows is never counted as a later one")
+        h.tick(16, 5)
+        self.assertEqual(len([p for k, p in h.events if k == "equity.alert" and "evl5_held_unsent" in p]), 1, "once")
+        # the next session, the same late decision: it recurs
+        self.fall(h, "OMEG", "0000000009", "e-9", 15.0, day=TB.NEXT, prior=TB.DAY)
+        h.lane.decided(TB.NEXT, "open")
+        for hh, mm in ((9, 15), (9, 16)):
+            h.tick(hh, mm, day=TB.NEXT)
+        for mm in (46, 47, 48):
+            h.tick(15, mm, 40, day=TB.NEXT)
+        self.receipt(h, "EVL-ERN-DROP-ON", day=TB.NEXT)
+        h.tick(15, 49, 40, day=TB.NEXT)
+        h.tick(16, 2, 10, day=TB.NEXT)
+        said = [p for k, p in h.events if k == "equity.alert" and "evl5_held_unsent" in p]
+        self.assertEqual((said[-1]["day"], said[-1]["recent"]), (TB.NEXT.isoformat(), [TB.DAY.isoformat()]))
+        self.assertEqual([lv for lv, text in h.alerts if "PREREG-EVL-5" in text], ["info", "warning"])
+
+
+class TheLanesTurnForItsCloseDecision(TH.LaneCase):
+    """The money review of release 1019g (third finding): real money buys this file's rows only once the lane's close
+    decision has finished and only until the close - 11 minutes, while the lane's turns start only on the House's
+    publishes. From `HOLD_LEAD` before its live close decision (the close decision + CLOSE_GRACE, 15:47:00 ET) a turn
+    keeps going: it runs what falls due meanwhile and starts the decision AT its time, not at the next publish; `due()`
+    looks again no later than the lead's start. Here the lane's sleep moves the House's clock."""
+
+    def new_lane(self, redecide=False, **settings):
+        lane = super().new_lane(redecide, **settings)
+
+        def sleep(seconds: float) -> None:
+            self.mono.advance(seconds)
+            self.clock.advance(seconds)
+        lane._sleep = sleep
+        self.ran: list[tuple[str, str]] = []
+        note = lane._note
+
+        def noted(name, status, summary, began):
+            self.ran.append((name, S.iso(lane.now())))
+            return note(name, status, summary, began)
+        lane._note = noted
+        return lane
+
+    def opened(self, day: str = "2026-10-20") -> None:
+        with self.store() as st:
+            rid = st.start_receipt(f"decide-open:{day}", now=TH.et(day, "09:15"))
+            st.finish_receipt(rid, "ok", {}, now=TH.et(day, "09:16"))
+
+    def test_a_turn_inside_the_lead_starts_the_live_close_decision_at_its_time(self):
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:44") + dt.timedelta(seconds=40))
+        self.mark_recorded()
+        self.lane.run()
+        [close] = self.receipts("decide-close:2026-10-20")
+        self.assertEqual(close["started_at"], "2026-10-20T19:47:00Z", "at 15:47:00 ET, not at the next publish")
+        self.assertEqual(close["status"], "ok")
+        names = [n for n, _ in self.ran]
+        self.assertEqual(names[-1], "decide-close")
+        self.assertIn("record", names, "what fell due in the lead ran in it (the record pass at 15:46:40)")
+        self.assertTrue(all(at < "2026-10-20T19:47:00Z" for n, at in self.ran if n != "decide-close"))
+        self.assertIsNone(self.lane.health()["running"])
+
+    def test_due_looks_again_at_the_leads_start_and_no_rows_no_hold(self):
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:42"))
+        self.mark_recorded(TH.et("2026-10-20", "15:42") + dt.timedelta(seconds=50))   # (the next record pass: 15:44:50)
+        self.lane._looks[("close", dt.date(2026, 10, 20))] = H.VerdictLook(TH.et("2026-10-20", "15:42"), 0, False)
+        for _ in range(6):                                    # (the turns of what is due at 15:42, until none is)
+            self.lane.run()
+            if self.lane._next_look > self.clock():
+                break
+        self.assertGreater(self.lane._next_look, self.clock(), "nothing more is due at 15:42")
+        self.assertEqual(self.lane._next_look, (TH.et("2026-10-20", "15:47") - H.HOLD_LEAD).timestamp(),
+                         "the next look is the lead's start (15:44:30 ET), before the record pass due at 15:44:50")
+        self.assertEqual(self.receipts("decide-close:2026-10-20"), [])
+        with mock.patch.object(R, "five_programs", return_value=[]):
+            self.at(TH.et("2026-10-20", "15:45"))
+            self.lane._next_look = float("-inf")
+            self.lane.run()
+        self.assertEqual(self.receipts("decide-close:2026-10-20"), [], "no PREREG-EVL-5 rows: the turn ends as before")
+
+    def test_a_clock_that_does_not_move_ends_the_held_turn(self):
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:46"))
+        self.mark_recorded()
+        self.lane._sleep = self.mono.advance                  # (the House's clock stays where it is)
+        self.lane.run()
+        self.assertEqual(self.receipts("decide-close:2026-10-20"), [])
+        self.assertIsNone(self.lane.health()["running"])
+
+
 # ----------------------------------------------------------------------------------------------- the record before
 class TheRecordBeforeTheRelease(unittest.TestCase):
     """Section 3: every close decision from the registration time to the first one the House release carrying this
@@ -1248,15 +1593,22 @@ class TheReport(WorldCase):
                 (3, "EVL-ERN-READ-O1", "buy", "learning", NEXT, "open", "refused",
                  "sizing: no whole share fits (cash): refused: the cash"),
                 (4, "EVL-ERN-READ-O1", "buy", "probe", NEXT, "open", "refused",
-                 "sizing: no whole share fits (cash): refused: the cash")]
+                 "sizing: no whole share fits (cash): refused: the cash"),
+                (5, "EVL-ERN-UNDER-ON", "buy", "learning", D, "close", "missed",
+                 f"not filled at the close auction (never sent: {EB.PART_WAIT} of {D} to decide PREREG-EVL-5's rows)"),
+                (6, "EVL-B-ERNREACT-DIP", "buy", "learning", D, "close", "missed",
+                 f"not filled at the close auction (never sent: {L.HELD_ROOM} (1 {L.HELD_AHEAD}): skipped)"),
+                (7, "EVL-ERN-REACT-C1", "buy", "learning", D, "close", "done", f"filled 2 shares at the close")]
         for iid, program, side, band, day, at_, status, why in rows:
             db.execute("INSERT INTO eq_intents VALUES(?, ?, ?)", (iid, status, why))
             db.execute("INSERT INTO eq_event_intents VALUES(?, ?, ?, ?, ?, ?)", (iid, program, side, band, day.isoformat(),
                                                                                  at_))
         db.commit()
         db.close()
-        self.assertEqual(RP.room_effects(self.st, D), {"line_refused": 1, "exits_held": 0, "open_lost": 0})
-        self.assertEqual(RP.room_effects(self.st, NEXT), {"line_refused": 0, "exits_held": 1, "open_lost": 1})
+        self.assertEqual(RP.room_effects(self.st, D), {"line_refused": 1, "exits_held": 0, "open_lost": 0,
+                                                       "held_unsent": 1, "room_waited": 1})
+        self.assertEqual(RP.room_effects(self.st, NEXT), {"line_refused": 0, "exits_held": 1, "open_lost": 1,
+                                                          "held_unsent": 0, "room_waited": 0})
         rep = RP.build(self.st, D, now=et(D, 21, 5))
         self.assertEqual(rep["evl5"]["funnel"]["survivors"], 5)
         self.assertEqual(rep["evl5"]["funnel"]["gap_pass"], 3)
@@ -1267,6 +1619,7 @@ class TheReport(WorldCase):
         text = RP.render(rep)
         self.assertIn("PREREG-EVL-5: ERN(D)", text)
         self.assertIn("room: line refused 1", text)
+        self.assertIn("unsent waiting for the close decision 1 (later buys 1)", text)
         rid = self.st.start_receipt(f"decide-close:{D}", now=et(D, 17, 0))
         self.st.finish_receipt(rid, "ok", {"evl5_error": "RuntimeError: invented"}, now=et(D, 17, 0))
         self.assertEqual(RP.evl5(self.st, D)["failed"], [{"day": D.isoformat(), "error": "RuntimeError: invented",
