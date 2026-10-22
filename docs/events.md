@@ -409,8 +409,8 @@ after 21:26:21Z Oct 21):
   minute, 15:47:00 ET) keeps going, running what falls due and waiting between, and starts the decision at 15:47:00, not
   at the next House publish; `due()` looks again no later than the lead's start. INSIDE THE LEAD NO OTHER DECISION
   STARTS (release 1019g, PREREG-EVL-5's money re-review; `_lead`): a decision runs with the whole 150 s budget, never
-  bounded by the next decision as the other tasks are, so a missed, cut, pending or failed decision of another
-  session, the hourly re-decision and the rows' own backfill decisions (`decide-close-evl4`, `decide-close-evl5`, the
+  bounded by the next decision as the other tasks are, so a missed, cut, pending or failed decision (today's
+  open included), the hourly re-decision and the rows' own backfill decisions (`decide-close-evl4`, `decide-close-evl5`, the
   births') wait until the live one has a receipt, and then run whole. A bound is checked before each network read, so a
   task's last read (the gateway's timeout is 45 s) can return after it: a task that returns at or after 15:47:00 never
   ends the turn while the live decision is owed (no receipt, still live): the turn starts it at once (`_close_owed`).

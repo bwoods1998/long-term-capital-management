@@ -182,9 +182,9 @@ URGENT_BEFORE = dt.timedelta(minutes=30)
 #: has programs, at most HOLD_TURNS tasks a turn.
 #: INSIDE THE LEAD NO OTHER DECISION STARTS (the money re-review of PREREG-EVL-5, wf_03d60ddf-1c3; `_lead`): a decision
 #: task runs with the whole DECIDE_BUDGET (`_deadline` bounds every other task by the next decision, never a decision),
-#: so from HOLD_LEAD before the live close decision until it has started, a missed, cut, pending or failed decision of
-#: another session, the hourly re-decision and the backfill kinds (`BACKFILL_KINDS`) wait; each is due again once the
-#: live decision has a receipt (a deferred decision runs whole, never cut by the hold). Every other task is bounded to
+#: so from HOLD_LEAD before the live close decision until it has started, every other decision waits (a missed, cut,
+#: pending or failed one, today's open included, the hourly re-decision and the backfill kinds, `BACKFILL_KINDS`); each
+#: is due again once the live decision has a receipt (a deferred decision runs whole, never cut by the hold). Every other task is bounded to
 #: end DECISION_MARGIN before the decision, as before; none starts inside that margin. A BOUND IS NOT A PROMISE: a task
 #: checks its bound before each network read, and one read can return after it (the gateway's timeout is 45 s); a
 #: decision started before the lead ends by the decision's time only if no read overruns (HOLD_LEAD >= DECIDE_BUDGET).

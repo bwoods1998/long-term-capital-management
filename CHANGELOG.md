@@ -123,7 +123,7 @@ programs trades real money at learning size.
   them could end unsent. Two ordinary paths: every decision task runs with the whole `DECIDE_BUDGET` (`_deadline` bounds
   none), and a bounded task's last network read (the gateway's 45 s timeout) can return after its bound. NOW: (1) from
   `HOLD_LEAD` before the live close decision until it has a receipt, no other decision starts (a missed, cut, pending or
-  failed decision of another session, the hourly re-decision, `decide-close-evl4`, `decide-close-evl5` and the births'
+  failed decision, today's open included, the hourly re-decision, `decide-close-evl4`, `decide-close-evl5` and the births'
   own wait, then run whole: none is cut by the hold); (2) a task that returns at or after the decision's time never ends
   the turn while the live decision has no receipt and is still live: the turn starts it at once. The HOLD_LEAD comment,
   the module docstring and docs/events.md say so (they said every task ended 5 s before the decision; false for
