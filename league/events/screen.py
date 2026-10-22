@@ -82,19 +82,25 @@ SEATABLE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-R
             "EVL-ERN-REACT-ON", "EVL-ERN-GUIDE-O1", "EVL-INS-BUY-O1", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON",
             # PREREG-EVL-4 (registered 2026-10-19T16:01:05Z): seatable from birth at version 1, judged by PREREG-EVL-3's
             # screen unchanged (`_seating`: their version 1 runs `_run_v2`)
-            "EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON")
+            "EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON",
+            # PREREG-EVL-5 (registered 2026-10-21T21:26:21Z): the same, at version 1 (its section 2)
+            "EVL-ERN-DROP-ON", "EVL-ERN-UNDER-ON", "EVL-NEWS-NIGHT2-ON")
 RECORDS = ("EVL-ERN-READ-O3", "EVL-INS-CLUSTER-O5", "EVL-CTRL-ERN-ALL-O1", "EVL-CTRL-8K-ALL-O1", "EVL-CTRL-NEWS-ALL-O1",
            "EVL-INS-BUY-O5", "EVL-ERN-REACT-READ-C1", "EVL-ERN-READ3-O1", "EVL-CTRL-NEWS-DAY-ON",
            # PREREG-EVL-4's controls (free records: never seated, never screened)
-           "EVL-CTRL-8K-ON", "EVL-CTRL-NEWSPM-ON")
+           "EVL-CTRL-8K-ON", "EVL-CTRL-NEWSPM-ON",
+           # PREREG-EVL-5's control (section 4)
+           "EVL-CTRL-ERN-UNDER-ON")
 #: A READ program's control (its mean block value must exceed the control's over the same sessions).
 CONTROLS: dict[str, str] = {"EVL-ERN-READ-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-8K-READ-O1": "EVL-CTRL-8K-ALL-O1",
                             "EVL-NEWS-READ-O1": "EVL-CTRL-NEWS-ALL-O1",
                             "EVL-ERN-GUIDE-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-NEWS-READ-ON": "EVL-CTRL-NEWS-DAY-ON",
                             # PREREG-EVL-4 section 4 (EVL-8K-REACT-ON reads no verdict and has no control condition)
-                            "EVL-8K-READ-ON": "EVL-CTRL-8K-ON", "EVL-NEWSPM-READ-ON": "EVL-CTRL-NEWSPM-ON"}
-#: Sessions held as the prereg counts them (C1, close to next close, holds one; PREREG-EVL-2's and PREREG-EVL-4's
-#: close-to-next-open programs hold one). The screen judges only the seatable programs, every one a one-session hold,
+                            "EVL-8K-READ-ON": "EVL-CTRL-8K-ON", "EVL-NEWSPM-READ-ON": "EVL-CTRL-NEWSPM-ON",
+                            # PREREG-EVL-5 section 4 (EVL-ERN-DROP-ON and EVL-NEWS-NIGHT2-ON read no verdict and have none)
+                            "EVL-ERN-UNDER-ON": "EVL-CTRL-ERN-UNDER-ON"}
+#: Sessions held as the prereg counts them (C1, close to next close, holds one; PREREG-EVL-2's, PREREG-EVL-4's and
+#: PREREG-EVL-5's close-to-next-open programs hold one). The screen judges only the seatable programs, every one a one-session hold,
 #: so each of their blocks is one entry session.
 HOLDS: dict[str, int] = {"EVL-ERN-READ-O1": 1, "EVL-ERN-REACT-C1": 1, "EVL-8K-READ-O1": 1, "EVL-NEWS-READ-O1": 1,
                          "EVL-ERN-READ-O3": 3, "EVL-INS-CLUSTER-O5": 5, "EVL-CTRL-ERN-ALL-O1": 1, "EVL-CTRL-8K-ALL-O1": 1,
@@ -103,7 +109,8 @@ HOLDS: dict[str, int] = {"EVL-ERN-READ-O1": 1, "EVL-ERN-REACT-C1": 1, "EVL-8K-RE
                          "EVL-NEWS-REACT-ON": 1, "EVL-INS-BUY-O5": 5, "EVL-ERN-REACT-READ-C1": 1, "EVL-ERN-READ3-O1": 1,
                          "EVL-CTRL-NEWS-DAY-ON": 1,
                          "EVL-8K-REACT-ON": 1, "EVL-8K-READ-ON": 1, "EVL-NEWSPM-READ-ON": 1, "EVL-CTRL-8K-ON": 1,
-                         "EVL-CTRL-NEWSPM-ON": 1}
+                         "EVL-CTRL-NEWSPM-ON": 1,
+                         "EVL-ERN-DROP-ON": 1, "EVL-ERN-UNDER-ON": 1, "EVL-NEWS-NIGHT2-ON": 1, "EVL-CTRL-ERN-UNDER-ON": 1}
 
 
 # ----------------------------------------------------------------------------------------------------------- basics
@@ -804,6 +811,14 @@ FEED_NAMES = {"8-K": "8-K", "4": "Form 4", "news": "news"}
 #: never decided (the reading that waits: a House that never ran it could only delay the look).
 NAMED_FROM = 4
 FOUR_KIND = "close-evl4"
+#: PREREG-EVL-5 section 3, THE RECORD BEFORE THE RELEASE, the same rule for its rows: a close decided by a release without
+#: them, OR WHOSE PART FOR THEM FAILED OR RAN PAST ITS OWN BOUND (section 1.3: its receipt finishes with the earlier rows
+#: and names none of them), is not made for them until a later receipt of their rows decided by themselves (`FIVE_KIND`,
+#: league/events/run.py `decide_close` with `evl5_only`) names them. A file's rows decided by themselves are named
+#: only by that file's kind (`FILE_KINDS`); a close decision made at or before a program's registration time is made for
+#: it (none of its events is in that decision's windows: section 3's "every close decision from the registration time").
+FIVE_KIND = "close-evl5"
+FILE_KINDS = {4: FOUR_KIND, 5: FIVE_KIND}
 #: A DECISION MADE WITHOUT A REGISTERED BIRTH'S ROWS IS NOT MADE FOR IT (release 1019e's review; PREREG-EVL-1 section 3:
 #: "an outage removes nothing"). A birth (R3, league/events/births.py) is prereg 3, so the rule above (`NAMED_FROM`)
 #: never reached it: a receipt that never named a birth, made by a release without births (the documented rollback to
@@ -863,14 +878,25 @@ def four_programs() -> tuple[Any, ...]:
     return tuple(p for p in PROGRAMS if p.prereg == 4)
 
 
-def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None) -> dict[dt.date, bool]:
-    """THE CLOSES WHOSE PREREG-EVL-4 ROWS ARE STILL TO DECIDE BY THEMSELVES: the sessions from the first close after
-    PREREG-EVL-4's registration (from `first`, when later) to `last` whose latest `decide-close` receipt is finished
-    `ok` or `pending` without naming every one of its programs (a release without their rows made it), and with no
-    later `FOUR_KIND` receipt finished `ok`. {day: stale}: stale when the session's latest `FOUR_KIND` receipt is older
-    than that receipt (its rows were decided by themselves, then the session again by such a release: decided again).
-    The House's lane and the CLI's catchup decide each of them (`FOUR_KIND`), once, as a backfill."""
-    four = four_programs()
+def file_programs(prereg: int) -> tuple[Any, ...]:
+    """The programs of PREREG-EVL-`prereg` (4 or 5), every one a close-entry program (that file's kind, `FILE_KINDS`,
+    decides them and nothing else)."""
+    from .programs import PROGRAMS
+
+    return tuple(p for p in PROGRAMS if p.prereg == int(prereg) and p.spec is None)
+
+
+def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None, prereg: int = 4) -> dict[dt.date, bool]:
+    """THE CLOSES WHOSE PREREG-EVL-4 ROWS (`prereg` 5: PREREG-EVL-5's) ARE STILL TO DECIDE BY THEMSELVES: the sessions
+    from the first close after that file's registration (from `first`, when later) to `last` whose latest `decide-close`
+    receipt is finished `ok` or `pending` without naming every one of its programs registered before its decision time
+    (a release without their rows made it, or, PREREG-EVL-5 section 1.3, its part for them failed or ran past its own
+    bound), and with no later receipt of that file's kind (`FILE_KINDS`: `FOUR_KIND`, `FIVE_KIND`) finished `ok`.
+    {day: stale}: stale when the session's latest such receipt is older than that receipt (its rows were decided by
+    themselves, then the session again without them: decided again). The House's lane and the CLI's catchup decide each
+    of them (that kind), once, as a backfill."""
+    own = FILE_KINDS[int(prereg)]
+    four = four_programs() if int(prereg) == 4 else file_programs(prereg)
     if not four:
         return {}
     since = min(p.registered_at for p in four).astimezone(C.NY).date()
@@ -878,7 +904,7 @@ def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None)
         since = max(since, first)
     if since > last:
         return {}
-    latest = _latest_receipts(store, ("close", FOUR_KIND))
+    latest = _latest_receipts(store, ("close", own))
     out: dict[dt.date, bool] = {}
     for x in C.sessions(store, since, last):
         rid, status, summary = latest.get(f"decide-close:{x.day.isoformat()}", (0, "", None))
@@ -887,7 +913,7 @@ def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None)
         keys = [program_key(p.id, p.version) for p in four if p.registered_at < x.close_decide]
         if all(names(summary, k) for k in keys):
             continue
-        rid4, status4, _ = latest.get(f"decide-{FOUR_KIND}:{x.day.isoformat()}", (0, "", None))
+        rid4, status4, _ = latest.get(f"decide-{own}:{x.day.isoformat()}", (0, "", None))
         if rid4 > rid and status4 == "ok":
             continue
         out[x.day] = 0 < rid4 < rid
@@ -995,25 +1021,28 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     # (release 1019c's review: a program of PREREG-EVL-4 or later reads a receipt that does not name it as not made,
     # unless a later receipt of its file's rows decided by themselves names it: `NAMED_FROM`, above)
     named = prog.prereg >= NAMED_FROM
+    own_kind = FILE_KINDS.get(int(prog.prereg), FOUR_KIND)     # (each file's rows by themselves: PREREG-EVL-4's, -5's)
     group = birth_group(prog)       # (R3: a birth and its control; [] for every PREREG program, which reads none of it)
     born_kind = BIRTHS_KIND.get(kind) if group else None
-    latest = _latest_receipts(store, (kind,) + ((FOUR_KIND,) if named else ()) + ((born_kind,) if born_kind else ()))
+    latest = _latest_receipts(store, (kind,) + ((own_kind,) if named else ()) + ((born_kind,) if born_kind else ()))
     since = max(first, (now - reach_lookback).astimezone(C.NY).date())
     # A66's second rule and A69's (iv): the first session from the look-back on whose decision is not made for it. A
     # program of PREREG-EVL-4 or later (`named`) reads a receipt finished `ok` or `pending` that does not name it as not
-    # made, unless a later receipt of its file's rows decided by themselves (`FOUR_KIND`) names it: then that one is
-    # its decision (`NAMED_FROM`, above). A registered birth (`group`) reads a decision made after its registration
+    # made, unless a later receipt of its file's rows decided by themselves (`FOUR_KIND`; `FIVE_KIND` for PREREG-EVL-5,
+    # whose close decided at or before its registration time is made for it: `FIVE_KIND`'s comment) names it: then that
+    # one is its decision (`NAMED_FROM`, above). A registered birth (`group`) reads a decision made after its registration
     # that does not name every member of its group the same way, with the births' own decision (`BIRTHS_KIND`), and
     # waits when a member of its group failed its part or is pending on its verdicts (`BIRTHS_KIND`'s comment).
     unmade: tuple[dt.date, str] | None = None
     for x in C.sessions(store, since, today):
         rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
-        if named and status in ("ok", "pending") and not names(summary, key):
-            rid4, status4, summary4 = latest.get(f"decide-{FOUR_KIND}:{x.day.isoformat()}", (0, "", None))
+        if named and status in ("ok", "pending") and not names(summary, key) and \
+                (own_kind != FIVE_KIND or _decision_time(x, kind) > prog.registered_at):
+            rid4, status4, summary4 = latest.get(f"decide-{own_kind}:{x.day.isoformat()}", (0, "", None))
             if kind == "close" and rid4 > rid and names(summary4, key):
                 status, summary = status4, summary4        # its rows decided by themselves, after that decision
             elif kind == "close" and rid4 > rid:
-                status = f"made without its rows ({FOUR_KIND}: {status4 or 'running'})"
+                status = f"made without its rows ({own_kind}: {status4 or 'running'})"
             else:
                 status = "made without its rows"
         if group and status in ("ok", "pending") and _decision_time(x, kind) > prog.registered_at and \
@@ -1094,11 +1123,23 @@ def _fast_block(store: S.Store, prog: Any, first: dt.date, x: C.Session, unmade:
         return "no session before it in the calendar"
     prior = before[-1]
     day = max(prior.day, first)
+    start = max(prior.open_cutoff, prog.registered_at)     # (no event before its registration counts)
+    if getattr(prog, "prereg", None) == 5 and getattr(prog, "spec", None) is None:
+        # PREREG-EVL-5 section 2: FOR ITS ROWS A69's span begins at the earliest window that feeds their decision of
+        # close X, the close decision time of P' (two sessions before X: where the close window of P, read by NO NEW
+        # INFORMATION (ii), begins; the attention articles of P begin at P''s close), and A74 (3)'s daily-index
+        # backfill must have run for every weekday from P' through X. The skips those windows feed carry no
+        # registration floor, so neither does the span (the reading that waits). A69 (i)'s passes are judged from
+        # before that start through the span's end by `_fast_passes`, whichever reading of A69 (i) the tree holds (A84's
+        # per-feed clean reads once it is merged; every pass whole before); A69 (ii) reads the filings from that start.
+        back = C.previous(store, x.day, 2)
+        if len(back) < 2:
+            return "not two sessions before it in the calendar"
+        day, start = back[0].day, back[0].close_decide
     while day <= x.day:
         if day.weekday() < 5 and store.meta(f"evl:backfill:{day.isoformat()}") != "done":
             return f"the daily-index backfill of {day.isoformat()} has not run"
         day += dt.timedelta(days=1)
-    start = max(prior.open_cutoff, prog.registered_at)     # (no event before its registration counts)
     end = max(after.open_decide, S.parse_iso(row["started_at"]))
     stuck = _fast_filings(store, x, start, x.close_decide, now, cache)
     if stuck is not None:
@@ -1305,7 +1346,8 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 
 def expected_false_passes(store: S.Store) -> dict[str, Any]:
     """0.10 x every version that can seat (PREREG-EVL-3 section 4: the nine version 2 programs, version 1 of their ids
-    never seats; PREREG-EVL-4 section 3: version 1 of its three, 1.2 in all), plus any later version of a seatable
+    never seats; PREREG-EVL-4 section 3: version 1 of its three, 1.2 in all; PREREG-EVL-5 section 3: version 1 of its
+    three, 1.5 in all with no birth registered before it), plus any later version of a seatable
     program seen in the store (a version above the program's highest seating version); and (R3) every seatable birth
     registered, through SEATING once league/events/programs.py `load_births` has loaded them (A81: R3's validator
     charges each 0.10 against `LANE_BUDGET`, 3.0 in all, counted from this sum)."""
@@ -1484,7 +1526,7 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
 
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
            "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "FAST_RECORD_GAP", "NAMED_FROM",
-           "FOUR_KIND", "BIRTHS_KIND", "program_key", "names", "four_programs", "made_without", "births_made_without",
+           "FOUR_KIND", "FIVE_KIND", "FILE_KINDS", "file_programs", "BIRTHS_KIND", "program_key", "names", "four_programs", "made_without", "births_made_without",
            "birth_group", "B", "TIE", "LOOKS", "SEATABLE",
            "RECORDS", "CONTROLS", "HOLDS", "Block", "blocks", "issuer_values",
            "look_schedule", "look_number", "minimums", "seed_string", "seed_of", "look_seed", "values_sha", "signflip_p",

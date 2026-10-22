@@ -489,17 +489,18 @@ class ScreenJobTest(unittest.TestCase):
 
     def test_expected_false_passes_count_every_seatable_version(self):
         # PREREG-EVL-3's nine version 2 rows and PREREG-EVL-4's three (their version 1), of the lane's stated 3.0
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 12, "expected": 1.2, "budget": 3.0, "left": 1.8})
+        # (PREREG-EVL-5, release 1019g: its three seatable programs at version 1 too, 1.5 of the stated 3.0)
+        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
         with self.st.tx() as db:
             db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
                        "exit_at, mode, status) VALUES('EVL-8K-READ-O1', 3, 'x', 'S', 'z', '2026-10-19', 'open', "
                        "'2026-10-19', 'close', 'shadow', 'planned')")
-        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 13)
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 16)
         with self.st.tx() as db:     # a later version of a PREREG-EVL-4 id is one above its seating version 1
             db.execute("INSERT INTO intents(program, version, event, symbol, decided_at, entry_day, entry_at, exit_day, "
                        "exit_at, mode, status) VALUES('EVL-8K-REACT-ON', 2, 'x', 'S', 'z', '2026-10-20', 'close', "
                        "'2026-10-21', 'open', 'shadow', 'planned')")
-        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 14)
+        self.assertEqual(SC.expected_false_passes(self.st)["versions"], 17)
 
 
 if __name__ == "__main__":

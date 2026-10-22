@@ -1541,10 +1541,22 @@ path.
   `program_of(program, version)`, `order_of`, `room_key(program, band)`, `Lane` (read-only), `open_lane(root)`,
   `decided(lane, day, at)`, `eligible(lane, day)` and `universe_rows(lane, day)` (the live rule's eligible rows only,
   `LIVE_ROWS`: release 1019b's second review), `lane_bands(lane)`, `bands(lane, s=None) -> [Band] | None`,
-  `picks(lane, program, day, *, decided_at, reaction=None, held=None)` (PREREG-EVL-4 section 1.3: for
+  `picks(lane, program, day, *, decided_at, reaction=None, held=None, gap=None)` (PREREG-EVL-4 section 1.3: for
   `NEXT_OPEN_GUARD`'s programs an issuer's one event is not bought when `next_open_event(lane, row, session,
-  decided_at)` says it is EVL-8K-READ-O1's at the next open), `rows_for` (PREREG-EVL-4's rows by `rows_4(lane, day,
-  decided_at)`: the rows stored before the decision, EXCLUDED and the F8K(D) skip read from them), `held_recently`,
+  decided_at, raised=False)` says it is EVL-8K-READ-O1's at the next open; PREREG-EVL-5 section 1.3: its two earnings
+  rows, `RAISED_GUARD`, read it with `raised` True, which bars an `ok` score >= 1 with guidance "raised" too;
+  EVL-NEWS-NIGHT2-ON reads `gap(row, universe_row)`, no gap no buy), `rows_for(lane, program, day, decided_at, *,
+  reaction=None)` (PREREG-EVL-4's rows by `rows_4(lane, day, decided_at)`: the rows stored before the decision, EXCLUDED
+  and the F8K(D) skip read from them; PREREG-EVL-5's by `rows_5(lane, day, decided_at, *, reaction)`: TAKEN AT D'S
+  CLOSE BY AN EARLIER ROW, the <= 0.96 skip and NO NEW INFORMATION read from the rows stored and verdicts answered
+  before it, an unanswered DAY(D) article skipping its issuer, NO NEW INFORMATION's symbols mapped by `lane_tickers(lane,
+  day)`; LookupError without a reaction), `gap_reader(lane, day, *, opens, opens_many=None)` (PREREG-EVL-5's gap: the
+  lane's stored 09:30 mark, label `0930`, else the book's own read of that minute, `opening_minute(rows, session)`, all
+  the day's live names together; the equity book passes `EquityBook._event_open_minute` and `_event_open_minutes`),
+  `part_hold(lane, program, version, day) -> None | ("wait", why) | ("never", why)` (PREREG-EVL-5 section 1.3: a buy of
+  its rows at D's close goes only once the lane's first finished close decision of D names its program; the equity
+  book's `_event_work_entry` holds the buy while it waits, sent again each minute of the window, and refuses it when
+  that decision finished without it), `held_recently`,
   `allocate(picks, rooms,
   band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
   each program its own ranked picks whose name no earlier-given program was given, until its room is full; inside
@@ -1557,16 +1569,16 @@ path.
   day) -> (day, "open" | "close")`,
   `publish(client, day, symbols)`, `FillWriter(path)`, `write_fills(root, rows) -> int | None` (the rows new or
   changed); constants `LANE` "event", `TAG`, `EXIT_TAG` "evl_exit", `LATE_TAG` "evl_late", `REAL_VERSION` 2 (PREREG-EVL-1's
-  and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `BANDS`,
-  `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `PROBE_UP` ("sized", "probe"), `RESERVE_DECISIONS` 5,
+  and -2's seating version; no gate since PREREG-EVL-4, whose ids seat at version 1), `NEXT_OPEN_GUARD`, `RAISED_GUARD`,
+  `BANDS`, `LIVE_BANDS`, `DEFAULT_BAND` "learning", `PRIORITY`, `PROBE_UP` ("sized", "probe"), `RESERVE_DECISIONS` 5,
   `ROUND_ROBIN_TIERS` (the PREREG Sized and Probe tiers), `reserved_for(program, band)`, `leaves_room(program, band)`,
   `LADDER_CLOSES` 5, `ZERO_AFTER` 20, `ISSUER_GAP_SESSIONS` 5, `STRICT_WEIGHT` 0.40, `FILLS_TABLE`, `FILL_COLUMNS`;
   release 1019f's `SCHEMA_COLUMNS` ({table: {column: ALTER}}), `BINDINGS` (bands.py's), `SIZING_BINDINGS` and
   `binding_of(sized) -> str | None` (`size_entry`'s cap as the record names it). THE LANE'S OWN MODULES IT USES
   (release 1019b; no stand-in in
   the book or its tests): league/events/programs.py `SEATING`, `BY_KEY` and `Program.can_seat` (`seatable()` is
-  `SEATING`, every version that can seat: version 2 of the nine, version 1 of PREREG-EVL-4's three, in the tables'
-  order; `program_of` reads `BY_KEY` and `can_seat`); league/events/bands.py `bands(store)` (the band reader:
+  `SEATING`, every version that can seat: version 2 of the nine, version 1 of PREREG-EVL-4's three and of
+  PREREG-EVL-5's three, in the tables' order; `program_of` reads `BY_KEY` and `can_seat`); league/events/bands.py `bands(store)` (the band reader:
   {(program, version): band} for every seating version, no row = learning; the book reads each row's `since` and `why`
   beside) and `record_fill(store, ...)` (the fill write-back, one row a (program, version, event, side), a write again
   changing only its fee), on a `FillWriter` (the existing store file only, a 5 s busy timeout); the store's tables

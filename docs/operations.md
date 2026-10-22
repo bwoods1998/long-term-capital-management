@@ -239,6 +239,45 @@ order in flight; CI green on the exact head; before Oct 26 13:00Z, when the firs
 first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
 `evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
 
+## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, release 1019g, not deployed
+
+Cut from `rel/1019e` (`c485dcfe`); it ships as release 1019g on top of release 1019f (A92: "release 1019g, or 1019f if
+it has not merged"): the frozen [PREREG-EVL-5](prereg/PREREG-EVL-5.md)'s rows (EVL-ERN-DROP-ON, EVL-ERN-UNDER-ON,
+EVL-NEWS-NIGHT2-ON at their version 1, seatable at learning from birth after PREREG-EVL-4's rows and before R3's
+births in ROOM's order; the control EVL-CTRL-ERN-UNDER-ON never seats), as [events.md](events.md), "PREREG-EVL-5",
+describes. An owner deploy of the House alone (league/events/'s judges, run.py, book.py and house.py are behind
+league/ci.py's wall; league/equity/ is protected): no gateway file, no setting, no money row; the money digest
+`055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`,
+the xs identity `2f0083bc` and the gate contract `397b22b7` are its base's. MERGING ONTO 1019f: `league/events/book.py`'s
+`__all__` (keep both lists) and docs/events.md (keep both sections) conflict; A84's `fix/a84-fast-path-per-feed` merges
+with this branch without a conflict in league/events/screen.py (it changes `_fast_passes`; this branch `_fast_block`).
+
+**Deploy, in order** (never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2; never with an order in flight; CI
+green on the exact head):
+1. THE CAPTAIN'S CHECK (A92, the code plan's 0(a)): from the release's tree, `python3 -c "from league.events import
+   screen as SN, book as EB; print(SN.expected_false_passes(EB.open_lane('/workspace/state')))"` (the store opened
+   `mode=ro`, its registered births loaded) prints 1.5 + 0.10 for each seatable birth registered (at most 3.0); R3's
+   validator then reads the same sum.
+2. THE HOUSE from the merged head. At its start the lane decides every close from 21:26:21Z Oct 21 on for the new rows:
+   the last three sessions' closes again whole (the hourly re-decision), and each OLDER close releases 1019e and 1019f
+   decided, for the new rows BY THEMSELVES (`decide-close-evl5:<day>`, once each, as a backfill, after the record pass,
+   oldest first). Until a close is decided for them, the judge reads it as not made for them (their looks wait), and the
+   earlier rows of those closes are never decided again; none of those closes' events of the new rows is ever traded.
+3. VERIFY (read-only): `sqlite3 -readonly /workspace/state/events/events.sqlite "SELECT job, status FROM receipts WHERE
+   job LIKE 'decide-close-evl5:%' ORDER BY id"` lists one `ok` row for each close older than the last three sessions,
+   back to Thu Oct 22; `SELECT key FROM meta WHERE key LIKE 'evl5:pre:%'` holds today's from 09:47 ET (the pre-pass); a
+   close decision's summary has `evl5` (the funnels) and no `evl5_error` (when it has one, the House warns "PREREG-EVL-5
+   part of a close decision" and `decide-close-evl5` decides that close later; its events are never traded). At the
+   first event decision `eq_event_programs` holds fifteen rows (and one a seatable birth).
+4. Real money for the new rows starts at the first close decision after the release is live, and at each close only
+   once the lane's own close decision of that day names them (`book.part_hold`): a buy waits in its window for it
+   (its intent's why says so) and is refused when that decision finished without them.
+
+**Rollback**: the previous House release (1019f's). The new rows' intents and lots stay in the stores and their lots
+exit by their own plans (the old book plans their exits: `_event_exits` reads each lot's own plan); the old code seats
+none of them and its receipts name none of them, so a later redeploy decides those closes again for the new rows the
+same way. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
+
 ## Release 1019e (Oct 21-22, 2026): R3's births, A80's re-send, the site follows the lane, the cost fix: `rel/1019e`, not deployed
 
 Four merges on release 1019d's head `5a17bd25` (#581, **Release 1019d**, below), `--no-ff`, in this order:

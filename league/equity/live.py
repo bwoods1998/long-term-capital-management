@@ -5260,11 +5260,17 @@ class EquityBook:
         if lane is not None and s.enabled and readable:
             moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
             unread: list[str] = []
+            unread_gap: list[str] = []
             # (The T29 reads end before the window's last minute: release 1019b's third review, `EVENT_MINUTE_STOP_S`.)
             reaction = adapter.reaction_reader(
                 lane, em.day, daily=self._event_daily_close,
                 minutes=lambda symbol, session: self._event_minute_close(symbol, session, until=until),
                 minutes_many=lambda names, session: self._event_minute_closes(names, session, failed=unread, until=until))
+            # (PREREG-EVL-5: EVL-NEWS-NIGHT2-ON's gap, D's 09:30 minute: the lane's stored mark, else read here, together)
+            gap = adapter.gap_reader(
+                lane, em.day, opens=lambda symbol, session: self._event_open_minute(symbol, session, until=until),
+                opens_many=lambda names, session: self._event_open_minutes(names, session, failed=unread_gap,
+                                                                           until=until))
             wanted: dict[str, list[Any]] = {}
             rooms: dict[str, int] = {}
             insts = {}
@@ -5282,7 +5288,7 @@ class EquityBook:
                 held = self._event_held(inst, em.day, adapter)
                 try:
                     got = adapter.picks(lane, program, em.day, decided_at=moment, reaction=reaction,
-                                        held=lambda cik, held=held: cik in held)
+                                        held=lambda cik, held=held: cik in held, gap=gap)
                 except Exception as exc:  # noqa: BLE001 - that program plans nothing this auction; the others go on
                     self._error(f"event picks {inst.family}", exc, out)
                     summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
@@ -5300,6 +5306,13 @@ class EquityBook:
                 summary["errors"] = unread[:5]
                 summary["t29"] = "unread: a REACT row of a name whose T29 minute was not read is not taken"
                 for why in summary["errors"]:
+                    out.setdefault("errors", []).append(f"event decide {at}: {why}"[:300])
+            if unread_gap:
+                # (PREREG-EVL-5: a name whose 09:30 minute could not be read has no gap, so EVL-NEWS-NIGHT2-ON takes no
+                # pick of it; every other pick goes.)
+                summary["gap_errors"] = unread_gap[:5]
+                summary["gap"] = "unread: an EVL-NEWS-NIGHT2-ON pick of a name whose 09:30 minute was not read is not taken"
+                for why in summary["gap_errors"]:
                     out.setdefault("errors", []).append(f"event decide {at}: {why}"[:300])
             if unreadable:
                 # (Release 1019b's second review: E could not be read: no pick is decided on a reading that is missing.
@@ -5615,6 +5628,43 @@ class EquityBook:
             if got is not None:
                 for name in chunk:
                     out[name] = adapter.minute_close(got.get(name) or [], session)
+        return out
+
+    def _event_open_minute(self, symbol: str, session: Any, *, until: float | None = None) -> float | None:
+        """PREREG-EVL-5's gap minute of `symbol` in `session` (EVL-NEWS-NIGHT2-ON, when the lane stored no mark): the
+        open of the SIP 1-minute bar starting at the session's open (09:30 ET), read through the plan's SIP window; None
+        when it had no trade, the read failed, or the window's last minute has begun (`_event_minute_late`)."""
+        got = self._event_open_minutes([symbol], session, until=until)
+        return got.get(str(symbol).upper())
+
+    def _event_open_minutes(self, symbols: Sequence[str], session: Any, *, failed: list[str] | None = None,
+                            until: float | None = None) -> dict[str, float | None]:
+        """{symbol: the open of its SIP 1-minute bar starting at 09:30 ET of `session`} for many names at once
+        (`book.gap_reader`'s `opens_many`, PREREG-EVL-5): `EVENT_MINUTE_BATCH` names a request over that one minute;
+        None for a name with no such bar (no trade: no gap), or whose read failed (said in `failed`; the decision then
+        takes no EVL-NEWS-NIGHT2-ON pick of it). Read once, never after a timeout, never in the window's last minute."""
+        adapter = self._event_adapter()
+        names = sorted({str(x).upper() for x in symbols if x})
+        stamp = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        start, end = session.open_at, session.open_at + dt.timedelta(minutes=1)
+        out: dict[str, float | None] = {}
+        for i in range(0, len(names), self.EVENT_MINUTE_BATCH):
+            chunk = names[i:i + self.EVENT_MINUTE_BATCH]
+            got = None
+            if self._event_minute_late(until):
+                if failed is not None:
+                    failed.append(f"the 09:30 minutes of {len(chunk)} names were not read: the window's last minute "
+                                  "had begun")
+            else:
+                try:
+                    got = self.market.bars(chunk, timeframe="1Min", start=stamp(start), end=stamp(end),
+                                           adjustment="raw") or {}
+                except Exception as exc:  # noqa: BLE001 - unread: no gap, said in `failed`
+                    if failed is not None:
+                        failed.append(f"the 09:30 minutes of {len(chunk)} names could not be read: "
+                                      f"{type(exc).__name__}: {str(exc)[:120]}")
+            for name in chunk:
+                out[name] = None if got is None else adapter.opening_minute(got.get(name) or [], session)
         return out
 
     def _event_publish(self, day: dt.date, adapter: Any, lane: Any, out: dict) -> bool:
@@ -5940,6 +5990,15 @@ class EquityBook:
             lane = self._event_lane_store()
             if lane is None or not self._event_publish(dt.date.fromisoformat(day), adapter, lane, out):
                 why = "the day's eligible list is not at the gateway yet"
+            elif at == "close" and inst is not None:
+                # PREREG-EVL-5 section 1.3: its rows' buy goes only once the lane's own close decision of D has decided
+                # them; a close whose part for them failed is never traded (`book.part_hold`)
+                hold = adapter.part_hold(lane, inst.family, int(inst.version), dt.date.fromisoformat(day))
+                if hold is not None and hold[0] == "never":
+                    self._finish(intent, "refused", hold[1][:300])
+                    return
+                if hold is not None:
+                    why = hold[1]
         if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None:

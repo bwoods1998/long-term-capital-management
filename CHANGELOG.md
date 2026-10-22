@@ -472,6 +472,86 @@ programs trades real money at learning size.
 - **Deploy**: docs/operations.md, **A84** (the gateway first, then the House). **Rollback**: the House first, to the
   release this one replaced; the gateway's word can stay.
 
+### PREREG-EVL-5: three overnight and close programs (the captain's hand births), seatable at version 1 from birth, on `feat/evl-5` (unreleased; release 1019g on top of release 1019f, A92; cut from `rel/1019e` `c485dcfe`; an owner deploy of the House alone: league/events/'s judges, run.py, book.py and house.py are behind league/ci.py's wall and league/equity/ is protected; NO IDENTITY MOVES: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; no gateway file, no setting, no money row)
+
+- **The rows** (league/events/programs.py): EVL-ERN-DROP-ON (`ern-drop`), EVL-ERN-UNDER-ON (`ern-under`, reads) and
+  EVL-NEWS-NIGHT2-ON (`news-night2`), seatable, and EVL-CTRL-ERN-UNDER-ON (a control), each version 1, prereg 5, entering
+  at D's close and exiting at the next open (hold 1), after PREREG-EVL-4's rows and before any birth;
+  `REGISTERED_AT_5 = "2026-10-21T21:26:21Z"` (A92: the latest of the commit's 21:26:18Z, GitHub's activity 21:26:19Z
+  and the client's clock after the tag push 21:26:21Z); `Program.registered_at` reads it for prereg 5 and nothing else;
+  `SEATING_PREREGS = (3, 4, 5)`; the frozen constants `DROP_RATIO` 0.96, `GAP_RATIO` 1.02, `GUIDE_BONUS` 0.5. Pure
+  helpers for the frozen sets, every one read with NO registration floor: `close_window`'s ERN(D), DAY(D),
+  `taken_close_5` (TAKEN AT D'S CLOSE BY AN EARLIER ROW (a), (b), (c) and the wait), `dropped_ciks`, `attention_window`,
+  `night2_windows`, `news_named` (any source, any symbols, `news_rows`' non-live exclusion), `ins_buys_window` (`ins_buys`'
+  rule, its body moved to `_insider_buy` with no change), `ciks_by_ticker`, `named_ciks`, `filed_ciks`, `bought_ciks`,
+  `no_new_info`, `close_rows_5`; `select` takes the three families (and `gap`); `ern-under` joins `BEST_SCORE` and
+  `news-night2` `NEWS_FAMILIES`. Expected false passes: 1.5 of the lane's stated 3.0 with no birth registered before
+  it (`screen.expected_false_passes` reads SEATING: 15 seatable versions).
+- **The close decision's last part** (league/events/run.py `decide_close`, `_rows_5`, `_skip_taken_5`): after every
+  earlier row and PREREG-EVL-4's part, under ITS OWN TIME BOUND (`EVL5_BUDGET` 45 s, never past the task's bound less
+  `EVL5_FINISH` 15 s; `Context.deadline` from the House; `bounded`'s gateway and SEC reads raise `PartDeadline`, which
+  is not the task's `Deadline`); its expiry or any failure finishes the receipt with the earlier rows whole, the error
+  in `evl5_error` and these rows named nowhere (section 1.3); `evl5_only` decides them by themselves
+  (`decide-close-evl5:<day>`); NO NEW PROMPT AND NO SECOND VERDICT (the asks with the earlier rows' event ids and
+  renderings, in the tally); a re-decision moves an unsettled intent `skipped:taken` when a row stored later puts its
+  issuer in a set that skips it (as A75 (2) reads it for file 4). THE PRE-PASS: with `ask_only`, from 09:47 ET
+  (`pre_from`), EVL-NEWS-NIGHT2-ON's heavy reads (the survivors' eligibility by the live rule, their 09:30 minutes,
+  `_marks_0930`, batched, label `0930`) under `EVL5_PRE_BUDGET` 60 s, meta `evl5:pre:<day>` written last; the close
+  reads every window whole from the store and the network reads as stored (the equivalence test).
+- **The judge** (league/events/screen.py, for prereg 5 ONLY): the registries (`SEATABLE`, `RECORDS`, `CONTROLS`,
+  `HOLDS`), `FIVE_KIND` and `FILE_KINDS` (a file's rows decided by themselves named only by that file's kind),
+  `made_without(..., prereg=5)` (prereg 4's reading byte for byte the old one), `final_until` reading `decide-close-evl5`
+  for prereg 5 (a close decided at or before 21:26:21Z Oct 21 is made for them), and section 2's final record in
+  `_fast_block`: A69's span from P''s close decision with no registration floor, A74 (3)'s backfill from P' through X,
+  the passes judged by `_fast_passes` (A84's per-feed reading when `fix/a84-fast-path-per-feed` is merged, A69's
+  before; the two merge with no conflict in screen.py), A66 otherwise.
+- **The House** (league/events/house.py): `FIVE_KIND` in `BACKFILL_KINDS`, `_refill_redecide`'s `_five` (every close
+  `made_without(prereg=5)` names that the hourly re-decision no longer reaches, oldest first, once), `_decide` and
+  `_verdicts` for it, the warning on `evl5_error`; THE PRE-PASS SCHEDULE `_pre_due` (today's close verdict pass is due
+  from 09:47 ET while meta `evl5:pre:<day>` is not stored, once more inside the last 30 minutes once the earlier rows'
+  verdicts are stored; a failed pre-read waits `VERDICT_BACKOFF`; never for a session none of whose attention articles
+  can be an event, nor while a written look keeps EVL-NEWS-NIGHT2-ON). The CLI: `catchup` and `decide-close
+  --evl5-only`.
+- **Real money** (league/events/book.py; league/equity/live.py's event kind): `rows_5` (the rows stored and verdicts
+  answered before the decision; an unanswered DAY(D) article skips its issuer; (i) by the lane's tickers copy,
+  `lane_tickers`), `gap_reader` (the lane's 09:30 mark, else the book's own batched read, `_event_open_minutes`),
+  `NEXT_OPEN_GUARD` with `RAISED_GUARD` (`next_open_event(..., raised=True)`: also an `ok` score >= 1 with guidance
+  raised; PREREG-EVL-4's guard unchanged), and `part_hold`: a buy of these rows at D's close goes only once the lane's
+  first finished close decision of D names its program, waits for it inside the window, and is refused when that
+  decision finished without it (section 1.3: such a close is never traded). ROOM follows SEATING.
+- **The report** (league/events/report.py `evl5`, `room_effects`): each row's funnel, the closes whose part failed, the
+  two room effects of section 1.3 (read-only from `<state>/live.sqlite`), `skipped:taken` among the late rows.
+  league/site_lane.py names the four rows (`lane_v1` unchanged).
+- **Docs**: docs/prereg/PREREG-EVL-5.md (sha256 `48b19fde...`) and docs/prereg/evl-5/ byte for byte the tag's;
+  docs/events.md ("PREREG-EVL-5"), docs/operations.md (its deploy, verify and rollback), league/equity/INTERFACES.md,
+  league/events/__init__.py's receipts contract.
+- **Readings this build took** (each the one that waits or trades less; for the captain to record as amendments before
+  the first settled event, PREREG-EVL-5 section 7): (1) real money waits for the lane's own close decision of D to name
+  these rows before a buy goes, and gives up at the window's cut-off (the frozen "that close's events ... never traded"
+  cannot be known at the book's 15:47 ET decision otherwise); (2) the final record's span for these rows has no
+  registration floor (the skips it feeds carry none); (3) a part whose reads end past its bound expires (its writes
+  are never cut); (4) a row's shadow wait is counted only for an issuer whose DAY(D) answer can change its intents
+  (one with an event its rule takes on the stored prices: the intents are those of waiting for every issuer); (5) the close decision re-reads the windows whole from the store instead of only
+  the pre-pass's tails (the same stored record; the network reads are the pre-pass's), its summary counting what was
+  added and removed after the cut; (6) `skipped:taken` for the re-decision's moves, as A75 (2) for file 4.
+- **Tests**: league/tests/test_events_evl5.py (one test a clause; the pre-pass equivalence; the isolation, its own bound
+  and the task's; the record before the release; the real book's hold; THE PROOF on league/tests/evl5_world.py's week,
+  with and without these rows; the docs' hashes and the wall), and the earlier modules' counts (twelve seatable programs
+  to fifteen, 1.2 to 1.5). The same week decided by release 1019e's own code (`c485dcfe`, `python
+  league/tests/evl5_world.py OUT.json`) gives every earlier program the same 126 shadow intents and 28 real-money pick
+  lists.
+- **Runs, on `7f828831`** (the code, its tests and docs): the full league suite on 3.14, every one of league/tests' 470
+  test modules in four processes of `python -m unittest <modules>` (the box's load average was about 100, other agents'
+  runs, so the one `discover` process would have run past four hours), 12,770 OK (33 skipped: 2,991 + 3,202 + 3,324 +
+  3,253); on 3.11 the events, evl, equity, live, ci, constitution, daily_report, site_lane, e3_identities,
+  swarm_event_waits and stall modules, 96 modules, 2,375 OK; the gateway is unchanged (no gateway suite); `python -m
+  league.ci --base origin/main --branch feat/evl-5 --no-tests` passed; the identities, computed with the tree's own
+  functions (`constitution.money_digest`, `digest`, `swarm.evaluator.execution_fingerprint`, `equity_fingerprint`,
+  `xs.identity.xs_identity`, `swarm.gate.gate_contract`) on both Pythons, are the base's, as in the heading. On a scratch
+  merge with `rel/1019f` (`a62b6cf2`, A84 and A85 in it; the two conflicts kept both sides) test_events_evl5, the
+  event-book and PREREG-EVL-4 tests passed, and the event-lane modules there failed only on the counts this branch
+  updates.
+
 ### Release 1019e: R3 births (A81's budget), A80's re-send, the site follows the lane, the cost fix, on `rel/1019e` (unreleased; release 1019d's head `5a17bd25` (#581) and four merges; an owner deploy: THE GATEWAY FIRST (`gateway/` changed: the births' docs route), THEN THE HOUSE, THEN `events.births` true; on top of release 1019d, before 12:55Z Thu Oct 22 when it can be, else from 20:05Z Thu; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES FROM RELEASE 1019d: the money digest `055e5313`, the constitution `a8d4cbd9`, the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7`, read with the tree's own functions on 3.14 and 3.11; no merged branch moves one on its own base either)
 
 - **Births ship ON (A90).** `league/config.json` `events.births` true in this head, so the births job runs at 21:15 ET

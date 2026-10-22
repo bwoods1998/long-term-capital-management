@@ -389,11 +389,13 @@ class TheRows(unittest.TestCase):
         self.assertEqual([p.id for p in EB.seatable()],
                          ["EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-O1", "EVL-ERN-REACT-ON",
                           "EVL-ERN-GUIDE-O1", "EVL-INS-BUY-O1", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON",
-                          "EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON"],
-                         "version 2 of PREREG-EVL-1's four and PREREG-EVL-2's five, then PREREG-EVL-4's three (their "
+                          "EVL-8K-REACT-ON", "EVL-8K-READ-ON", "EVL-NEWSPM-READ-ON",
+                          "EVL-ERN-DROP-ON", "EVL-ERN-UNDER-ON", "EVL-NEWS-NIGHT2-ON"],
+                         "version 2 of PREREG-EVL-1's four and PREREG-EVL-2's five, then PREREG-EVL-4's and -5's three (their "
                          "version 1), in the tables' order")
-        self.assertEqual({(p.prereg, p.version) for p in EB.seatable()}, {(3, 2), (4, 1)},
-                         "version 1 of PREREG-EVL-1's and -2's programs never trades; PREREG-EVL-4's seat at version 1")
+        self.assertEqual({(p.prereg, p.version) for p in EB.seatable()}, {(3, 2), (4, 1), (5, 1)},
+                         "version 1 of PREREG-EVL-1's and -2's programs never trades; PREREG-EVL-4's and -5's seat at "
+                         "version 1")
         self.assertIsNone(EB.program_of("EVL-ERN-READ-O1", 1))
         self.assertIs(EB.program_of("EVL-8K-REACT-ON", 1), P.BY_KEY[("EVL-8K-REACT-ON", 1)])
         self.assertIsNone(EB.program_of("EVL-CTRL-8K-ON", 1), "a control never trades")
@@ -484,10 +486,12 @@ class TheBands(EventTest):
                          {"EVL-ERN-READ-O1": "learning", "EVL-ERN-REACT-C1": "learning", "EVL-8K-READ-O1": "probe",
                           "EVL-NEWS-READ-O1": "sized", "EVL-ERN-REACT-ON": "learning", "EVL-ERN-GUIDE-O1": "retired",
                           "EVL-INS-BUY-O1": "retired", "EVL-NEWS-READ-ON": "learning", "EVL-NEWS-REACT-ON": "learning",
-                          "EVL-8K-REACT-ON": "learning", "EVL-8K-READ-ON": "learning", "EVL-NEWSPM-READ-ON": "learning"})
+                          "EVL-8K-REACT-ON": "learning", "EVL-8K-READ-ON": "learning", "EVL-NEWSPM-READ-ON": "learning",
+                          "EVL-ERN-DROP-ON": "learning", "EVL-ERN-UNDER-ON": "learning",
+                          "EVL-NEWS-NIGHT2-ON": "learning"})
         self.assertIn("no band of PREREG-EVL-3", got["EVL-ERN-GUIDE-O1"].why)
         self.assertEqual({(b.program, b.version) for b in got.values()}, {(p.id, p.version) for p in EB.seatable()})
-        self.assertEqual(EB.bands(None) and [b.band for b in EB.bands(None)], ["learning"] * 12, "no lane: no band table")
+        self.assertEqual(EB.bands(None) and [b.band for b in EB.bands(None)], ["learning"] * 15, "no lane: no band table")
 
     def test_a_band_table_that_cannot_be_read_trades_nothing(self):
         h = self.harness()
@@ -596,7 +600,8 @@ class ThePicks(EventTest):
         # EXCLUDED (ERN(DAY): ERN, GUI, EKA; DAY(DAY): DAY, RCT); READ-ON takes its stored score 2, REACT-ON has no
         # reaction for OTH; NEWSPM-READ-ON takes NWS's pre-market article (score 2, no F8K(DAY) filing).
         self.assertEqual({k: v for k, v in got.items() if k not in nine},
-                         {"EVL-8K-REACT-ON": [], "EVL-8K-READ-ON": ["OTH"], "EVL-NEWSPM-READ-ON": ["NWS"]})
+                         {"EVL-8K-REACT-ON": [], "EVL-8K-READ-ON": ["OTH"], "EVL-NEWSPM-READ-ON": ["NWS"],
+                          "EVL-ERN-DROP-ON": [], "EVL-ERN-UNDER-ON": [], "EVL-NEWS-NIGHT2-ON": []})
         [buy] = EB.picks(lane, V2("EVL-INS-BUY-O1"), DAY, decided_at=open_at)
         self.assertEqual(buy.rank, 60_000.0, "ranked by its purchase value")
         both = EB.one_name_an_auction({p: EB.picks(lane, V2(p), DAY, decided_at=close_at, reaction=react)
@@ -639,8 +644,8 @@ class TheDay(EventTest):
         inst = h.book._instance(key("EVL-ERN-READ-O1"))
         self.assertEqual((inst.kind, inst.lane, inst.band, inst.live), ("event", "event", "learning", True))
         self.assertIsNone(h.book._instance(L.instance_key("EVL-ERN-READ-O1", 1)), "version 1 never trades")
-        self.assertEqual(len([i for i in h.book._instances() if i.kind == "event"]), 12,
-                         "all twelve at learning: the nine version 2 rows and PREREG-EVL-4's three")
+        self.assertEqual(len([i for i in h.book._instances() if i.kind == "event"]), 15,
+                         "all fifteen at learning: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three")
         h.tick(9, 16)
         [body] = h.bodies()
         self.assertEqual(body, {"symbol": "ACME", "qty": "2", "side": "buy", "type": "limit", "limit_price": "20.00",

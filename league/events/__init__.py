@@ -33,7 +33,11 @@ never its status alone (a pass that says `ok` and read nothing is no progress). 
   over the session, each with why and the events left out of its record, `events` and `unjudged`), which
   league/events/report.py `kept_out` counts. A kept program is asked no verdict, so its events are not in the tally.
   `evl_decide` counts a decision made when a receipt that started within 10 minutes of its time finished `ok` or
-  `pending`; `evl_verdicts` reads the latest receipt's tally (a receipt from before it, its `pending` counts).
+  `pending`; `evl_verdicts` reads the latest receipt's tally (a receipt from before it, its `pending` counts). A close
+  decision's summary also carries PREREG-EVL-5's `evl5` (its funnels), or `evl5_error` when its part failed or ran past
+  its own bound (its rows then named nowhere in it); `decide-close-evl4:<day>` and `decide-close-evl5:<day>` are those
+  files' rows decided by themselves (run.decide_close with `evl4_only` / `evl5_only`), and meta `evl5:pre:<day>` is the
+  session's PREREG-EVL-5 pre-pass (no receipt).
 - `score` (house.py `_score`): one a nightly pass, bounded and resumable: `ok` once every intent due that night was
   tried, `partial` before; `evl_score` judges the intents themselves (still `planned` or `entered` after 23:00 ET), never
   the receipt.
