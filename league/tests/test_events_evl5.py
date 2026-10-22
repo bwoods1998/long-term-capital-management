@@ -1448,6 +1448,256 @@ class TheLanesTurnForItsCloseDecision(TH.LaneCase):
         self.assertEqual(self.receipts("decide-close:2026-10-20"), [])
         self.assertIsNone(self.lane.health()["running"])
 
+    # -- the money re-review (wf_03d60ddf-1c3): a lead task that returns late, and no other decision in the lead -------
+    def overrun(self, returns_at: dt.datetime) -> list[str]:
+        """The record pass's last network read returns at `returns_at`, after its bound (the gateway's timeout is 45 s;
+        a bounded task checks its bound only before each read): the lane's clock moves there inside the task."""
+        started: list[str] = []
+
+        def record(ctx, deadline):
+            started.append(S.iso(self.lane.now()))
+            self.assertLess(deadline, self.mono() + 20.0, "the record pass is bounded to end before the decision")
+            self.clock.set(returns_at)
+            return {}
+        self.lane._record = record
+        return started
+
+    def decisions(self) -> list[tuple[str, str, str]]:
+        """(kind, day, started at) of every decision the lane started, in order."""
+        out: list[tuple[str, str, str]] = []
+        decide = self.lane._decide
+
+        def wrapped(ctx, kind, day, live):
+            out.append((kind, day.isoformat(), S.iso(self.lane.now())))
+            return decide(ctx, kind, day, live)
+        self.lane._decide = wrapped
+        return out
+
+    def test_a_lead_task_that_returns_after_the_decisions_time_still_starts_it_in_the_same_turn(self):
+        """The re-review's case (a): a record pass due at 15:46:40 whose last read returns at 15:47:05 ET. Before the
+        fix the turn ended there (`_close_hold` is None once the time has come) and the decision waited for the next
+        publish; now it starts at 15:47:05, in the same turn."""
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:44") + dt.timedelta(seconds=40))
+        self.mark_recorded()                                   # (the record pass is due again at 15:46:40)
+        started = self.overrun(TH.et("2026-10-20", "15:47") + dt.timedelta(seconds=5))
+        made = self.decisions()
+        self.lane.run()
+        self.assertEqual(started, ["2026-10-20T19:46:40Z"])
+        [close] = self.receipts("decide-close:2026-10-20")
+        self.assertEqual(close["started_at"], "2026-10-20T19:47:05Z", "at once, never at the next publish")
+        self.assertEqual(close["status"], "ok")
+        self.assertEqual(made, [("close", "2026-10-20", "2026-10-20T19:47:05Z")])
+        self.assertEqual([n for n, _ in self.ran][-2:], ["record", "decide-close"])
+        self.assertIsNone(self.lane.health()["running"])
+        self.assertFalse(self.lane._close_owed(self.lane_store(), self.clock_dt()), "made: owed no more")
+
+    def lane_store(self) -> S.Store:
+        st = self.store()
+        self.addCleanup(st.close)
+        return st
+
+    def test_a_turn_that_begins_after_the_time_with_a_task_that_ends_late_runs_the_decision(self):
+        """A task started BEFORE the lead (a re-decision with the whole DECIDE_BUDGET, at 15:44:29 ET) that returns at
+        15:47:10 ET: the turn does not end while the live decision is owed."""
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:44") + dt.timedelta(seconds=29))
+        self.mark_recorded()
+        self.lane._looks[("close", dt.date(2026, 10, 20))] = H.VerdictLook(self.clock_dt(), 0, False)
+        self.lane._redecide.add(("close", dt.date(2026, 10, 19)))
+        made = self.decisions()
+        decide = self.lane._decide
+
+        def slow(ctx, kind, day, live):
+            out = decide(ctx, kind, day, live)
+            if day == dt.date(2026, 10, 19):
+                self.clock.set(TH.et("2026-10-20", "15:47") + dt.timedelta(seconds=10))
+            return out
+        self.lane._decide = slow
+        self.lane.run()
+        self.assertEqual(made, [("close", "2026-10-19", "2026-10-20T19:44:29Z"),
+                                ("close", "2026-10-20", "2026-10-20T19:47:10Z")])
+        [close] = self.receipts("decide-close:2026-10-20")
+        self.assertEqual(close["status"], "ok")
+
+    def test_a_redecision_queued_inside_the_lead_waits_for_the_live_decision(self):
+        """The re-review's case (b): the hourly re-decision of Monday's close queued at 15:46:30 ET would run with the
+        whole DECIDE_BUDGET (150 s, `_deadline` bounds no decision) and end at 15:47:11. Inside the lead no decision
+        but the live one starts: the live close decision starts at 15:47:00 ET, then the re-decision."""
+        self.opened()
+        self.at(TH.et("2026-10-20", "15:46") + dt.timedelta(seconds=30))
+        self.mark_recorded()
+        self.lane._looks[("close", dt.date(2026, 10, 20))] = H.VerdictLook(self.clock_dt(), 0, False)
+        self.lane._redecide.add(("close", dt.date(2026, 10, 19)))
+        made = self.decisions()
+        decide = self.lane._decide
+
+        def slow(ctx, kind, day, live):
+            out = decide(ctx, kind, day, live)
+            if day == dt.date(2026, 10, 19):
+                self.clock.advance(41)
+            return out
+        self.lane._decide = slow
+        self.lane.run()
+        self.assertEqual(made[0], ("close", "2026-10-20", "2026-10-20T19:47:00Z"), "the live decision first")
+        [close] = self.receipts("decide-close:2026-10-20")
+        self.assertEqual(close["started_at"], "2026-10-20T19:47:00Z")
+        if len(made) == 1:                                     # (the re-decision is the next turn's)
+            self.assertEqual(self.lane._next_look, self.clock(), "due at once after the live decision")
+            self.lane.run()
+        self.assertEqual(made[1][:2], ("close", "2026-10-19"), "the re-decision after it, whole")
+        self.assertGreaterEqual(made[1][2], "2026-10-20T19:47:00Z")
+        self.assertNotIn(("close", dt.date(2026, 10, 19)), self.lane._redecide)
+
+    def test_inside_the_lead_no_other_decision_is_due_whatever_its_rank(self):
+        """A missed decision (rank 1), a cut one (rank 2), the hourly re-decision and the backfill kinds (rank 3) wait
+        from HOLD_LEAD before the live close decision until it has started; before the lead, after it has started, or
+        with no PREREG-EVL-5 programs, they are due as before."""
+        self.opened()
+        monday = dt.date(2026, 10, 19)
+        with self.store() as st:
+            st.db.execute("DELETE FROM receipts WHERE job='decide-close:2026-10-19'")     # (missed: rank 1)
+        lead_at = TH.et("2026-10-20", "15:47") - H.HOLD_LEAD
+        cases = {
+            "missed": lambda: None,
+            "cut": lambda: self.lane._cut.add(("close", monday)),
+            "five": lambda: self.lane._five.add(monday),
+        }
+        for name, setup in cases.items():
+            with self.subTest(name), self.store() as st:
+                self.lane._cut.clear()
+                self.lane._five.clear()
+                setup()
+                if name != "missed":
+                    rid = st.start_receipt("decide-close:2026-10-19", now=TH.et("2026-10-19", "15:47"))
+                    st.finish_receipt(rid, "cut" if name == "cut" else "ok", {}, now=TH.et("2026-10-19", "15:48"))
+                if name == "five":
+                    self.lane._redecide.add((H.FIVE_KIND, monday))
+                for when, due in ((lead_at - dt.timedelta(seconds=1), True), (lead_at, False),
+                                  (TH.et("2026-10-20", "15:46") + dt.timedelta(seconds=59), False)):
+                    got = self.lane._due_decision(st, when, self.lane._decide_receipts(st, when), [])
+                    self.assertEqual(got is not None, due, (name, when))
+                with mock.patch.object(R, "five_programs", return_value=[]):
+                    self.assertIsNotNone(self.lane._due_decision(st, lead_at, self.lane._decide_receipts(st, lead_at),
+                                                                 []), "no PREREG-EVL-5 rows: no lead")
+                at = TH.et("2026-10-20", "15:47")
+                got = self.lane._due_decision(st, at, self.lane._decide_receipts(st, at), [])
+                self.assertEqual(got[2:4], ("close", dt.date(2026, 10, 20)), "at its time: the live one, rank 0")
+                rid = st.start_receipt("decide-close:2026-10-20", now=at)
+                got = self.lane._due_decision(st, at, self.lane._decide_receipts(st, at), [])
+                self.assertIsNotNone(got, "the live one has started: the others are due again")
+                self.assertEqual(got[3], monday)
+                st.db.execute("DELETE FROM receipts WHERE id=?", (rid,))
+                st.db.execute("DELETE FROM receipts WHERE job IN ('decide-close:2026-10-19', ?)",
+                              (f"{H.FIVE_KIND}:2026-10-19",))
+
+    def test_a_decision_started_before_the_lead_is_due_to_end_by_the_decisions_time(self):
+        self.assertGreaterEqual(H.HOLD_LEAD.total_seconds(), H.DECIDE_BUDGET)
+        self.assertLess(H.HOLD_LEAD, H.LIVE_WITHIN)
+
+
+class TheHeldTurnInTheWeek(unittest.TestCase):
+    """The money re-review's fix in the invented week (league/tests/evl5_world.py): Tuesday's and Wednesday's live close
+    decisions made by the House's lane in a held turn that begins at 15:44:40 ET with the hourly re-decision of
+    Monday's close queued (it waits for the live one) and a record pass whose last read returns at 15:47:05 ET (the
+    decision starts then, in the same turn), against the same decisions made directly at 15:47:00 ET with Monday's
+    re-decision after them: every program's intents (PREREG-EVL-1 to -4, the births and PREREG-EVL-5's), the earlier
+    programs' real-money picks and PREREG-EVL-5's real-money gate (`book.part_hold`) are the same."""
+
+    def world(self) -> W.World:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(P.load_births, None)
+        world = W.World(Path(tmp.name) / "lane")
+        self.addCleanup(world.close)
+        world.births()
+        W.evl4_rows(world)
+        W.evl5_rows(world)
+        for day in W.W4.weekdays(dt.date(2026, 10, 19), PRIOR - dt.timedelta(days=1)):   # (decided before the week)
+            for kind, hh, mm in (("open", 9, 15), ("close", 15, 47)):
+                rid = world.st.start_receipt(f"decide-{kind}:{day.isoformat()}", now=et(day, hh, mm))
+                world.st.finish_receipt(rid, "ok", {}, now=et(day, hh, mm))
+        world.at(et(PRIOR, 7, 31)).decide("open", PRIOR, ask_only=True)       # (and Monday's open, as the House does)
+        world.at(et(PRIOR, 9, 15, 30)).decide("open", PRIOR)
+        return world
+
+    @staticmethod
+    def direct(w: W.World, day: dt.date) -> None:
+        w.at(et(day, 15, 47)).decide("close", day)
+        w.at(et(day, 15, 47, 10)).decide("close", PRIOR, live=False)    # (the hourly re-decision, after it)
+
+    def by_the_lane(self, w: W.World, day: dt.date) -> None:
+        from ltcm.tests.fakes import Clock
+
+        start = et(day, 15, 44, 40)
+        clock, mono = Clock(S.iso(start)), Mono()
+
+        def sleep(seconds: float) -> None:
+            mono.advance(seconds)
+            clock.advance(seconds)
+        lane = H.EventLane(FakeHouse(clock), w.root, gateway=w.gw, sec=W.sec, monotonic=mono, sleep=sleep)
+        lane._redecide_next = dt.datetime(2100, 1, 1, tzinfo=UTC)
+        lane._open_checked = dt.datetime(2100, 1, 1, tzinfo=UTC)
+        w.st.set_meta("evl:lane:sessions_at", S.iso(start))
+        rid = w.st.start_receipt("record", now=start)
+        w.st.finish_receipt(rid, "ok", {}, now=start)
+        lane._redecide.add(("close", PRIOR))                  # (queued inside the lead)
+
+        def record(ctx, deadline):
+            rid = ctx.store.start_receipt("record", now=ctx.now())
+            if ctx.now() < et(day, 15, 47):
+                clock.set(et(day, 15, 47, 5))                  # (its last read returns after its bound)
+            ctx.store.finish_receipt(rid, "ok", {}, now=ctx.now())
+            return {}
+        lane._record = record
+        made: list[tuple[str, str, str]] = []
+        decide = lane._decide
+
+        def noted(ctx, kind, d, live):
+            made.append((kind, d.isoformat(), S.iso(lane.now())))
+            return decide(ctx, kind, d, live)
+        lane._decide = noted
+        with mock.patch.object(lane, "_nightly", return_value=None), \
+                mock.patch.object(lane, "_backfill_due", return_value=None), \
+                mock.patch.object(lane, "_tickers_due", return_value=False):
+            for _ in range(4):
+                lane.run()
+                if ("close", PRIOR.isoformat()) in [m[:2] for m in made]:
+                    break
+                clock.advance(60)                              # (the next publish)
+        self.assertEqual(made[0], ("close", day.isoformat(), S.iso(et(day, 15, 47, 5))), made)
+        self.assertEqual(made[1][:2], ("close", PRIOR.isoformat()), "the re-decision after the live one")
+        [live] = [r for r in w.st.db.execute("SELECT * FROM receipts WHERE job=? ORDER BY id",
+                                              (f"decide-close:{day.isoformat()}",))]
+        self.assertEqual((live["started_at"], live["status"]), (S.iso(et(day, 15, 47, 5)), "ok"))
+        self.assertLess(live["finished_at"], S.iso(et(day, 15, 49)), "finished before the book's cut-off")
+        w.at(lane.now())
+
+    def test_every_programs_close_decisions_and_the_real_money_are_the_same(self):
+        a, b = self.world(), self.world()
+        W.decide_week(a, close=self.direct)
+        W.decide_week(b, close=self.by_the_lane)
+        rows = a.intents(earlier)
+        self.assertGreater(len(rows), 60)
+        self.assertEqual(b.intents(earlier), rows, "PREREG-EVL-1 to -4 and the births")
+        self.assertEqual(b.intents(lambda p, v: p in ALL5), a.intents(lambda p, v: p in ALL5))
+        self.assertTrue(b.intents(lambda p, v: p in ALL5))
+        picks = W.picks(a, lambda p: p.prereg != 5)
+        self.assertTrue(any(picks.values()))
+        self.assertEqual(W.picks(b, lambda p: p.prereg != 5), picks)
+        self.assertEqual(W.picks(b, lambda p: p.prereg == 5), W.picks(a, lambda p: p.prereg == 5))
+        held = [EB.Lane(w.root / S.DB_NAME) for w in (a, b)]
+        try:
+            for day in (D, NEXT):
+                for prog in R.five_programs():
+                    if prog.seatable:
+                        self.assertIsNone(EB.part_hold(held[1], prog.id, prog.version, day), (prog.id, day))
+                        self.assertEqual(EB.part_hold(held[1], prog.id, prog.version, day),
+                                         EB.part_hold(held[0], prog.id, prog.version, day))
+        finally:
+            for lane in held:
+                lane.close()
+
 
 # ----------------------------------------------------------------------------------------------- the record before
 class TheRecordBeforeTheRelease(unittest.TestCase):

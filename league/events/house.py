@@ -17,9 +17,11 @@ so every legacy path behaves as it does today.
 ONE TURN, ONE TASK, BOUNDED. `run()` does the single most urgent due task, never raises (a failure is a warning at most
 once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time. One exception
 (PREREG-EVL-5 section 1.3, release 1019g's money review): from `HOLD_LEAD` before today's live close decision a turn
-keeps going, runs each task that falls due (each still bounded to end before the decision), waits between them and
-starts the decision at its time (`_close_hold`, `_wait_until`), because real money buys that file's rows only once the
-decision has finished, by the close - 11 minutes. The order of the tasks:
+keeps going, runs each task that falls due but another decision (none starts inside the lead, `_lead`; every other
+task is still bounded to end before the decision), waits between them and starts the decision at its time
+(`_close_hold`, `_wait_until`), and when a task returns at or after that time (a network read can outlast its bound)
+starts it at once in the same turn (`_close_owed`), because real money buys that file's rows only once the decision
+has finished, by the close - 11 minutes. The order of the tasks:
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
@@ -174,11 +176,20 @@ URGENT_BEFORE = dt.timedelta(minutes=30)
 #: `part_hold`) and only until the close - 11 minutes, while a turn starts only on the House's publishes (a minute or
 #: more apart in session), so the decision could start a publish after its time (the close decision + CLOSE_GRACE) and
 #: leave the book no minute to send them. From HOLD_LEAD before that time a turn keeps going instead of ending: it runs
-#: every task that falls due meanwhile (each bounded to end DECISION_MARGIN before the decision, as before; none inside
-#: that margin), waits between them (HOLD_STEP a look; the House closing, the STOP file or a clock that does not move
-#: ends the wait, and the turn), and starts the decision at its time; `due()` looks again no later than HOLD_LEAD
-#: before it, so the publish that starts the turn falls inside the lead. Only while PREREG-EVL-5 has programs, at
-#: most HOLD_TURNS tasks a turn.
+#: every task that falls due meanwhile, waits between them (HOLD_STEP a look; the House closing, the STOP file or a
+#: clock that does not move ends the wait, and the turn), and starts the decision at its time; `due()` looks again no
+#: later than HOLD_LEAD before it, so the publish that starts the turn falls inside the lead. Only while PREREG-EVL-5
+#: has programs, at most HOLD_TURNS tasks a turn.
+#: INSIDE THE LEAD NO OTHER DECISION STARTS (the money re-review of PREREG-EVL-5, wf_03d60ddf-1c3; `_lead`): a decision
+#: task runs with the whole DECIDE_BUDGET (`_deadline` bounds every other task by the next decision, never a decision),
+#: so from HOLD_LEAD before the live close decision until it has started, a missed, cut, pending or failed decision of
+#: another session, the hourly re-decision and the backfill kinds (`BACKFILL_KINDS`) wait; each is due again once the
+#: live decision has a receipt (a deferred decision runs whole, never cut by the hold). Every other task is bounded to
+#: end DECISION_MARGIN before the decision, as before; none starts inside that margin. A BOUND IS NOT A PROMISE: a task
+#: checks its bound before each network read, and one read can return after it (the gateway's timeout is 45 s); a
+#: decision started before the lead ends by the decision's time only if no read overruns (HOLD_LEAD >= DECIDE_BUDGET).
+#: So a task that returns at or after the decision's time never ends the turn while today's live close decision has
+#: no receipt and is still live (`_close_owed`): the turn starts it at once, in the same turn.
 HOLD_LEAD = dt.timedelta(seconds=150)
 HOLD_STEP = 1.0
 HOLD_TURNS = 40
@@ -630,6 +641,10 @@ class EventLane:
                     next_look = self.house.clock() if follow is not None else \
                         self.house.clock() + max(0.0, (at - now).total_seconds())
                     hold = self._close_hold(st, now)
+                    if hold is None and follow is not None and self._close_owed(st, now):
+                        # (a task of the lead returned at or after the decision's time: the decision in this turn,
+                        # at once, never at the next publish)
+                        hold = now
                     if hold is None:
                         lead = self._hold_from(st, now)
                         if lead is not None:
@@ -671,6 +686,29 @@ class EventLane:
         still ahead of `now`; else None."""
         at = self._hold_at(st, now)
         return at - HOLD_LEAD if at is not None and now < at - HOLD_LEAD else None
+
+    def _close_owed(self, st: S.Store, now: dt.datetime) -> bool:
+        """True when today's live close decision's time (+ CLOSE_GRACE) has come while PREREG-EVL-5 has programs, the
+        decision is still live (`R.live_run`) and no receipt of it has started: a task of the lead that returned at or
+        after its time (a network read past its bound) leaves it to this turn, never to the next publish."""
+        at = self._lead(st, now)
+        return at is not None and now >= at
+
+    def _lead(self, st: S.Store, now: dt.datetime,
+              latest: Mapping[str, tuple[str, dt.datetime]] | None = None) -> dt.datetime | None:
+        """THE LEAD (HOLD_LEAD's comment): today's live close decision's time (its time + CLOSE_GRACE) from HOLD_LEAD
+        before it until a receipt of it has started (any status), while it is still live (`R.live_run`) and
+        PREREG-EVL-5 has programs; else None. Inside it no other decision starts (`_due_decision`). `latest`: the
+        decisions' receipts as `_decide_receipts` reads them (else today's close receipt is read alone)."""
+        at = self._hold_at(st, now)
+        if at is None or now < at - HOLD_LEAD or not R.live_run(at - CLOSE_GRACE, now):
+            return None
+        job = f"decide-close:{now.astimezone(C.NY).date().isoformat()}"
+        if latest is not None:
+            started = job in latest
+        else:
+            started = st.db.execute("SELECT 1 FROM receipts WHERE job=? LIMIT 1", (job,)).fetchone() is not None
+        return None if started else at
 
     @staticmethod
     def _hold_at(st: S.Store, now: dt.datetime) -> dt.datetime | None:
@@ -935,14 +973,21 @@ class EventLane:
                       soon: list[dt.datetime]) -> tuple[int, dt.datetime, str, dt.date, bool] | None:
         """The most urgent decision: (0) a live one (within LIVE_WITHIN of its time) not yet made, (1) a missed one, oldest
         first, (2) one cut by the lane's bound, pending on verdicts or never finished, (3) the hourly re-decision (and
-        the backfill's), which waits for the record pass. None when none is due."""
+        the backfill's), which waits for the record pass. None when none is due.
+
+        INSIDE THE LEAD (`_lead`, HOLD_LEAD's comment: from HOLD_LEAD before today's live close decision until it has
+        started) only that decision is ever due: every other one waits, whatever its rank, and is due again as soon as
+        the live one has a receipt (it is due at its time, so `soon` holds that time already)."""
         today = now.astimezone(C.NY).date()
         start = max(P.registered().astimezone(C.NY).date(), (now - LOOKBACK).astimezone(C.NY).date())
         best: tuple[int, dt.datetime, str, dt.date, bool] | None = None
+        lead = self._lead(st, now, latest)
         for s, kind, scheduled, at in self._decision_times(st, start, today + dt.timedelta(days=7)):
             if at > now:
                 soon.append(at)
                 continue
+            if lead is not None and (kind, s.day) != ("close", today):
+                continue        # (the lead: no decision but the live close decision starts before it has)
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
             live = kind not in BACKFILL_KINDS and R.live_run(scheduled, now)   # (their rows' own: always a backfill)
