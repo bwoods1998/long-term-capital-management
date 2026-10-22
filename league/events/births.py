@@ -47,13 +47,28 @@ sorted keys and no spaces; its sha256 (`sha`) names the birth.
 
 THE FACTS (`Facts`): what the ARCHITECT reads, OUTCOME-FREE. Over the last `SESSIONS` (20) sessions: event counts by
 family, 8-K item, form, news source and knowable hour; the stored verdict scores and guidance; which families and items
-no program selects; every registered program's selection count; and a candidate rule's selection count (each run
-through the lane's own `select` over the same windows). The facts NEVER read bars, marks, outcomes, looks, bands,
-band_history, real_fills, the universe (its prices) or meta (the looks' details): a SQLite authorizer refuses those
-tables for the whole build (`outcome_free`), so a price after an event, a return, a P&L, a look's p or a band cannot
-reach the architect. Eligibility is the lane's kept result (`eligibility`: listed, operating, priced before the
-session), the session's own or else the issuer's nearest. The reactions of the react families are prices after the
-event: never read, so their counts are UPPER BOUNDS (every event passes the reaction) and say so.
+no program selects; every registered program's selection count (PREREG-EVL-4's and -5's too from release 1019h, below);
+and a candidate rule's selection count (each run through the lane's own `select` over the same windows). The facts NEVER
+read bars, marks, outcomes, looks, bands, band_history, real_fills, the universe (its prices) or meta (the looks'
+details): a SQLite authorizer refuses those tables for the whole build (`outcome_free`), so a price after an event, a
+return, a P&L, a look's p or a band cannot reach the architect. Eligibility is the lane's kept result (`eligibility`:
+listed, operating, priced before the session), the session's own or else the issuer's nearest. The reactions of the
+react families are prices after the event: never read, so their counts are UPPER BOUNDS (every event passes the
+reaction) and say so.
+PREREG-EVL-4'S AND PREREG-EVL-5'S FAMILIES (release 1019h; PREREG-EVL-5 section 7, "births.py's facts for the new
+families"; the review of release 1019g found every one of their nine rows selecting 0, so no Jaccard was computed
+against them): their rows are read as their close decision reads them (league/events/programs.py `close_rows_4`,
+`close_rows_5`, `FILE_FAMILIES` here), with every price unread, so a count that reads one is an UPPER BOUND as a react
+family's: EVL-8K-REACT-ON's reaction passes as any react family's; PREREG-EVL-5's reaction passes each row's own band
+(`UNREAD_IN_BAND`: <= 0.96 for EVL-ERN-DROP-ON, inside 0.96-1.04 for EVL-ERN-UNDER-ON and its control) and its gap
+passes (EVL-NEWS-NIGHT2-ON); its skips that read a price (TAKEN AT D'S CLOSE BY AN EARLIER ROW (a) and (c), the <= 0.96
+skip) skip nothing, while (b) (a stored PROMPT-NEWS verdict `ok` with score >= 2) skips as in the lane, and an issuer
+waiting on an unanswered article is counted; NO NEW INFORMATION (i) names an issuer by the kept eligibility's ticker of
+it (SEC's tickers copy is read through `meta`, which the facts never read), naming no more than the lane's copy does,
+and (ii) and (iii) read the 8-Ks and Form 4 buys as the lane does. Every one of those readings can only add events, so
+the facts' count of such a row is at least what the row selected on the same eligibility; the rows that read no price
+(EVL-8K-READ-ON, EVL-NEWSPM-READ-ON and their controls) are counted as their decision reads them, on the kept
+eligibility (registration set aside, as every count here).
 
 THE VALIDATOR (`validate`, code, not a model): the grammar; a new id and sha; a minimum rate: a SEATABLE birth >=
 `MIN_RATE` (20; SUP-3's rate rule, the captain's A97, release 1019h) selected events a session over the sessions of
@@ -68,9 +83,10 @@ FALSE-PASS BUDGET (R3-SPEC section 3 as the captain's A81 states it, 16:25Z Oct 
 stated charge, the screen's `FALSE_PASS_RATE`), at most A71's stated lifetime budget of the lane, 3.0
 (league/events/screen.py `LANE_BUDGET`, PREREG-EVL-4 section 3), over every seatable version ever registered in the
 lane, counted from SEATING's own sum as the report counts it (league/events/screen.py `expected_false_passes`:
-PREREG-EVL-1 to -4's twelve seatable versions, 1.2, and every seatable birth once loaded; never a figure written
-here), and at most `SEATABLE_A_NIGHT` (3) seatable births a night: so at most 18 seatable births before the budget is
-spent. A retired program's past looks stay counted (a test that was run is never refunded). Records are free.
+PREREG-EVL-1 to -5's fifteen seatable versions, 1.5 (PREREG-EVL-4's three and PREREG-EVL-5's three included,
+release 1019g), and 0.10 for every seatable birth once loaded; never a figure written here), and at most
+`SEATABLE_A_NIGHT` (3) seatable births a night: so at most fifteen seatable births before the budget is spent. A
+retired program's past looks stay counted (a test that was run is never refunded). Records are free.
 
 THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 at temperature 0 (the lane's
 `/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict
@@ -205,7 +221,7 @@ JACCARD_MAX = 0.8
 #: The false-pass budget (A81), in tenths of an expected false pass (integers: no float drift): each seatable birth the
 #: screen's FALSE_PASS_RATE, 1 (0.10); every seatable version ever registered at most the lane's stated lifetime budget,
 #: LANE_BUDGET, 30 (3.0), read from the screen and never restated here; what is used is SEATING's own sum
-#: (`budget_used_tenths`: PREREG-EVL-1 to -4's twelve, 12, before any birth); at most 3 seatable births a night.
+#: (`budget_used_tenths`: PREREG-EVL-1 to -5's fifteen, 15, before any birth); at most 3 seatable births a night.
 CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
@@ -227,6 +243,14 @@ JOB = "births"
 EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
 #: What the facts may never read (R3-SPEC section 2): a price after an event, a return, a P&L, a look's p, a band.
 FACTS_DENY = frozenset({"bars", "marks", "outcomes", "looks", "bands", "band_history", "real_fills", "universe", "meta"})
+#: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
+#: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
+#: of their programs has a selection count and every candidate a Jaccard against them.
+FILE_FAMILIES = tuple(P.CLOSE_FAMILIES_4) + tuple(P.CLOSE_FAMILIES_5)
+#: The facts' unread reaction of PREREG-EVL-5's two earnings families (a price after the event, never read): a value
+#: inside each row's own band, so every event passes it (an upper bound, as `unread_reaction` is for the react
+#: families): EVL-ERN-DROP-ON's <= 0.96; EVL-ERN-UNDER-ON's and its control's above 0.96 and below 1.04.
+UNREAD_IN_BAND = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
 
 
 class SpecError(ValueError):
@@ -501,6 +525,21 @@ def unread_reaction(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float:
     return math.inf
 
 
+def unread_gap(row: Mapping[str, Any], uni: Mapping[str, Any]) -> float:
+    """The facts' gap of EVL-NEWS-NIGHT2-ON (D's 09:30 minute over P's close: a price after the attention article):
+    never read; every event passes it (an upper bound, release 1019h)."""
+    return math.inf
+
+
+def facts_reaction(prog: P.Program) -> Callable[[Mapping[str, Any], Mapping[str, Any]], float]:
+    """The facts' unread reaction for `prog` (release 1019h): `unread_reaction` for every birth and every react family;
+    for PREREG-EVL-5's earnings rows a value inside the row's own band (`UNREAD_IN_BAND`), so each event passes it."""
+    if prog.spec is None and prog.family in UNREAD_IN_BAND:
+        value = UNREAD_IN_BAND[prog.family]
+        return lambda row, uni: value
+    return unread_reaction
+
+
 def select(program: P.Program, rows: Iterable[Mapping[str, Any]], *,
            eligible: Callable[[str], Mapping[str, Any] | None], verdict: Callable[[Mapping[str, Any]], int | None],
            reaction: Callable[[Mapping[str, Any], Mapping[str, Any]], float | None] | None = None,
@@ -751,7 +790,7 @@ class Facts:
             nlo, nhi = P.news_window(st, day)
             dlo, dhi = P.day_news_window(st, day)
         except LookupError:
-            return {f: [] for f in FAMILIES}
+            return {f: [] for f in FAMILIES + FILE_FAMILIES}
         e8k = P.filings_in(st, "8-K", lo, hi, since=EPOCH)
         ern_close = [r for r in P.filings_in(st, "8-K", clo, chi, since=EPOCH) if P.ERN_ITEMS & P.items_of(r)]
         by_symbol = self.elig.symbols(day)
@@ -759,7 +798,55 @@ class Facts:
         day_news = [dict(a) | {"cik": by_symbol.get(a["symbol"])} for a in P.news_in(st, dlo, dhi, since=EPOCH)]
         return {"ern": e8k, "8k": e8k, "ins": P.ins_triggers(st, lo, hi, since=EPOCH),
                 "ins-buy": P.ins_buys(st, lo, hi, since=EPOCH), "news": news, "ern-react": ern_close,
-                "news-day": day_news, "news-react": day_news}
+                "news-day": day_news, "news-react": day_news, **self._file_windows(day, by_symbol)}
+
+    def _file_windows(self, day: dt.date, by_symbol: Mapping[str, str]) -> dict[str, list[Mapping[str, Any]]]:
+        """PREREG-EVL-4'S AND -5'S ROWS OF ENTRY SESSION `day` (release 1019h; the module docstring): `close_rows_4` and
+        `close_rows_5` over the same windows their close decision reads, with no registration floor, every price unread
+        (TAKEN (a) and (c) and the <= 0.96 skip skip nothing; no issuer waits), TAKEN (b) from the stored PROMPT-NEWS
+        verdicts, NO NEW INFORMATION (i) by the kept eligibility's tickers. {family: rows} for `FILE_FAMILIES`; a family
+        whose windows the calendar cannot place has none."""
+        st = self.store
+        out: dict[str, list[Mapping[str, Any]]] = {f: [] for f in FILE_FAMILIES}
+        try:
+            clo, chi = P.close_window(st, day)
+            dlo, dhi = P.day_news_window(st, day)
+            nlo, nhi = P.news_window(st, day)
+        except LookupError:
+            return out
+
+        def with_cik(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+            return [dict(a) | {"cik": by_symbol.get(a["symbol"])} for a in rows]
+
+        def symbol_of(cik: str) -> str | None:
+            row = self.elig.row(day, cik)
+            return None if row is None else str(row["symbol"])
+        all8k = P.filings_window(st, "8-K", clo, chi)
+        day_all = with_cik(P.news_rows(st, dlo, dhi))
+        out.update(P.close_rows_4(all8k, day_all, with_cik(P.news_rows(st, nlo, nhi)), symbol_of))
+        ern = [r for r in all8k if r.get("cik") and P.items_of(r) & P.ERN_ITEMS]
+        taken, _ = P.taken_close_5(ern, day_all, symbol_of=symbol_of, reaction=lambda row: None,
+                                   day_reaction=lambda cik: None, news_answer=self._news_answer)
+        night2: list[Mapping[str, Any]] = []
+        try:
+            windows = P.night2_windows(st, day)
+            attention = with_cik(P.news_rows(st, *P.attention_window(st, day)))
+        except LookupError:
+            attention = []
+        if attention:
+            tickers = {symbol: {cik} for symbol, cik in by_symbol.items()}
+            named = P.named_ciks(P.news_named(st, *windows["named"]), tickers)
+            filed = P.filed_ciks(P.filings_window(st, "8-K", *windows["filed"]))
+            bought = P.bought_ciks(P.ins_buys_window(st, *windows["bought"]))
+            night2 = P.no_new_info(attention, named, filed, bought, symbol_of)
+        out.update(P.close_rows_5(ern, night2, taken=taken, waiting=set(), dropped=set()))
+        return out
+
+    def _news_answer(self, article: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """TAKEN (b)'s reading of a DAY(D) article: its stored PROMPT-NEWS verdict when `ok` ({status, score}), else None
+        (none stored, `unparsed` or `refused`: never taken by it)."""
+        got = self.scores.get(f"news|news:{article.get('id')}")
+        return None if got is None else {"status": "ok", "score": got[0]}
 
     def _verdict(self, row: Mapping[str, Any]) -> int | None:
         key = f"doc|8k:{row['accession']}" if row.get("accession") else f"news|news:{row.get('id')}"
@@ -773,7 +860,8 @@ class Facts:
     def selected(self, prog: P.Program) -> dict[dt.date, list[str]]:
         """{session: the events `prog`'s rule selects in it} over the facts' sessions: the lane's own `select` with its
         registration time set aside, one event an issuer a decision (the earliest knowable, as `write_intents`), the
-        reaction unread (`unread_reaction`)."""
+        reaction unread (`unread_reaction`; PREREG-EVL-5's earnings rows `facts_reaction`, release 1019h) and the gap
+        unread (`unread_gap`)."""
         key = f"{prog.id}|{prog.spec or ''}"     # (a PREREG program's version 2 selects as its version 1)
         if key in self._selected:
             return self._selected[key]
@@ -783,7 +871,8 @@ class Facts:
             for day in self.days:
                 rows = self.rows[day].get(prog.family, [])
                 got = P.select(unbounded, rows, eligible=lambda cik, day=day: self.elig.row(day, cik),
-                               verdict=self._verdict, reaction=unread_reaction, guidance=self._guidance)
+                               verdict=self._verdict, reaction=facts_reaction(prog), guidance=self._guidance,
+                               gap=unread_gap)
                 taken: set[str] = set()
                 events = []
                 for c in sorted(got, key=lambda c: (c.knowable_at, c.event)):
@@ -846,7 +935,8 @@ class Facts:
             recorded = set(self.recorded)
             on_recorded: dict[str, int] = {}
             for day in self.days:
-                for family, rows in self.rows[day].items():
+                for family in FAMILIES:     # (the grammar's families: PREREG-EVL-4's and -5's rows are counted by program)
+                    rows = self.rows[day].get(family, [])
                     slot = fam.setdefault(family, {"events": 0, "eligible": 0})
                     for row in rows:
                         items_ = P.items_of(row) if row.get("accession") and family in ("ern", "8k", "ern-react") else set()
@@ -947,7 +1037,7 @@ def _events(selected: Mapping[dt.date, Sequence[str]]) -> set[str]:
 def budget_used_tenths(store: Any) -> int:
     """Tenths of an expected false pass already charged (A81): SEATING's own sum as the report counts it
     (league/events/screen.py `expected_false_passes`, after `load_births`: 0.10 for every seatable version ever
-    registered in the lane, PREREG-EVL-1 to -4's twelve and every seatable birth, retired ones included, and any later
+    registered in the lane, PREREG-EVL-1 to -5's fifteen and every seatable birth, retired ones included, and any later
     version of a seatable program the store has seen). Never a figure written here."""
     return int(round(float(SN.expected_false_passes(store)["expected"]) * 10))
 

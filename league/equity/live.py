@@ -352,6 +352,16 @@ EVL5_HELD_SAID = "eq_evl5_held_unsent"
 #: How many such closes are kept, and the sessions back a second one makes the alarm a warning (it recurs).
 HELD_DAYS = 10
 HELD_RECUR_SESSIONS = 5
+#: PREREG-EVL-5 section 1.3's WAITING ROOM ONCE THE LANE'S CLOSE RECEIPT IS OVERDUE (THE CAPTAIN'S DECISION on the money
+#: re-review of PREREG-EVL-5, its option 1; release 1019h): from this many seconds (one book minute) before the close
+#: window's cut-off (`close_until`, the close - 11 minutes) a buy still waiting for the lane's close decision
+#: (`book.part_hold`, "wait") keeps its room (`HeldAhead`: cash, invested room, loss budget, name wall, line slots) from
+#: R3's births after it in ROOM's order, never from a row of PREREG-EVL-1 to -4 (`book.room_free_overdue`): when the
+#: lane's receipt comes that late the waiting buy can rarely still go, and an earlier file's real money no longer pays
+#: for it (the re-review found a Probe PREREG-EVL-5 row's wait leaving a learning PREREG-EVL-1 row unsent at the cut-off).
+#: Before then ROOM holds as release 1019g built it. The post-close alert (`_event_held_said`) is a WARNING whenever a
+#: later buy that ended unsent waiting for that room is a PREREG row (`book.prereg_row`: any file's, not a birth).
+HELD_OVERDUE_S = 60.0
 #: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
 #: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
 ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
@@ -482,6 +492,25 @@ def _has_table(rows: Callable[..., list], name: str) -> bool:
     try:
         return bool(rows("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)))
     except Exception:  # noqa: BLE001
+        return False
+
+
+def _room_free(adapter: Any, program: Any, version: Any) -> bool:
+    """Whether a waiting PREREG-EVL-5 buy keeps no room from (program, version) once the lane's close receipt is overdue
+    (`book.room_free_overdue`: a row of PREREG-EVL-1 to -4; release 1019h, `HELD_OVERDUE_S`); False when the event
+    adapter cannot say (the room is kept, as release 1019g keeps it)."""
+    try:
+        return bool(adapter.room_free_overdue(str(program), int(version)))
+    except Exception:  # noqa: BLE001 - the reading that keeps the room
+        return False
+
+
+def _prereg_row(adapter: Any, program: Any, version: Any) -> bool:
+    """Whether (program, version) is a PREREG row (any file's, not R3's birth: `book.prereg_row`); False when the event
+    adapter cannot say (release 1019h: the post-close alert's warning, `_event_held_said`)."""
+    try:
+        return bool(adapter.prereg_row(str(program), int(version)))
+    except Exception:  # noqa: BLE001 - an alert's count, never the book's path
         return False
 
 
@@ -1001,13 +1030,21 @@ class HeldAhead:
     budget; `names`, each symbol's dollars, out of the book-wide 10% a name; `orders`, how many are held (each keeps
     its send and its own exit on the event kind's line and the House-wide line, `_count_refusal`). Made afresh at each
     minute's sends, so a buy the lane's decision names (or never will) holds nothing the next minute; the later buys
-    themselves are never held."""
+    themselves are never held. `overdue` (release 1019h, `HELD_OVERDUE_S`): the minute is within one book minute of the
+    close window's cut-off while buys still wait, so a row of PREREG-EVL-1 to -4 after them is sized and counted
+    without their room (`for_buy`); R3's births and PREREG-EVL-5's own rows still are with it."""
 
     usd: Decimal = Decimal(0)
     risk: Decimal = Decimal(0)
     orders: int = 0
     names: dict = field(default_factory=dict)
     held: list = field(default_factory=list)
+    overdue: bool = False
+
+    def for_buy(self, free: bool) -> "HeldAhead":
+        """The room kept from a later buy: all of it, or, once `overdue` and for a buy whose program `free` says is a
+        row of PREREG-EVL-1 to -4 (`book.room_free_overdue`), none (release 1019h, the captain's option 1)."""
+        return HeldAhead() if self.overdue and free else self
 
 
 class _NoYield(Exception):
@@ -5866,7 +5903,9 @@ class EquityBook:
         (`book.part_hold`, its words `book.PART_WAIT` on the end), and how many later buys ended unsent waiting for the
         room or the line slots kept for them (`HELD_AHEAD`). A close with any: an `equity.alert` record of the counts and an alert, a
         WARNING when another close of the last `HELD_RECUR_SESSIONS` sessions had any (it recurs: the lane's close
-        decision finishes too late for the book's window), else info. kv `EVL5_HELD_SAID` keeps the last day said and the
+        decision finishes too late for the book's window) or (release 1019h, the captain's option 1) when a later buy
+        that ended unsent so is a PREREG row's (`book.prereg_row`: any file's, not a birth's; `room_waited_prereg`), else
+        info. kv `EVL5_HELD_SAID` keeps the last day said and the
         last `HELD_DAYS` such closes, written only on a close with one; a close with none is read once a process
         (`_held_said`) and leaves no trace (the book's state is as before for every other path)."""
         self._held_said = day
@@ -5875,15 +5914,18 @@ class EquityBook:
         if kept.get("said") == day:
             return
         words = str(getattr(adapter, "PART_WAIT", "") or "")
-        unsent = waited = 0
+        unsent = waited = prereg = 0
         if words and _has_table(self.state.rows, "eq_event_intents"):
-            for r in self.state.rows("SELECT i.status, i.why FROM eq_intents i JOIN eq_event_intents e ON e.iid=i.iid "
-                                     "WHERE e.day=? AND e.at='close' AND e.side='buy' AND i.status='missed'", (day,)):
+            for r in self.state.rows("SELECT i.status, i.why, i.family, i.version FROM eq_intents i JOIN eq_event_intents "
+                                     "e ON e.iid=i.iid WHERE e.day=? AND e.at='close' AND e.side='buy' AND "
+                                     "i.status='missed'", (day,)):
                 text = str(r["why"] or "")
                 if "never sent" not in text:
                     continue
                 unsent += words in text
                 waited += HELD_AHEAD in text
+                # (release 1019h, the captain's option 1: a PREREG row, not a birth, that waited for that room)
+                prereg += HELD_AHEAD in text and _prereg_row(adapter, r["family"], r["version"])
         if not unsent and not waited:
             return
         days = {str(k): int(v) for k, v in dict(kept.get("days") or {}).items()}
@@ -5903,11 +5945,13 @@ class EquityBook:
         what = (f"PREREG-EVL-5: {unsent} buy{'' if unsent == 1 else 's'} of {day}'s close ended unsent while "
                 f"{'it' if unsent == 1 else 'they'} waited for the lane's own close decision (book.part_hold), and "
                 f"{waited} later buy{'' if waited == 1 else 's'} ended unsent waiting for the room kept for them"
+                + (f", {prereg} of them a PREREG row's (not a birth's: an earlier file's real money paid for the wait)"
+                   if prereg else "")
                 + (f"; it recurs: {', '.join(recent)} too (read the lane's decide-close seconds in lane.json; the "
                    "decision must finish before the close - 11 minutes)" if recent else ""))
         self.record("equity.alert", {"what": what, "day": day, "evl5_held_unsent": unsent, "room_waited": waited,
-                                     "recent": recent})
-        self.alert("warning" if recent and unsent else "info", f"equity: {what}")
+                                     "room_waited_prereg": prereg, "recent": recent})
+        self.alert("warning" if (recent and unsent) or prereg else "info", f"equity: {what}")
 
     def _venue_cancel_said(self, day: str) -> None:
         """A80'S ONE ALERT OF A SESSION (info), once the session's close has ended (`_event_finish`): how many of the
@@ -5991,8 +6035,9 @@ class EquityBook:
             buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
         until = em.open_until if at == "open" else em.close_until
         # (PREREG-EVL-5 section 1.3: a buy that waits for the lane's close decision keeps its room from every buy after
-        # it in this order, `HeldAhead`, made afresh each minute)
-        ahead = HeldAhead()
+        # it in this order, `HeldAhead`, made afresh each minute; release 1019h, the captain's option 1: from one book
+        # minute before the close's cut-off, `HELD_OVERDUE_S`, from R3's births only)
+        ahead = HeldAhead(overdue=at == "close" and now >= until - HELD_OVERDUE_S)
         for r in sells + buys:
             try:
                 side = self._event_row(r["iid"])
@@ -6073,7 +6118,8 @@ class EquityBook:
         every other gate) and, while it waits, KEEPS ITS ROOM from every buy after it in ROOM's order at this auction
         (`ahead`, `HeldAhead`: its worst case at its limit out of their cash, invested room, loss budget and name wall,
         and its send and exit out of their lines), so ROOM holds while it waits; a decision that finished without its
-        program refuses it (never traded)."""
+        program refuses it (never traded). ONCE OVERDUE (release 1019h, the captain's option 1, `HELD_OVERDUE_S`): a buy
+        of a PREREG-EVL-1 to -4 row is sized and counted without that room (`HeldAhead.for_buy`); a birth's still waits."""
         ahead = ahead if ahead is not None else HeldAhead()
         if side is None:
             self._finish(intent, "refused", "an event buy with no side row")
@@ -6088,6 +6134,10 @@ class EquityBook:
         resend = cancels[0] if cancels else None
         held = A80_HELD if resend is not None else ""
         inst = self._instance(intent.instance)
+        # (release 1019h, the captain's option 1, `HELD_OVERDUE_S`: once the lane's close receipt is overdue a row of
+        # PREREG-EVL-1 to -4 is sized and counted without the room the waiting PREREG-EVL-5 buys keep; a birth's buy,
+        # and a PREREG-EVL-5 row's, still keep out of it)
+        room = ahead.for_buy(ahead.overdue and inst is not None and _room_free(adapter, inst.family, inst.version))
         why = self._open_block(real_block, inst, killed)
         hold = None
         if why is None:
@@ -6105,7 +6155,7 @@ class EquityBook:
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
-                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=ahead.orders)
+                self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders)
         if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
             why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
         if why is None and hold is not None:
@@ -6122,17 +6172,17 @@ class EquityBook:
         if limit <= 0:
             self._finish(intent, "refused", "no limit price")
             return
-        sized = self._size_event(intent, inst, side, limit, day, s, ahead=ahead)
+        sized = self._size_event(intent, inst, side, limit, day, s, ahead=room)
         if sized is None:
             self._resend_held(intent, held)
             return
         qty, why = sized
-        if qty < 1 and ahead.held:
+        if qty < 1 and room.held:
             free = self._size_event(intent, inst, side, limit, day, s, dry=True)
             if free is not None and free[0] >= 1:
                 # (PREREG-EVL-5 section 1.3: it fits but for the room ROOM keeps for the buys ahead of it that wait for
                 # the lane's close decision: it waits with them, and goes, or is refused, once they are decided)
-                text = held + f"{HELD_ROOM} ({len(ahead.held)} {HELD_AHEAD}): {why}"
+                text = held + f"{HELD_ROOM} ({len(room.held)} {HELD_AHEAD}): {why}"
                 if intent.why != text[:400]:
                     intent.why = text[:400]
                     self._save_intent(intent)

@@ -1551,8 +1551,9 @@ class TheLanesTurnForItsCloseDecision(TH.LaneCase):
 
     def test_inside_the_lead_no_other_decision_is_due_whatever_its_rank(self):
         """A missed decision (rank 1), a cut one (rank 2), the hourly re-decision and the backfill kinds (rank 3) wait
-        from HOLD_LEAD before the live close decision until it has started; before the lead, after it has started, or
-        with no PREREG-EVL-5 programs, they are due as before."""
+        from HOLD_LEAD before the live close decision until a run of it has finished `ok` or `pending` (release 1019h:
+        a run that has only started, or that failed, keeps them waiting); before the lead, once it is made, or with no
+        PREREG-EVL-5 programs, they are due as before."""
         self.opened()
         monday = dt.date(2026, 10, 19)
         with self.store() as st:
@@ -1583,11 +1584,25 @@ class TheLanesTurnForItsCloseDecision(TH.LaneCase):
                 at = TH.et("2026-10-20", "15:47")
                 got = self.lane._due_decision(st, at, self.lane._decide_receipts(st, at), [])
                 self.assertEqual(got[2:4], ("close", dt.date(2026, 10, 20)), "at its time: the live one, rank 0")
+                # (release 1019h, the review of release 1019g: the lead ends when a run of the live one has FINISHED
+                # `ok` or `pending`, never at a run that has only started or that failed: the others wait through the
+                # failed run's retry, which is the live one's, rank 0)
+                tue = ("close", dt.date(2026, 10, 20))
                 rid = st.start_receipt("decide-close:2026-10-20", now=at)
                 got = self.lane._due_decision(st, at, self.lane._decide_receipts(st, at), [])
-                self.assertIsNotNone(got, "the live one has started: the others are due again")
+                self.assertTrue(got is None or got[2:4] == tue, "running: the others still wait")
+                st.finish_receipt(rid, "failed", {"why": "OSError: invented"}, now=at + dt.timedelta(seconds=5))
+                for after, live in ((30, False), (60, True)):
+                    when = at + dt.timedelta(seconds=after)
+                    got = self.lane._due_decision(st, when, self.lane._decide_receipts(st, when), [])
+                    self.assertEqual(None if got is None else got[2:4], tue if live else None, (name, after))
+                rid = st.start_receipt("decide-close:2026-10-20", now=at + dt.timedelta(seconds=60))
+                st.finish_receipt(rid, "ok", {}, now=at + dt.timedelta(seconds=65))
+                when = at + dt.timedelta(seconds=70)
+                got = self.lane._due_decision(st, when, self.lane._decide_receipts(st, when), [])
+                self.assertIsNotNone(got, "the live one is made: the others are due again")
                 self.assertEqual(got[3], monday)
-                st.db.execute("DELETE FROM receipts WHERE id=?", (rid,))
+                st.db.execute("DELETE FROM receipts WHERE job='decide-close:2026-10-20'")
                 st.db.execute("DELETE FROM receipts WHERE job IN ('decide-close:2026-10-19', ?)",
                               (f"{H.FIVE_KIND}:2026-10-19",))
 

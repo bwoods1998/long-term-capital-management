@@ -1846,3 +1846,25 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   outage left out, under 3 sessions, what a complete record pass is, the prompt's lines); test_daily_report.py
   `DoneSupply` and gateway/test/report-notice.test.mjs (the line, its flag and its words); test_events_births_names.py
   (fix/births-names' replays on SUP-3's rule with release 1019e's rate for their figures, `PARSE_VERSION` 3).
+
+## 26. PREREG-EVL-5's waiting room once the lane's close receipt is overdue (the captain's decision on PREREG-EVL-5's money re-review, its option 1; release 1019h's minors, `fix/1019h-minors`; book, as built; after section 25)
+
+- **The rule** (league/equity/live.py `HELD_OVERDUE_S` 60, `HeldAhead.overdue`, `HeldAhead.for_buy(free)`,
+  `_room_free`; league/events/book.py `room_free_overdue(program, version)`): `_event_send` makes each minute's
+  `HeldAhead` with `overdue` true at the close auction from `close_until - HELD_OVERDUE_S` (one book minute before the
+  window's cut-off, 15:48:00 ET on a full day); a buy that waits there waits because the lane's close receipt is still
+  unfinished (`book.part_hold`, "wait"). `_event_work_entry` then sizes and counts a buy of a row of PREREG-EVL-1 to -4
+  (`room_free_overdue`: a PREREG program of files 1 to 4, versions 1 and 2) against an empty `HeldAhead` (no cash,
+  invested room, loss budget, name wall or line slots kept for the waiting buys), while R3's births and PREREG-EVL-5's
+  own rows keep sizing and counting against all of it; the waiting buys still add to the shared `HeldAhead`
+  (`_event_keep_room`). An adapter that cannot say keeps the room (release 1019g's reading). Before the overdue minute
+  nothing changes. A buy of an earlier file's row can only go earlier than release 1019g sent it, inside every wall.
+- **The alert** (`_event_held_said`): the `equity.alert` record gains `room_waited_prereg` (the later buys that ended
+  unsent waiting for that room whose program is a PREREG row: `book.prereg_row`, any file's, not a birth's), and the
+  alert is a WARNING when it is above 0 (else as before: a warning only when the close's own buys ended unsent and it
+  recurs within `HELD_RECUR_SESSIONS`).
+- **Identities**: none moves (live.py is the book's plumbing, outside the equity identity; no money row).
+- **Tests**: league/tests/test_events_1019h_minors.py `TheRoomOnceOverdue` (a learning PREREG-EVL-1 row behind a
+  waiting Probe PREREG-EVL-5 row goes at the 15:48:40 minute with the cash; a birth behind a waiting learning row still
+  waits and its alert stays info; a PREREG row that waited and ended unsent, no book minute in the overdue minute, is a
+  warning the first time; the rows freed are files 1 to 4 alone).

@@ -4,9 +4,39 @@ How to pause, deploy, roll back, inspect and recover the House, the gateway, the
 Gym, and the switches that govern them. The design is in [design.md](design.md). Commands run from
 the repository root on the owner's machine unless they say "on the box". Sections that depend on
 the swarm or live path describe their implementation, not evidence that production trading is
-enabled. This page describes the tree it is in, release V3-A part 1, which is live since Oct 3, 2026: **Now** says
-what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
+enabled. This page describes the tree it is in; the running House release is release 1019g (live since 05:36Z Oct 22,
+2026, **Release 1019g** below), on V3-A part 1's machinery (live since Oct 3, 2026: **Now** says what that production
+ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
+
+## Release 1019h's minors (Oct 22, 2026): release 1019g's reviewed minors: `fix/1019h-minors`, not deployed
+
+Cut from `feat/done-speed` (`88ecf37f`, **Release 1019h** below); it ships IN release 1019h, the same owner deploy (the
+same gateway step, the same pair `8e63ce64` / `c3026eba`: this branch moves no money row, no constitution row and no
+identity, read with the tree's own functions on 3.14 and 3.11). Six items, each held by a test that fails without it
+(league/tests/test_events_1019h_minors.py; CHANGELOG.md, **Release 1019h's minors**): (1) `evl_score`'s "waiting on the
+tape" reads the score's own marks only ('open', 'close', 'first': league/ops/evl_health.py `TAPE_LABELS`), so
+PREREG-EVL-5's '0930' minute with no trade excuses no stuck intent; (2) R3's outcome-free facts window PREREG-EVL-4's and
+-5's families (league/events/births.py `FILE_FAMILIES`, `_file_windows`: prices unread, so their counts are upper bounds),
+so the nine rows have selection counts and the validator's Jaccard reads them; (3) `evl_decide` stands on a close
+PREREG-EVL-5's rows still owe their own decision and `evl_verdicts` reads `decide-close-evl5`'s tallies (`FILE_WAITS`,
+stall.json `evl_kept` `five`); (4) THE LEAD after a FAILED live close run (league/events/house.py `LEAD_ENDS`,
+`_live_next`): it ends only when a run has finished `ok` or `pending` (or the decision is no longer live), so no other
+decision starts before the retry, every other task ends 5 s before it, and the held turn starts the retry at its time;
+(5) THE CAPTAIN'S DECISION on PREREG-EVL-5's money re-review, option 1 (league/equity/live.py `HELD_OVERDUE_S`,
+`HeldAhead.for_buy`, league/events/book.py `room_free_overdue`, `prereg_row`): from one book minute before the close
+window's cut-off, with the lane's close receipt still unfinished, a waiting PREREG-EVL-5 buy keeps no room from a row of
+PREREG-EVL-1 to -4 (still from births), and the post-close alert is a WARNING when a PREREG row waited for that room and
+ended unsent (`room_waited_prereg`); (6) docs: the deployed state below, the births budget after PREREG-EVL-5 (1.5 used
++ 0.10 a seatable birth, at most fifteen), and docs/prereg/evl-3/calibrate_events.py, the module the shipped
+docs/prereg/evl-5/calib_evl5.py imports, byte for byte the tags' (PREREG-EVL-5.md and the script untouched).
+
+**Verify after release 1019h's deploy** (read-only, beside its own list): the stall job's `evl_decide` numbers carry
+`five_waiting` (0 unless a close is owed) and `stall.json` `evl_kept` has `five`; a session with a failed live close run
+(`decide-close:<day>` `failed` in the store, the House's warning "decide-close failed") shows its retry started one
+minute after the failed run's start and no other `decide-*` receipt started between them; the night's births receipt's
+facts list PREREG-EVL-4's and -5's rows with non-zero selection counts on a store whose sessions hold their events.
+**Rollback**: with release 1019h (the House to release 1019g's deployed head); nothing of this branch needs its own.
 
 ## Release 1019h (Oct 22, 2026): Done speed (the captain's A97 and A100): `feat/done-speed`, not deployed
 
@@ -62,7 +92,7 @@ Probe lots bought rounded up exit by their own plans and count as they were sent
 `parse_version` 3 stays registered, release 1019g's grammar parses it); the gateway by `wrangler rollback` to the
 version recorded, or never (the House's older facts carry no `supply`).
 
-## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5 + the births fix, the pre-open deploy (A94): `rel/1019g`, not deployed
+## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5 + the births fix, the pre-open deploy (A94): `rel/1019g`, deployed 05:36Z Oct 22 (House `20261022T053527Z-05c3dc2f4422`, main `b374d862`, PR 595; gateway `354aeab2`, 05:34Z; A108)
 
 Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
 **PREREG-EVL-5's three event programs**, below) merged in, then origin/main `eb5bedac` (the House's scoreboard of Oct 21)
@@ -77,9 +107,10 @@ THE FINAL ROUND: `fix/births-names` `4b565668` (PR 596, A95, cut from release 10
 `EVL-B-`, a one-role list reads as its role, two valid examples in the prompt, the prompt's sha `2203fda3` ->
 `8294fe77`, and ONE re-run of a night that accepted and registered nothing under an older reading, never from 12:55Z of
 the session day after it) merged in, and the fix of the open major of PREREG-EVL-5's money re-review: from `HOLD_LEAD`
-before the live close decision until it has a receipt no other decision starts (league/events/house.py `_lead`), and a
-task that returns at or after 15:47:00 ET (a network read past its bound) never ends the held turn while the live
-decision is owed: the turn starts it at once (`_close_owed`).
+before the live close decision until it has a receipt no other decision starts (league/events/house.py `_lead`; release
+1019h: until a run of it has FINISHED `ok` or `pending`, so a failed run keeps the lead and the held turn starts its
+retry at its time, **Release 1019h's minors** above), and a task that returns at or after 15:47:00 ET (a network read
+past its bound) never ends the held turn while the live decision is owed: the turn starts it at once (`_close_owed`).
 ROOM'S ORDER WHILE A PREREG-EVL-5 BUY WAITS for the lane's own close decision to name its program (`book.part_hold`;
 the book's close decision waits only 60 s for the lane's) is feat/evl-5's `HeldAhead` alone (league/equity/live.py:
 the waiting buy, once every other gate lets it go, keeps its dry-sized worst case, A85's reservation and A86's Probe
@@ -141,7 +172,7 @@ the old code seats none of them, so a later redeploy decides those closes for th
 by `wrangler rollback` to `68363043`, or never. Constitution-only: `equity_money.event.enabled` False (`fd9e90c0` /
 `005745e9`) stops every event buy; release 1019e's Probe rows (`055e5313` / `a8d4cbd9`) are inside the bounds.
 
-## Release 1019f (Oct 21-22, 2026): the path-to-Done fixes (A84-A86), the alarms, the Done reader: `rel/1019f`, not deployed
+## Release 1019f (Oct 21-22, 2026): the path-to-Done fixes (A84-A86), the alarms, the Done reader: `rel/1019f`, deployed 05:36Z Oct 22 in release 1019g
 
 Nine merges on release 1019e's head `c485dcfe` (#583, **Release 1019e**, below), `--no-ff`, rerere off, in this order:
 `fix/a84-fast-path-per-feed` (`b0a62c6b`, #586: A84, the fast path reads each feed by its own clean reads, and
@@ -240,7 +271,7 @@ never (its extra words are only words). Constitution-only: `equity_money.event.e
 constitution `005745e9`) stops every event buy; `position_share.probe` 0.05 with `one_share_max.probe` removed is
 release 1019e's pair (`055e5313` / `a8d4cbd9`), rows inside the bounds.
 
-## A86 REVISED, Probe smaller inside the trade-less envelope (Oct 21, 2026): the Probe band at 3.5% of E, 6 open: `fix/a86-probe-more-smaller` as release 1019f integrates it, not deployed
+## A86 REVISED, Probe smaller inside the trade-less envelope (Oct 21, 2026): the Probe band at 3.5% of E, 6 open: `fix/a86-probe-more-smaller` as release 1019f integrates it, deployed 05:36Z Oct 22 in release 1019g
 
 The captain's amendment A86 REVISED (20:30Z Oct 21, 2026, replacing A86's proposal; decided before any Probe event; the
 branch is integrated ONLY in this form): cash at the auction binds first at Probe, so PREREG-EVL-3's Probe band
@@ -279,7 +310,7 @@ program already at Probe keeps its open lots (each exits by its own plan); its n
 `005745e9`), `position_share.probe` 0.05 with `one_share_max.probe` removed (rows inside the bounds: release 1019e's
 pair `055e5313` / `a8d4cbd9`), or the House release before it.
 
-## The screen after the open, the night by session (Oct 21, 2026): `fix/screen-after-open`, in release 1019f, not deployed
+## The screen after the open, the night by session (Oct 21, 2026): `fix/screen-after-open`, in release 1019f, deployed 05:36Z Oct 22 in release 1019g
 
 Cut from `rel/1019d` `5a17bd25`; release 1019f integrates it on top of release 1019e. The audit of the live House
 ("bands move a session late"): the judge makes a look's close final at an open decision, but the screen ran only after
@@ -322,7 +353,7 @@ in `band_history` (`written_at` that morning); at that session's close decision 
 are the judge's, whichever run wrote them), and the old code goes back to the nightly screen and the first-decision
 band read. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
 
-## The daily-index backfill's retries and SEC holidays (Oct 21, 2026): `fix/backfill-robust`, joins release 1019f, not deployed
+## The daily-index backfill's retries and SEC holidays (Oct 21, 2026): `fix/backfill-robust`, joins release 1019f, deployed 05:36Z Oct 22 in release 1019g
 
 Cut from `rel/1019d` `5a17bd25`; the captain integrates it on top of release 1019e as release 1019f. It changes
 league/events/house.py alone (behind the wall: an owner deploy, never by the updater). No judge moves: the screen still
@@ -343,7 +374,7 @@ house.py takes): otherwise the day's backfill waits an hour at a time while it i
 in reach, as every holiday did before this fix. **Rollback**: the release before it; a day this fix marked done stays
 done.
 
-## A84: the fast path reads each feed by its own clean reads, and `evl_final` (Oct 21, 2026): `fix/a84-fast-path-per-feed`, joins release 1019f, not deployed
+## A84: the fast path reads each feed by its own clean reads, and `evl_final` (Oct 21, 2026): `fix/a84-fast-path-per-feed`, joins release 1019f, deployed 05:36Z Oct 22 in release 1019g
 
 Cut from `rel/1019d` `5a17bd25`; the captain integrates it into release 1019f on top of release 1019e. **Why** (the
 audit of the live House, two lenses independently; the captain's A84, 19:58Z Oct 21, recorded before any look): A69's
@@ -394,7 +425,7 @@ order in flight; CI green on the exact head; before Oct 26 13:00Z, when the firs
 first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
 `evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
 
-## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, in release 1019g, not deployed
+## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, in release 1019g, deployed 05:36Z Oct 22
 
 Cut from `rel/1019e` (`c485dcfe`); it ships as release 1019g on top of release 1019f (A92: "release 1019g, or 1019f if
 it has not merged"): the frozen [PREREG-EVL-5](prereg/PREREG-EVL-5.md)'s rows (EVL-ERN-DROP-ON, EVL-ERN-UNDER-ON,
@@ -444,7 +475,7 @@ exit by their own plans (the old book plans their exits: `_event_exits` reads ea
 none of them and its receipts name none of them, so a later redeploy decides those closes again for the new rows the
 same way. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
 
-## Release 1019e (Oct 21-22, 2026): R3's births, A80's re-send, the site follows the lane, the cost fix: `rel/1019e`, not deployed
+## Release 1019e (Oct 21-22, 2026): R3's births, A80's re-send, the site follows the lane, the cost fix: `rel/1019e`, deployed 21:17Z Oct 21 (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`; gateway `68363043`, 21:15Z; A93)
 
 Four merges on release 1019d's head `5a17bd25` (#581, **Release 1019d**, below), `--no-ff`, in this order:
 `feat/evl-births` (`ad9c8513`, #577: R3, **Births** below and [events.md](events.md), "Births"), `feat/site-events`
@@ -511,7 +542,7 @@ close that release 1019d settled filled stays in its record. So once births are 
 false plus the instant stop of event buys over a House rollback; roll the House back only for a fault in the House
 itself, and read the births' settled intents of the rollback's sessions before their next look.
 
-## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, not deployed
+## Release 1019d (Oct 21, 2026): PREREG-EVL-4's three programs: `rel/1019d`, deployed 20:06Z Oct 21 with release 1019c (House `20261021T200543Z-98b98e817ece`, main `5a17bd25`, #581; gateway `fccaf9da`, 20:05Z; A88)
 
 One merge on release 1019c's head `b35c018f` (#580, **Release 1019c**, below): `feat/evl-4` (`699c5e69`, #579,
 **PREREG-EVL-4's three event programs and two controls**, below), `--no-ff`; then release 1019c's later head `f85cc152`
@@ -556,7 +587,7 @@ deployed from another); the grant stands (the same
 money digest). The new rows' intents and lots stay in the stores and their lots exit by their own plans; release
 1019c seats none of them. The instant stop of event buys is release 1019b's (**Release 1019b**, Rollback).
 
-## PREREG-EVL-4's three event programs and two controls: `feat/evl-4`, in release 1019d, not deployed
+## PREREG-EVL-4's three event programs and two controls: `feat/evl-4`, in release 1019d, deployed 20:06Z Oct 21
 
 Cut from `rel/1019b`; it ships in release 1019d on top of release 1019c (**Release 1019d**, above, is how it deploys): the frozen [PREREG-EVL-4](prereg/PREREG-EVL-4.md)'s rows
 (EVL-8K-REACT-ON, EVL-8K-READ-ON, EVL-NEWSPM-READ-ON at their version 1, seatable at learning from birth after the nine
@@ -588,7 +619,7 @@ their lots exit by their own plans; the old code seats none of them, and its rec
 later redeploy decides those closes again for the new rows the same way. The instant stop of event buys is release
 1019b's (**Release 1019b**, Rollback).
 
-## Release 1019c (Oct 20, 2026): alarms and the daily report, the lane's fast finality and order line: `rel/1019c`, not deployed
+## Release 1019c (Oct 20, 2026): alarms and the daily report, the lane's fast finality and order line: `rel/1019c`, deployed 20:06Z Oct 21 inside release 1019d
 
 One release, on main `3230a884` (release 1019b as deployed), carries the two sections below, merged in this order, each
 `--no-ff`: `r3/lane-1019c` (`6f53eeca`, #578: **Release 1019c (Oct 19-20, 2026): the fast path to a final record ...**)
@@ -657,7 +688,7 @@ reset at 00:00 UTC, and `metered.observe` credits a cap to the day it was read a
 higher). The cap moves only with realized profit; at no realized profit it is a constant $5, so the issue cannot bite
 before the lane's first profitable week.
 
-## Release 1019c (Oct 19-20, 2026): the fast path to a final record, the owed re-decision rule, the event kind's own day order count: `r3/lane-1019c`, not deployed
+## Release 1019c (Oct 19-20, 2026): the fast path to a final record, the owed re-decision rule, the event kind's own day order count: `r3/lane-1019c`, deployed 20:06Z Oct 21 in release 1019c
 
 Cut from `rel/1019b` (`cd3d1505`), with release 1019b's final head (`3230a884`: fix round 3, the proof's tightening
 `30558c43` and round 4, A72) merged in, and deployed AFTER it: an owner deploy of the House alone (league/constitution.py,
@@ -712,7 +743,7 @@ decision receipt's `kept` entries carry `events` and `unjudged` lists.
 1019b's, money `285fa7af`, constitution `fd38e4e1`), which knows an event lot's exit, so it may be rolled back to with
 event lots open; a look written by the fast path stands (looks are never rewritten).
 
-## Release 1019c, alarms and costs (Oct 19, 2026): budget rule 3, the event lane's progress alarms, the cap breach, the daily one-screen report by mail: `r2/alarms`, not deployed (ships in release 1019c)
+## Release 1019c, alarms and costs (Oct 19, 2026): budget rule 3, the event lane's progress alarms, the cap breach, the daily one-screen report by mail: `r2/alarms`, deployed 20:06Z Oct 21 in release 1019c
 
 The owner's goal of Oct 19, 2026, items 4 and 5 ("metered compute <= $5 a day plus half the trailing week's realized net
 profit, never above $25"; "alarms on stalls, missed events, fill gaps and cap breaches; a daily one-screen report
@@ -1023,7 +1054,7 @@ knowable lag, which program gets which rows, the record's schema). `league/event
 `league/service.py` and `scripts/evl_migrate.py` are not: a fix to them can ship through the updater. `config.json` is
 the owner's. R3 adds `league/events/births.py` (the births' grammar, validator and budget, the facts' wall).
 
-**Births (R3, on `feat/evl-births`, not deployed; [events.md](events.md), "Births").** Deploy THE GATEWAY FIRST (its
+**Births (R3, on `feat/evl-births`, deployed 21:17Z Oct 21 in release 1019e; [events.md](events.md), "Births").** Deploy THE GATEWAY FIRST (its
 docs route admits `docs/births/<YYYY-MM-DD>.jsonl` appends), then the House release with `league/config.json`
 `events.births` true: the lane then runs the births job once a session night at 21:15 ET after the report (receipt
 `births`; the architect's one Haiku call, at most $0.25 a night, refused under PAUSE and INSIDE THE LANE'S LINE since

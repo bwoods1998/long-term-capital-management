@@ -140,7 +140,8 @@ the never-sent by reason and the constraint that bound), `evl_backfill` (a weekd
 not done by 12:00 ET of the next weekday, a run of passes that are not `ok` over 6 h, or a done day whose passes failed
 to fetch a filing) and `evl_handback` (a real event fill the book owes the lane's `real_fills` over 1 h and not there);
 and `evl_decide` also stands for PREREG-EVL-4's rows of a close still to decide by themselves 2 h after the job first saw
-it (`stall.json` `evl_kept`), `evl_verdicts` reads their `decide-close-evl4` tallies too.
+it (`stall.json` `evl_kept`), `evl_verdicts` reads their `decide-close-evl4` tallies too (release 1019h: PREREG-EVL-5's
+rows the same, `decide-close-evl5`, kept apart under `evl_kept` `five`).
 
 THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms on ... cap breaches";
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
