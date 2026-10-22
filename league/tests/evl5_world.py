@@ -61,9 +61,12 @@ SEPTEMBER = dt.date(2026, 8, 1)
 
 class Gateway(W4.Gateway):
     """evl4_world's gateway for every ticker here: its calendar, assets (all active and tradable on NASDAQ), daily bars
-    (close 20 but for `closes`), T29 minutes (`minute`), the 09:30 minute's open (`opens`, else `default_open`; none for
-    a symbol in `no_open`), a closing print, and verdicts by ticker (PROMPT-DOC, with `guide`) or symbol (PROMPT-NEWS);
-    a news verdict of a symbol in `refuse` gets no answer (a 503)."""
+    (close 20 but for `closes`), T29 minutes (`minute`), the minutes from 09:30 ET of a read of at most five of them
+    (the 09:30 minute's open `opens`, else `default_open`; no 09:30 bar for a symbol in `no_open`, whose later minutes
+    trade), a closing print, and verdicts by ticker (PROMPT-DOC, with `guide`) or symbol (PROMPT-NEWS); a news verdict
+    of a symbol in `refuse` gets no answer (a 503). OUTAGES of those minute reads, a 200 answer all the same:
+    `minutes_down` True answers every one with no bar at all; `minutes_partial` symbols are left out of every answer
+    of more than one symbol."""
 
     def __init__(self, *, doc: Mapping[str, int] | None = None, news: Mapping[str, int] | None = None,
                  minute: Mapping[str, float] | None = None, opens: Mapping[str, float] | None = None,
@@ -75,6 +78,8 @@ class Gateway(W4.Gateway):
         self.guide = dict(GUIDE if guide is None else guide)
         self.no_open = {"AAB"}
         self.default_open = DEFAULT_OPEN
+        self.minutes_down = False
+        self.minutes_partial: set[str] = set()
         self.refuse: set[str] = set()
         self.inactive: set[str] = set()       # (symbols Alpaca lists as inactive: never eligible)
 
@@ -91,11 +96,16 @@ class Gateway(W4.Gateway):
             end = S.parse_iso(params["end"])
             minute = params.get("timeframe") == "1Min"
             start = S.parse_iso(params["start"]) if minute else None
-            if minute and end - start == dt.timedelta(minutes=1):
+            if minute and dt.timedelta(minutes=1) <= end - start <= dt.timedelta(minutes=5):
                 self.gets.append((path, params))        # (PREREG-EVL-5's gap minute: the bar starting at `start`)
-                return {"bars": {s: [{"t": S.iso(start), "o": self.opens.get(s, self.default_open), "h": 21, "l": 19,
-                                      "c": 20.0, "v": 100}] for s in symbols if s not in self.no_open},
-                        "next_page_token": None}
+                if self.minutes_down:
+                    return {"bars": {}, "next_page_token": None}
+                minutes = [start + dt.timedelta(minutes=k) for k in range(int((end - start).total_seconds() // 60))]
+                kept = [s for s in symbols if not (len(symbols) > 1 and s in self.minutes_partial)]
+                bars = {s: [{"t": S.iso(t), "o": self.opens.get(s, self.default_open) if t == start else 20.0,
+                             "h": 21, "l": 19, "c": 20.0, "v": 100}
+                            for t in minutes if not (t == start and s in self.no_open)] for s in kept}
+                return {"bars": {s: b for s, b in bars.items() if b}, "next_page_token": None}
             if not minute:
                 self.gets.append((path, params))
                 first = dt.date.fromisoformat(str(params["start"])[:10])
@@ -261,11 +271,12 @@ def evl5_rows(w: World) -> None:
     w.article("n-aac-1", "AAC", knowable=et(P_DAY, 10, 20))
 
 
-def decide_week(w: World, *, late: bool = True) -> None:
+def decide_week(w: World, *, late: bool = True, close: Callable[[World, dt.date], Any] | None = None) -> None:
     """The House's decisions of the week (as evl4_world's `the_week`): Monday's close, then for Tuesday and Wednesday
     the verdicts asked from 07:30 ET and at 12:30 and 15:17 ET (PREREG-EVL-5's pre-pass among them), the live open and
     close decisions, Tuesday's late-stored rows (HHH's earnings 8-K and AAC's article) and the re-decisions as
-    backfills."""
+    backfills. `close(w, day)`: what makes Tuesday's and Wednesday's live close decisions (by default the decision at
+    15:47 ET; league/tests/test_events_evl5.py `TheHeldTurnInTheWeek` has the House's lane make them)."""
     w.at(et(P_DAY, 15, 47)).decide("close", P_DAY)
     for day in (D_DAY, N_DAY):
         w.at(et(day, 7, 31)).decide("open", day, ask_only=True)
@@ -273,7 +284,10 @@ def decide_week(w: World, *, late: bool = True) -> None:
         w.at(et(day, 9, 15, 30)).decide("open", day)
         w.at(et(day, 12, 30)).decide("close", day, ask_only=True)
         w.at(et(day, 15, 17)).decide("close", day, ask_only=True)
-        w.at(et(day, 15, 47)).decide("close", day)
+        if close is None:
+            w.at(et(day, 15, 47)).decide("close", day)
+        else:
+            close(w, day)
         if day == D_DAY and late:
             w.filing("0000000008-26-000002", "HHH", accepted=et(D_DAY, 14, 0), items=("2.02",), stored=et(D_DAY, 16, 30))
             w.article("n-aac-2", "AAC", knowable=et(D_DAY, 14, 0), stored=et(D_DAY, 16, 30))

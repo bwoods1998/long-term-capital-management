@@ -12,7 +12,12 @@ births).
 
 THE GRAMMAR (R3-SPEC section 1, its fields and only those; `parse` refuses anything else, so a birth is never free
 code). A spec is a JSON object of exactly `FIELDS`:
-- `id`: "EVL-B-..." (upper-case letters, digits and dashes; never one registered, never ending "-CTRL");
+- `id`: "EVL-B-..." (upper-case letters, digits and dashes; never one registered, never ending "-CTRL"). A NAME IS
+  NOT PART OF THE RULE (A95, the captain's, 02:25Z Oct 22, 2026: the first births night's six specs were all refused
+  for ids like "EVL-ERN-NEGATIVE-O1"): an id that lacks the "EVL-B-" prefix is named canonically by the House
+  (`canonical_name`: a leading "EVL-" becomes "EVL-B-", any other id takes "EVL-B-" in front), and every check of an
+  id applies to that name; the canonical line and the sha carry the name, and the candidate row keeps the proposed id
+  beside it (`figures.named`);
 - `version`: 1 (births are seatable at version 1; a change is a new birth);
 - `family`: an event family the lane already reads (`FAMILIES`): ern (8-K item 2.02, open), ern-react (8-K 2.02 in the
   close window, with its reaction), 8k (8-Ks with an ITEM SET, never 2.02), ins (Form 4 cluster triggers), ins-buy
@@ -22,8 +27,9 @@ code). A spec is a JSON object of exactly `FIELDS`:
   qualifies when it carries one of them); `score_min` / `score_max` (thresholds on the STORED PROMPT-DOC or PROMPT-NEWS
   score, -3..3) and `guidance` (the stored PROMPT-DOC guidance, the ern and 8k families): never a new prompt;
   `react_min` / `react_max` (the reaction ratio, PREREG-EVL-1's C1 measure: the 15:29 minute's close over the last
-  close before the event); `value_min` (dollars, >= the lane's own $50,000) and `roles` ("director" | "officer") for
-  Form 4; `sources` and `hours` (the news windows: the article's source, and its knowable hour in New York);
+  close before the event); `value_min` (dollars, >= the lane's own $50,000) and `roles` ("director" | "officer"; a
+  one-role list such as ["officer"] reads as its role, A95, and any other list is refused) for Form 4; `sources` and
+  `hours` (the news windows: the article's source, and its knowable hour in New York);
 - `entry`: the family's own ("open" for ern, 8k, ins, ins-buy, news; "close" for ern-react, news-day, news-react);
 - `exit`: "close" (the close of session h) or "open" (a close entry's next open, PREREG-EVL-2's overnight rows); an
   open entry exits at a close;
@@ -68,12 +74,29 @@ spent. A retired program's past looks stay counted (a test that was run is never
 
 THE PROPOSER (`propose`): ONE gateway call a night to claude-haiku-4-5-20251001 at temperature 0 (the lane's
 `/v1/claude/messages`, as the verdicts), its prompt's sha256 recorded and its answer stored like a verdict
-(`birth_calls`: a night's stored answer is read again, never asked again), at most `K` specs a night, under a cost cap
+(`birth_calls`, keyed by night, prompt sha and model: a night's stored answer is read again, never asked again, while
+the prompt is the same; a new prompt sha is a new prompt, whose answer a night has not been given), at most `K` specs
+a night, under a cost cap
 of `NIGHT_USD` ($0.25) a night: the call's worst case (its input at about 3 characters a token and its max_tokens, at
 Haiku 4.5's $1 and $5 a million tokens) must fit under what the night has left, or no call is made. On the House the
 call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is left of the lane's
 line today (league/events/house.py `line_left`), and its stored cost counts in that line, in the budget rule's measure
 of the lane (league/ops/budget.py `lane_spend`) and in the site's bill (league/site_lane.py `verdict_usd`).
+
+The prompt (`USER`, A95) shows two VALID specs (`EXAMPLES`: an 8k spec over items outside `READ_ITEMS_8K` with no
+score or guidance field, and a news spec) and says that an 8k spec may carry score_min, score_max or guidance only when
+every item is among `READ_ITEMS_8K`, and that guidance is a list. That moved the prompt's sha (release 1019e's
+2203fda3... to 8294fe77...): a stored answer under the old sha is never read by this code (it stays stored, and its
+cost stays counted in its night's cap and its day's line), and a night run by this code asks under the new sha.
+
+THE ONE RE-RUN OF AN EMPTY NIGHT (A95; `rerun_due`, the House's lane): every births receipt records the running
+`PARSE_VERSION` (3 from release 1019h, whose SUP-3 moved the prompt's sha again, to 890806ff...; 2 before it;
+release 1019e's record none, read as 1). When the latest night's receipts accepted none and registered none and were
+all written by an older version, the House runs that night's job once more (its receipt says
+`rerun`), before 12:55Z of the session day after the night: it reuses the night's stored answer when its prompt sha is
+the running one (no call), else makes the night's call inside `NIGHT_USD` (the first call counts) and the lane's line.
+A re-run birth is registered like any (the later of GitHub's commit time and the House's receipt), so it counts only
+events knowable after the re-run; `rerun_due` says why the cut-off is safe either way.
 
 REGISTRATION (`register`): the accepted specs' canonical lines are appended to `docs/births/<night>.jsonl` on main
 through the gateway's GitHub docs route (`POST /v1/github/docs`, gateway/lib/desk.mjs: that path pattern, appends of
@@ -144,9 +167,27 @@ REACT_MAX_RANGE = (0.75, 0.99)
 VALUE_MAX = 10_000_000
 ROLES = ("director", "officer")
 SOURCE_RE = re.compile(r"[a-z0-9][a-z0-9._ -]{0,31}")
+ID_PREFIX = "EVL-B-"
 ID_RE = re.compile(r"EVL-B-[A-Z0-9]{1,12}(?:-[A-Z0-9]{1,12}){0,4}")
 ID_MAX = 40
 CONTROL_SUFFIX = "-CTRL"
+#: THE GRAMMAR'S READING VERSION (A95, the captain's, 02:25Z Oct 22, 2026): what the running parser and prompt are,
+#: recorded in every births receipt (`night`, `parse_version`). 1 is R3 as release 1019e shipped it (its receipts record
+#: none: `PARSE_VERSION_BEFORE`); 2 names an id that lacks "EVL-B-" canonically (`canonical_name`), reads a one-role list
+#: as its role and shows the prompt's two valid examples and its 8k line; 3 (release 1019h, the captain's A97, SUP-3's
+#: rate rule) reads a seatable birth's rate over the sessions holding a complete record pass (so a store whose calendar
+#: holds fewer than 20 sessions may accept one) and tells the proposer both rates and "no earnings-only family after Nov
+#: 6". A night whose receipt is older than this and accepted and registered none is run ONCE more (`rerun_due`). It
+#: moves with any change of `parse`, of the validator or of the prompt that could turn a refused answer into an accepted
+#: one.
+PARSE_VERSION = 3
+PARSE_VERSION_BEFORE = 1
+#: A night's one re-run starts before this UTC time of the session day after the night (A95): the start of the
+#: deploy-blocked session window (12:55Z, 08:55 ET in daylight time and 07:55 ET in standard time), at least 5 (65)
+#: minutes before that session's 09:00 ET cut-off and 20 (80) before its 09:15 ET open decision.
+RERUN_BY = dt.time(12, 55)
+#: How far back the re-run looks for a night's receipts (a long weekend's Friday night is the oldest that can be due).
+RERUN_REACH = dt.timedelta(days=10)
 
 #: THE VALIDATOR'S RULES (R3-SPEC sections 2 and 3).
 SESSIONS = 20
@@ -205,9 +246,39 @@ def _number(value: Any) -> bool:
     return type(value) in (int, float) and math.isfinite(float(value))
 
 
+def canonical_name(ident: Any) -> Any:
+    """THE HOUSE'S NAME of a proposed id (A95): a name is not part of the rule, so an id that lacks the "EVL-B-" prefix
+    is named canonically, a leading "EVL-" becoming "EVL-B-" and any other id taking "EVL-B-" in front ("EVL-ERN-NEG-O1"
+    is "EVL-B-ERN-NEG-O1", "ERN-NEG" is "EVL-B-ERN-NEG"). Every check of an id (ID_RE, ID_MAX, never ending "-CTRL",
+    never registered) applies to the new name. An id with the prefix, or one that is not a string, is as it was."""
+    if not isinstance(ident, str) or ident.startswith(ID_PREFIX):
+        return ident
+    return ID_PREFIX + (ident[len("EVL-"):] if ident.startswith("EVL-") else ident)
+
+
+def _raw(spec: Any) -> Any:
+    if isinstance(spec, (str, bytes, bytearray)):
+        try:
+            return json.loads(spec)
+        except ValueError:
+            return None
+    return spec
+
+
+def renamed(spec: Any) -> dict[str, str] | None:
+    """{from, to}: the proposed id and the House's name for it (`canonical_name`) when they differ, else None (a spec
+    that is not a JSON object, or whose id is not a string, has none). The candidate row keeps it (`night`)."""
+    raw = _raw(spec)
+    ident = raw.get("id") if isinstance(raw, Mapping) else None
+    if not isinstance(ident, str) or canonical_name(ident) == ident:
+        return None
+    return {"from": ident, "to": canonical_name(ident)}
+
+
 def parse(spec: Any) -> dict[str, Any]:
-    """The spec in its normal form (lists sorted, sources lower-cased, ratios to 4 places), or SpecError with every
-    reason: the GRAMMAR's fields and only those, each of its type and bounds, the family's rule fields and only those."""
+    """The spec in its normal form (lists sorted, sources lower-cased, ratios to 4 places, the House's canonical name
+    of its id, a one-role list as its role), or SpecError with every reason: the GRAMMAR's fields and only those, each
+    of its type and bounds, the family's rule fields and only those."""
     if isinstance(spec, (str, bytes, bytearray)):
         try:
             spec = json.loads(spec)
@@ -225,9 +296,11 @@ def parse(spec: Any) -> dict[str, Any]:
     if why:
         raise SpecError(why)
     out: dict[str, Any] = {}
-    ident = spec["id"]
+    ident = canonical_name(spec["id"])      # (A95: the House names an id that lacks "EVL-B-"; the checks are the name's)
     if not isinstance(ident, str) or len(ident) > ID_MAX or not ID_RE.fullmatch(ident) or ident.endswith(CONTROL_SUFFIX):
-        why.append(f"id must match EVL-B-<A-Z0-9 groups>, at most {ID_MAX} characters, never ending {CONTROL_SUFFIX}")
+        named = f" (the House's name {ident} of {spec['id']})" if ident != spec["id"] else ""
+        why.append(f"id must match EVL-B-<A-Z0-9 groups>, at most {ID_MAX} characters, never ending {CONTROL_SUFFIX}"
+                   + named)
     out["id"] = ident
     if not _int(spec["version"]) or spec["version"] != 1:
         why.append("version must be 1 (a change is a new birth)")
@@ -309,9 +382,12 @@ def parse(spec: Any) -> dict[str, Any]:
             why.append(f"value_min must be whole dollars {int(floor)}..{VALUE_MAX} (the lane reads no smaller Form 4)")
         norm["value_min"] = v
     if "roles" in rule:
-        if rule["roles"] not in ROLES:
+        role = rule["roles"]
+        if isinstance(role, list) and len(role) == 1 and isinstance(role[0], str) and role[0] in ROLES:
+            role = role[0]      # (A95: a one-role list reads as its role; any other list is refused)
+        if not isinstance(role, str) or role not in ROLES:
             why.append("roles must be director or officer (no role filter: leave it out)")
-        norm["roles"] = rule["roles"]
+        norm["roles"] = role
     if "sources" in rule:
         src = rule["sources"]
         if not isinstance(src, list) or not 1 <= len(src) <= 8 or any(not isinstance(x, str) for x in src):
@@ -741,6 +817,9 @@ class Facts:
                              "by_session": [len(by[d]) for d in self.days],
                              "per_recorded_session": round(rated / len(self.recorded), 2) if self.recorded else 0.0,
                              "upper_bound": sp["family"] in REACT_FAMILIES}
+            named = renamed(raw)
+            if named is not None:
+                out[sp["id"]]["named_from"] = named["from"]
         return out
 
     def facts(self, programs: Sequence[P.Program] | None = None) -> dict[str, Any]:
@@ -902,8 +981,9 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
              night: dt.date | None = None) -> list[dict[str, Any]]:
     """THE VALIDATOR (the module docstring), in order: each proposal {spec, why, by} gets {seq, id, sha, spec (canonical,
     or the raw text when the grammar refused it), why, by, ok, reasons, selected, per_session, jaccard (the highest, and
-    with whom), charge (tenths)}; an accepted seatable birth is charged before the next is judged. `store` must have its
-    births loaded (programs.load_births) so the registered ids and the budget are current."""
+    with whom), charge (tenths), named ({from, to}: the proposed id and the House's name of it, A95, or None)}; an
+    accepted seatable birth is charged before the next is judged. `store` must have its births loaded
+    (programs.load_births) so the registered ids and the budget are current."""
     known_ids = {p.id for p in P.PROGRAMS}
     known_sha: set[str] = set()
     if "births" in _tables(store.db):
@@ -920,7 +1000,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
         raw = proposal.get("spec") if isinstance(proposal, Mapping) else None
         entry: dict[str, Any] = {"seq": seq, "id": None, "sha": None, "why": _why((proposal or {}).get("why")),
                                  "by": _why((proposal or {}).get("by")) or "architect", "ok": False, "reasons": [],
-                                 "selected": None, "per_session": None, "jaccard": None, "charge": 0}
+                                 "selected": None, "per_session": None, "jaccard": None, "charge": 0,
+                                 "named": renamed(raw)}
         try:
             spec = parse(raw)
         except SpecError as exc:
@@ -994,8 +1075,18 @@ SYSTEM = ("You are the architect of LTCM's event lane. You design pre-registered
           "for a session. You see only outcome-free facts: event counts and the stored verdicts of a fixed reading "
           "prompt. You never see a price after an event, a return, a profit or a test result. Answer with JSON only.")
 
+#: TWO VALID SPECS the prompt shows (A95: the first night's six were all refused by the grammar): an 8k spec over items
+#: outside READ_ITEMS_8K with no score or guidance field, and a news spec. The form only; each parses (a test holds it).
+EXAMPLES: tuple[dict[str, Any], ...] = (
+    {"id": "EVL-B-8K-OFFICERS-O1", "version": 1, "family": "8k", "rule": {"items": ["5.02"]}, "entry": "open",
+     "exit": "close", "hold": 1, "rank": "none", "seatable": True},
+    {"id": "EVL-B-NEWS-PREMARKET-O1", "version": 1, "family": "news", "rule": {"score_min": 1, "hours": [6, 7, 8]},
+     "entry": "open", "exit": "close", "hold": 1, "rank": "score", "seatable": True},
+)
+
 USER = """THE GRAMMAR. A spec is a JSON object with exactly these fields:
-- "id": "EVL-B-" then upper-case letters/digits groups joined by "-" (at most 40 characters), new.
+- "id": "EVL-B-" then upper-case letters/digits groups joined by "-" (at most 40 characters), new. Every id starts
+  with EVL-B-.
 - "version": 1.
 - "family": one of ern (8-K item 2.02, buy at the next open), ern-react (8-K 2.02 knowable during the session, buy at
   the close after its reaction), 8k (8-Ks carrying one of an item set, never 2.02, next open), ins (Form 4 cluster of
@@ -1006,10 +1097,13 @@ USER = """THE GRAMMAR. A spec is a JSON object with exactly these fields:
   ern: score_min, score_max (integers -3..3: the stored verdict of the filing), guidance (a list of raised, maintained,
   lowered, none, unclear); ern-react: score_min, score_max, react_min (1.01..1.25) or react_max (0.75..0.99), the
   reaction being the 15:29 price over the last close before the event; 8k: items (a list of 8-K items such as 1.01,
-  5.02, 8.01), score_min, score_max, guidance (with a verdict field, items only among <<READ_ITEMS>>); ins: value_min
-  (dollars >= 50000); ins-buy: value_min (>= 50000), roles ("director" or "officer"); news and news-day: score_min,
+  5.02, 8.01), and score_min, score_max, guidance only as the next line says; ins: value_min (dollars >= 50000);
+  ins-buy: value_min (>= 50000), roles (one string, "director" or "officer"); news and news-day: score_min,
   score_max, sources (news source names), hours (New York hours 0..23 of the article); news-react: react_min or
   react_max, sources, hours.
+- An 8k spec may carry score_min, score_max or guidance (or rank "score") only when every one of its items is among
+  <<READ_ITEMS>>, and guidance is a list such as ["raised"], never an object; over any other item an 8k spec has
+  items alone and rank "none".
 - "entry": "open" for ern, 8k, ins, ins-buy, news; "close" for ern-react, news-day, news-react.
 - "exit": "close" (the close of session h; the only exit after an open entry) or "open" (the next open, after a close
   entry).
@@ -1017,6 +1111,8 @@ USER = """THE GRAMMAR. A spec is a JSON object with exactly these fields:
 - "rank": "score", "reaction" (react families), "value" (Form 4) or "none".
 - "seatable": true (trades real money at learning size from its first event and is judged by the screen) or false (a
   record, free). An ins (Form 4 cluster) spec must be seatable false: a record only.
+TWO VALID SPECS (the form only; your rules come from the facts):
+<<EXAMPLES>>
 THE VALIDATOR refuses a seatable spec that selects fewer than <<MIN_RATE>> events a session over the sessions of the
 last <<SESSIONS>> that hold a complete record pass ("recorded_sessions" in the facts, at least <<MIN_RECORDED>>; each
 count's "per_recorded_session"), a record spec that selects fewer than <<RECORD_MIN_RATE>> a session over the last
@@ -1030,7 +1126,8 @@ THE FACTS (counts over the last <<SESSIONS>> sessions; "eligible" are the events
 companies the lane can trade; react counts are upper bounds, so the rate floor barely binds a react rule):
 <<FACTS>>
 
-Answer with JSON only: {"specs": [{"spec": {...}, "why": "one line"}]}"""
+Answer with JSON only: {"specs": [{"spec": {...}, "why": "one line"}]}""".replace(
+    "<<EXAMPLES>>", "\n".join(json.dumps(x, separators=(", ", ": ")) for x in EXAMPLES))
 
 
 def prompt_sha() -> str:
@@ -1227,16 +1324,24 @@ def reconcile(store: Any, gw: Any, *, now: Callable[[], dt.datetime]) -> list[di
 # ----------------------------------------------------------------------------------------------------------- the night
 def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime],
           proposals: Sequence[Mapping[str, Any]] | None = None, k: int = K, cap: float = NIGHT_USD,
-          dry_run: bool = False, line_left: float | None = None) -> dict[str, Any]:
+          dry_run: bool = False, line_left: float | None = None,
+          rerun: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """THE BIRTHS JOB of the night of `today` (receipt `births`): the unknown registrations of earlier nights posted
     again; the outcome-free facts; the architect's one call (or `proposals`, the captain's own {spec, why}: no call),
     held to the night's cap and to `line_left` (`propose`); the validator; the accepted lines registered (`dry_run`:
-    validated and recorded, never registered); the births loaded again. Returns its summary."""
+    validated and recorded, never registered); the births loaded again. Returns its summary. The receipt records the
+    running `PARSE_VERSION` and, for the House's one re-run of an empty night (`rerun`, `rerun_due`'s answer), what it
+    re-runs; both are written when the receipt starts, so a re-run that dies before it finishes is still the night's one
+    re-run. A proposed id the House renamed is kept on its candidate row (`figures.named`: {from, to}) and in the
+    receipt (`named`: {the House's name: the proposed id})."""
     P.load_births(store)
     rid = store.start_receipt(JOB, now=now())
-    out: dict[str, Any] = {"night": today.isoformat()}
+    out: dict[str, Any] = {"night": today.isoformat(), "parse_version": PARSE_VERSION}
+    if rerun is not None:
+        out["rerun"] = dict(rerun)
     status = "ok"
     try:
+        store.db.execute("UPDATE receipts SET summary=? WHERE id=?", (json.dumps(out, sort_keys=True, default=str), rid))
         if not dry_run:
             out["reconciled"] = reconcile(store, gw, now=now)
             P.load_births(store)
@@ -1247,7 +1352,7 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         if proposals is None:
             call = propose(store, gw, sheet, night=today, now=now, k=k, cap=cap, line_left=line_left)
             proposals = call["proposals"]
-            out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why")}
+            out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why", "prompt_sha")}
             psha = call.get("prompt_sha")
         else:
             proposals = [dict(p) | {"by": (p.get("by") or "captain")} for p in proposals]
@@ -1263,7 +1368,7 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         with store.tx() as db:
             for c in checked:
                 figures = {"selected": c["selected"], "per_session": c["per_session"], "jaccard": c["jaccard"],
-                           "charge": c["charge"]}
+                           "charge": c["charge"]} | ({"named": c["named"]} if c.get("named") else {})
                 db.execute("INSERT INTO birth_candidates(night, seq, sha, id, spec, why, by, status, reasons, figures, line, "
                            "at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (today.isoformat(), c["seq"], c["sha"], c["id"], c["spec"], c["why"], c["by"],
@@ -1273,6 +1378,9 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         out["proposed"] = len(checked)
         out["accepted"] = [c["id"] for c in accepted]
         out["refused"] = [{"id": c["id"], "why": c["reasons"][:3]} for c in checked if not c["ok"]][:K * 2]
+        named = {c["named"]["to"]: c["named"]["from"] for c in checked if c.get("named")}
+        if named:
+            out["named"] = named
         if accepted and not dry_run:
             # (`unknown` first: a job that dies between GitHub's commit and the births rows is posted again next night)
             _set_status(store, today.isoformat(), [c["seq"] for c in accepted], "unknown")
@@ -1290,6 +1398,76 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
         out["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
     store.finish_receipt(rid, status, out, now=now())
     return out | {"_status": status}
+
+
+def _version_of(summary_: Mapping[str, Any]) -> int:
+    try:
+        return int(summary_.get("parse_version") or PARSE_VERSION_BEFORE)
+    except (TypeError, ValueError):
+        return PARSE_VERSION_BEFORE
+
+
+def rerun_due(store: Any, now: dt.datetime, *, version: int = PARSE_VERSION) -> dict[str, Any] | None:
+    """THE ONE RE-RUN OF AN EMPTY NIGHT (A95, the captain's, 02:25Z Oct 22, 2026): the night whose births job the House
+    runs once more NOW, as {night, of (its earlier receipts' ids), parse_version (theirs), until}, or None. The night is
+    the latest one a births receipt names (receipts started within `RERUN_REACH`); it is due only when
+    - every receipt of it was written by an OLDER reading than the running one (`parse_version` below `version`; a
+      receipt of release 1019e records none: `PARSE_VERSION_BEFORE`), so the running parser and prompt have not read it;
+    - no receipt of it is a re-run already (at most one re-run a night; a re-run that died running counts, since `night`
+      writes its head when it starts);
+    - it ACCEPTED NONE and REGISTERED NONE: no receipt names an accepted id, no candidate row of it is accepted,
+      unknown or registered, and no birth is registered for it;
+    - `now` is before `RERUN_BY` (12:55Z) of the session day after the night (no calendar row for it: never).
+    WHY THE CUT-OFF IS SAFE EITHER WAY: a re-run birth counts only events knowable after its own registration (the later
+    of GitHub's commit time and the House's receipt, `register`), like any birth, so whenever it lands no event the House
+    saw before it is ever counted, and it is charged to the false-pass budget and the night's three like any. Started
+    before 12:55Z it starts at least 5 minutes (65 in standard time) before the session's 09:00 ET cut-off and 20 (80)
+    before its 09:15 ET open decision, so in the normal case (the night's first run took 11 s) it is registered before
+    that session's first decision and its first session is whole. From 12:55Z it never starts: the session's
+    decisions, sends and fills run from then to the close (the deploy-blocked window, which keeps the code fixed, keeps
+    the program set fixed too), and a birth registered among them would begin its record part-way through a session it
+    cannot fairly count; the night stays empty and the next session night's births job (21:15 ET, at the running
+    reading) proposes again, so the only cost is that night's births. A night's re-run reuses its stored answer when the
+    running prompt sha is the stored one (the parser changed, the prompt did not: no call), else makes the night's call
+    inside `NIGHT_USD` (the night's first call counts in it) and the lane's line, as `propose` always does."""
+    if "receipts" not in _tables(store.db):
+        return None
+    since = S.iso(now - RERUN_REACH)
+    runs: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for r in store.db.execute("SELECT id, summary FROM receipts WHERE job=? AND started_at>=? AND summary IS NOT NULL "
+                              "ORDER BY id", (JOB, since)):
+        try:
+            data = json.loads(str(r["summary"]))
+            day = dt.date.fromisoformat(str(data.get("night")))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        runs.setdefault(day.isoformat(), []).append((int(r["id"]), data))
+    if not runs:
+        return None
+    latest = max(runs)
+    mine = runs[latest]
+    if any(data.get("rerun") for _, data in mine):
+        return None
+    before = max(_version_of(data) for _, data in mine)
+    if before >= version:
+        return None
+    if any(data.get("accepted") for _, data in mine):
+        return None
+    tables = _tables(store.db)
+    if "births" in tables and store.db.execute("SELECT 1 FROM births WHERE night=? LIMIT 1", (latest,)).fetchone():
+        return None
+    if "birth_candidates" in tables and store.db.execute(
+            "SELECT 1 FROM birth_candidates WHERE night=? AND status IN ('accepted', 'unknown', 'registered') LIMIT 1",
+            (latest,)).fetchone():
+        return None
+    day = dt.date.fromisoformat(latest)
+    after = C.sessions(store, day + dt.timedelta(days=1), day + RERUN_REACH)
+    if not after:
+        return None
+    until = dt.datetime.combine(after[0].day, RERUN_BY, tzinfo=dt.timezone.utc)
+    if now >= until:
+        return None
+    return {"night": latest, "of": [rid for rid, _ in mine], "parse_version": before, "until": S.iso(until)}
 
 
 def summary(store: Any) -> dict[str, Any]:
@@ -1313,4 +1491,6 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "SYSTEM", "USER", "prompt_sha", "render", "worst_usd", "parse_answer", "propose", "path_of", "line_of",
            "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED", "RECORD_MIN_RATE",
            "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS",
-           "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "K", "NIGHT_USD", "MODEL", "FACTS_DENY", "DOCS_ROUTE", "JOB"]
+           "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "K", "NIGHT_USD", "MODEL", "FACTS_DENY", "DOCS_ROUTE", "JOB",
+           "ID_PREFIX", "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY",
+           "rerun_due"]

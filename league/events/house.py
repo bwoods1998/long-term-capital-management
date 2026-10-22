@@ -15,7 +15,13 @@ started on the House's one-slot feeds lane with `house._background("feeds:evl", 
 so every legacy path behaves as it does today.
 
 ONE TURN, ONE TASK, BOUNDED. `run()` does the single most urgent due task, never raises (a failure is a warning at most
-once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time:
+once an hour per task, so the House's repeat rule never turns it into an error), and keeps its time. One exception
+(PREREG-EVL-5 section 1.3, release 1019g's money review): from `HOLD_LEAD` before today's live close decision a turn
+keeps going, runs each task that falls due but another decision (none starts inside the lead, `_lead`; every other
+task is still bounded to end before the decision), waits between them and starts the decision at its time
+(`_close_hold`, `_wait_until`), and when a task returns at or after that time (a network read can outlast its bound)
+starts it at once in the same turn (`_close_owed`), because real money buys that file's rows only once the decision
+has finished, by the close - 11 minutes. The order of the tasks:
 1. a DECISION due: the open at 09:15 ET, the close's at the close - 14 minutes (a minute later, for the 15:30 minute
    bar); live within 10 minutes of its time, a backfill after (the judge's rule: league/events/run.py `live_run`); then
    a missed one, then a pending
@@ -44,8 +50,11 @@ once an hour per task, so the House's repeat rule never turns it into an error),
    day; then, on a session night with `events.births` on, R3's BIRTHS job at 21:15 ET (league/events/births.py
    `night`: the outcome-free facts, the architect's one Haiku call under $0.25 a night and inside what is left of the
    lane's line, below, the validator, the registration through the gateway's docs route), once a night (keyed on the
-   calendar day, as release 1019e built it); then THE SCREEN AFTER THE OPEN (release 1019f, `screen-open`): from 09:40
-   ET of a session whose open decision is made, until 5 minutes before its close decision, whenever the judge's final
+   calendar day, as release 1019e built it), and ONCE MORE for a night whose births receipt accepted and registered
+   none under an older reading of the grammar and prompt than the running one (A95: `births.PARSE_VERSION` in the
+   receipt; `births.rerun_due`), never from 12:55Z of the session day after it; then THE SCREEN AFTER THE OPEN
+   (release 1019f, `screen-open`): from 09:40 ET of a session whose open decision is made, until 5 minutes before its
+   close decision, whenever the judge's final
    horizon (league/events/screen.py `final_until`) of any seating version moved since the last screen receipt, the
    screen's looks of the seating versions run again (never the band review nor the Done reader, which stay nightly),
    so a look the judge makes final at the open is written that morning and its Probe move trades from that session's
@@ -162,6 +171,28 @@ BIRTH_KINDS = dict(SN.BIRTHS_KIND)
 FIVE_KIND = SN.FIVE_KIND
 BACKFILL_KINDS = (FOUR_KIND, *BIRTH_KINDS.values(), FIVE_KIND)
 URGENT_BEFORE = dt.timedelta(minutes=30)
+#: PREREG-EVL-5 section 1.3, THE LANE KEEPS ITS TURN FOR ITS LIVE CLOSE DECISION (the money review of release 1019g):
+#: real money buys this file's rows only once the lane's close decision of D has finished (league/events/book.py
+#: `part_hold`) and only until the close - 11 minutes, while a turn starts only on the House's publishes (a minute or
+#: more apart in session), so the decision could start a publish after its time (the close decision + CLOSE_GRACE) and
+#: leave the book no minute to send them. From HOLD_LEAD before that time a turn keeps going instead of ending: it runs
+#: every task that falls due meanwhile, waits between them (HOLD_STEP a look; the House closing, the STOP file or a
+#: clock that does not move ends the wait, and the turn), and starts the decision at its time; `due()` looks again no
+#: later than HOLD_LEAD before it, so the publish that starts the turn falls inside the lead. Only while PREREG-EVL-5
+#: has programs, at most HOLD_TURNS tasks a turn.
+#: INSIDE THE LEAD NO OTHER DECISION STARTS (the money re-review of PREREG-EVL-5, wf_03d60ddf-1c3; `_lead`): a decision
+#: task runs with the whole DECIDE_BUDGET (`_deadline` bounds every other task by the next decision, never a decision),
+#: so from HOLD_LEAD before the live close decision until it has started, every other decision waits (a missed, cut,
+#: pending or failed one, today's open included, the hourly re-decision and the backfill kinds, `BACKFILL_KINDS`); each
+#: is due again once the live decision has a receipt (a deferred decision runs whole, never cut by the hold). Every other task is bounded to
+#: end DECISION_MARGIN before the decision, as before; none starts inside that margin. A BOUND IS NOT A PROMISE: a task
+#: checks its bound before each network read, and one read can return after it (the gateway's timeout is 45 s); a
+#: decision started before the lead ends by the decision's time only if no read overruns (HOLD_LEAD >= DECIDE_BUDGET).
+#: So a task that returns at or after the decision's time never ends the turn while today's live close decision has
+#: no receipt and is still live (`_close_owed`): the turn starts it at once, in the same turn.
+HOLD_LEAD = dt.timedelta(seconds=150)
+HOLD_STEP = 1.0
+HOLD_TURNS = 40
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
@@ -203,25 +234,13 @@ BACKFILL_RETRY = dt.timedelta(hours=1)
 #: or 503 (its archive's answer to a missing file), never 404 (the independent check of fix/backfill-robust): so a
 #: weekday IN THIS TABLE whose index read fails, WHATEVER THE STATUS, is done, "no index: SEC holiday" (EDGAR accepts no
 #: filing that day, so done is right even when the read failed for another reason); a failed read on any other weekday,
-#: whatever its status, waits as an unpublished index does, and a holiday's index that exists is read as any day's. The
-#: federal holidays of
-#: 2026 and 2027 as OPM lists them (https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/, read Oct 21,
-#: 2026), and Fri Dec 31, 2027: New Year's Day 2028 falls on a Saturday, so the Friday before is its holiday (5 U.S.C.
-#: 6103(b)(1)). A closure by executive order (a Christmas Eve) is not in it: add the day before it falls; 2028's before
-#: Jan 2028.
-SEC_HOLIDAYS: dict[dt.date, str] = {
-    dt.date(2026, 1, 1): "New Year's Day", dt.date(2026, 1, 19): "Birthday of Martin Luther King, Jr.",
-    dt.date(2026, 2, 16): "Washington's Birthday", dt.date(2026, 5, 25): "Memorial Day",
-    dt.date(2026, 6, 19): "Juneteenth National Independence Day", dt.date(2026, 7, 3): "Independence Day",
-    dt.date(2026, 9, 7): "Labor Day", dt.date(2026, 10, 12): "Columbus Day", dt.date(2026, 11, 11): "Veterans Day",
-    dt.date(2026, 11, 26): "Thanksgiving Day", dt.date(2026, 12, 25): "Christmas Day",
-    dt.date(2027, 1, 1): "New Year's Day", dt.date(2027, 1, 18): "Birthday of Martin Luther King, Jr.",
-    dt.date(2027, 2, 15): "Washington's Birthday", dt.date(2027, 5, 31): "Memorial Day",
-    dt.date(2027, 6, 18): "Juneteenth National Independence Day", dt.date(2027, 7, 5): "Independence Day",
-    dt.date(2027, 9, 6): "Labor Day", dt.date(2027, 10, 11): "Columbus Day", dt.date(2027, 11, 11): "Veterans Day",
-    dt.date(2027, 11, 25): "Thanksgiving Day", dt.date(2027, 12, 24): "Christmas Day",
-    dt.date(2027, 12, 31): "New Year's Day",
-}
+#: whatever its status, waits as an unpublished index does, and a holiday's index that exists is read as any day's.
+#: THE TABLE IS THE JUDGE'S (release 1019f's review, lens judges): league/events/screen.py `SEC_HOLIDAYS`, behind the
+#: wall, as the reach above is, since a look reads it too: a holiday's eve's late 8-Ks are in the index of the next
+#: weekday EDGAR is open, so a holiday NYSE trades is final only once that index is backfilled as well
+#: (screen.py `index_through`; the judge reads this name too, `_sec_holidays`, so a day only this copy lists still has
+#: the index after it waited for).
+SEC_HOLIDAYS: dict[dt.date, str] = SN.SEC_HOLIDAYS
 SEC_HOLIDAY_WHY = "no index: SEC holiday"
 CALENDAR_EVERY = dt.timedelta(hours=20)
 CALENDAR_RETRY = dt.timedelta(minutes=10)
@@ -607,19 +626,45 @@ class EventLane:
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
-                now = self.now()
-                self._maintain(st, now)
-                task, _ = self._plan(st, now)
-                if task is not None:
-                    name = task.name
+                for _ in range(HOLD_TURNS):
+                    now = self.now()
+                    self._maintain(st, now)
+                    task, _ = self._plan(st, now)
+                    if task is not None:
+                        name = task.name
+                        with self._lock:
+                            self._running = name
+                        status, summary = self._do(st, task)
+                        self._note(name, status, summary, began)
+                    now = self.now()
+                    follow, at = self._plan(st, now)
+                    next_look = self.house.clock() if follow is not None else \
+                        self.house.clock() + max(0.0, (at - now).total_seconds())
+                    hold = self._close_hold(st, now)
+                    if hold is None and follow is not None and self._close_owed(st, now):
+                        # (a task of the lead returned at or after the decision's time: the decision in this turn,
+                        # at once, never at the next publish)
+                        hold = now
+                    if hold is None:
+                        lead = self._hold_from(st, now)
+                        if lead is not None:
+                            next_look = min(next_look, self.house.clock() + max(0.0, (lead - now).total_seconds()))
+                        break
+                    # (PREREG-EVL-5 section 1.3: the turn is kept for the live close decision, HOLD_LEAD)
+                    step = dt.timedelta(seconds=HOLD_STEP)
+                    if follow is None:
+                        wake = min(max(at, now + step), hold)      # (the next task due, or the decision)
+                    elif now >= hold - dt.timedelta(seconds=DECISION_MARGIN):
+                        wake = hold                                 # (inside the decision's margin: the decision first)
+                    elif task is not None and self._mono() - began < HOLD_STEP:
+                        wake = now + step                           # (a task that took no time is not run again at once)
+                    else:
+                        wake = now
+                    if not self._wait_until(wake):
+                        break
+                    began, name = self._mono(), "turn"
                     with self._lock:
-                        self._running = name
-                    status, summary = self._do(st, task)
-                    self._note(name, status, summary, began)
-                now = self.now()
-                follow, at = self._plan(st, now)
-                next_look = self.house.clock() if follow is not None else \
-                    self.house.clock() + max(0.0, (at - now).total_seconds())
+                        self._running = "planning"
         except Exception as exc:  # noqa: BLE001 - a turn's failure is a warning, never the tick's
             self._failed[name] = self.now()
             self._note(name, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, began)
@@ -629,6 +674,62 @@ class EventLane:
                 self._running = None
                 self._next_look = next_look
             self._write_health()
+
+    def _close_hold(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When today's LIVE CLOSE DECISION starts (its time + CLOSE_GRACE), while that is at most HOLD_LEAD ahead of
+        `now` and PREREG-EVL-5 has programs (their real money waits for it, `book.part_hold`); else None."""
+        at = self._hold_at(st, now)
+        return at if at is not None and now < at <= now + HOLD_LEAD else None
+
+    def _hold_from(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        """When a turn should start to keep itself for today's live close decision (HOLD_LEAD before it), when that is
+        still ahead of `now`; else None."""
+        at = self._hold_at(st, now)
+        return at - HOLD_LEAD if at is not None and now < at - HOLD_LEAD else None
+
+    def _close_owed(self, st: S.Store, now: dt.datetime) -> bool:
+        """True when today's live close decision's time (+ CLOSE_GRACE) has come while PREREG-EVL-5 has programs, the
+        decision is still live (`R.live_run`) and no receipt of it has started: a task of the lead that returned at or
+        after its time (a network read past its bound) leaves it to this turn, never to the next publish."""
+        at = self._lead(st, now)
+        return at is not None and now >= at
+
+    def _lead(self, st: S.Store, now: dt.datetime,
+              latest: Mapping[str, tuple[str, dt.datetime]] | None = None) -> dt.datetime | None:
+        """THE LEAD (HOLD_LEAD's comment): today's live close decision's time (its time + CLOSE_GRACE) from HOLD_LEAD
+        before it until a receipt of it has started (any status), while it is still live (`R.live_run`) and
+        PREREG-EVL-5 has programs; else None. Inside it no other decision starts (`_due_decision`). `latest`: the
+        decisions' receipts as `_decide_receipts` reads them (else today's close receipt is read alone)."""
+        at = self._hold_at(st, now)
+        if at is None or now < at - HOLD_LEAD or not R.live_run(at - CLOSE_GRACE, now):
+            return None
+        job = f"decide-close:{now.astimezone(C.NY).date().isoformat()}"
+        if latest is not None:
+            started = job in latest
+        else:
+            started = st.db.execute("SELECT 1 FROM receipts WHERE job=? LIMIT 1", (job,)).fetchone() is not None
+        return None if started else at
+
+    @staticmethod
+    def _hold_at(st: S.Store, now: dt.datetime) -> dt.datetime | None:
+        if not R.five_programs():
+            return None
+        session = C.session(st, now.astimezone(C.NY).date())
+        return None if session is None else session.close_decide + CLOSE_GRACE
+
+    def _wait_until(self, when: dt.datetime) -> bool:
+        """Wait on the House's clock until `when`, HOLD_STEP a look (`sleep`). False, at once, when the House is closing,
+        the STOP file is there or the store is gone, or a look found the clock where it was (a clock that does not move:
+        nothing could come due)."""
+        while True:
+            now = self.now()
+            if now >= when:
+                return True
+            if self.closing() or not self.ready():
+                return False
+            self._sleep(min(HOLD_STEP, max(0.0, (when - now).total_seconds())))
+            if self.now() <= now:
+                return False
 
     def _do(self, st: S.Store, task: Task) -> tuple[str, dict[str, Any]]:
         """Run `task` under its bound; its Claude calls are counted into a `verdicts` receipt."""
@@ -872,14 +973,21 @@ class EventLane:
                       soon: list[dt.datetime]) -> tuple[int, dt.datetime, str, dt.date, bool] | None:
         """The most urgent decision: (0) a live one (within LIVE_WITHIN of its time) not yet made, (1) a missed one, oldest
         first, (2) one cut by the lane's bound, pending on verdicts or never finished, (3) the hourly re-decision (and
-        the backfill's), which waits for the record pass. None when none is due."""
+        the backfill's), which waits for the record pass. None when none is due.
+
+        INSIDE THE LEAD (`_lead`, HOLD_LEAD's comment: from HOLD_LEAD before today's live close decision until it has
+        started) only that decision is ever due: every other one waits, whatever its rank, and is due again as soon as
+        the live one has a receipt (it is due at its time, so `soon` holds that time already)."""
         today = now.astimezone(C.NY).date()
         start = max(P.registered().astimezone(C.NY).date(), (now - LOOKBACK).astimezone(C.NY).date())
         best: tuple[int, dt.datetime, str, dt.date, bool] | None = None
+        lead = self._lead(st, now, latest)
         for s, kind, scheduled, at in self._decision_times(st, start, today + dt.timedelta(days=7)):
             if at > now:
                 soon.append(at)
                 continue
+            if lead is not None and (kind, s.day) != ("close", today):
+                continue        # (the lead: no decision but the live close decision starts before it has)
             key = (kind, s.day)
             status, last = latest.get(f"decide-{kind}:{s.day.isoformat()}", (None, None))
             live = kind not in BACKFILL_KINDS and R.live_run(scheduled, now)   # (their rows' own: always a backfill)
@@ -1173,7 +1281,7 @@ class EventLane:
             known = [r[0] for r in st.db.execute("SELECT accession FROM filings WHERE form=? ORDER BY accepted_at DESC "
                                                  "LIMIT 2000", (form,))]
             try:
-                entries = E.poll_current(ctx.sec, form, known)
+                entries = E.poll_current(ctx.sec, form, known, prefer=listed)   # (co-registered: a listed filer's)
             except LaneDeadline:
                 raise
             except Exception as exc:  # noqa: BLE001 - one feed's outage never stops the other or the news
@@ -1326,6 +1434,22 @@ class EventLane:
             elif (st.root / "reports" / f"{today.isoformat()}.txt").exists() and \
                     not self._receipt_since(st, "births", births_at) and not self._quiet("births", now, soon):
                 return Task("births", self._births, BIRTHS_BUDGET)
+        if self.births_on:
+            # THE ONE RE-RUN OF AN EMPTY NIGHT (A95; league/events/births.py `rerun_due`): a night whose births receipt
+            # accepted and registered none, written by an older reading of the grammar and prompt than the running one,
+            # runs once more, before 12:55Z of the session day after it (a weekend's Friday night until Monday's)
+            from . import births as BI
+
+            try:
+                again = BI.rerun_due(st, now)
+            except Exception as exc:  # noqa: BLE001 - a read error here never stops the plan's later tasks
+                self.warn("births re-run", exc)
+                again = None
+            if again is not None and (st.root / "reports" / f"{again['night']}.txt").exists() and \
+                    not self._quiet("births", now, soon):
+                night_of = dt.date.fromisoformat(str(again["night"]))
+                return Task("births", lambda ctx, deadline: self._births(ctx, deadline, night_of, again),
+                            BIRTHS_BUDGET)
         return None
 
     @staticmethod
@@ -1436,16 +1560,19 @@ class EventLane:
             self._receipted(ctx.store, DN.JOB, "ok", done)
         return summary | {"_status": status}
 
-    def _births(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
+    def _births(self, ctx: LaneContext, deadline: float | None, night: dt.date | None = None,
+                rerun: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """R3's births job of the night (league/events/births.py `night`, its own receipt `births`): its Claude call goes
         through the lane's gateway (refused while the House is paused or over the day's line, and counted), and is made
         only when its worst case fits under what is left of the lane's line today (`line_left`, release 1019e's review:
         the births call is inside the lane's line, as every verdict, never beside it), as well as under the night's own
-        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`)."""
+        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`). The night is today's, or
+        (`night`, `rerun`: A95's one re-run of an empty night, `births.rerun_due`) the earlier night it runs again."""
         from . import births as BI
 
         now = ctx.now()
-        out = BI.night(ctx.store, ctx.gw, today=now.astimezone(C.NY).date(), now=ctx.now, line_left=self.line_left())
+        out = BI.night(ctx.store, ctx.gw, today=night or now.astimezone(C.NY).date(), now=ctx.now,
+                       line_left=self.line_left(), rerun=rerun)
         status = str(out.pop("_status", "ok"))
         if status != "ok":
             self.warn("births", f"the births job of {out.get('night')} ended {status}: "
@@ -1453,6 +1580,7 @@ class EventLane:
         brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
         brief["accepted"] = len(out.get("accepted") or [])
         brief["proposed"] = int(out.get("proposed") or 0)
+        brief["rerun"] = rerun is not None
         return brief | {"_status": status}
 
     def _screen_open_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
@@ -1676,8 +1804,10 @@ class EventLane:
             tried = failed.get(accession)
             if tried is not None and now < tried[1] + FETCH_BACKOFF[tried[0] - 1]:
                 continue    # (its next try is not due yet: the tries-th after the first failure)
+            # (`listed`: a co-registered 8-K the live pass stored under an unlisted co-registrant is moved to this
+            # listed filer's CIK before it is fetched, release 1019f's review)
             status = E.record_filing(st, ctx.sec, row | {"accepted_at": None, "index_url": None, "items": []},
-                                     source="daily-index", now=ctx.now(), fetch=True)
+                                     source="daily-index", now=ctx.now(), fetch=True, listed=listed)
             if tried is not None:
                 counts["retried"] += 1
             if status.startswith("failed"):

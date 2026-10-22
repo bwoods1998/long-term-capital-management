@@ -21,6 +21,7 @@ sends' order) changes."""
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import random
 import tempfile
@@ -32,10 +33,12 @@ from unittest import mock
 from league import constitution as K
 from league.constitution import EQUITY_MONEY_BOUNDS, equity_money_problems
 from league.events import births as BI
+from league.equity import live as L
 from league.events import book as EB
 from league.events import done as DN
 from league.events import programs as P
 from league.events import store as S
+from league.tests import test_events_a85 as A85
 from league.tests import test_events_book as TB
 from league.tests.test_events_book import CIK, CIK2, CIK3, DAY, earnings
 from league.tests.test_events_births import spec
@@ -231,17 +234,84 @@ class AtDonesSize(TB.EventTest):
 
 
 class TheWaitingBuysAhead(TB.EventTest):
-    """Release 1019g's `_event_ahead` leaves a waiting PREREG-EVL-5 buy what it may send: with S2, the round-up."""
+    """PREREG-EVL-5 section 1.3's ROOM while a buy waits for the lane's close decision (release 1019g's `HeldAhead`,
+    feat/evl-5's): `_event_keep_room` keeps, from every buy after the waiting one in ROOM's order, what `_size_event`
+    would give it in a DRY sizing (nothing written), so S2's round-up, which sits inside `_size_event` (on `record`, the
+    side row written only when not dry), is what a waiting PREREG-EVL-5 Probe buy keeps: E $2,000 (target $70, bar $56,
+    envelope $100) and EVL-ERN-DROP-ON at Probe with a $40.00 limit keep $80 (two shares), never the floor's $40.
 
-    def test_a_probe_buy_ahead_is_left_its_round_up(self):
-        h = self.harness(cash="1898", E="1898")
-        s = EB.settings()
-        rows = [{"limit_px": "40", "band": "probe", "weight": "0.10"}, {"limit_px": "50", "band": "probe", "weight": "0.10"},
-                {"limit_px": "40", "band": "learning", "weight": "0.10"}]
-        cash, risk, note = h.book._event_ahead(rows, s, E1898)
-        self.assertEqual(cash, D("80") + D("50") + D("40"), "$40 at Probe: 2 shares; $50: 1; learning $40: one share")
-        self.assertEqual(risk, cash * D("0.10"))
-        self.assertIn("3 PREREG-EVL-5 buys", note)
+    $100 above the $50 reserve. DROP's Probe buy waits at 15:47; EVL-NEWS-READ-ON's learning buy after it ($20.00 limit,
+    learning's $40 target) is left $20: one share. Once the lane's decision names DROP, its buy sends the two shares it
+    kept. With S2 off (`book.round_up` None), DROP keeps $40, the learning buy sends two shares and DROP's own buy, the
+    $60 left, one (the shortfall then a cap's: no round-up)."""
+
+    def to_close(self, h: TB.Harness) -> str:
+        from league.tests.test_events_1019g import fall, DROP as DROP5
+
+        h.lane.band(DROP5, "probe", version=1)
+        fall(h, "ACME", CIK, "e-1", prev=32.0, close_px="40.00", next_open="40.00")         # (the limit 1.25 x $32)
+        [news] = A85.day_articles(h, 1)
+        h.venue.prints[(news, TB.DAY.isoformat(), "close")] = D("20.00")
+        h.lane.decided(TB.DAY, "open")
+        for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        return news
+
+    def kept(self, h: TB.Harness) -> L.HeldAhead:
+        """`_event_keep_room` of the waiting DROP buy on a fresh `HeldAhead`, as `_event_send` makes each minute."""
+        from league.tests.test_events_1019g import DROP as DROP5, buys_of
+
+        [drop] = buys_of(h, DROP5)
+        ahead = L.HeldAhead()
+        intent = L.Intent.of(h.state.rows("SELECT * FROM eq_intents WHERE iid=?", (drop["iid"],))[0])
+        inst = h.book._instance(intent.instance)
+        h.book._event_keep_room(intent, inst, h.book._event_row(drop["iid"]), TB.DAY.isoformat(), EB.settings(), ahead)
+        return ahead
+
+    def test_a_waiting_probe_buy_keeps_its_round_up(self):
+        from league.tests.test_events_1019g import DROP as DROP5, LEARN_ON, buys_of, lane_close, sent
+
+        for off in (False, True):
+            with self.subTest(s2_off=off), contextlib.ExitStack() as stack:
+                self.setUp()
+                if off:
+                    stack.enter_context(mock.patch.object(EB, "round_up", lambda *a, **k: None))
+                h = A85.short_of_cash(self.harness(cash="150"), "150")
+                news = self.to_close(h)
+                [drop] = buys_of(h, DROP5)
+                self.assertEqual((drop["band"], drop["status"]), ("probe", "planned"))
+                self.assertIn(EB.PART_WAIT, drop["why"])
+                ahead = self.kept(h)
+                self.assertEqual((ahead.usd, ahead.orders, ahead.names), (D(40 if off else 80), 1,
+                                                                           {"ACME": D(40 if off else 80)}),
+                                 "the waiting Probe buy keeps its round-up's two shares ($80), never the floor's $40")
+                self.assertEqual(ahead.risk, ahead.usd * L._event_weight_of(h.book._event_row(drop["iid"]).get("weight")))
+                self.assertEqual(sent(h), [(news, "2" if off else "1")],
+                                 "the learning buy after it is left $20 ($100 less the $80 kept): one share")
+                [on] = buys_of(h, LEARN_ON)
+                order = h.state.rows("SELECT why FROM eq_orders WHERE iid=?", (on["iid"],))[0]["why"]
+                if not off:
+                    self.assertIn("the sleeve has $20.00 of free cash", order)
+                lane_close(h, DROP5, f"{LEARN_ON}@v2")
+                h.tick(15, 48)
+                self.assertEqual(sent(h), [(news, "2" if off else "1"), ("ACME", "1" if off else "2")],
+                                 "once named, DROP sends the two shares it kept")
+                [drop] = buys_of(h, DROP5)
+                row = h.book._event_row(drop["iid"])
+                self.assertEqual(D(row["target_usd"]), D(70), "the target stays the band's")
+                self.assertEqual(D(row["sized_usd"]), D(40 if off else 80))
+                self.assertEqual(DN.at_size(float(D(row["target_usd"])), float(D(row["sized_usd"]))), not off)
+
+    def test_the_dry_sizing_of_a_round_up_writes_no_record(self):
+        """Release 1019g: a dry sizing (`_event_keep_room`'s) writes nothing on the side row, the round-up's included."""
+        from league.tests.test_events_1019g import DROP as DROP5, buys_of
+
+        h = A85.short_of_cash(self.harness(cash="150"), "150")
+        self.to_close(h)
+        [drop] = buys_of(h, DROP5)
+        self.assertEqual(self.kept(h).usd, D(80))
+        row = h.state.rows("SELECT target_usd, binding, sized_usd FROM eq_event_intents WHERE iid=?", (drop["iid"],))[0]
+        self.assertEqual((row["target_usd"], row["binding"], row["sized_usd"]), (None, None, None))
 
 
 # ================================================================================================ PL-2, an invented week

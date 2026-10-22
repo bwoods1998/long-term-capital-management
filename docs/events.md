@@ -32,10 +32,10 @@ they are and how the code runs them. When this page and a pre-registration disag
   versions: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three) of the lane's stated lifetime
   budget of 3.0 (PREREG-EVL-4 section 3, PREREG-EVL-5 section 3; 1.5 left for later births with none registered
   before PREREG-EVL-5, each seatable birth 0.10, as SEATING sums them).
-- [R3's births](#births-r3-not-yet-deployed) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free facts by
-  the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`, judged
-  by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable birth,
-  3.0 in all counted from the 1.2 above, at most 3 a night: at most 18 seatable births).
+- [R3's births](#births-r3-live-since-release-1019e) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free
+  facts by the architect (Claude Haiku 4.5) or the captain, each registered as one line of `docs/births/<night>.jsonl`,
+  judged by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable
+  birth, 3.0 in all counted from the 1.2 above, at most 3 a night: at most 18 seatable births).
 
 ## The programs
 
@@ -156,7 +156,9 @@ each and a clean pass 2-4 minutes later, so no span was ever whole and every loo
 `screen._fast_passes`, `_feed_problems`); (ii) no filing knowable in those windows that the lane would fetch is still
 `listed` or `failed` (a failed one, a listed Form 4, a listed 8-K of a filer in X's tickers copy; an unlisted filer's
 8-K is never fetched and never an event of X); (iii) the daily-index backfill of every weekday from the session before X
-through X has run; and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
+through X has run, and, when X is an SEC holiday NYSE trades (Columbus Day, Veterans Day), through the next weekday EDGAR
+is open: EDGAR dates an 8-K accepted after 17:30 ET as filed on the next day it is open, so the 8-Ks of the holiday's
+eve are in that day's index (`screen.index_through`; release 1019f's review: A66's reach reads it the same way); and (iv) every decision of the program's entry kind through X is made (`ok`, or `pending` only on
 another program's verdicts) and the next session's open decision is made. Otherwise A66's rules apply unchanged, and
 finality stays contiguous: X is final by the fast path only when every session before it is final. The record receipts
 the House already writes prove (i) (league/events/house.py `_record`: a failed feed read is an `error` in its part of
@@ -383,8 +385,8 @@ after 21:26:21Z Oct 21):
   time: TAKEN, the <= 0.96 skip and NO NEW INFORMATION read from those rows (NO NEW INFORMATION's (i) maps symbols by
   the lane's tickers copy of D, `lane_tickers`), and a DAY(D) article with no PROMPT-NEWS answer by then skips its
   issuer. The reactions are the book's (`reaction_reader`); the gap is the lane's stored 09:30 mark (label `0930`, made
-  by the pre-passes; a stored minute with no trade is no gap), else the book's own batched read of that minute
-  (`gap_reader`, league/equity/live.py `_event_open_minutes`; a price it cannot read is not bought). EVL-ERN-DROP-ON and
+  by the pre-passes and the decisions; a stored minute with no trade is no gap), else the book's own batched read of
+  that minute (`gap_reader`, league/equity/live.py `_event_open_minutes`; a price it cannot read is not bought). EVL-ERN-DROP-ON and
   EVL-ERN-UNDER-ON NEVER BUY for a filing knowable at or after 09:00 ET of D whose stored PROMPT-DOC verdict is `ok`
   with score >= 2, or `ok` with score >= 1 and guidance "raised", or not yet answered, at the decision time
   (`next_open_event` with `raised`, `RAISED_GUARD`: EVL-ERN-READ-O1's or EVL-ERN-GUIDE-O1's event at the next open;
@@ -394,14 +396,12 @@ after 21:26:21Z Oct 21):
   each pass in the tables' order); a learning buy of theirs at D's close leaves the next open's PREREG Probe and Sized
   programs A85's reservation, and at Probe or Sized they are reserved for by the open's learning buys; A86 REVISED
   moves only Probe (3.5% of E, one share up to 5%, six open): their learning rows are as frozen (2%, one share up to 5%,
-  eight open). ROOM'S ORDER WHILE THEIR BUYS WAIT (release 1019g's integration, league/equity/live.py `_event_send`):
-  the book's close decision waits only 60 s for the lane's, so a buy of these rows can wait for `part_hold` while the
-  buys after it in ROOM's order go (a learning buy behind one at Probe, a birth behind one at any band); each such buy
-  is sent leaving the waiting buys ahead of it what they will ask (their band's target in whole shares at their limit,
-  the loss budget at their weight: `_event_ahead`) and two orders each of the day's lines, and one that leaves it no
-  whole share WAITS for them ("waits for the PREREG-EVL-5 buys ahead of it in ROOM's order"), never refused for it; so
-  cash, room, budget and the 150-order line go in ROOM's order whatever the minute each buy is sent (the reading that
-  trades less: a buy behind them can only be smaller or later).
+  eight open). ROOM'S ORDER WHILE THEIR BUYS WAIT (release 1019g; the next item): the
+  book's close decision waits only 60 s for the lane's, so a buy of these rows can wait for `part_hold` while the buys
+  after it in A85's send order go (a learning buy behind one at Probe, a birth behind one at any band); the waiting buy
+  keeps its room from them (`HeldAhead`), sized dry with A85's reservation and A86's Probe size in it, and a dry sizing
+  writes no release 1019f record (`target_usd`, `binding`, `sized_usd` stay the sizing a send reads). (Release 1019g's
+  first build had its own form of this, `ahead`; its fix round kept `HeldAhead` alone.)
 - THE EARLIER ROWS' DECISION COMES FIRST (section 1.3; league/events/run.py `decide_close`): the part that decides these
   rows runs LAST, after every earlier row and PREREG-EVL-4's part, under its own time bound (`EVL5_BUDGET` 45 s, never
   past the close task's own bound less `EVL5_FINISH` 15 s: `part_until`, `bounded`, `PartDeadline`, which is not the
@@ -411,9 +411,29 @@ after 21:26:21Z Oct 21):
   themselves; and REAL MONEY NEVER TRADES THAT CLOSE FOR THEM: their buys are planned at the book's close decision and
   go only once the lane's first finished close decision of D names their program (`book.part_hold`; a buy waits while
   there is none, sent again each minute of the window, and is refused when it does not name it). The task's own bound
-  inside the part stops the whole task as before (the next turn decides the close again).
+  inside the part stops the whole task as before (the next turn decides the close again). ROOM HOLDS WHILE IT WAITS
+  (release 1019g's money review): a waiting buy that every other gate lets go keeps its room from every buy after it in
+  ROOM's order at that auction (league/equity/live.py `HeldAhead`, `_event_keep_room`: its whole shares at its limit as
+  `_size_event` would size them now, out of their cash, invested room and name wall, those at its own weight out of
+  their loss budget, and its send and its exit out of the event line and the House-wide line, `_count_refusal`'s
+  `held`), so R3's births, and every learning row behind one of these rows at Probe or Sized, never take what ROOM gives
+  it; a later buy that fits only without that room waits too (`HELD_ROOM`) instead of being refused. Made afresh each
+  minute: a buy the lane's decision names, or never will, keeps nothing the next. THE LANE STARTS THAT DECISION AT ITS
+  TIME (league/events/house.py `HOLD_LEAD`): a turn from 150 s before the live close decision (the close decision + a
+  minute, 15:47:00 ET) keeps going, running what falls due and waiting between, and starts the decision at 15:47:00, not
+  at the next House publish; `due()` looks again no later than the lead's start. INSIDE THE LEAD NO OTHER DECISION
+  STARTS (release 1019g, PREREG-EVL-5's money re-review; `_lead`): a decision runs with the whole 150 s budget, never
+  bounded by the next decision as the other tasks are, so a missed, cut, pending or failed decision (today's
+  open included), the hourly re-decision and the rows' own backfill decisions (`decide-close-evl4`, `decide-close-evl5`, the
+  births') wait until the live one has a receipt, and then run whole. A bound is checked before each network read, so a
+  task's last read (the gateway's timeout is 45 s) can return after it: a task that returns at or after 15:47:00 never
+  ends the turn while the live decision is owed (no receipt, still live): the turn starts it at once (`_close_owed`).
 - THE PRE-PASS (section 1.3): EVL-NEWS-NIGHT2-ON's heavy reads (its attention articles of P, (ii) and (iii) so far, the
-  eligibility of the issuers that survive them by the live rule, and their 09:30 minutes, `_marks_0930`, batched) are
+  eligibility of the issuers that survive them by the live rule, and their 09:30 minutes, `_marks_0930`, batched: A
+  BATCH STORES ONLY A PRICE, so an empty or partial answer stores nothing and removes nothing, PREREG-EVL-1 section 3;
+  a decision, never a pre-pass, reads each survivor still unmarked BY ITSELF once over 09:30-09:35 ET and stores "no
+  trade" only when the tape served the name, a later minute's bar with none at 09:30; an answer with no bar stores
+  nothing, no gap at that decision, and the next decision reads it again) are
   made by the session's close verdict pre-passes (`decide_close` with `ask_only`, the same part under `EVL5_PRE_BUDGET`
   60 s) from 09:47 ET of D (`pre_from`: the 09:30 bar on the Basic plan's tape), each stored as it is read, meta
   `evl5:pre:<day>` ({cut, survivors, ...}) written last; inside the last 30 minutes only once the earlier rows'
@@ -436,7 +456,12 @@ after 21:26:21Z Oct 21):
   -> gaps read -> >= 1.02), the closes whose part failed, and section 1.3's two room effects from the House's event book
   (`room_effects`, read-only: this file's buys the event kind's day order line refused, its lots' exits that use the
   next session's line, and the earlier rows' open-entry learning buys at the next open that sizing refused for cash,
-  invested or loss-budget room while this file's overnight lots were open); the shadow's difference from real money by
+  invested or loss-budget room while this file's overnight lots were open), and THE COST OF THE WAIT for the lane's
+  close decision (`held_unsent`: this file's buys at the close that ended unsent waiting for it; `room_waited`: the
+  later buys that ended unsent waiting for the room kept for them); the House's event book says such a close after it
+  ends (`equity.alert`, info; a WARNING when another close of the last five sessions had one too: the lane's close
+  decision finishes too late for the window, so read its `decide-close` seconds in `lane.json`); the shadow's
+  difference from real money by
   storage time (`late_rows`, `skipped:taken` counted with `skipped:excluded`); an earlier row's buy lost to this file's
   sale at the same auction (the book's `sale_to_later`).
 - THE PROOF that no earlier program changes: league/tests/test_events_evl5.py decides a synthetic week
@@ -499,7 +524,8 @@ turn, the most urgent due first.
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
 | - | PREREG-EVL-5's rows decided by themselves (`decide-close-evl5`) for each close a release without them decided, or whose part for them failed or ran past its own bound | from the first turn after the record pass, once each, oldest first | 150 s |
 | 2/6 | PREREG-EVL-5's pre-pass: today's close verdict pass, for EVL-NEWS-NIGHT2-ON's heavy reads | from 09:47 ET (D's 09:30 minute on the tape) until meta `evl5:pre:<day>` is stored; once more inside the last 30 minutes once the earlier rows' verdicts are stored | 90 s (the part's own 60 s inside it) |
-| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| 1 | PREREG-EVL-5's hold for the live close decision: a turn from `HOLD_LEAD` (150 s) before it keeps going, runs what falls due but another decision (none starts in the lead; every other task is bounded to end 5 s before the decision), waits between, and starts the decision at 15:47:00 ET, or at once when a task's last read returns after that | each session, while PREREG-EVL-5 has programs | at most 40 tasks a turn; the House closing, STOP or a clock that does not move ends it |
+| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once, and once more for a night an older reading of the grammar left empty, before 12:55Z of the session day after it (A95) | the score 120 s, resumable; births 240 s |
 | - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
@@ -508,7 +534,10 @@ turn, the most urgent due first.
 THE BACKFILL GOES FILING BY FILING (A82, release 1019c): EDGAR's daily index lists a filing once per filer (a Form 4
 under its issuer and its reporting owner, an 8-K under each co-registrant: Oct 19, 2026's index had 1,189 rows and 665
 filings), so a day is complete when every filing is seen, and an 8-K is a listed filer's when any of its filers is
-listed. Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
+listed. The current feed lists a co-registered 8-K once per filer too: the live pass keeps it under a listed filer
+whichever the feed lists first (`edgar.poll_current`'s `prefer`), and the backfill moves one stored under an unlisted
+co-registrant to the listed filer's CIK before it fetches it (`edgar.record_filing`'s `listed`; release 1019f's review:
+kept under the first filer seen, such an 8-K was never an event of the listed issuer). Before it, a day counted rows and never completed, every look waited the full A66 reach and A69's fast path
 never ran.
 
 A FAILED FETCH HOLDS ITS DAY, ONE DEAD DOCUMENT NEVER HOLDS IT FOR GOOD (`fix/backfill-robust`, release 1019f): a
@@ -522,12 +551,12 @@ still waits on it for the closes whose windows hold it, and A66's reach does not
 counted as seen and the day was done at once: one transient SEC error lost the filing. SEC HOLIDAYS: EDGAR is closed on
 a federal holiday and publishes no daily index for it (Wed Nov 11, 2026, Veterans Day, is a trading day), so its index
 is never there; SEC answers a daily index that does not exist with 403 or 503, never 404 (the branch's independent
-check). A weekday in `house.py` `SEC_HOLIDAYS` (OPM's 2026 and 2027 federal holidays, and Fri Dec 31, 2027, New Year's
-Day 2028 observed) whose index read FAILS, WHATEVER THE STATUS, is done as `no index: SEC holiday` (receipt `ok`, `why`,
+check). A weekday in `SEC_HOLIDAYS` (league/events/screen.py, behind the wall, which house.py takes: OPM's 2026 and
+2027 federal holidays, and Fri Dec 31, 2027, New Year's Day 2028 observed) whose index read FAILS, WHATEVER THE STATUS, is done as `no index: SEC holiday` (receipt `ok`, `why`,
 `holiday`, `status`: EDGAR accepts no filing that day, so done is right even when the read failed for another reason).
 A failed read on any other weekday, 403, 503 or any status, waits an hour as before, and a holiday's index that
 exists is read as any day's. A closure by executive order is not in the table: add its day
-before it falls.
+before it falls. A holiday NYSE trades is final only once the index after it is backfilled too (A69 (iii), above).
 
 A task ends before a decision falls due. A filing whose fetch failed (a transient SEC error) is fetched again at the
 first record pass 2, 4, 8, 16 and 32 minutes after its first failure, six tries in all, then left to the daily-index
@@ -590,12 +619,14 @@ THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after
 metered costs beside it, by program and band (to date as far as `metered.json` covers it: "since <day>, partly
 measured" when it began after the first fill); the measured costs of the UTC day of the same date against its cap with
 its lines labelled the allowance; the events by family, the verdicts, the shadow intents by program and version, the real fills (buys, sells,
-fees, the fill gap against the auction prints); for each version 2 program its band, settled n (shadow TRADABLE and real), next look and events to go, its
+fees, the fill gap against the auction prints); for each program that may trade real money (version 2 of the nine, version 1
+of PREREG-EVL-4's three, then each seatable birth of R3, which the report loads from the lane's store: release 1019f's
+review) its band, settled n (shadow TRADABLE and real), next look and events to go, its
 market-direction share and benchmark mean and its same-risk buy-and-hold ("n/a until real fills"); the records and
 controls in one line, the expected false passes and the alarms open. Figures only: no headline, document text, symbol
 or price leaves the House. How to read it: [operations](operations.md), **THE DAILY ONE-SCREEN REPORT BY MAIL**.
 
-## On the public site (WP4, Oct 19, 2026; branch `feat/site-events`, not yet deployed)
+## On the public site (WP4, Oct 19, 2026; live since Oct 21, 2026: release 1019e publishes `lane_v1`)
 
 The House publishes the lane under one versioned key, `lane_v1` (`league/site_lane.py` reads it read-only;
 `league/publish.py` `site_lane` allowlists it; the contract is `league/tests/fixtures/site_contract.md`): each program
@@ -804,7 +835,7 @@ release 1019b's one count of 60, entries stopped at about 30 open-entry lots sol
 learning lots left that day's close entries no room (league/tests/test_events_1019c.py sends all 40 and a Probe close
 entry). The row moves the money digest (`285fa7af` -> `055e5313`) and the constitution's (`fd38e4e1` -> `a8d4cbd9`).
 
-## Births (R3; not yet deployed)
+## Births (R3; live since release 1019e)
 
 The owner's goal V2 item 2: "Births come from your architect agents and from you, using outcome-free facts, rationed by
 an expected-false-pass budget you state". The spec is `goal-2026-10-19/R3-SPEC.md`; the code is
@@ -816,14 +847,19 @@ with the judges untouched.
 (1), `family` (one the lane already reads: `ern`, `ern-react`, `8k` with an item set, `ins`, `ins-buy` with value and
 role filters, `news`, `news-day`, `news-react`), `rule` (the family's own fields only: `items`; `score_min` /
 `score_max` on the STORED PROMPT-DOC or PROMPT-NEWS score and `guidance` on the stored PROMPT-DOC guidance, never a new
-prompt; `react_min` / `react_max`; `value_min` (>= $50,000) and `roles` (director | officer); `sources` and `hours`, the
-news windows), `entry` (the family's: open or close), `exit` (close of session h, or a close entry's next open), `hold`
-(1..5; ONE for a seatable birth, whose screen blocks are one-session blocks, as every seatable PREREG program's), `rank`
+prompt; `react_min` / `react_max`; `value_min` (>= $50,000) and `roles` (director | officer; a one-role list such as
+`["officer"]` reads as its role, any other list is refused); `sources` and `hours`, the news windows), `entry` (the
+family's: open or close), `exit` (close of session h, or a close entry's next open), `hold` (1..5; ONE for a seatable
+birth, whose screen blocks are one-session blocks, as every seatable PREREG program's), `rank`
 (score, reaction, value or none) and `seatable`. Anything else is refused. Its canonical form (sorted keys, no spaces)
 and that form's sha256 name it. A READ birth (a verdict threshold, a guidance filter or a score ranking) carries a
 CONTROL derived from it, `<id>-CTRL` (its rule with every verdict condition removed, a record), registered with it, so
 PREREG-EVL-1 section 7's "a READ program beats its control" holds for births too. A READ birth of the `8k` family names
 only items whose verdicts the lane asks (1.01, 2.01, 7.01, 8.01), so its verdicts are stored before its decision.
+A NAME IS NOT PART OF THE RULE (A95): an id that lacks the `EVL-B-` prefix is named canonically by the House
+(`births.canonical_name`: a leading `EVL-` becomes `EVL-B-`, any other id takes `EVL-B-` in front), every check of an id
+(the pattern, 40 characters, never ending `-CTRL`, never registered) applies to that name, the canonical line and sha
+carry it, and the candidate row keeps the proposed id beside it (`figures.named` {from, to}; the receipt's `named`).
 
 **Born from outcome-free facts.** Each night the lane builds the facts of the last 20 sessions (`births.Facts`): event
 counts by family, 8-K item, news source and knowable hour; the stored verdict scores and guidance; which families and
@@ -835,7 +871,13 @@ architect. A react family's reaction is a price after the event: never read, so 
 
 **The architect and the validator.** One gateway call a night (`births.propose`): claude-haiku-4-5-20251001, temperature
 0, max_tokens 3,000, its prompt's sha256 and its answer stored in `birth_calls` like a verdict (a night's answer is read
-again, never asked again), at most 6 specs a night, under a cost cap of $0.25 a night (the call's worst case must fit).
+again, never asked again, under the same prompt sha), at most 6 specs a night, under a cost cap of $0.25 a night (the
+call's worst case must fit). The prompt shows two valid specs (`births.EXAMPLES`: an 8k spec over items outside the four
+READ items with no score or guidance field, and a news spec) and says that an 8k spec may carry `score_min`,
+`score_max` or `guidance` only when every item is among the four, and that `guidance` is a list (A95: the first night's
+6 specs were all refused, for ids without the prefix, `"guidance": {"verdict": "none"}`, READ fields on other items and
+`"roles": ["officer"]`). That moved the prompt's sha (release 1019e's `2203fda3` to `8294fe77`): an answer stored under
+the old sha is never read by this code (it stays stored and counted), and a night this code runs asks under the new one.
 On the House the call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is
 left of the lane's line that UTC day, and its stored cost counts in that line (the next verdict is refused once births
 and verdicts reach it), in the budget rule's measure of the lane (`budget.lane_spend`: its window, its heaviest day and
@@ -899,7 +941,20 @@ after a decision), so the book reads no `ins` rows and the grammar refuses a sea
 **On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
 paused or over the day's verdict line, made only when its worst case fits under what is left of that line, and counted
-in it). It ships false: switching it on needs the gateway release with the births
+in it). THE ONE RE-RUN OF AN EMPTY NIGHT (A95, `births.rerun_due`): every births receipt records the running
+`births.PARSE_VERSION` (2; release 1019e's receipts record none, read as 1). When the latest night's receipts accepted
+none and registered none (no accepted id, no candidate row accepted, unknown or registered, no birth of the night) and
+were all written by an older version, the House runs that night's job once more, its receipt marked `rerun` (written
+when it starts, so a re-run that dies is still the one), never from 12:55Z of the session day after the night (a
+Friday night's until Monday's 12:55Z). The re-run reads the night's stored answer again when its prompt sha is the
+running one (no call), else makes the night's call inside the night's $0.25 (its first call counts) and the lane's line.
+Its births register like any, at the later of GitHub's commit time and the House's receipt, so they count only events
+knowable after the re-run, are charged to the budget and to that night's three; the line goes to the night's own file.
+Before 12:55Z the re-run starts at least 5 minutes (65 in standard time) before the session's 09:00 ET cut-off and 20
+(80) before its 09:15 ET open decision; from then the session's decisions run until its close (the deploy-blocked
+window), and a birth registered among them would begin part-way through a session it cannot fairly count, so the
+night stays empty and the next night's job proposes again: either way no event before a birth's registration is
+counted. It ships false: switching it on needs the gateway release with the births
 route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
 fallback after two failing nights of Haiku proposals, and a ranking of learning room by look statistics (a later,
 pre-registered version).

@@ -1533,16 +1533,6 @@ path.
   while the other auction has no PREREG Probe or Sized program; an error reading it waits the buy a minute, as any
   sizing figure). Release 1019f: each answer writes the buy's `target_usd`, `binding` and `sized_usd` on its side row
   (`_event_sized`, `_event_cut`), the gateway's final refusal `binding` "gateway" (`_event_refused_at_gateway`).
-  RELEASE 1019g (A85's send order with PREREG-EVL-5's `book.part_hold`): `_event_send` passes each close buy `ahead`,
-  the side rows of the PREREG-EVL-5 buys before it in ROOM's order still waiting for the lane's own close decision to
-  name their program (`_event_part_waits`: `part_hold` "wait", no order sent); `_count_refusal(day, exit_=False,
-  event_line=..., ahead=n)` keeps two orders for each (its send and its own exit) on the event kind's line and the
-  House-wide one; `_size_event(..., ahead=...)` has `available_cash`, `invested_now` and `budget_room` less what each
-  will ask (`_event_ahead(ahead, s, E) -> (cash, budget, note)`: its band's target in whole shares at its own limit, or
-  one share within the band's one-share cap, the budget at its own weight), beside A85's reservation; and a buy left no
-  whole share by it WAITS (`AHEAD_HELD` on its intent, sized again next minute, missed at the cut-off if they still
-  wait), never refused for it. So the cash, room, budget and day orders go in ROOM's order whatever the minute each buy
-  goes (the book's close decision waits only `EVENT_DECIDE_WAIT_S` 60 s for the lane's).
   `probe_figures` weighs an
   open event lot by `event_lot_weight` (its `info.evl.weight`; 0.40 from the ladder's first rung or when unreadable; 1
   once at 0) and a working event buy by its side row's weight, and counts every closed event lot in `closes` whatever
@@ -1568,7 +1558,9 @@ path.
   `part_hold(lane, program, version, day) -> None | ("wait", why) | ("never", why)` (PREREG-EVL-5 section 1.3: a buy of
   its rows at D's close goes only once the lane's first finished close decision of D names its program; the equity
   book's `_event_work_entry` holds the buy while it waits, sent again each minute of the window, and refuses it when
-  that decision finished without it), `held_recently`,
+  that decision finished without it; while it waits it keeps its room from every buy after it in ROOM's order,
+  `HeldAhead` and `_event_keep_room`, and `PART_WAIT` is the words the book and the lane's report count it by),
+  `held_recently`,
   `allocate(picks, rooms,
   band_of, skip) -> ({program: picks given}, {program: {why passed over: n}})` (the auction's slots in ROOM's order,
   each program its own ranked picks whose name no earlier-given program was given, until its room is full; inside
@@ -1639,9 +1631,14 @@ path.
   program of the same auction; the median of five decisions, the room cap, the buys' weights; the cash this auction's
   sales give back; the loss budget held by R x the weight. league/tests/test_events_1019g.py (release 1019g): A85 with
   PREREG-EVL-5's rows (their tiers, round-robin and send order; a learning DROP close buy leaving the next open's Probe
-  program its reservation); `ahead` (a learning buy behind a waiting Probe DROP buy leaves it its three shares, a birth
-  behind a waiting DROP buy waits for it, a DROP buy whose part failed frees what it was left; each undone in a
-  counterfactual); the line in ROOM's order with the new rows; A80's re-send of a DROP buy; A86 REVISED's sizes.
+  program its reservation); feat/evl-5's `HeldAhead` with A85 and A86 (a learning buy behind a waiting Probe DROP buy
+  leaves it A86's three shares, a birth behind a waiting DROP buy waits for it, a DROP buy whose part failed frees what
+  it kept, waiting DROP buys keep only what A85's reservation leaves them; each undone in a counterfactual,
+  `_event_keep_room` keeping nothing); a dry sizing writes no release 1019f record (`_size_event(dry=True)`: neither the
+  intent's why nor the side row's `target_usd`, `binding`, `sized_usd`); the line in ROOM's order with the new rows (a
+  birth behind a waiting DROP buy keeps its two orders, `HeldAhead.orders`); A80's re-send of a DROP buy; A86
+  REVISED's sizes. (Release 1019g first built its own `ahead` for this, `_event_part_waits` and `_event_ahead`; its fix
+  round dropped it for feat/evl-5's review round's `HeldAhead`, the one form.)
 
 ## 21. The event kind's own day order count (release 1019c, Oct 2026; under the owner's goal of Oct 19, 2026; money and book, as built)
 
