@@ -288,7 +288,8 @@ class ThePxLine(LaneCase):
         with mock.patch.object(PXS, "disk_free", return_value=int(41.2 * GB)):
             off = DR.px_line(CTX, self.root, day)
             self.assertEqual(off, {"on": False, "size_mb": None, "line_mb": None, "free_gb": None, "floor_gb": None,
-                                   "ok": None, "runs": None}, "off and no px.sqlite: nothing")
+                                   "ok": None, "runs": {k: None for k in DR.PX_STATUSES}},
+                             "off and no px.sqlite: nothing, in the one shape")
             with PXS.PxStore(self.root / "events") as px:
                 for status in ("ok", "ok", "partial", "disk"):
                     run = px.start_run("daily", now=at(day, 14, 0), free_bytes=int(41.2 * GB))

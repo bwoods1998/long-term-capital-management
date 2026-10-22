@@ -315,7 +315,7 @@ test('release 1019i\'s review: the parity latch on the Score lines and the PX li
   assert.ok(off.some(line => line.startsWith('PX store (off): 812/2048 MB')), off.join('\n'));
   // The recorders off and no px.sqlite (every figure null): no line at all.
   const none = lines({ ...REPORT, px_store: { on: false, size_mb: null, line_mb: null, free_gb: null, floor_gb: null,
-    ok: null, runs: null } });
+    ok: null, runs: Object.fromEntries(Object.keys(REPORT.px_store.runs).map(k => [k, null])) } });
   assert.ok(!none.some(line => line.startsWith('PX store')), none.join('\n'));
   // Figures only: a word where a figure goes is never echoed.
   const odd = lines({ ...REPORT, px_store: { ...REPORT.px_store, size_mb: 'ACME', runs: { ok: 'ACME', ACME: 3 } } });

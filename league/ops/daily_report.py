@@ -533,8 +533,8 @@ PX_STATUSES = ("ok", "partial", "waiting", "cut", "failed", "disk")
 
 def px_line(ctx: Any, root: str | Path, on: dt.date) -> dict[str, Any]:
     """THE PX LINE (the module docstring), always in one shape: {on, size_mb, line_mb, free_gb, floor_gb, ok, runs:
-    {status: n} of the New York day `on`}; read by `stat`, the disk's usage and px.sqlite opened read-only (a store
-    that cannot be read leaves `runs` None). Counts and sizes only."""
+    {status: n} of the New York day `on` (`PX_STATUSES`)}; read by `stat`, the disk's usage and px.sqlite opened
+    read-only (every count None when it does not exist or cannot be read). Counts and sizes only."""
     from ..events import pxstore as PXS
     from ..events import report as RP
 
@@ -543,7 +543,7 @@ def px_line(ctx: Any, root: str | Path, on: dt.date) -> dict[str, Any]:
     running = isinstance(block, Mapping) and block.get("px_data") is True
     events = Path(root) / LANE
     out: dict[str, Any] = {"on": running, "size_mb": None, "line_mb": None, "free_gb": None, "floor_gb": None,
-                           "ok": None, "runs": None}
+                           "ok": None, "runs": {k: None for k in PX_STATUSES}}
     path = PXS.path_of(events)
     if not running and not path.exists():
         return out
@@ -560,7 +560,7 @@ def px_line(ctx: Any, root: str | Path, on: dt.date) -> dict[str, Any]:
                     (lo, hi))])
             out["runs"] = {k: 0 for k in PX_STATUSES} | {str(k): int(n) for k, n in got if str(k) in PX_STATUSES}
         except Exception:  # noqa: BLE001 - the line's figures without the runs
-            out["runs"] = None
+            out["runs"] = {k: None for k in PX_STATUSES}
     return out
 
 
