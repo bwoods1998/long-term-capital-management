@@ -1,0 +1,69 @@
+{
+ "cells": [
+  {
+   "lab": "L|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 3000,
+   "seed0": 97000000
+  },
+  {
+   "lab": "L|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 97000100
+  },
+  {
+   "lab": "L|N3|both|AR20|phi.2",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.2
+   },
+   "R": 2000,
+   "seed0": 97000200
+  },
+  {
+   "lab": "L|N3|dayskew|nodrift|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 97000300
+  }
+ ]
+}

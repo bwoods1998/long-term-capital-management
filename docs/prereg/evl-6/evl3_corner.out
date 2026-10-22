@@ -1,0 +1,3 @@
+PREREG-EVL-3 alone N3|both|AR20|phi0.20 n30 rho0.15: 0.1845 (se 0.0087, R 2000)
+PREREG-EVL-3 alone N3|both|AR20|phi0.20 n85 rho0.15: 0.1430 (se 0.0078, R 2000)
+PREREG-EVL-3 alone N3|dayskew|AR20|phi0.20 n30 rho0.15: 0.1800 (se 0.0086, R 2000)

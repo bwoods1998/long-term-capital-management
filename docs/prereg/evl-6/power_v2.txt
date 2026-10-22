@@ -1,0 +1,55 @@
+RULE looks from 22: 0.02 S22-30, 0.006 S31-40, 0.001 S41-60
+ 60 bp rho 0.05 n  85: by20 0.000 by22 0.456 by25 0.529 by30 0.607 by40 0.642 by60 0.689 | E60 36.9 med 25.0 | ended 0.311 | promoted by 120 incl. run 2 0.907
+ 60 bp rho 0.05 n  30: by20 0.000 by22 0.322 by25 0.382 by30 0.454 by40 0.490 by60 0.530 | E60 42.6 med 60.0 | ended 0.468 | promoted by 120 incl. run 2 0.791
+ 60 bp rho 0.05 n  13: by20 0.000 by22 0.215 by25 0.304 by30 0.375 by40 0.407 by60 0.427 | E60 45.6 med None | ended 0.569 | promoted by 120 incl. run 2 0.653
+ 60 bp rho 0.05 n   8: by20 0.000 by22 0.118 by25 0.216 by30 0.266 by40 0.309 by60 0.321 | E60 49.1 med None | ended 0.668 | promoted by 120 incl. run 2 0.546
+ 60 bp rho 0.05 n   3: by20 0.000 by22 0.006 by25 0.080 by30 0.167 by40 0.208 by60 0.217 | E60 53.1 med None | ended 0.777 | promoted by 120 incl. run 2 0.397
+ 60 bp rho 0.05 MEAN: by20 0.000 by22 0.223 by25 0.302 by30 0.374 by40 0.412 by60 0.437 | E60 45.48 | ended 0.559 | promoted by 120 incl. run 2 0.659
+ 60 bp rho 0.00 n  85: by20 0.000 by22 0.788 by25 0.845 by30 0.901 by40 0.938 by60 0.969 | E60 25.5 med 22.0 | ended 0.031 | promoted by 120 incl. run 2 1.000
+ 60 bp rho 0.00 n  30: by20 0.000 by22 0.529 by25 0.622 by30 0.708 by40 0.749 by60 0.797 | E60 33.1 med 22.0 | ended 0.199 | promoted by 120 incl. run 2 0.952
+ 60 bp rho 0.00 n  13: by20 0.000 by22 0.295 by25 0.399 by30 0.472 by40 0.513 by60 0.546 | E60 41.7 med 40.0 | ended 0.449 | promoted by 120 incl. run 2 0.796
+ 60 bp rho 0.00 n   8: by20 0.000 by22 0.165 by25 0.297 by30 0.359 by40 0.409 by60 0.431 | E60 45.4 med None | ended 0.553 | promoted by 120 incl. run 2 0.659
+ 60 bp rho 0.00 n   3: by20 0.000 by22 0.007 by25 0.101 by30 0.194 by40 0.245 by60 0.263 | E60 51.8 med None | ended 0.728 | promoted by 120 incl. run 2 0.453
+ 60 bp rho 0.00 MEAN: by20 0.000 by22 0.357 by25 0.453 by30 0.527 by40 0.571 by60 0.601 | E60 39.48 | ended 0.392 | promoted by 120 incl. run 2 0.772
+ 60 bp rho 0.15 n  85: by20 0.000 by22 0.231 by25 0.288 by30 0.343 by40 0.369 by60 0.395 | E60 47.0 med None | ended 0.605 | promoted by 120 incl. run 2 0.634
+ 60 bp rho 0.15 n  30: by20 0.000 by22 0.188 by25 0.244 by30 0.295 by40 0.319 by60 0.331 | E60 48.8 med None | ended 0.668 | promoted by 120 incl. run 2 0.568
+ 60 bp rho 0.15 n  13: by20 0.000 by22 0.143 by25 0.202 by30 0.244 by40 0.264 by60 0.278 | E60 50.6 med None | ended 0.717 | promoted by 120 incl. run 2 0.474
+ 60 bp rho 0.15 n   8: by20 0.000 by22 0.083 by25 0.140 by30 0.170 by40 0.199 by60 0.206 | E60 53.0 med None | ended 0.786 | promoted by 120 incl. run 2 0.402
+ 60 bp rho 0.15 n   3: by20 0.000 by22 0.005 by25 0.064 by30 0.123 by40 0.166 by60 0.176 | E60 54.5 med None | ended 0.816 | promoted by 120 incl. run 2 0.329
+ 60 bp rho 0.15 MEAN: by20 0.000 by22 0.130 by25 0.188 by30 0.235 by40 0.263 by60 0.277 | E60 50.77 | ended 0.719 | promoted by 120 incl. run 2 0.481
+100 bp rho 0.05 n  85: by20 0.000 by22 0.811 by25 0.862 by30 0.909 by40 0.933 by60 0.959 | E60 25.4 med 22.0 | ended 0.042 | promoted by 120 incl. run 2 1.000
+100 bp rho 0.05 n  30: by20 0.000 by22 0.693 by25 0.777 by30 0.852 by40 0.887 by60 0.922 | E60 27.5 med 22.0 | ended 0.077 | promoted by 120 incl. run 2 0.995
+100 bp rho 0.05 n  13: by20 0.000 by22 0.508 by25 0.650 by30 0.733 by40 0.782 by60 0.818 | E60 31.7 med 22.0 | ended 0.169 | promoted by 120 incl. run 2 0.966
+100 bp rho 0.05 n   8: by20 0.000 by22 0.285 by25 0.506 by30 0.588 by40 0.650 by60 0.687 | E60 36.6 med 25.0 | ended 0.286 | promoted by 120 incl. run 2 0.903
+100 bp rho 0.05 n   3: by20 0.000 by22 0.018 by25 0.199 by30 0.372 by40 0.456 by60 0.488 | E60 44.6 med 67.0 | ended 0.483 | promoted by 120 incl. run 2 0.745
+100 bp rho 0.05 MEAN: by20 0.000 by22 0.463 by25 0.599 by30 0.691 by40 0.742 by60 0.775 | E60 33.15 | ended 0.211 | promoted by 120 incl. run 2 0.922
+100 bp rho 0.00 n  85: by20 0.000 by22 0.982 by25 0.992 by30 0.997 by40 0.999 by60 1.000 | E60 22.1 med 22.0 | ended 0.000 | promoted by 120 incl. run 2 1.000
+100 bp rho 0.00 n  30: by20 0.000 by22 0.895 by25 0.947 by30 0.977 by40 0.988 by60 0.995 | E60 23.0 med 22.0 | ended 0.005 | promoted by 120 incl. run 2 1.000
+100 bp rho 0.00 n  13: by20 0.000 by22 0.630 by25 0.787 by30 0.861 by40 0.904 by60 0.931 | E60 26.9 med 22.0 | ended 0.058 | promoted by 120 incl. run 2 0.997
+100 bp rho 0.00 n   8: by20 0.000 by22 0.380 by25 0.640 by30 0.722 by40 0.785 by60 0.821 | E60 31.4 med 23.0 | ended 0.154 | promoted by 120 incl. run 2 0.968
+100 bp rho 0.00 n   3: by20 0.000 by22 0.017 by25 0.235 by30 0.435 by40 0.527 by60 0.568 | E60 42.1 med 35.0 | ended 0.397 | promoted by 120 incl. run 2 0.829
+100 bp rho 0.00 MEAN: by20 0.000 by22 0.581 by25 0.720 by30 0.798 by40 0.840 by60 0.863 | E60 29.09 | ended 0.123 | promoted by 120 incl. run 2 0.959
+100 bp rho 0.15 n  85: by20 0.000 by22 0.529 by25 0.591 by30 0.667 by40 0.707 by60 0.756 | E60 34.5 med 22.0 | ended 0.244 | promoted by 120 incl. run 2 0.948
+100 bp rho 0.15 n  30: by20 0.000 by22 0.475 by25 0.545 by30 0.632 by40 0.674 by60 0.717 | E60 35.9 med 25.0 | ended 0.282 | promoted by 120 incl. run 2 0.924
+100 bp rho 0.15 n  13: by20 0.000 by22 0.353 by25 0.472 by30 0.550 by40 0.590 by60 0.620 | E60 38.8 med 30.0 | ended 0.367 | promoted by 120 incl. run 2 0.854
+100 bp rho 0.15 n   8: by20 0.000 by22 0.232 by25 0.394 by30 0.454 by40 0.507 by60 0.530 | E60 41.8 med 40.0 | ended 0.446 | promoted by 120 incl. run 2 0.796
+100 bp rho 0.15 n   3: by20 0.000 by22 0.013 by25 0.147 by30 0.295 by40 0.364 by60 0.386 | E60 47.8 med None | ended 0.597 | promoted by 120 incl. run 2 0.630
+100 bp rho 0.15 MEAN: by20 0.000 by22 0.321 by25 0.430 by30 0.520 by40 0.568 by60 0.602 | E60 39.74 | ended 0.387 | promoted by 120 incl. run 2 0.830
+ 30 bp rho 0.05 n  85: by20 0.000 by22 0.105 by25 0.138 by30 0.177 by40 0.189 by60 0.197 | E60 53.4 med None | ended 0.799 | promoted by 120 incl. run 2 0.352
+ 30 bp rho 0.05 n  30: by20 0.000 by22 0.077 by25 0.102 by30 0.131 by40 0.143 by60 0.145 | E60 55.0 med None | ended 0.851 | promoted by 120 incl. run 2 0.287
+ 30 bp rho 0.05 n  13: by20 0.000 by22 0.062 by25 0.091 by30 0.115 by40 0.125 by60 0.128 | E60 55.6 med None | ended 0.867 | promoted by 120 incl. run 2 0.240
+ 30 bp rho 0.05 n   8: by20 0.000 by22 0.032 by25 0.062 by30 0.078 by40 0.089 by60 0.095 | E60 56.8 med None | ended 0.900 | promoted by 120 incl. run 2 0.180
+ 30 bp rho 0.05 n   3: by20 0.000 by22 0.002 by25 0.032 by30 0.059 by40 0.082 by60 0.086 | E60 57.3 med None | ended 0.907 | promoted by 120 incl. run 2 0.160
+ 30 bp rho 0.05 MEAN: by20 0.000 by22 0.056 by25 0.085 by30 0.112 by40 0.126 by60 0.130 | E60 55.65 | ended 0.865 | promoted by 120 incl. run 2 0.244
+ 30 bp rho 0.00 n  85: by20 0.000 by22 0.208 by25 0.262 by30 0.330 by40 0.358 by60 0.379 | E60 47.5 med None | ended 0.621 | promoted by 120 incl. run 2 0.615
+ 30 bp rho 0.00 n  30: by20 0.000 by22 0.125 by25 0.166 by30 0.200 by40 0.214 by60 0.225 | E60 52.5 med None | ended 0.774 | promoted by 120 incl. run 2 0.406
+ 30 bp rho 0.00 n  13: by20 0.000 by22 0.082 by25 0.113 by30 0.146 by40 0.161 by60 0.166 | E60 54.4 med None | ended 0.831 | promoted by 120 incl. run 2 0.293
+ 30 bp rho 0.00 n   8: by20 0.000 by22 0.041 by25 0.081 by30 0.108 by40 0.124 by60 0.128 | E60 55.7 med None | ended 0.870 | promoted by 120 incl. run 2 0.248
+ 30 bp rho 0.00 n   3: by20 0.000 by22 0.002 by25 0.032 by30 0.059 by40 0.083 by60 0.086 | E60 57.3 med None | ended 0.905 | promoted by 120 incl. run 2 0.170
+ 30 bp rho 0.00 MEAN: by20 0.000 by22 0.091 by25 0.131 by30 0.169 by40 0.188 by60 0.197 | E60 53.48 | ended 0.800 | promoted by 120 incl. run 2 0.346
+ 30 bp rho 0.15 n  85: by20 0.000 by22 0.080 by25 0.105 by30 0.127 by40 0.135 by60 0.138 | E60 55.2 med None | ended 0.856 | promoted by 120 incl. run 2 0.262
+ 30 bp rho 0.15 n  30: by20 0.000 by22 0.062 by25 0.081 by30 0.101 by40 0.110 by60 0.113 | E60 56.2 med None | ended 0.879 | promoted by 120 incl. run 2 0.214
+ 30 bp rho 0.15 n  13: by20 0.000 by22 0.051 by25 0.074 by30 0.090 by40 0.098 by60 0.100 | E60 56.5 med None | ended 0.892 | promoted by 120 incl. run 2 0.190
+ 30 bp rho 0.15 n   8: by20 0.000 by22 0.034 by25 0.063 by30 0.083 by40 0.104 by60 0.107 | E60 56.4 med None | ended 0.877 | promoted by 120 incl. run 2 0.189
+ 30 bp rho 0.15 n   3: by20 0.000 by22 0.002 by25 0.029 by30 0.063 by40 0.077 by60 0.080 | E60 57.4 med None | ended 0.910 | promoted by 120 incl. run 2 0.142
+ 30 bp rho 0.15 MEAN: by20 0.000 by22 0.045 by25 0.070 by30 0.093 by40 0.105 by60 0.107 | E60 56.37 | ended 0.883 | promoted by 120 incl. run 2 0.199

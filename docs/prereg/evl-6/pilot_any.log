@@ -1,0 +1,4 @@
+N3|both|AR20|phi0.20 n85: entries with full p <= 0.020 and the guards 525, disagreements 0; entries with full q <= 0.020 and mean a < 0 330, disagreements 0
+N3|sym|nodrift|phi0.10 n3: entries with full p <= 0.020 and the guards 132, disagreements 0; entries with full q <= 0.020 and mean a < 0 402, disagreements 0
+N3|both|AR20|phi0.20 n8: entries with full p <= 0.020 and the guards 768, disagreements 0; entries with full q <= 0.020 and mean a < 0 386, disagreements 0
+P60|sym|nodrift n13: entries with full p <= 0.020 and the guards 3339, disagreements 0; entries with full q <= 0.020 and mean a < 0 1, disagreements 0

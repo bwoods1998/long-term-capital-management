@@ -1,0 +1,115 @@
+{
+ "cells": [
+  {
+   "lab": "J|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 96000000
+  },
+  {
+   "lab": "J|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 96000100
+  },
+  {
+   "lab": "J|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 96000200
+  },
+  {
+   "lab": "J|N3|dayskew|nodrift|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 96000300
+  },
+  {
+   "lab": "J|N3|both|AR20",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 96000400
+  },
+  {
+   "lab": "J|N3|crash10|nodrift",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "jump_left": 0.5
+   },
+   "R": 2000,
+   "seed0": 96000500
+  },
+  {
+   "lab": "J|N3|both|AR20|lam.005",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "lam": 0.005
+   },
+   "R": 2000,
+   "seed0": 96000600
+  }
+ ]
+}
