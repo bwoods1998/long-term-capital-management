@@ -610,8 +610,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
 
     for prog in P.PROGRAMS:
-        if prog.entry_at != "open" or (births_only and prog.spec is None):
-            continue
+        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.LEARNER_FAMILIES:
+            continue        # (PREREG-EVL-7's learners decide after the receipt, by themselves: `learner_part`)
         _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
         def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows) -> None:
@@ -622,6 +622,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+        if not births_only:
+            learner_part(ctx, day, "open", rid, backfill_run=backfill_run)
     return out
 
 
@@ -1164,6 +1166,32 @@ def five_programs() -> list[P.Program]:
     return [p for p in P.PROGRAMS if p.prereg == 5 and p.entry_at == "close" and p.family in P.CLOSE_FAMILIES_5]
 
 
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
+def learner_part(ctx: Context, day: dt.date, at: str, rid: int, *, backfill_run: bool) -> dict[str, Any]:
+    """PREREG-EVL-7 SECTION 1.7'S ISOLATED LEARNER PART of the House's `at` decision of `day`: run AFTER that decision's
+    receipt is finished (so no earlier file's row, and no real money of one, ever waits on it: league/events/book.py
+    `decided` reads the receipt), only by a LIVE decision (a backfill run decides no learner: its auction is decided
+    later by the learner by itself), for each learner of the auction pinned (league/events/programs.py `learners`;
+    none while REGISTERED_AT_7 is None), under the learner's own bound (league/events/learner.py `live_part`: 90 s at
+    the open, 120 s at the close, never past the task's bound less its finish). It never raises: a failure or an
+    expiry is recorded beside and that auction is decided for the learner by itself later, shadow only. The receipt's
+    summary is never touched: it names no learner. Returns {learner key: what its part did}."""
+    out: dict[str, Any] = {}
+    if backfill_run:
+        return out
+    try:
+        learners = [p for p in P.learners() if p.entry_at == at]
+    except Exception:  # noqa: BLE001 - no learner row is readable: no part
+        return out
+    if not learners:
+        return out
+    from . import learner as LR
+
+    for prog in learners:
+        out[_key(prog)] = LR.live_part(ctx, prog, day, receipt_id=rid)
+    return out
+
+
 def _pre_tails(st: S.Store, day: dt.date, survivors: set[str]) -> dict[str, Any] | None:
     """What the close decision added to the session's pre-pass (meta `evl5:pre:<day>`): its cut, and the attention
     issuers that survive NO NEW INFORMATION now and did not then (`added`: an attention article stored after the cut)
@@ -1520,7 +1548,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     if not evl4_only and not evl5_only:       # (one file's rows by themselves: no earlier row is decided again)
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
-                    prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None):
+                    prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None) and \
+                    prog.family not in P.LEARNER_FAMILIES:     # (PREREG-EVL-7's: after the receipt, `learner_part`)
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
         if not births_only and not evl5_only:     # (the births, or PREREG-EVL-5's rows, by themselves: no PREREG-EVL-4 row)
@@ -1563,9 +1592,12 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+        if kind == "close":
+            learner_part(ctx, day, "close", rid, backfill_run=backfill_run)
     return out
 
 
 __all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run",
            "waits_on_open", "Deadline", "PM_ASKER", "PartDeadline", "EVL5_BUDGET", "EVL5_PRE_BUDGET", "EVL5_FINISH",
-           "EVL5_PRE_URGENT", "PRE_KEY", "GAP_LABEL", "part_until", "bounded", "pre_from", "five_programs"]
+           "EVL5_PRE_URGENT", "PRE_KEY", "GAP_LABEL", "part_until", "bounded", "pre_from", "five_programs",
+           "learner_part"]

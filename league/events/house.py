@@ -135,6 +135,10 @@ SCORE_BUDGET = 120.0
 BACKFILL_BUDGET = 90.0
 #: A task never runs into a decision: it ends this long before one falls due.
 DECISION_MARGIN = 5.0
+#: PREREG-EVL-7: the learners' own task's bound (league/events/learner.py `catchup`, `recompute`) and the nightly cost
+#: basis step's job (league/events/costs7.py `nightly`, after the score and before the screen).
+LEARNER_BUDGET = 120.0
+COST_BASIS_JOB = "cost-basis"
 #: The verdict step of a record pass starts only with this much of its bound left.
 VERDICT_STEP_MIN = 10.0
 
@@ -964,6 +968,9 @@ class EventLane:
         backfill = self._backfill_due(st, now, today, soon)
         if backfill is not None and not self._quiet("backfill", now, soon):
             return Task("backfill", lambda ctx, deadline: self._backfill(ctx, backfill, deadline), BACKFILL_BUDGET), now
+        learner = self._learner_due(st, now, today, session, soon)
+        if learner is not None:
+            return learner, now
         return None, min(soon)
 
     def _decision_task(self, decision: tuple[int, dt.datetime, str, dt.date, bool]) -> Task:
@@ -1506,6 +1513,11 @@ class EventLane:
                 if not self._quiet("score", now, soon):
                     return Task("score", lambda ctx, deadline: self._score(ctx, deadline, night), SCORE_BUDGET)
                 return None
+            if P.learners() and not self._receipt_since(st, COST_BASIS_JOB, since) and \
+                    not self._quiet(COST_BASIS_JOB, now, soon):
+                # (PREREG-EVL-7 section 2.2: the night's cost_basis row after the score and before the screen; one that
+                # fails waits its back-off and the screen goes on: only the learners' looks wait for a row, 2.2 (d))
+                return Task(COST_BASIS_JOB, lambda ctx, deadline: self._cost_basis(ctx, deadline, night), LEARNER_BUDGET)
             if not self._receipt_since(st, "screen", since):
                 if not self._quiet("screen", now, soon) and self._clear_of_decision(st, now, soon):
                     return Task("screen", lambda ctx, deadline: self._screen(ctx, deadline, night), None)
@@ -1652,6 +1664,66 @@ class EventLane:
         else:
             self._receipted(ctx.store, DN.JOB, "ok", done)
         return summary | {"_status": status}
+
+    # -- PREREG-EVL-7 -------------------------------------------------------------------------------------------------
+    def _learner_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                     soon: list[dt.datetime]) -> Task | None:
+        """PREREG-EVL-7'S LEARNERS' OWN WORK (league/events/learner.py), after every other task of the plan and never
+        within SCREEN_CLEAR of a decision: the reconstruction of the candidate sets before REGISTERED_AT_7 (once), the
+        catch-up of the decisions before the release (E4) and the late decision of a live part that failed or expired
+        (both under `decide-open-lrn:<D>` / `decide-close-lrn:<D>`, shadow only), and the night's recompute once its
+        score is in. None while no learner is pinned (REGISTERED_AT_7 None: nothing of it ever runs)."""
+        if not P.learners() or self._quiet("learner", now, soon):
+            return None
+        from . import learner as LR
+
+        try:
+            owed = LR.due(st, now)
+            night = self._night(st, now, today, session, [])
+            recompute = night is not None and self._receipt_since(st, "score", _wall(night, SCORE_AT), status="ok") \
+                and st.meta(LR.RECOMPUTE_KEY.format(day=night.isoformat())) is None
+        except Exception as exc:  # noqa: BLE001 - a read error here never stops the plan's other tasks
+            self.warn("learner plan", exc)
+            return None
+        if not owed and not recompute:
+            return None
+        if not self._clear_of_decision(st, now, soon):
+            return None
+        return Task("learner", lambda ctx, deadline: self._learner(ctx, deadline, night if recompute else None),
+                    LEARNER_BUDGET)
+
+    def _learner(self, ctx: LaneContext, deadline: float | None, night: dt.date | None) -> dict[str, Any]:
+        """Run the learners' owed decisions oldest first under the task's bound (each a decision whole or nothing), then
+        the night's recompute when it is due (meta `learner.RECOMPUTE_KEY`; the alarm reads it)."""
+        from . import learner as LR
+
+        def check(where: str) -> None:
+            if deadline is not None and self._mono() >= deadline - DECISION_MARGIN:
+                raise LR.Expired(f"the learner task's bound before {where}")
+        out: dict[str, Any] = {}
+        try:
+            out["catchup"] = LR.catchup(ctx.store, ctx.now, check=check)
+        except LR.Expired as exc:
+            out["cut"] = str(exc)[:200]
+            return out | {"_status": "cut"}
+        if night is not None:
+            got = LR.recompute(ctx.store, night, ctx.now)
+            out["recompute"] = {k: v.get("status") for k, v in got.items()}
+            bad = {k: v for k, v in got.items() if v.get("status") == "mismatch"}
+            if bad:
+                self.warn("learner recompute", f"{night.isoformat()}: {json.dumps(bad, sort_keys=True)[:300]}")
+        return out
+
+    def _cost_basis(self, ctx: LaneContext, deadline: float | None, night: dt.date) -> dict[str, Any]:
+        """PREREG-EVL-7 section 2.2: the night's `cost_basis` row and the `costs7` rows of the newly settled outcomes of
+        its versions and their pools (league/events/costs7.py `nightly`), with its receipt."""
+        from . import costs7 as C7
+
+        got = C7.nightly(ctx.store, night, ctx.now())
+        summary = {k: got.get(k) for k in ("night", "m_in", "m_out", "g_bp", "fbar_in", "fbar_out", "n_att", "why",
+                                            "costs7_written", "kept")}
+        self._receipted(ctx.store, COST_BASIS_JOB, "ok", summary)
+        return summary
 
     def _births(self, ctx: LaneContext, deadline: float | None, night: dt.date | None = None,
                 rerun: Mapping[str, Any] | None = None) -> dict[str, Any]:

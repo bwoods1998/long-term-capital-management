@@ -427,7 +427,19 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
+        "learners": _learners(store, day),
     }
+
+
+def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:
+    """PREREG-EVL-7's learner lines (league/events/learner.py `report_lines`): each learner's decision of the day, its
+    candidates, picks and training rows (counts only: no fitted figure reaches the report); [] while none is pinned."""
+    from . import learner as LR
+
+    try:
+        return LR.report_lines(store, day)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return [{"error": f"{type(exc).__name__}: {str(exc)[:120]}"}]
 
 
 def _births(store: S.Store) -> dict[str, Any]:
@@ -454,6 +466,10 @@ def render(report: Mapping[str, Any]) -> str:
     fam.append(f"news {ev['news']['total']} (live {ev['news']['live']})")
     lines.append("Events: " + " | ".join(fam) + f"; recorded today {ev['recorded_today']}")
     lines.append("Verdicts: " + " | ".join(f"{s} {v['n']} ${v['usd']:.2f}" for s, v in vd.items()))
+    for x in report.get("learners") or []:     # (PREREG-EVL-7: counts only)
+        from . import learner as LR
+
+        lines.extend(LR.render_lines([x]) if "error" not in x else [f"Learners: {x['error']}"])
     for p in report["programs"]:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)

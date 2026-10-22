@@ -558,9 +558,13 @@ def eligible(lane: Lane, day: dt.date) -> list[str]:
 
 def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
     """{cik: the live rule's eligible universe row of entry session `day`} (`LIVE_ROWS`; the highest ADV when a CIK has
-    two)."""
+    two). PREREG-EVL-7's E5 (league/events/learner.py `AsOf`): a view carrying `eligible_by` reads only the live results
+    DECIDED AT OR BEFORE that time; every other caller's reading is unchanged."""
     out: dict[str, dict[str, Any]] = {}
-    for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),)):
+    bound = getattr(lane, "eligible_by", None)
+    sql, args = (LIVE_ROWS, (day.isoformat(),)) if bound is None else \
+        (LIVE_ROWS + " AND e.decided_at<=?", (day.isoformat(), S.iso(bound)))
+    for r in lane.db.execute(sql, args):
         row = dict(r)
         have = out.get(str(row["cik"]))
         if have is None or float(row.get("adv20") or 0) > float(have.get("adv20") or 0):
@@ -1016,7 +1020,10 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     missing. For `NEXT_OPEN_GUARD`'s programs (PREREG-EVL-4 section 1.3) the issuer's one event is not bought when it is
     EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
     rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
-    price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`)."""
+    price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`).
+    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`)."""
+    if P.is_learner(program):
+        return learner_picks(lane, program, day, decided_at=decided_at, held=held)
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
     guard = program.id in NEXT_OPEN_GUARD
@@ -1321,6 +1328,116 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
             return None
         return float(px) / prev
     return gap
+
+
+# ----------------------------------------------------------------------------------------------------- PREREG-EVL-7
+#: PREREG-EVL-7 section 1.9's DAY ORDER LINE: a learner's entry leaves this many slots of the event kind's line
+#: (`Settings.max_orders_day`) to every earlier file's rows (16 entries and 16 exits a day, this file's own most), on
+#: top of its own entry and exit, so the line refuses this file's entries before any earlier PREREG row's; an exit is
+#: never stopped by it (league/equity/live.py `_count_refusal`).
+LEARNER_LINE_KEEP = 32
+
+
+def is_learner(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-7's learners (league/events/programs.py `is_learner`)."""
+    return P.is_learner(program)
+
+
+def line_keep(program: str) -> int:
+    """The buys' worth of the day order line a buy of `program` leaves to the earlier rows (`HeldAhead`'s unit: each
+    keeps a send and an exit): LEARNER_LINE_KEEP / 2 for a learner, 0 for every other program."""
+    return LEARNER_LINE_KEEP // 2 if P.is_learner(program) else 0
+
+
+def ern_issuer(lane: Lane, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
+    """EVL-LRN-O1'S ERN GUARD (PREREG-EVL-7 section 1.9, E8), IN REAL MONEY ONLY: True when the issuer has an 8-K with
+    item 2.02 knowable in D's close window (programs.py `close_window`) and stored by the decision time (`_stored_before`,
+    the reading that trades less): an ERN(D) issuer, which earlier rows buy at D's close and which this learner's sale
+    there would take. Unreadable inputs read as barred (fail closed). The shadow keeps the pick."""
+    try:
+        lo, hi = P.close_window(lane, day)
+        for row in P.filings_window(lane, "8-K", lo, hi):
+            if str(row.get("cik")) == str(cik) and P.items_of(row) & P.ERN_ITEMS and _stored_before(row, decided_at, lane):
+                return True
+    except (LookupError, sqlite3.Error, TypeError, ValueError):
+        return True
+    return False
+
+
+def issuer_8k_guard(lane: Lane, cik: str, session: C.Session | None, decided_at: dt.datetime) -> bool:
+    """EVL-LRN-ON'S 8-K GUARD (PREREG-EVL-7 section 1.9, E10), IN REAL MONEY ONLY: True when the issuer is NOT bought.
+    It reads EVERY 8-K of the issuer (form exactly '8-K') knowable at or after 09:00 ET of D and stored by the decision
+    time, whatever the learner's primary event (never the primary event's accession): barred when any of them has a
+    stored PROMPT-DOC verdict `ok` with score >= 2, or `ok` with score >= 1 and guidance "raised", or no answer by the
+    decision time (PREREG-EVL-4 and -5 section 1.3 with A75 (1)'s readings): such a filing is an earlier row's event at
+    the next open, which this learner's sale there would take. An issuer with no such 8-K is not barred. Unreadable
+    inputs read as barred (fail closed). The shadow keeps every pick."""
+    if session is None:
+        return True
+    try:
+        rows = lane.db.execute("SELECT * FROM filings WHERE form='8-K' AND status='fetched' AND cik=? AND knowable_at>=? "
+                               "AND knowable_at<=? ORDER BY knowable_at, accession",
+                               (str(cik), S.iso(session.open_cutoff), S.iso(decided_at))).fetchall()
+        for r in rows:
+            row = dict(r)
+            if not _stored_before(row, decided_at, lane):
+                continue
+            got = V.stored(lane, f"8k:{row['accession']}", V.PROMPTS["doc"])
+            if not got or not got.get("answered_at") or S.parse_iso(str(got["answered_at"])) > decided_at:
+                return True
+            score = None if got.get("score") is None else int(got["score"])
+            if got.get("status") != "ok" or score is None:
+                continue
+            if score >= P.READ_MIN_SCORE or (score >= P.GUIDE_MIN_SCORE and got.get("guidance") == "raised"):
+                return True
+    except (sqlite3.Error, TypeError, ValueError, KeyError):
+        return True
+    return False
+
+
+def learner_pending(lane: Lane, program: P.Program, day: dt.date) -> bool:
+    """Whether the learner's LIVE PART of `day` may still write (PREREG-EVL-7 section 1.7): no decision on record and
+    no failure or expiry recorded for it (league/events/learner.py `PART_KEY`). The book's learner decision of the
+    auction waits on it within its bound (league/equity/live.py `_event_decide_lrn`)."""
+    from . import learner as LR
+
+    if LR.decided(lane, program, day) is not None:
+        return False
+    return lane.meta(LR.PART_KEY.format(program=program.id, version=program.version, day=day.isoformat())) is None
+
+
+def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
+                  held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-7 LEARNER (section 1.9): its intents of the House's LIVE decision of `day`
+    (league/events/learner.py `live_picks`; none for an auction its part did not decide live, nor before the release)
+    in its rank order, less the book's own skips: EVL-LRN-O1's ERN guard (E8, `ern_issuer`), EVL-LRN-ON's 8-K guard
+    (E10, `issuer_8k_guard`), one position per issuer on the learner's earlier intents (`held_recently`) and on real
+    lots (`held`). Each pick's `rank` is its place counted down from K (the first pick K), so the list's order is the
+    learner's: no fitted figure goes to the book."""
+    from . import learner as LR
+
+    got = LR.live_picks(lane, program, day)
+    if not got:
+        return []
+    session = C.session(lane, day)
+    out: list[Pick] = []
+    for r in got:
+        cik = str(r["cik"])
+        if program.id == "EVL-LRN-O1" and ern_issuer(lane, cik, day, decided_at):
+            continue
+        if program.id == "EVL-LRN-ON" and issuer_8k_guard(lane, cik, session, decided_at):
+            continue
+        if held_recently(lane, program, cik, day) or (held is not None and held(cik)):
+            continue
+        try:
+            prev = Decimal(str(r["prev_close"]))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not prev.is_finite() or prev <= 0:
+            continue
+        out.append(Pick(program.id, program.version, str(r["event"]), str(r["symbol"]).upper(), cik,
+                        float(LR.K + 1 - int(r["rank"])), float(r["adv20"] or 0.0), prev, str(r["knowable_at"])))
+    return out
 
 
 #: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the

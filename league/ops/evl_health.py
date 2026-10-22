@@ -112,7 +112,7 @@ from . import guard
 from . import schedule as S
 
 CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
-          "evl_backfill", "evl_handback")
+          "evl_backfill", "evl_handback", "evl_learner")
 #: The stall job's key in `<state>/ops.json` that switches these off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
@@ -242,6 +242,9 @@ DOING = {
                      "complete, filing by filing (A82), and decides again the sessions the filings it fetches enter; the "
                      "screen's looks wait for every weekday of its reach to be done (A66, A69 (iii)), so a day not done "
                      "holds every look that covers it."),
+    "evl_learner": ("PREREG-EVL-7's learners decide after the House's own decision of each auction, under their own "
+                    "bound; a part that fails or expires is decided later by itself (never traded); the nightly recompute "
+                    "alarms on a mismatch; the training follows the evening score (league/ops/evl_learner.py)."),
     "evl_handback": ("The book writes each real event fill back into the lane's store every minute until the store takes "
                      "it (league/equity/live.py `_event_fills`: a buy once its intent has ended, a sale once its lot is "
                      "closed); the lane computes Sized, demotion and retirement from those rows, so a fill missing there "
@@ -1516,6 +1519,14 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
                                   "is not judged")
                 out["evl_final"] = _not_judged(f"the final records could not be read ({type(exc).__name__})")
         out["evl_backfill"] = _backfill(now, f, backfill_reach(now))
+        try:    # (PREREG-EVL-7's learners, league/ops/evl_learner.py: its own reader, blinding no other cause)
+            from . import evl_learner as LRN
+
+            out["evl_learner"] = LRN.check(root, now)
+        except Exception as exc:  # noqa: BLE001 - said, and the other causes stand as judged
+            if errors is not None:
+                errors.append(f"the learners' records could not be read ({type(exc).__name__}): evl_learner is not judged")
+            out["evl_learner"] = _not_judged(f"the learners' records could not be read ({type(exc).__name__})")
         # THE BOOK'S OWN ROWS (live.sqlite, read-only), each read on its own: one that cannot be read blinds only itself.
         for cause, judge in (("evl_entries", lambda: _entries(now, entry_facts(root, auctions(now)))),
                              ("evl_handback", lambda: _handback(now, handback_facts(root)))):

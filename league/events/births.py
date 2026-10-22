@@ -320,6 +320,11 @@ FILE_FAMILIES = tuple(P.CLOSE_FAMILIES_4) + tuple(P.CLOSE_FAMILIES_5)
 #: inside each row's own band, so every event passes it (an upper bound, as `unread_reaction` is for the react
 #: families): EVL-ERN-DROP-ON's <= 0.96; EVL-ERN-UNDER-ON's and its control's above 0.96 and below 1.04.
 UNREAD_IN_BAND = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
+#: PREREG-EVL-7 (section 9, the task's item 5): the learners' outcome-derived state and COST-7's tables never reach the
+#: facts (league/events/learner.py `TABLES`: learner_fits, learner_cands and the per-session sums; league/events/
+#: costs7.py `TABLES`: costs7 and cost_basis), nor the intents, whose `rank_key` holds a learner's fitted ahat (check
+#: 2's minor 10 (3): the facts never read intents).
+FACTS_DENY = FACTS_DENY | frozenset({"learner_fits", "learner_cands", "learner_stats", "costs7", "cost_basis", "intents"})
 
 
 class SpecError(ValueError):
