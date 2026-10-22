@@ -1,0 +1,94 @@
+== pilot
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D54               R=1000  run1 0.1280 (se 0.0106) v120 0.2870 cm<=0 0.0150 <=10bp 0.0350 retired 0.037 runs 1.85 | picks: ev/s 7.66 tau +25.1bp a7 +24.9bp sig 0.052 c7 19.1 crep 17.9bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D54-static        R=450   run1 0.0911 (se 0.0136) v120 0.1778 cm<=0 0.0222 <=10bp 0.0467 retired 0.071 runs 2.36 | picks: ev/s 7.95 tau +2.1bp a7 +2.4bp sig 0.048 c7 19.7 crep 17.9bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D54-static        R=1000  run1 0.0830 (se 0.0087) v120 0.1490 cm<=0 0.0190 <=10bp 0.0370 retired 0.062 runs 1.89 | picks: ev/s 7.56 tau +2.1bp a7 +1.4bp sig 0.046 c7 19.2 crep 17.8bp
+== search
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58           R=400   run1 0.1275 (se 0.0167) v120 0.2050 cm<=0 0.0350 <=10bp 0.0500 retired 0.050 runs 1.84 | picks: ev/s 7.52 tau +1.4bp a7 +6.7bp sig 0.058 c7 21.6 crep 19.6bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52               R=400   run1 0.1150 (se 0.0160) v120 0.1950 cm<=0 0.0325 <=10bp 0.0575 retired 0.062 runs 2.33 | picks: ev/s 7.92 tau +0.0bp a7 +4.3bp sig 0.046 c7 19.4 crep 17.9bp
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58                 R=400   run1 0.1000 (se 0.0150) v120 0.1725 cm<=0 0.0150 <=10bp 0.0400 retired 0.045 runs 1.88 | picks: ev/s 7.89 tau +5.4bp a7 +8.1bp sig 0.053 c7 20.7 crep 19.0bp
+ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58               R=400   run1 0.1000 (se 0.0150) v120 0.1525 cm<=0 0.0200 <=10bp 0.0325 retired 0.055 runs 1.87 | picks: ev/s 7.49 tau +3.1bp a7 +3.9bp sig 0.049 c7 19.9 crep 18.6bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52               R=400   run1 0.0950 (se 0.0147) v120 0.1825 cm<=0 0.0225 <=10bp 0.0300 retired 0.092 runs 1.86 | picks: ev/s 7.51 tau +1.9bp a7 +4.1bp sig 0.046 c7 19.4 crep 18.2bp
+ON-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2-D58                 R=400   run1 0.0950 (se 0.0147) v120 0.1875 cm<=0 0.0175 <=10bp 0.0450 retired 0.037 runs 1.89 | picks: ev/s 7.50 tau +2.6bp a7 +5.2bp sig 0.050 c7 20.1 crep 18.7bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D58               R=400   run1 0.0925 (se 0.0145) v120 0.1900 cm<=0 0.0225 <=10bp 0.0300 retired 0.052 runs 2.41 | picks: ev/s 7.96 tau +5.6bp a7 +4.1bp sig 0.054 c7 20.9 crep 19.0bp
+O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52                 R=400   run1 0.0900 (se 0.0143) v120 0.1550 cm<=0 0.0175 <=10bp 0.0425 retired 0.065 runs 1.88 | picks: ev/s 7.50 tau +2.2bp a7 +1.1bp sig 0.048 c7 19.7 crep 18.4bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D58               R=400   run1 0.0875 (se 0.0141) v120 0.1650 cm<=0 0.0200 <=10bp 0.0300 retired 0.058 runs 1.88 | picks: ev/s 7.55 tau +2.5bp a7 +4.2bp sig 0.049 c7 19.8 crep 18.5bp
+O1-N1-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag1-D52                R=400   run1 0.0850 (se 0.0139) v120 0.1450 cm<=0 0.0125 <=10bp 0.0300 retired 0.075 runs 1.88 | picks: ev/s 7.51 tau +1.6bp a7 +3.6bp sig 0.052 c7 20.4 crep 18.9bp
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag1-D58                 R=400   run1 0.0850 (se 0.0139) v120 0.1725 cm<=0 0.0175 <=10bp 0.0300 retired 0.050 runs 2.38 | picks: ev/s 7.96 tau +5.9bp a7 +7.6bp sig 0.055 c7 21.1 crep 19.2bp
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58                 R=400   run1 0.0850 (se 0.0139) v120 0.1800 cm<=0 0.0375 <=10bp 0.0525 retired 0.070 runs 1.89 | picks: ev/s 7.50 tau +2.7bp a7 +6.2bp sig 0.049 c7 19.9 crep 18.6bp
+O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52                 R=400   run1 0.0825 (se 0.0138) v120 0.1650 cm<=0 0.0250 <=10bp 0.0475 retired 0.070 runs 2.36 | picks: ev/s 7.95 tau +1.5bp a7 +2.7bp sig 0.048 c7 19.9 crep 18.3bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52               R=400   run1 0.0825 (se 0.0138) v120 0.1525 cm<=0 0.0175 <=10bp 0.0400 retired 0.072 runs 2.42 | picks: ev/s 7.95 tau +1.5bp a7 +1.2bp sig 0.047 c7 19.6 crep 18.1bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D52               R=400   run1 0.0825 (se 0.0138) v120 0.1425 cm<=0 0.0200 <=10bp 0.0325 retired 0.045 runs 1.89 | picks: ev/s 7.88 tau +1.3bp a7 +0.9bp sig 0.047 c7 19.8 crep 18.2bp
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-D58                 R=400   run1 0.0825 (se 0.0138) v120 0.1575 cm<=0 0.0175 <=10bp 0.0350 retired 0.065 runs 1.89 | picks: ev/s 7.58 tau +2.7bp a7 +3.7bp sig 0.049 c7 19.9 crep 18.6bp
+ON-N1-crasht3cl-skew-rho05-phi20-dr20-tau1-n300-lag2-D58               R=400   run1 0.0825 (se 0.0138) v120 0.1500 cm<=0 0.0075 <=10bp 0.0225 retired 0.068 runs 1.89 | picks: ev/s 7.45 tau +2.7bp a7 +4.7bp sig 0.052 c7 20.4 crep 18.9bp
+ON-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-D58                 R=400   run1 0.0800 (se 0.0136) v120 0.1500 cm<=0 0.0300 <=10bp 0.0350 retired 0.065 runs 1.88 | picks: ev/s 7.55 tau +2.2bp a7 +3.4bp sig 0.049 c7 19.9 crep 18.6bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58               R=400   run1 0.0800 (se 0.0136) v120 0.1725 cm<=0 0.0150 <=10bp 0.0425 retired 0.043 runs 1.90 | picks: ev/s 7.90 tau +5.8bp a7 +7.7bp sig 0.054 c7 20.9 crep 19.1bp
+ON-N1-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag2-D58                R=400   run1 0.0800 (se 0.0136) v120 0.1500 cm<=0 0.0200 <=10bp 0.0325 retired 0.065 runs 1.90 | picks: ev/s 7.50 tau +2.5bp a7 +4.7bp sig 0.052 c7 20.5 crep 19.0bp
+O1-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-D52                 R=400   run1 0.0775 (se 0.0134) v120 0.1525 cm<=0 0.0225 <=10bp 0.0350 retired 0.092 runs 1.89 | picks: ev/s 7.50 tau +1.3bp a7 -0.8bp sig 0.050 c7 20.0 crep 18.6bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1-D52               R=400   run1 0.0775 (se 0.0134) v120 0.1475 cm<=0 0.0300 <=10bp 0.0425 retired 0.070 runs 1.89 | picks: ev/s 7.37 tau +0.0bp a7 -0.2bp sig 0.046 c7 19.3 crep 18.0bp
+O1-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag1-D52               R=400   run1 0.0775 (se 0.0134) v120 0.1400 cm<=0 0.0250 <=10bp 0.0350 retired 0.052 runs 1.90 | picks: ev/s 7.48 tau +1.7bp a7 +3.3bp sig 0.047 c7 19.6 crep 18.3bp
+O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag2-D52                 R=400   run1 0.0725 (se 0.0130) v120 0.1325 cm<=0 0.0225 <=10bp 0.0350 retired 0.052 runs 1.90 | picks: ev/s 7.45 tau +1.8bp a7 +4.0bp sig 0.046 c7 19.4 crep 18.2bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D52               R=400   run1 0.0725 (se 0.0130) v120 0.1450 cm<=0 0.0125 <=10bp 0.0300 retired 0.048 runs 1.92 | picks: ev/s 7.44 tau +1.8bp a7 +5.7bp sig 0.047 c7 19.5 crep 18.3bp
+ON-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag1-D58                   R=400   run1 0.0725 (se 0.0130) v120 0.1625 cm<=0 0.0275 <=10bp 0.0450 retired 0.050 runs 1.90 | picks: ev/s 7.58 tau +2.9bp a7 +4.6bp sig 0.050 c7 20.0 crep 18.7bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D58               R=400   run1 0.0725 (se 0.0130) v120 0.1475 cm<=0 0.0100 <=10bp 0.0250 retired 0.058 runs 1.89 | picks: ev/s 7.86 tau +0.0bp a7 +0.8bp sig 0.048 c7 19.8 crep 18.1bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag2-D58               R=400   run1 0.0725 (se 0.0130) v120 0.1425 cm<=0 0.0225 <=10bp 0.0550 retired 0.040 runs 1.90 | picks: ev/s 7.48 tau +2.6bp a7 +5.9bp sig 0.047 c7 19.5 crep 18.4bp
+O1-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag2-D52                   R=400   run1 0.0700 (se 0.0128) v120 0.1250 cm<=0 0.0125 <=10bp 0.0225 retired 0.068 runs 1.91 | picks: ev/s 7.43 tau +1.5bp a7 +3.9bp sig 0.047 c7 19.6 crep 18.3bp
+O1-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2-D52                 R=400   run1 0.0700 (se 0.0128) v120 0.1450 cm<=0 0.0050 <=10bp 0.0225 retired 0.070 runs 1.89 | picks: ev/s 7.44 tau +1.7bp a7 +2.2bp sig 0.047 c7 19.6 crep 18.3bp
+O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D52                 R=400   run1 0.0700 (se 0.0128) v120 0.1625 cm<=0 0.0150 <=10bp 0.0400 retired 0.072 runs 1.89 | picks: ev/s 7.88 tau +1.4bp a7 +2.0bp sig 0.048 c7 19.9 crep 18.2bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt-D52           R=400   run1 0.0675 (se 0.0125) v120 0.1075 cm<=0 0.0150 <=10bp 0.0350 retired 0.070 runs 1.91 | picks: ev/s 7.54 tau +1.0bp a7 +1.6bp sig 0.057 c7 21.5 crep 19.4bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag1-D52               R=400   run1 0.0675 (se 0.0125) v120 0.1425 cm<=0 0.0200 <=10bp 0.0500 retired 0.048 runs 1.91 | picks: ev/s 7.46 tau +1.4bp a7 +0.9bp sig 0.046 c7 19.4 crep 18.2bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58               R=400   run1 0.0650 (se 0.0123) v120 0.1475 cm<=0 0.0200 <=10bp 0.0250 retired 0.068 runs 1.91 | picks: ev/s 7.50 tau +2.6bp a7 +2.6bp sig 0.049 c7 20.0 crep 18.6bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag2-D58               R=400   run1 0.0600 (se 0.0119) v120 0.1250 cm<=0 0.0175 <=10bp 0.0400 retired 0.060 runs 1.91 | picks: ev/s 7.37 tau +0.0bp a7 +1.0bp sig 0.047 c7 19.5 crep 18.2bp
+O1-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag1-D52                   R=400   run1 0.0575 (se 0.0116) v120 0.1050 cm<=0 0.0100 <=10bp 0.0275 retired 0.062 runs 1.91 | picks: ev/s 7.48 tau +1.3bp a7 -1.8bp sig 0.049 c7 19.9 crep 18.5bp
+ON-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag2-D58                   R=400   run1 0.0550 (se 0.0114) v120 0.1500 cm<=0 0.0075 <=10bp 0.0200 retired 0.072 runs 1.90 | picks: ev/s 7.49 tau +3.1bp a7 +2.6bp sig 0.049 c7 19.9 crep 18.6bp
+O1-N1-crasht3cl-skew-rho05-phi20-dr20-tau1-n300-lag1-D52               R=400   run1 0.0525 (se 0.0112) v120 0.1075 cm<=0 0.0100 <=10bp 0.0175 retired 0.060 runs 1.91 | picks: ev/s 7.43 tau +1.1bp a7 +1.5bp sig 0.050 c7 19.9 crep 18.6bp
+O1-N2-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52          R=400   run1 0.0375 (se 0.0095) v120 0.0725 cm<=0 0.0275 <=10bp 0.0300 retired 0.142 runs 1.89 | picks: ev/s 7.61 tau +0.8bp a7 -17.9bp sig 0.056 c7 21.1 crep 19.5bp
+ON-N2-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58          R=400   run1 0.0325 (se 0.0089) v120 0.0800 cm<=0 0.0225 <=10bp 0.0275 retired 0.163 runs 1.88 | picks: ev/s 7.55 tau +1.0bp a7 -21.7bp sig 0.055 c7 20.8 crep 19.3bp
+   search: 40 cells, max 0.1275, median 0.0788, min 0.0325
+== fresh
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58                 R=4000  run1 0.0890 (se 0.0045) v120 0.1683 cm<=0 0.0205 <=10bp 0.0393 retired 0.057 runs 1.88 | picks: ev/s 7.90 tau +5.7bp a7 +6.7bp sig 0.053 c7 20.9 crep 19.0bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52               R=4000  run1 0.0845 (se 0.0044) v120 0.1585 cm<=0 0.0210 <=10bp 0.0370 retired 0.066 runs 1.88 | picks: ev/s 7.50 tau +1.6bp a7 +3.0bp sig 0.047 c7 19.5 crep 18.3bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58           R=4000  run1 0.0820 (se 0.0043) v120 0.1497 cm<=0 0.0210 <=10bp 0.0367 retired 0.071 runs 1.89 | picks: ev/s 7.51 tau +2.2bp a7 +3.1bp sig 0.059 c7 21.8 crep 19.7bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52               R=4000  run1 0.0820 (se 0.0043) v120 0.1545 cm<=0 0.0253 <=10bp 0.0462 retired 0.067 runs 2.40 | picks: ev/s 7.92 tau +0.0bp a7 +0.7bp sig 0.046 c7 19.6 crep 17.9bp
+ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58               R=4000  run1 0.0810 (se 0.0043) v120 0.1540 cm<=0 0.0170 <=10bp 0.0340 retired 0.056 runs 1.89 | picks: ev/s 7.49 tau +2.7bp a7 +4.0bp sig 0.049 c7 19.8 crep 18.5bp
+== life
+ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58-T200            R=1000  run1 0.0850 (se 0.0088) v120 0.1650 cm<=0 0.0120 <=10bp 0.0350 retired 0.081 runs 3.35 | picks: ev/s 7.93 tau +6.3bp a7 +5.5bp sig 0.052 c7 20.6 crep 18.8bp | LIFE<=3 0.2330 (se 0.0134) by60 0.084 by120 0.165 by180 0.232 runs 2.66
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52-T200          R=1000  run1 0.0840 (se 0.0088) v120 0.1640 cm<=0 0.0240 <=10bp 0.0410 retired 0.098 runs 3.31 | picks: ev/s 7.56 tau +2.0bp a7 +2.1bp sig 0.045 c7 19.1 crep 18.0bp | LIFE<=3 0.2350 (se 0.0134) by60 0.081 by120 0.164 by180 0.233 runs 2.65
+== fam
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52-famdrift20    R=1000  run1 0.1290 (se 0.0106) v120 0.2330 cm<=0 0.0200 <=10bp 0.0330 retired 0.045 runs 2.31 | picks: ev/s 7.97 tau +1.0bp a7 +12.5bp sig 0.053 c7 20.7 crep 18.9bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58-famdrift20    R=1000  run1 0.1250 (se 0.0105) v120 0.2330 cm<=0 0.0070 <=10bp 0.0200 retired 0.038 runs 1.85 | picks: ev/s 7.90 tau +4.9bp a7 +17.4bp sig 0.056 c7 21.4 crep 19.5bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52-famdrift20    R=1000  run1 0.1100 (se 0.0099) v120 0.2140 cm<=0 0.0100 <=10bp 0.0200 retired 0.046 runs 1.87 | picks: ev/s 7.61 tau +1.5bp a7 +11.3bp sig 0.049 c7 19.9 crep 18.7bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58-famdrift20    R=1000  run1 0.1090 (se 0.0099) v120 0.2130 cm<=0 0.0180 <=10bp 0.0300 retired 0.058 runs 1.85 | picks: ev/s 7.56 tau +2.3bp a7 +10.0bp sig 0.051 c7 20.3 crep 19.0bp
+== stress
+ON-N1-crash-skew-rho30-phi40-dr20-tau1-n300-lag2-D58                   R=500   run1 0.1180 (se 0.0144) v120 0.2200 cm<=0 0.0340 <=10bp 0.0580 retired 0.116 runs 1.82 | picks: ev/s 7.55 tau +2.3bp a7 +5.1bp sig 0.047 c7 19.7 crep 18.4bp
+ON-N1-crasht3cl-skew-rho15-phi25-dr20-tau1-n300-lag2-D58               R=500   run1 0.1120 (se 0.0141) v120 0.1980 cm<=0 0.0280 <=10bp 0.0460 retired 0.068 runs 1.86 | picks: ev/s 7.50 tau +2.9bp a7 +4.3bp sig 0.049 c7 19.8 crep 18.5bp
+O1-N1-crasht3cl-skew-rho15-phi25-dr20-tau1-n300-lag1-D52               R=500   run1 0.1000 (se 0.0134) v120 0.1780 cm<=0 0.0280 <=10bp 0.0460 retired 0.062 runs 1.87 | picks: ev/s 7.50 tau +1.2bp a7 +1.4bp sig 0.047 c7 19.6 crep 18.3bp
+ON-N1-crash-skew-rho30-phi25-dr20-tau1-n300-lag2-D58                   R=500   run1 0.0960 (se 0.0132) v120 0.1760 cm<=0 0.0240 <=10bp 0.0480 retired 0.062 runs 1.87 | picks: ev/s 7.55 tau +2.6bp a7 +7.4bp sig 0.047 c7 19.6 crep 18.4bp
+O1-N1-crash-skew-rho15-phi10-dr20-tau0-n300-lag1-D52-famdrift20        R=500   run1 0.0940 (se 0.0131) v120 0.1900 cm<=0 0.0140 <=10bp 0.0260 retired 0.060 runs 1.88 | picks: ev/s 7.57 tau +0.0bp a7 +9.6bp sig 0.049 c7 20.0 crep 18.6bp
+O1-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag1-D52-secdrift20        R=500   run1 0.0920 (se 0.0129) v120 0.1860 cm<=0 0.0140 <=10bp 0.0240 retired 0.062 runs 1.87 | picks: ev/s 7.51 tau +0.0bp a7 +6.2bp sig 0.049 c7 19.9 crep 18.5bp
+ON-N1-crash-skew-rho15-phi10-dr20-tau0-n300-lag2-D58-famdrift20        R=500   run1 0.0920 (se 0.0129) v120 0.1660 cm<=0 0.0100 <=10bp 0.0260 retired 0.050 runs 1.88 | picks: ev/s 7.51 tau +0.0bp a7 +8.7bp sig 0.050 c7 20.1 crep 18.7bp
+ON-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag2-D58-loadcorr7-fac25   R=500   run1 0.0760 (se 0.0119) v120 0.1300 cm<=0 0.0180 <=10bp 0.0300 retired 0.058 runs 1.89 | picks: ev/s 7.49 tau +0.0bp a7 +2.7bp sig 0.061 c7 20.6 crep 18.6bp
+ON-N1-crasht3cl-skew-rho15-phi20-dr30-tau1-n300-lag2-D58               R=500   run1 0.0740 (se 0.0117) v120 0.1480 cm<=0 0.0140 <=10bp 0.0220 retired 0.080 runs 1.88 | picks: ev/s 7.51 tau +2.5bp a7 +2.8bp sig 0.050 c7 20.0 crep 18.6bp
+ON-N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag2-D58-secdrift20        R=500   run1 0.0720 (se 0.0116) v120 0.1320 cm<=0 0.0100 <=10bp 0.0340 retired 0.060 runs 1.89 | picks: ev/s 7.48 tau +0.0bp a7 +3.9bp sig 0.050 c7 20.1 crep 18.7bp
+ON-N1-crash-skew-rho30-phi10-dr20-tau1-n300-lag2-D58                   R=500   run1 0.0660 (se 0.0111) v120 0.1260 cm<=0 0.0200 <=10bp 0.0300 retired 0.052 runs 1.90 | picks: ev/s 7.54 tau +2.5bp a7 +5.8bp sig 0.045 c7 19.2 crep 18.2bp
+== sens
+ON-N1-t3-sym-rho05-phi10-dr00-tau0-n300-lag2-D58                       R=2000  run1 0.0255 (se 0.0035) v120 0.0480 cm<=0 0.0255 <=10bp 0.0255 retired 0.079 runs 1.93 | picks: ev/s 7.22 tau +0.0bp a7 +0.8bp sig 0.058 c7 21.3 crep 19.5bp
+O1-N1-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-D52                       R=2000  run1 0.0245 (se 0.0035) v120 0.0470 cm<=0 0.0245 <=10bp 0.0245 retired 0.077 runs 1.94 | picks: ev/s 7.17 tau +0.0bp a7 +0.8bp sig 0.057 c7 21.1 crep 19.2bp
+== power
+O1-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n800-lag1-D52               a7   R=500 by10/20/40/60 0.000/0.000/0.126/0.136 run1 0.140 v120 0.288 sig 0.079 c7/crep 25.6/21.8
+O1-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n800-lag1-D52               arep R=500 by10/20/40/60 0.000/0.000/0.138/0.152 run1 0.154 v120 0.304 sig 0.079 c7/crep 25.6/21.8
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [28.3, 46.6, 51.7]
+ON-A-ic03-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               a7   R=500 by10/20/40/60 0.000/0.000/0.020/0.022 run1 0.022 v120 0.074 sig 0.078 c7/crep 25.4/21.6
+ON-A-ic03-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               arep R=500 by10/20/40/60 0.000/0.000/0.022/0.024 run1 0.024 v120 0.082 sig 0.078 c7/crep 25.4/21.6
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [3.7, 16.9, 21.2]
+ON-A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D58       a7   R=500 by10/20/40/60 0.000/0.000/0.126/0.134 run1 0.138 v120 0.316 sig 0.068 c7/crep 23.6/20.7
+ON-A-ic05-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D58       arep R=500 by10/20/40/60 0.000/0.000/0.140/0.148 run1 0.152 v120 0.338 sig 0.068 c7/crep 23.6/20.7
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [29.5, 49.1, 56.5]
+ON-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag2-D58               a7   R=500 by10/20/40/60 0.000/0.000/0.072/0.074 run1 0.078 v120 0.204 sig 0.074 c7/crep 24.4/21.5
+ON-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag2-D58               arep R=500 by10/20/40/60 0.000/0.000/0.080/0.086 run1 0.086 v120 0.218 sig 0.074 c7/crep 24.4/21.5
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [22.4, 38.0, 44.0]
+ON-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               a7   R=500 by10/20/40/60 0.000/0.000/0.118/0.128 run1 0.128 v120 0.324 sig 0.080 c7/crep 25.9/22.0
+ON-A-ic05-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               arep R=500 by10/20/40/60 0.000/0.000/0.130/0.144 run1 0.150 v120 0.364 sig 0.080 c7/crep 25.9/22.0
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [36.7, 62.3, 69.3]
+ON-A-ic08-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               a7   R=500 by10/20/40/60 0.000/0.000/0.494/0.542 run1 0.578 v120 0.850 sig 0.082 c7/crep 26.3/22.3
+ON-A-ic08-t3-sym-rho05-phi10-dr00-tau0-n800-lag2-D58               arep R=500 by10/20/40/60 0.000/0.000/0.530/0.566 run1 0.612 v120 0.868 sig 0.082 c7/crep 26.3/22.3
+      picks' true a7 edge (bp), sessions 1-10 / 51-60 / 111-120: [98.1, 134.1, 142.5]

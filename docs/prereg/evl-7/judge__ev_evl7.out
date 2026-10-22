@@ -1,0 +1,28 @@
+per learner, 120 sessions; $ = abnormal after real cost; Probe events = real buys at Probe size (Done's kind)
+scenario                     rule      P(promo)   by40  by120  $ F_L .25  $ F_L .50  Probe ev  E-cum 50
+F-A-ic03-base-n800           one          0.038  0.038  0.038       13.6       25.2        24      None
+F-A-ic03-base-n800           chain3       0.102  0.048  0.102       15.2       26.3        45      None
+F-A-ic03-base-n800           one c7       0.047  0.047  0.047       14.0       25.4        30      None
+F-A-ic03-base-n800           chain3 c7    0.112  0.052  0.112       15.4       26.5        49      None
+F-A-ic05-base-n800           one          0.123  0.098  0.123       64.0      105.0        72        90
+F-A-ic05-base-n800           chain3       0.300  0.100  0.300       76.5      114.1       119        80
+F-A-ic05-base-n800           one c7       0.150  0.118  0.150       67.7      107.7        87        79
+F-A-ic05-base-n800           chain3 c7    0.352  0.122  0.352       81.7      117.9       139        74
+F-A-ic08-base-n800           one          0.483  0.312  0.483      242.2      304.5       260        43
+F-A-ic08-base-n800           chain3       0.762  0.313  0.762      279.0      331.4       324        43
+F-A-ic08-base-n800           one c7       0.533  0.355  0.533      258.0      316.1       289        41
+F-A-ic08-base-n800           chain3 c7    0.817  0.357  0.817      295.7      343.7       355        40
+F-A-ic12-base-n800           one          0.943  0.798  0.943      692.0      728.0       554        25
+F-A-ic12-base-n800           chain3       0.998  0.798  0.998      705.3      737.7       568        25
+F-A-ic12-base-n800           one c7       0.962  0.817  0.962      704.9      737.4       568        24
+F-A-ic12-base-n800           chain3 c7    0.998  0.817  0.998      714.5      744.4       578        24
+F-A-ic05-worst-notau-n800    one          0.200  0.170  0.200       59.9       89.8       120        62
+F-A-ic05-worst-notau-n800    chain3       0.355  0.175  0.355       69.1       96.5       162        61
+F-A-ic05-worst-notau-n800    one c7       0.213  0.182  0.213       61.5       90.9       127        59
+F-A-ic05-worst-notau-n800    chain3 c7    0.380  0.185  0.380       71.2       98.0       172        58
+F-A-ic05-base-n300           one          0.100  0.085  0.100       41.7       70.6        58       107
+F-A-ic05-base-n300           chain3       0.212  0.088  0.212       46.9       74.4        86        91
+F-A-ic05-base-n300           one c7       0.123  0.103  0.123       43.9       72.2        71        92
+F-A-ic05-base-n300           chain3 c7    0.253  0.108  0.253       50.0       76.7       104        84
+E-cum 50 = the first session at which the EXPECTED cumulative Probe events (over paths) reach 50; a promoted learner itself buys about 5.9 Probe events a session, so 50 in about 9 sessions after its promotion (Done's >= 50 a program).
+NULL (IC 0): the picks' true replay a is 0, so each real pick earns GAP: $7.2 (F_L .25) to $14.4 (F_L .50) over 120 sessions at learning, plus a false promotion's Probe lots at the same GAP; the loss budget bounds the variance.

@@ -1,0 +1,10 @@
+search: 9 cells; maximum per-run rate 0.1400 (O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52); band 0.03; selected 2 (the top of each (lag, pool) group, then the band, at most 6)
+ * 0.1400 (se 0.0491, R 50) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52
+ * 0.0950 (se 0.0147, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0900 (se 0.0143, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0825 (se 0.0138, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52
+   0.0825 (se 0.0138, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52
+   0.0775 (se 0.0134, R 400) O1-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0775 (se 0.0134, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1-D52
+   0.0675 (se 0.0125, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt-D52
+   0.0575 (se 0.0116, R 400) O1-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag1-D52

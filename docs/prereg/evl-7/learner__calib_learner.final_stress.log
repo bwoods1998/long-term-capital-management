@@ -1,0 +1,15 @@
+final_stress: 5/50 jobs, 29s (last 15s)
+final_stress: 10/50 jobs, 46s (last 16s)
+final_stress: 15/50 jobs, 70s (last 23s)
+final_stress: 20/50 jobs, 103s (last 30s)
+final_stress: 25/50 jobs, 139s (last 18s)
+final_stress: 30/50 jobs, 180s (last 37s)
+final_stress: 35/50 jobs, 223s (last 44s)
+final_stress: 40/50 jobs, 274s (last 43s)
+final_stress: 45/50 jobs, 352s (last 49s)
+final_stress: 50/50 jobs, 406s (last 41s)
+{"cell": "F-N1-rho30-notau-n300", "EVL3": {"pass": 0.148, "retired": 0.16, "by20": 0.074, "by40": 0.108, "by60": 0.122, "by120": 0.148, "median_pass_session": 20.5}, "L12": {"pass": 0.087, "retired": 0.913, "by20": 0.055, "by40": 0.087, "by60": 0.087, "by120": 0.087, "median_pass_session": 18.0}, "E840": {"pass": 0.091, "retired": 0.909, "by20": 0.061, "by40": 0.088, "by60": 0.091, "by120": 0.091, "median_pass_session": 17.0}, "ev": 7.57, "mean_a_bp": -3.6777050667323397}
+{"cell": "F-N1-drift30-notau-n300", "EVL3": {"pass": 0.139, "retired": 0.146, "by20": 0.064, "by40": 0.098, "by60": 0.117, "by120": 0.139, "median_pass_session": 22.0}, "L12": {"pass": 0.078, "retired": 0.922, "by20": 0.052, "by40": 0.078, "by60": 0.078, "by120": 0.078, "median_pass_session": 17.0}, "E840": {"pass": 0.081, "retired": 0.919, "by20": 0.061, "by40": 0.079, "by60": 0.081, "by120": 0.081, "median_pass_session": 16.0}, "ev": 7.54, "mean_a_bp": 0.9819771015867715}
+{"cell": "F-N1-mom40-notau-n300", "EVL3": {"pass": 0.242, "retired": 0.253, "by20": 0.125, "by40": 0.175, "by60": 0.199, "by120": 0.242, "median_pass_session": 19.0}, "L12": {"pass": 0.163, "retired": 0.837, "by20": 0.109, "by40": 0.163, "by60": 0.163, "by120": 0.163, "median_pass_session": 16.0}, "E840": {"pass": 0.171, "retired": 0.829, "by20": 0.119, "by40": 0.164, "by60": 0.171, "by120": 0.171, "median_pass_session": 16.0}, "ev": 7.59, "mean_a_bp": 1.1502827961347786}
+{"cell": "F-N3-famdrift20-notau-n300", "EVL3": {"pass": 0.201, "retired": 0.116, "by20": 0.08, "by40": 0.135, "by60": 0.155, "by120": 0.201, "median_pass_session": 23.0}, "L12": {"pass": 0.1, "retired": 0.9, "by20": 0.067, "by40": 0.1, "by60": 0.1, "by120": 0.1, "median_pass_session": 17.0}, "E840": {"pass": 0.109, "retired": 0.891, "by20": 0.073, "by40": 0.104, "by60": 0.109, "by120": 0.109, "median_pass_session": 16.0}, "ev": 7.6, "mean_a_bp": 11.95601747331691}
+{"cell": "F-N4-loadcorr-fac25-notau-n300", "EVL3": {"pass": 0.139, "retired": 0.141, "by20": 0.069, "by40": 0.098, "by60": 0.115, "by120": 0.139, "median_pass_session": 21.0}, "L12": {"pass": 0.071, "retired": 0.929, "by20": 0.056, "by40": 0.071, "by60": 0.071, "by120": 0.071, "median_pass_session": 17.0}, "E840": {"pass": 0.08, "retired": 0.92, "by20": 0.068, "by40": 0.079, "by60": 0.08, "by120": 0.08, "median_pass_session": 16.0}, "ev": 7.56, "mean_a_bp": 0.3374970688767873}

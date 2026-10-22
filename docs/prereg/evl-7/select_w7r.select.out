@@ -1,0 +1,41 @@
+search: 40 cells; maximum per-run rate 0.1275 (ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58); band 0.03; selected 5 (the top of each (lag, pool) group, then the band, at most 6)
+ * 0.1275 (se 0.0167, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D58
+ * 0.1150 (se 0.0160, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag1-D52
+ * 0.1000 (se 0.0150, R 400) ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58
+ * 0.1000 (se 0.0150, R 400) ON-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag2-D58
+ * 0.0950 (se 0.0147, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0950 (se 0.0147, R 400) ON-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2-D58
+   0.0925 (se 0.0145, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D58
+   0.0900 (se 0.0143, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0875 (se 0.0141, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D58
+   0.0850 (se 0.0139, R 400) O1-N1-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0850 (se 0.0139, R 400) ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag1-D58
+   0.0850 (se 0.0139, R 400) ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58
+   0.0825 (se 0.0138, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52
+   0.0825 (se 0.0138, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D52
+   0.0825 (se 0.0138, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D52
+   0.0825 (se 0.0138, R 400) ON-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-D58
+   0.0825 (se 0.0138, R 400) ON-N1-crasht3cl-skew-rho05-phi20-dr20-tau1-n300-lag2-D58
+   0.0800 (se 0.0136, R 400) ON-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-D58
+   0.0800 (se 0.0136, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2-D58
+   0.0800 (se 0.0136, R 400) ON-N1-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag2-D58
+   0.0775 (se 0.0134, R 400) O1-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0775 (se 0.0134, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1-D52
+   0.0775 (se 0.0134, R 400) O1-N1-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag1-D52
+   0.0725 (se 0.0130, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag2-D52
+   0.0725 (se 0.0130, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D52
+   0.0725 (se 0.0130, R 400) ON-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag1-D58
+   0.0725 (se 0.0130, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n800-lag2-D58
+   0.0725 (se 0.0130, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag2-D58
+   0.0700 (se 0.0128, R 400) O1-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag2-D52
+   0.0700 (se 0.0128, R 400) O1-N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2-D52
+   0.0700 (se 0.0128, R 400) O1-N1-crashcl-skew-rho15-phi20-dr20-tau1-n800-lag2-D52
+   0.0675 (se 0.0125, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt-D52
+   0.0675 (se 0.0125, R 400) O1-N1-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag1-D52
+   0.0650 (se 0.0123, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58
+   0.0600 (se 0.0119, R 400) ON-N1-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag2-D58
+   0.0575 (se 0.0116, R 400) O1-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0550 (se 0.0114, R 400) ON-N1-crash-skew-rho15-phi20-dr20-tau1-n300-lag2-D58
+   0.0525 (se 0.0112, R 400) O1-N1-crasht3cl-skew-rho05-phi20-dr20-tau1-n300-lag1-D52
+   0.0375 (se 0.0095, R 400) O1-N2-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D52
+   0.0325 (se 0.0089, R 400) ON-N2-ic05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D58

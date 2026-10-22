@@ -1,0 +1,124 @@
+PREREG-EVL-7, PART L: TWO PRE-REGISTERED ONLINE LEARNERS (draft text to freeze; lens "learner", synthetic calibration only)
+
+Designed blind: from the frozen PREREG-EVL-1..-5, the EVL-6 draft and its judge's synthetic search, the code of
+rel/1019e..g, the outcome-free counts in speed/SPEED-FACTS.md and EXECUTION-FACTS.md, the literature, and the synthetic
+Monte Carlo evl7/learner/calib_learner.py. No price, return, look, band, P&L or bar of any event or program was read.
+
+L0. WHAT A LEARNER IS. A seatable program whose rule is a FIXED ALGORITHM: at each decision it chooses at most K = 8
+events from a fixed candidate pool by a model fit at that decision only on outcomes SETTLED AND STORED BEFORE it
+(outcomes.status = 'settled' and outcomes.settled_at < tau). Its features, algorithm, hyperparameters, warm-up, pool,
+universe, ranking and constants are fixed here, before any of its events exists; none is chosen per session, per result
+or per program. Using settled outcomes at run time is the forward test itself: each pick is made before its own outcome
+exists. A learner's RECORD counts only events knowable after REGISTERED_AT_7 (it registers after REGISTERED_AT_6, A91's
+method); its TRAINING rows may be older (every settled pool outcome stored before the decision).
+
+L1. THE PROGRAMS (version 1 each, seatable at PREREG-EVL-3's learning band from birth):
+  EVL-LRN-O1: entry OPEN of D, exit CLOSE of D (hold 1); tau = D's open decision (09:15 ET); POOL, in this order:
+    EVL-CTRL-NEWS-ALL-O1, EVL-CTRL-8K-ALL-O1, EVL-CTRL-ERN-ALL-O1, EVL-INS-BUY-O1 (all version 1).
+  EVL-LRN-ON: entry CLOSE of D, exit OPEN of D+1 (hold 1); tau = D's close decision (close - 14 min); POOL, in order:
+    EVL-CTRL-NEWS-DAY-ON, EVL-CTRL-NEWSPM-ON, EVL-CTRL-8K-ON, EVL-ERN-REACT-ON, EVL-ERN-DROP-ON, EVL-CTRL-ERN-UNDER-ON
+    (all version 1; a pool program not yet live contributes nothing).
+  Free records (derived controls, no intents and no settlement of their own): EVL-LRN-O1-POOL, EVL-LRN-ON-POOL = every
+  candidate of each decision of their learner (L2 (i)-(ii), before its one-position skip and hurdle) with the pool
+  outcome of its (D, issuer) (L4).
+
+L2. CANDIDATES at tau. For each pool program p, in pool order: the events p's own rule takes for entry session D from
+rows STORED before tau with verdicts ANSWERED before tau and the LIVE rule's universe rows only (PREREG-EVL-1 section
+3's real-money reading, as league/events/book.py `picks(lane, p, D, decided_at=tau)` makes it, p's own one-position rule
+included; a verdict not answered before tau reads as no score). One CANDIDATE per issuer: its POOL FAMILIES are the pool
+programs selecting it; its PRIMARY EVENT is the event of the first of them in pool order (the learner's intent's event).
+Kept only when (i) TRADABLE at decision (1.25 x prev_close <= 10% of the equity at the previous close), (ii) for picks,
+its primary event is knowable after REGISTERED_AT_7, and (iii) for picks, the learner holds no intent of the issuer
+entered before D that exits within the last 5 sessions or later (PREREG-EVL-1 section 5 as A72 reads it).
+
+L3. FEATURES x (each read as stored before tau; a missing input is 0 with its own indicator; definitions, order and
+scaling never change for a version). COMMON: dummies of the primary pool program (the first is the baseline); multi (>= 2
+pool programs select the issuer); from the best `ok` verdict answered before tau among its pool events (PROMPT-NEWS for
+news, PROMPT-DOC for 8-K): s_num = s/3, s>=2, s=3, s<=-1, no-score, and s_num x each primary dummy; PROMPT-DOC guidance
+raised, lowered; 8-K items 1.01, 2.01, 7.01, 8.01; src_benzinga (the primary article's source contains "benzinga");
+n_art = ln(1 + single-symbol articles of the ticker knowable in the primary family's window); n_att20 = ln(1 + such
+articles in the 20 sessions before that window); first20 (in none of this learner's candidate sets of the previous 20
+sessions); mon, fri (first / last session of the calendar week); issuer (D's live universe row, cik_info): ln(adv20/1e7),
+ln(prev_close/20), ln(sig20/0.03) with sig20 the sd of the 19 daily log changes of the 20 stored raw SIP closes before D
+(floor 0.005, cap 0.25), bench_iwm, SIC bio (2833-2836, 8731), tech (3570-3579, 3600-3699, 7370-7379), fin (6000-6799),
+energy (1000-1499, 2900-2999); r1 = clip(ln(c-1/c-2), 0.5), r5 = clip(ln(c-1/c-6), 1), r20 = clip(ln(c-1/c-20), 1.5)
+from the same closes (c-1 = prev_close). EVL-LRN-O1 ADDS: the primary event's knowable hour (ET) overnight [20:00, 04:00),
+pre [04:00, 07:00), late [07:00, 09:00); ln(1 + purchase value / $50,000) of an EVL-INS-BUY-O1 event (D = 38).
+EVL-LRN-ON ADDS: morning (knowable 09:00-12:00 ET of D), before (knowable before 09:00 ET of D); dmove = clip(ln(m1530 /
+prev_close), 0.5) with m1530 the ticker's stored '1530' mark for D fetched before tau (the close pre-pass reads its
+candidates' marks in MARK_BATCH requests), dmove missing, |dmove|, s_num x dmove (D = 43).
+
+L4. TRAINING ROWS at tau: every candidate (s, i) of every earlier entry session s of the learner's kind, at most 250
+sessions back (the candidate sets stored at its own decisions and, for sessions before REGISTERED_AT_7, the sets its
+first run RECONSTRUCTS once as of each session's own tau_s by L2-L3), whose (s, issuer) has a POOL OUTCOME: an outcomes
+row of a pool program for that issuer entering at s with the learner's auctions (the first in pool order), status
+'settled', tradable 1, settled_at < tau. Label y = clip(a / sig20, -5, 5), a that row's after-cost abnormal return
+(PREREG-EVL-1 section 5). A training row's features are the ones stored for it as of tau_s, never recomputed.
+
+L5. THE FIT (session-demeaned weighted ridge), at each decision: w_s = 2^(-(n(D) - n(s)) / 40) (H = 40 sessions, n the
+lane's session index); within each session s, x~ = x - mean_s x and y~ = y - mean_s y over its training rows (a session
+with one row adds nothing: the day shock, the pool's drift and the benchmark cancel inside a session); A = sum_s w_s sum_i
+x~ x~', b = sum_s w_s sum_i x~ y~, N_w = sum_s w_s n_s; d_j = sqrt(A_jj / N_w) (a column with d_j < 1e-9 gets 0);
+M = diag(d)^-1 A diag(d)^-1 + 8000 I; beta = diag(d)^-1 M^-1 diag(d)^-1 b. Sums by math.fsum in (entry day, cik) order;
+M solved by Cholesky in float64.
+PREDICTION for candidate i of D: e_i = (x_i - xbar_D) . beta (xbar_D the mean over D's candidates kept by L2 (i));
+c_i = the replay's round trip for i (PREREG-EVL-1 section 5: 2 x (0.5 + 5 or 10 bp by ADV) + $0.03 over 5% of the
+previous close's equity); z_i = e_i - c_i / sig20_i (the LEVEL is the fixed prior that the pool's gross abnormal mean is
+zero: never learned, so no pick can time a drift common to the pool); ahat_i = sig20_i x z_i, the predicted after-cost
+abnormal return.
+PICK: the candidates with z_i > 0, ranked by ahat_i (higher first), then adv20, then event id; the first 8 are the
+learner's intents of D (rank_key = ahat_i). No other pick exists.
+
+L6. WARM-UP AND FAILURE. No pick until the training set holds >= 2,000 rows from >= 3 sessions. A decision that cannot
+read its pool, outcomes or features, or whose fit is not finite, picks nothing (fail closed) and says why. The learner's
+part runs after every earlier row is decided, under its own bound (90 s at the open, 120 s at the close); its failure
+never cuts an earlier row; that auction is then decided for the learner by itself, later, exactly as of tau (every cut-
+off read from stored times: received_at, documents.stored_at, answered_at, marks.fetched_at, settled_at), shadow only,
+never traded. A decision written is never decided again.
+
+L7. WHAT IS WRITTEN (additive tables; SCHEMA_VERSION stays 1): learner_fits (program, version, day, tau, n_rows,
+n_sessions, beta, d, xbar, the sha256 of the ordered training keys); learner_cands (program, version, day, cik, event,
+families, features, e, z, ahat, picked, rank). The written picks are the record; a nightly recompute alarms on a mismatch
+and never rewrites.
+
+L8. REAL MONEY: PREREG-EVL-3 section 2's bands, the walls, the open-risk weight and the loss budget, unchanged. The book's
+picks of a learner are its intents of that decision in rank order, less the book's own skips (a name given to an earlier
+program at the auction, the sale gate, no whole share, cash, A85's reservation, the walls, the day's order line). ROOM:
+after every PREREG-EVL-1..-6 row and before R3's births, EVL-LRN-O1 then EVL-LRN-ON. In real money only, EVL-LRN-ON does
+not buy an issuer with an 8-K knowable at or after 09:00 ET of D whose PROMPT-DOC verdict is ok with score >= 2, or ok
+with score >= 1 and guidance "raised", or not answered at tau (PREREG-EVL-4 and -5 section 1.3). The shadow keeps
+every pick.
+
+L9. THE JUDGE: PREREG-EVL-6 sections 1-3 (the seating screen of every version registered after REGISTERED_AT_6). A
+learner is a READ program wherever a rule names one; its control is its derived POOL record, over its own block sessions.
+Its record is its forward picks only. If PREREG-EVL-6 is not frozen, PREREG-EVL-3 sections 2-3 as PREREG-EVL-4 section 2
+applies them, and each learner version is charged 0.16 (L11). The code never edits the screen that judges it.
+
+L10. RE-ENTRY (pre-registered): when a learner version is RETIRED by its judge (lower-tail retirement, or EXHAUSTION at
+its last look without a pass), version n + 1 of the same id and this rule unchanged is registered the first night
+after through R3's registration route (registration time the later of GitHub's commit time and the House's receipt),
+at most versions 1-3 per id, each counting only events knowable after its own registration and training on everything
+settled before each decision. Each draws 0.10 at registration and is refused when the lane's budget cannot hold it.
+
+L11. FALSE PASSES: 0.10 a learner version under PREREG-EVL-6 (0.20 for the two version 1 rows: 1.5 + 0.2 = 1.7 of the
+stated 3.0; at most 0.60 with every re-entry); 0.16 a version under PREREG-EVL-3 (no re-entry there).
+MEASURED (calib_learner.py, final design, per version, the EVL-6 judge's two leading 10%-cap candidates L12 / E840):
+  zero-edge base (rho_day .05, t3): 3.00% / 3.15%; random picker of the same size 3.1% / 3.0% (first design).
+  worst plausible (rho_day .15, crash days, left-skewed events, 20 bp AR .97 pool drift, day momentum .10), no issuer
+  effect: 7.30% / 7.40% (pool 300), 7.70% / 6.90% (pool 800), 8.33% / 8.33% over 300 sessions; with a 1% persistent issuer
+  effect 7.45% / 7.70% (that effect is learnable: picks +2.7 bp forward).
+  knife edge (features rank the pool, the best 5% have mean exactly 0): 4.3-5.8% / 4.3-6.3%.
+  three versions chained (L10): 8.75% / 8.70% base, 22.05% / 21.40% worst, 23.5% / 22.7% over 300 sessions (charged 0.30).
+  under PREREG-EVL-3 (its skew check omitted, an upper bound): 5.85% base, 14.00% worst, 16.0% over 300 sessions.
+  named stresses: rho_day .30 8.7% / 9.1%; 30 bp drift 7.8% / 8.1%; rho_day .30 with day momentum .40 16.3% / 17.1%
+  (a day-shock property shared by every program); a learnable family drift 10.0% / 10.9% (picks +12 bp forward).
+
+L12. REPORTED BESIDE (never a judge): per learner and decision, candidates, picks, warm-up state, training rows; after
+settlement the Spearman correlation of z with a across the candidates (realised IC), the picks' mean a minus the pool's,
+their running means (the learning curve). These and the fit tables are outcome-derived: R3's facts authorizer refuses
+learner_fits and learner_cands.
+
+L13. NOT DECIDED HERE: the code (league/events/learner.py; run.py's part; book.py's rows; screen.py's derived control and
+registries; programs.py's rows and REGISTERED_AT_7; births.py's authorizer and re-entry line; the report). An ambiguity
+takes the reading less likely to pass (screen) or that trades less (trading), fixed before the first settled event and
+recorded as an amendment.

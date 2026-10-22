@@ -1,0 +1,4 @@
+== w7r.pilot.jsonl
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D54           a7   R=1000  RUN1 0.1280 (se 0.0106) [cm<=0 0.0150 <=10bp 0.0350] by10/20/40/60 0.000/0.000/0.114/0.122 | VERSION by120 0.2870 runs 1.85 retired 0.037 | ev/s 7.66 pool 300 a7 +24.9bp cm7 +25.0bp tau +25.1bp sig 0.052 c7/crep 19.1/17.9bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D54-static    a7   R=1000  RUN1 0.0830 (se 0.0087) [cm<=0 0.0190 <=10bp 0.0370] by10/20/40/60 0.000/0.000/0.079/0.082 | VERSION by120 0.1490 runs 1.89 retired 0.062 | ev/s 7.56 pool 300 a7 +1.4bp cm7 +1.7bp tau +2.1bp sig 0.046 c7/crep 19.2/17.8bp
+O1-N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag1-D54-static    a7   R=450   RUN1 0.0911 (se 0.0136) [cm<=0 0.0222 <=10bp 0.0467] by10/20/40/60 0.000/0.000/0.089/0.091 | VERSION by120 0.1778 runs 2.36 retired 0.071 | ev/s 7.95 pool 797 a7 +2.4bp cm7 +2.4bp tau +2.1bp sig 0.048 c7/crep 19.7/17.9bp

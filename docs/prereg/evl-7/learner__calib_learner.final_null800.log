@@ -1,0 +1,10 @@
+final_null800: 5/40 jobs, 42s (last 22s)
+final_null800: 10/40 jobs, 62s (last 19s)
+final_null800: 15/40 jobs, 84s (last 22s)
+final_null800: 20/40 jobs, 106s (last 21s)
+final_null800: 25/40 jobs, 141s (last 19s)
+final_null800: 30/40 jobs, 161s (last 19s)
+final_null800: 35/40 jobs, 182s (last 19s)
+final_null800: 40/40 jobs, 204s (last 22s)
+{"cell": "F-N1-worst-n800", "EVL3": {"pass": 0.131, "retired": 0.161, "by20": 0.079, "by40": 0.111, "by60": 0.122, "by120": 0.131, "median_pass_session": 18.0}, "L12": {"pass": 0.075, "retired": 0.925, "by20": 0.055, "by40": 0.075, "by60": 0.075, "by120": 0.075, "median_pass_session": 11.0}, "E840": {"pass": 0.084, "retired": 0.916, "by20": 0.063, "by40": 0.084, "by60": 0.084, "by120": 0.084, "median_pass_session": 11.0}, "ev": 7.9, "mean_a_bp": 1.0029744984711184}
+{"cell": "F-N1-worst-notau-n800", "EVL3": {"pass": 0.133, "retired": 0.155, "by20": 0.079, "by40": 0.105, "by60": 0.12, "by120": 0.133, "median_pass_session": 18.0}, "L12": {"pass": 0.077, "retired": 0.923, "by20": 0.064, "by40": 0.077, "by60": 0.077, "by120": 0.077, "median_pass_session": 12.0}, "E840": {"pass": 0.069, "retired": 0.931, "by20": 0.058, "by40": 0.069, "by60": 0.069, "by120": 0.069, "median_pass_session": 12.0}, "ev": 7.89, "mean_a_bp": 0.10338825918738176}
