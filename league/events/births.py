@@ -312,6 +312,9 @@ JOB = "births"
 EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
 #: What the facts may never read (R3-SPEC section 2): a price after an event, a return, a P&L, a look's p, a band.
 FACTS_DENY = frozenset({"bars", "marks", "outcomes", "looks", "bands", "band_history", "real_fills", "universe", "meta"})
+#: RELEASE 1019i: the attempts ledger (`real_attempts`: the venue's fill prices and states, PREREG-EVL-7's H6) and the
+#: batched score's parity flags (`score_parity`: one per settled intent) are outcome-derived: the facts never read them.
+FACTS_DENY = FACTS_DENY | frozenset({"real_attempts", "score_parity"})
 #: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
 #: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
 #: of their programs has a selection count and every candidate a Jaccard against them.

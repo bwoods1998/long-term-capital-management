@@ -33,8 +33,9 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   // One screen: 44 lines before release 1019f; the day's real buys add three (A80 (2)), the break-even edge a fourth once a
   // Probe buy exists, and the Done line (the goal V2) three; release 1019h's Done supply line its head, a line or two
   // of Probe+ rows and its reach (four for the fixture's two rows).
-  assert.ok(text.length <= 55, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4; no Probe buy here: 54)
-  assert.equal(text.length, 54);
+  // Release 1019i: the attempts ledger's fill rates (two lines an auction) and the batched score's settle pace (two).
+  assert.ok(text.length <= 61, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2; no Probe buy: 60)
+  assert.equal(text.length, 60);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -270,4 +271,30 @@ test('the Done supply line (release 1019h, SUP-4): each Probe+ row\'s counted ev
   for (const line of [...text, ...three, ...none, ...bad]) assert.ok(line.length <= REPORT_WIDTH, line);
   const before = lines((({ supply: _s, ...rest }) => rest)(REPORT));
   assert.ok(!before.some(line => line.startsWith('Done supply')), 'a House before release 1019h: no line');
+});
+
+test('release 1019i: the fill rates by auction over 3 and 20 sessions (the attempts ledger) and the settle pace (the batched score)', () => {
+  const text = lines(REPORT);
+  for (const line of ['Fills open: 10/12 83% (3 sessions), 63/70 90% (20)',
+    ' venue cancels 2/14, 8/78; re-sent 2, 7; unsent 1, 4',
+    'Fills close: 9/9 100% (3 sessions), 50/52 96% (20)',
+    ' venue cancels 0/9, 1/53; re-sent 0, 1; unsent 0, 2',
+    'Score: 398/412 settled, 3 passes, 4.0 min, 99/min, batched',
+    ' skip 9, wait 5, fail 0; bars 12, prints 806; parity 20/20']) {
+    assert.ok(text.includes(line), line);
+  }
+  // No ledger yet (every figure null) and no score pass of the night: no line of either.
+  const empty = Object.fromEntries(Object.keys(REPORT.fill_rates).map(a => [a, {
+    last3: Object.fromEntries(Object.keys(REPORT.fill_rates[a].last3).map(k => [k, null])),
+    last20: Object.fromEntries(Object.keys(REPORT.fill_rates[a].last20).map(k => [k, null]))}]));
+  const quiet = lines({ ...REPORT, fill_rates: empty, settle: { ...REPORT.settle, passes: 0 } });
+  assert.ok(!quiet.some(line => line.startsWith('Fills ') || line.startsWith('Score:')), quiet.join('\n'));
+  // A night not complete says so, the per-intent path says nothing of batching, no parity night says nothing of it.
+  const partial = lines({ ...REPORT, settle: { ...REPORT.settle, complete: false, batched: 0, parity: { checked: 0, equal: 0 } } });
+  assert.ok(partial.includes('Score: 398/412 settled, 3 passes, 4.0 min, 99/min, not'), partial.join('\n'));
+  assert.ok(partial.includes(' skip 9, wait 5, fail 0; bars 12, prints 806'));
+  // Figures only: a word where a figure goes is never echoed.
+  const odd = lines({ ...REPORT, settle: { ...REPORT.settle, settled: 'ACME rallied' }, fill_rates: { ...REPORT.fill_rates,
+    open: { ...REPORT.fill_rates.open, last3: { ...REPORT.fill_rates.open.last3, buys_filled: 'ACME' } } } });
+  assert.ok(!odd.join('\n').includes('ACME'));
 });

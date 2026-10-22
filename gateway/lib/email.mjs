@@ -217,6 +217,12 @@ export const STALL_CAUSES = {
   evl_entries: 'event-lane real buys went unfilled or unsent',
   evl_backfill: 'the event lane\'s daily-index backfill is late or failing',
   evl_handback: 'real event fills are missing from the lane\'s record',
+  // Release 1019i (PREREG-EVL-7's harness change H4, the attempts ledger: league/events/attempts.py): an auction's
+  // real buys filled under 85% over the last 3 sessions, or more than 10 points under their last 20; and an event order
+  // with no final state an hour after its auction (or the book's order not in the lane's ledger an hour on). Deploy the
+  // gateway first, as above.
+  evl_fill_rate: 'event-lane real buys filled less often than they did',
+  evl_attempts: 'event-lane orders have no final state on record',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
@@ -464,6 +470,21 @@ export function composeReport(facts = {}) {
   } else if (Number.isInteger(totals.planned)) {
     add('Real buys: none planned today');
   }
+  // RELEASE 1019i: THE FILL-RATE LINES (PREREG-EVL-7's H4; league/ops/daily_report.py `fill_lines`, from the attempts
+  // ledger): each auction's real buys filled of sent over the last 3 and the last 20 sessions, the venue's cancels at
+  // once of the buy orders sent, A80's re-sends and the picks that ended unsent; once the ledger holds a sent buy.
+  // Counts and shares only.
+  const rates = plain(facts.fill_rates);
+  const filledOf = c => `${count(c.buys_filled)}/${count(c.buys_sent)}`
+    + (real(c.fill_rate) === null ? '' : ` ${pct(100 * real(c.fill_rate))}`);
+  for (const a of Object.keys(AUCTIONS)) {
+    const short = plain(plain(rates[a]).last3), long = plain(plain(rates[a]).last20);
+    if (!Number.isInteger(long.buys_sent) || long.buys_sent < 1) continue;
+    add(`Fills ${AUCTIONS[a]}: ${filledOf(short)} (3 sessions), ${filledOf(long)} (20)`, '   ');
+    add(` venue cancels ${count(short.venue_cancels)}/${count(short.buy_orders)}, ${count(long.venue_cancels)}/`
+      + `${count(long.buy_orders)}; re-sent ${count(short.resent)}, ${count(long.resent)}; unsent `
+      + `${count(short.unsent)}, ${count(long.unsent)}`, '   ');
+  }
   const even = plain(facts.break_even);
   if (typeof even.since === 'string' && DAY.test(even.since)) {
     add(real(even.edge_bp) === null ? 'Break-even edge: n/a (compute not measured)'
@@ -554,6 +575,20 @@ export function composeReport(facts = {}) {
       add(`${supply.flag === true ? ' FLAG: ' : ' '}${count(supply.reach)} of ${count(rows.length)} reach 50 by `
         + `${count(supply.checkpoint)} (${when})${supply.flag === true ? '; needs 3' : ''}`, '   ');
     }
+  }
+  // RELEASE 1019i: THE SETTLE PACE (PREREG-EVL-8's H1, the batched score; league/ops/daily_report.py `settle_line`): the
+  // night's score passes, what they settled, a minute, the bar and trade requests and the parity night's equality flags.
+  const pace = plain(facts.settle), asked = plain(pace.requests), parity = plain(pace.parity);
+  if (Number.isInteger(pace.passes) && pace.passes > 0) {
+    const minutes = real(pace.seconds) === null ? 'unknown' : (real(pace.seconds) / 60).toFixed(1);
+    add(`Score: ${count(pace.settled)}/${count(pace.due)} settled, ${count(pace.passes)} passes, ${minutes} min`
+      + (real(pace.pace) === null ? '' : `, ${real(pace.pace).toFixed(0)}/min`)
+      + (Number.isInteger(pace.batched) && pace.batched > 0 ? ', batched' : '')
+      + (pace.complete === false ? ', not complete' : ''), '   ');
+    add(` skip ${count(pace.skipped)}, wait ${count(pace.waiting)}, fail ${count(pace.errors)}; bars `
+      + `${count(asked.bars)}, prints ${count(asked.trades)}`
+      + (Number.isInteger(parity.checked) && parity.checked > 0
+        ? `; parity ${count(parity.equal)}/${count(parity.checked)}` : ''), '   ');
   }
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);

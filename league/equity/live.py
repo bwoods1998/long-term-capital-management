@@ -5220,6 +5220,10 @@ class EquityBook:
             self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3; any day)
         except Exception as exc:  # noqa: BLE001 - written again next minute
             self._error("event fills", exc, out)
+        try:
+            self._event_attempts(adapter, out)  # (release 1019i: the attempts ledger beside them; read-only of the orders)
+        except Exception as exc:  # noqa: BLE001 - written again next minute
+            self._error("event attempts", exc, out)
 
     # ---------------------------------------------------------------- the band sync
     def _event_sync(self, now: float, day: dt.date, s: Any, adapter: Any, lane: Any) -> list[Any] | None:
@@ -6646,6 +6650,33 @@ class EquityBook:
                 self._save_lot(lot)
         out["event_fills"] = f"{n} real fill(s) written to the lane"
 
+    def _event_attempts(self, adapter: Any, out: dict) -> None:
+        """THE ATTEMPTS LEDGER (release 1019i, PREREG-EVL-7's harness change H3; league/events/attempts.py): every order
+        of a real event instance (the auction buys and sales, the ladder's day sales, A80's re-sends) with its states as
+        the venue's own order states told this book, and every planned real buy that ended with no order sent, written
+        beside the real fills into the lane's `real_attempts` (`adapter.write_attempts`) from the book's own rows changed
+        since the last write (kv `adapter.ATTEMPTS_MARK`, read again `ATTEMPTS_SLACK_S` before it). It READS this book's
+        orders and never sends, changes or cancels one; the mark moves only once the lane's store took the rows (a store
+        with no such table yet: they wait and are read again). An adapter without the ledger (an older release's) is
+        left alone."""
+        read, write = getattr(adapter, "attempt_rows", None), getattr(adapter, "write_attempts", None)
+        if read is None or write is None:
+            return
+        try:
+            since = float(self.state.get(adapter.ATTEMPTS_MARK) or 0.0)
+        except (TypeError, ValueError):
+            since = 0.0
+        rows, newest = read(self.state.rows, since=max(0.0, since - float(adapter.ATTEMPTS_SLACK_S)))
+        if not rows:
+            return
+        n = write(self.root, rows)
+        if n is None:
+            out["event_attempts"] = f"{len(rows)} attempt row(s) wait: the lane's store holds no real_attempts table yet"
+            return
+        if newest is not None and newest > since:
+            self.state.put(adapter.ATTEMPTS_MARK, newest)
+        if n:
+            out["event_attempts"] = f"{n} attempt row(s) written to the lane"
 
 
 def export_row(lot: Lot) -> dict[str, Any]:
