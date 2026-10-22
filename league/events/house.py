@@ -48,8 +48,11 @@ decision has finished, by the close - 11 minutes. The order of the tasks:
    day; then, on a session night with `events.births` on, R3's BIRTHS job at 21:15 ET (league/events/births.py
    `night`: the outcome-free facts, the architect's one Haiku call under $0.25 a night and inside what is left of the
    lane's line, below, the validator, the registration through the gateway's docs route), once a night (keyed on the
-   calendar day, as release 1019e built it); then THE SCREEN AFTER THE OPEN (release 1019f, `screen-open`): from 09:40
-   ET of a session whose open decision is made, until 5 minutes before its close decision, whenever the judge's final
+   calendar day, as release 1019e built it), and ONCE MORE for a night whose births receipt accepted and registered
+   none under an older reading of the grammar and prompt than the running one (A95: `births.PARSE_VERSION` in the
+   receipt; `births.rerun_due`), never from 12:55Z of the session day after it; then THE SCREEN AFTER THE OPEN
+   (release 1019f, `screen-open`): from 09:40 ET of a session whose open decision is made, until 5 minutes before its
+   close decision, whenever the judge's final
    horizon (league/events/screen.py `final_until`) of any seating version moved since the last screen receipt, the
    screen's looks of the seating versions run again (never the band review nor the Done reader, which stay nightly),
    so a look the judge makes final at the open is written that morning and its Probe move trades from that session's
@@ -1386,6 +1389,22 @@ class EventLane:
             elif (st.root / "reports" / f"{today.isoformat()}.txt").exists() and \
                     not self._receipt_since(st, "births", births_at) and not self._quiet("births", now, soon):
                 return Task("births", self._births, BIRTHS_BUDGET)
+        if self.births_on:
+            # THE ONE RE-RUN OF AN EMPTY NIGHT (A95; league/events/births.py `rerun_due`): a night whose births receipt
+            # accepted and registered none, written by an older reading of the grammar and prompt than the running one,
+            # runs once more, before 12:55Z of the session day after it (a weekend's Friday night until Monday's)
+            from . import births as BI
+
+            try:
+                again = BI.rerun_due(st, now)
+            except Exception as exc:  # noqa: BLE001 - a read error here never stops the plan's later tasks
+                self.warn("births re-run", exc)
+                again = None
+            if again is not None and (st.root / "reports" / f"{again['night']}.txt").exists() and \
+                    not self._quiet("births", now, soon):
+                night_of = dt.date.fromisoformat(str(again["night"]))
+                return Task("births", lambda ctx, deadline: self._births(ctx, deadline, night_of, again),
+                            BIRTHS_BUDGET)
         return None
 
     @staticmethod
@@ -1496,16 +1515,19 @@ class EventLane:
             self._receipted(ctx.store, DN.JOB, "ok", done)
         return summary | {"_status": status}
 
-    def _births(self, ctx: LaneContext, deadline: float | None) -> dict[str, Any]:
+    def _births(self, ctx: LaneContext, deadline: float | None, night: dt.date | None = None,
+                rerun: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """R3's births job of the night (league/events/births.py `night`, its own receipt `births`): its Claude call goes
         through the lane's gateway (refused while the House is paused or over the day's line, and counted), and is made
         only when its worst case fits under what is left of the lane's line today (`line_left`, release 1019e's review:
         the births call is inside the lane's line, as every verdict, never beside it), as well as under the night's own
-        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`)."""
+        $0.25 cap. Its stored cost counts in the lane's line from then on (`_spend_today`). The night is today's, or
+        (`night`, `rerun`: A95's one re-run of an empty night, `births.rerun_due`) the earlier night it runs again."""
         from . import births as BI
 
         now = ctx.now()
-        out = BI.night(ctx.store, ctx.gw, today=now.astimezone(C.NY).date(), now=ctx.now, line_left=self.line_left())
+        out = BI.night(ctx.store, ctx.gw, today=night or now.astimezone(C.NY).date(), now=ctx.now,
+                       line_left=self.line_left(), rerun=rerun)
         status = str(out.pop("_status", "ok"))
         if status != "ok":
             self.warn("births", f"the births job of {out.get('night')} ended {status}: "
@@ -1513,6 +1535,7 @@ class EventLane:
         brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
         brief["accepted"] = len(out.get("accepted") or [])
         brief["proposed"] = int(out.get("proposed") or 0)
+        brief["rerun"] = rerun is not None
         return brief | {"_status": status}
 
     def _screen_open_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,

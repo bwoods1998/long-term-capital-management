@@ -174,7 +174,9 @@ class TheGrammar(unittest.TestCase):
             "a seatable birth holds one session": base | {"hold": 2},
             "seatable must be true or false": base | {"seatable": 1},
             "rank must be one of": base | {"rank": "reaction"},
-            "id must match": base | {"id": "EVL-ERN-READ-O1"},
+            # (A95: an id lacking "EVL-B-" is named by the House now, "EVL-ERN-READ-O1" becoming "EVL-B-ERN-READ-O1";
+            # an id that fails as named is refused: league/tests/test_events_births_names.py)
+            "id must match": base | {"id": "EVL-B-lower-case"},
             "family must be one of": base | {"family": "options"},
             "items must be a list of 8-K items": base | {"rule": {"items": ["2.02"]}},
             "the 8k family names its item set": base | {"rule": {}},
