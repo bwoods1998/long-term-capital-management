@@ -1303,6 +1303,23 @@ class TheRoomWhileItWaits(TB.EventTest):
             h.tick(15, 48)
         self.assertEqual(self.sent(h), [("ACME", "2")])
 
+    def test_a_waiting_probe_row_keeps_its_line_slots_from_a_learning_row_of_preregevl1_after_it(self):
+        h = self.harness()
+        self.fall(h, "ACME", TB.CIK, "e-1", 15.2)
+        self.fall(h, "GAMA", TB.CIK3, "e-3", 16.8, score=0)
+        h.lane.band("EVL-ERN-DROP-ON", "probe", version=1)
+        h.lane.decided(TB.DAY, "open")
+        tight = dataclasses.replace(EB.settings(), max_orders_day=2)
+        with mock.patch.object(EB, "settings", lambda constitution=None: tight):
+            for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            self.assertEqual(self.sent(h), [], "the learning row leaves the line's two orders to the waiting Probe row")
+            self.assertIn("the event kind's day order count", self.buy(h, "GAMA")["why"])
+            self.receipt(h, "EVL-ERN-DROP-ON")
+            h.tick(15, 48)
+        probe = str(int(tight.share("probe") * 2000 // 20))
+        self.assertEqual(self.sent(h), [("ACME", probe)], "Probe's share of E at the $20.00 limit")
+
     def test_a_decision_started_at_its_time_gives_the_book_a_minute_to_send(self):
         """The same book minutes (at :40 seconds), the lane's close decision started at 15:47:00 ET (the lane's hold,
         `house.HOLD_LEAD`) and finished at 15:47:05: the 15:47:40 minute sends the buy, well before the cut-off."""

@@ -343,7 +343,8 @@ HELD_ROOM = "waits for the room kept for the buys ahead of it in ROOM's order"
 #: (league/events/report.py `ROOM_WAIT`, the same words).
 HELD_AHEAD = "wait for the lane's close decision"
 #: kv: the closes whose PREREG-EVL-5 buys ended UNSENT while they waited for the lane's close decision
-#: (`_event_held_said`): {"said": the last day looked at, "days": {day: how many}} (the last HELD_DAYS such closes).
+#: (`_event_held_said`): {"said": the last day said, "days": {day: how many}} (the last HELD_DAYS such closes), written
+#: only on such a close.
 EVL5_HELD_SAID = "eq_evl5_held_unsent"
 #: How many such closes are kept, and the sessions back a second one makes the alarm a warning (it recurs).
 HELD_DAYS = 10
@@ -1060,6 +1061,7 @@ class EquityBook:
         #: A80: the New York day whose venue cancels this process has read for the session's one alert
         #: (`_venue_cancel_said`).
         self._venue_said: str | None = None
+        self._held_said: str | None = None      # (PREREG-EVL-5: the close `_event_held_said` last looked at, this process)
         #: instance -> (code sha, params) loaded in the decider child this process; its NEEDS as the child read them.
         self._loaded: dict[str, tuple[str, str]] = {}
         self._needs: dict[str, dict[str, Any]] = {}
@@ -5785,7 +5787,7 @@ class EquityBook:
                 self._event_ladder(lot, "no sale was planned at its auction (the House missed its decision)", adapter)
         if passed(today, "close") and self._venue_said != today:
             self._venue_cancel_said(today)
-        if passed(today, "close"):
+        if passed(today, "close") and self._held_said != today:
             self._event_held_said(today, adapter)
 
     def _event_held_said(self, day: str, adapter: Any) -> None:
@@ -5794,8 +5796,10 @@ class EquityBook:
         (`book.part_hold`, its words `book.PART_WAIT` on the end), and how many later buys ended unsent waiting for the
         room or the line slots kept for them (`HELD_AHEAD`). A close with any: an `equity.alert` record of the counts and an alert, a
         WARNING when another close of the last `HELD_RECUR_SESSIONS` sessions had any (it recurs: the lane's close
-        decision finishes too late for the book's window), else info. kv `EVL5_HELD_SAID` keeps the day looked at and the
-        last `HELD_DAYS` such closes; a close with none leaves only the day."""
+        decision finishes too late for the book's window), else info. kv `EVL5_HELD_SAID` keeps the last day said and the
+        last `HELD_DAYS` such closes, written only on a close with one; a close with none is read once a process
+        (`_held_said`) and leaves no trace (the book's state is as before for every other path)."""
+        self._held_said = day
         kept = self.state.get(EVL5_HELD_SAID)
         kept = dict(kept) if isinstance(kept, Mapping) else {}
         if kept.get("said") == day:
@@ -5810,13 +5814,13 @@ class EquityBook:
                     continue
                 unsent += words in text
                 waited += HELD_AHEAD in text
+        if not unsent and not waited:
+            return
         days = {str(k): int(v) for k, v in dict(kept.get("days") or {}).items()}
         if unsent:
             days[day] = unsent
         days = dict(sorted(days.items())[-HELD_DAYS:])
         self.state.put(EVL5_HELD_SAID, {"said": day, "days": days})
-        if not unsent and not waited:
-            return
         recent = []
         for d in days:
             if d == day:
