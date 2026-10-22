@@ -1,0 +1,90 @@
+{
+ "W5": {
+  "sessions": 1454,
+  "lookback_sessions": 1482,
+  "form4_P_filings_est": 79962,
+  "8k_est": 395381,
+  "8k_listed_issuer_est": 333537,
+  "max_issuers_with_symbol_a_year": 5807,
+  "sec": {
+   "atom_8k_pages_upper": 13010,
+   "form4_txt": 92914,
+   "fsds_range": 235,
+   "s2_quarter_files": 27,
+   "requests": 106187,
+   "hours_at_6.67_per_s": 4.42
+  },
+  "alpaca": {
+   "bars_grouped": 3780,
+   "bars_alone_worst": 25180,
+   "premarket_1min": 11632,
+   "mark1530_1min": 8724,
+   "auctions": 8724,
+   "auctions_hours_at_90": 1.62,
+   "news_pages_by_articles_a_day": {
+    "1000": 42420,
+    "1500": 63630,
+    "2000": 84840,
+    "3000": 127260
+   },
+   "hours_shared_100": {
+    "1000": 11.1,
+    "1500": 14.6,
+    "2000": 18.2,
+    "3000": 25.2
+   },
+   "hours_shared_100_bars_worst_extra": 3.6,
+   "hours_paper_190": {
+    "1000": 5.8,
+    "1500": 7.7,
+    "2000": 9.6,
+    "3000": 13.3
+   },
+   "hours_paper_190_bars_worst_extra": 1.9
+  }
+ },
+ "W10": {
+  "sessions": 2674,
+  "lookback_sessions": 2703,
+  "form4_P_filings_est": 164277,
+  "8k_est": 725456,
+  "8k_listed_issuer_est": 616949,
+  "max_issuers_with_symbol_a_year": 5807,
+  "sec": {
+   "atom_8k_pages_upper": 17596,
+   "form4_txt": 177229,
+   "fsds_range": 235,
+   "s2_quarter_files": 47,
+   "requests": 195108,
+   "hours_at_6.67_per_s": 8.13
+  },
+  "alpaca": {
+   "bars_grouped": 6930,
+   "bars_alone_worst": 25180,
+   "premarket_1min": 21392,
+   "mark1530_1min": 16044,
+   "auctions": 16044,
+   "auctions_hours_at_90": 2.97,
+   "news_pages_by_articles_a_day": {
+    "1000": 77820,
+    "1500": 116730,
+    "2000": 155640,
+    "3000": 233460
+   },
+   "hours_shared_100": {
+    "1000": 20.4,
+    "1500": 26.8,
+    "2000": 33.3,
+    "3000": 46.3
+   },
+   "hours_shared_100_bars_worst_extra": 3.0,
+   "hours_paper_190": {
+    "1000": 10.7,
+    "1500": 14.1,
+    "2000": 17.5,
+    "3000": 24.4
+   },
+   "hours_paper_190_bars_worst_extra": 1.6
+  }
+ }
+}

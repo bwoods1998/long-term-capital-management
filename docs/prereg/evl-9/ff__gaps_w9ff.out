@@ -1,0 +1,15 @@
+(1) search minus fresh, in SE of the difference
+  O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1            search 0.1550 (R 200) fresh 0.1300 (R 2000) gap +0.0250 = +0.94 SE
+  O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1                     search 0.1300 (R 200) fresh 0.1070 (R 1000) gap +0.0230 = +0.89 SE
+  O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1-TAUS05a13           search 0.1300 (R 200) fresh 0.1070 (R 2000) gap +0.0230 = +0.93 SE
+  O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1            search 0.1550 (R 200) fresh 0.1475 (R 2000) gap +0.0075 = +0.28 SE
+  ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-cnt                 search 0.1300 (R 200) fresh 0.1100 (R 1000) gap +0.0200 = +0.78 SE
+  ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2            search 0.1800 (R 200) fresh 0.1370 (R 2000) gap +0.0430 = +1.52 SE
+(2) every fresh replicate pooled (rounds 1 + 2 + the life cell's run 1)
+  O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1            rounds 1+2 0.1475 (R 2000) life run 1 0.1517 (R 600) pooled 0.1485 (se 0.0070, R 2600)
+  ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2            rounds 1+2 0.1370 (R 2000) life run 1 0.1417 (R 600) pooled 0.1381 (se 0.0068, R 2600)
+(3) the shape guard at the low-volatility prior and noise history (stress grid, 200 programs; beside the same cell with the guard on)
+  O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1    guard on (fresh, R 2000) 0.1300 picks' issuer effect +6.1 bp sig 0.019 | guard off (R 200) 0.0750 +1.0 bp sig 0.016
+  ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2    guard on (search, R 200) 0.0950 picks' issuer effect +6.2 bp sig 0.019 | guard off (R 200) 0.0700 +0.8 bp sig 0.017
+  O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1             guard on (fresh, R 1000) 0.1070 picks' issuer effect +5.0 bp sig 0.037 | guard off (R 200) 0.0850 +1.7 bp sig 0.034
+  ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2             guard on (search, R 200) 0.1100 picks' issuer effect +6.2 bp sig 0.038 | guard off (R 200) 0.1100 +2.4 bp sig 0.037

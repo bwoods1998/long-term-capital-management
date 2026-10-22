@@ -1,0 +1,55 @@
+== rc9.bind.jsonl
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                  R=1000  RUN1 0.1610 (se 0.0116) cm<=0 0.0080 cm<=10bp 0.0300 | v120 0.2770 | ev/s 7.95 tau +9.2bp sig 0.019
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1                  R=600   RUN1 0.1483 (se 0.0145) cm<=0 0.0233 cm<=10bp 0.0367 | v120 0.2800 | ev/s 7.95 tau +8.7bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                  R=600   RUN1 0.1467 (se 0.0144) cm<=0 0.0217 cm<=10bp 0.0350 | v120 0.2817 | ev/s 7.97 tau +10.1bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                  R=2000  RUN1 0.1400 (se 0.0078) cm<=0 0.0160 cm<=10bp 0.0385 | v120 0.2450 | ev/s 7.81 tau +6.9bp sig 0.019
+    pooled with the fixer's fresh 0.1265 (R 2000): 0.1333 (se 0.0054, R 4000)
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                           R=1000  RUN1 0.1280 (se 0.0106) cm<=0 0.0100 cm<=10bp 0.0250 | v120 0.2230 | ev/s 7.30 tau +8.4bp sig 0.043
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                           R=1000  RUN1 0.1260 (se 0.0105) cm<=0 0.0230 cm<=10bp 0.0390 | v120 0.2330 | ev/s 6.62 tau +7.7bp sig 0.041
+ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                      R=600   RUN1 0.1233 (se 0.0134) cm<=0 0.0150 cm<=10bp 0.0317 | v120 0.2117 | ev/s 7.44 tau +8.6bp sig 0.046
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                           R=1000  RUN1 0.1160 (se 0.0101) cm<=0 0.0180 cm<=10bp 0.0300 | v120 0.1810 | ev/s 3.63 tau +6.7bp sig 0.039
+    pooled with the fixer's fresh 0.1155 (R 2000): 0.1157 (se 0.0058, R 3000)
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1                           R=600   RUN1 0.1100 (se 0.0128) cm<=0 0.0100 cm<=10bp 0.0133 | v120 0.2067 | ev/s 6.51 tau +7.0bp sig 0.040
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1                           R=600   RUN1 0.0917 (se 0.0118) cm<=0 0.0317 cm<=10bp 0.0533 | v120 0.1450 | ev/s 3.01 tau +0.0bp sig 0.036
+    pooled with the fixer's fresh 0.0970 (R 2000): 0.0958 (se 0.0058, R 2600)
+== rc9.cold.jsonl
+ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                         R=600   RUN1 0.1033 (se 0.0124) cm<=0 0.0217 cm<=10bp 0.0433 | v120 0.1933 | ev/s 7.79 tau +6.7bp sig 0.050
+ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                         R=400   RUN1 0.0975 (se 0.0148) cm<=0 0.0125 cm<=10bp 0.0225 | v120 0.1750 | ev/s 7.87 tau +6.6bp sig 0.050
+O1-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1                         R=400   RUN1 0.0900 (se 0.0143) cm<=0 0.0100 cm<=10bp 0.0275 | v120 0.1950 | ev/s 7.82 tau +4.9bp sig 0.048
+== rc9.fix.jsonl
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-G20              R=400   RUN1 0.1600 (se 0.0183) cm<=0 0.0050 cm<=10bp 0.0200 | v120 0.3000 | ev/s 7.41 tau +12.4bp sig 0.021
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-G20              R=400   RUN1 0.1400 (se 0.0173) cm<=0 0.0200 cm<=10bp 0.0375 | v120 0.2750 | ev/s 7.41 tau +12.5bp sig 0.021
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-SP20             R=400   RUN1 0.1325 (se 0.0170) cm<=0 0.0125 cm<=10bp 0.0250 | v120 0.2350 | ev/s 7.87 tau +7.6bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-SP20             R=400   RUN1 0.1175 (se 0.0161) cm<=0 0.0100 cm<=10bp 0.0275 | v120 0.2175 | ev/s 7.89 tau +7.2bp sig 0.019
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-G20                       R=400   RUN1 0.1175 (se 0.0161) cm<=0 0.0150 cm<=10bp 0.0250 | v120 0.2325 | ev/s 5.78 tau +10.1bp sig 0.044
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-SP20                      R=400   RUN1 0.0850 (se 0.0139) cm<=0 0.0225 cm<=10bp 0.0325 | v120 0.1850 | ev/s 6.12 tau +5.5bp sig 0.041
+== rc9.fix2.jsonl
+ON-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n600-lag2-SP05                      R=200   RUN1 0.2250 (se 0.0295) cm<=0 0.0000 cm<=10bp 0.0000 | v120 0.3500 | ev/s 7.99 tau +0.0bp sig 0.077
+O1-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-SP05                      R=200   RUN1 0.1500 (se 0.0252) cm<=0 0.0000 cm<=10bp 0.0000 | v120 0.2400 | ev/s 7.91 tau +0.0bp sig 0.073
+ON-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n600-lag2-SP20                      R=200   RUN1 0.1450 (se 0.0249) cm<=0 0.0000 cm<=10bp 0.0000 | v120 0.2750 | ev/s 7.97 tau +0.0bp sig 0.075
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-SP20             R=400   RUN1 0.1100 (se 0.0156) cm<=0 0.0175 cm<=10bp 0.0275 | v120 0.2250 | ev/s 7.89 tau +6.7bp sig 0.019
+O1-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-SP20                      R=200   RUN1 0.1050 (se 0.0217) cm<=0 0.0000 cm<=10bp 0.0000 | v120 0.2650 | ev/s 7.85 tau +0.0bp sig 0.069
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-SP20             R=400   RUN1 0.1025 (se 0.0152) cm<=0 0.0150 cm<=10bp 0.0275 | v120 0.2025 | ev/s 7.90 tau +6.8bp sig 0.019
+== rc9.hd.jsonl
+ON-CHAR10-HD08-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                  R=400   RUN1 0.0850 (se 0.0139) cm<=0 0.0125 cm<=10bp 0.0400 | v120 0.1575 | ev/s 7.93 tau +2.6bp sig 0.064
+ON-HD08-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                         R=400   RUN1 0.0750 (se 0.0132) cm<=0 0.0250 cm<=10bp 0.0375 | v120 0.1300 | ev/s 7.92 tau +0.3bp sig 0.067
+O1-HD05-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1                           R=400   RUN1 0.0650 (se 0.0123) cm<=0 0.0150 cm<=10bp 0.0275 | v120 0.1450 | ev/s 7.55 tau +1.7bp sig 0.060
+ON-CHAR10-HD08-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2                    R=400   RUN1 0.0400 (se 0.0098) cm<=0 0.0075 cm<=10bp 0.0075 | v120 0.1275 | ev/s 7.90 tau +1.1bp sig 0.068
+== rc9.nolev.jsonl
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-NOLEV            R=400   RUN1 0.1550 (se 0.0181) cm<=0 0.0125 cm<=10bp 0.0325 | v120 0.2750 | ev/s 7.95 tau +7.8bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV            R=600   RUN1 0.1400 (se 0.0142) cm<=0 0.0100 cm<=10bp 0.0233 | v120 0.2767 | ev/s 7.95 tau +9.1bp sig 0.019
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-NOLEV                     R=400   RUN1 0.1250 (se 0.0165) cm<=0 0.0275 cm<=10bp 0.0400 | v120 0.2075 | ev/s 3.43 tau +5.2bp sig 0.036
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV-SP20       R=400   RUN1 0.1225 (se 0.0164) cm<=0 0.0200 cm<=10bp 0.0350 | v120 0.2000 | ev/s 7.88 tau +7.1bp sig 0.019
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV                     R=400   RUN1 0.0925 (se 0.0145) cm<=0 0.0175 cm<=10bp 0.0175 | v120 0.1950 | ev/s 6.48 tau +6.8bp sig 0.040
+== rc9.stress.jsonl
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10          R=400   RUN1 0.1325 (se 0.0170) cm<=0 0.0225 cm<=10bp 0.0300 | v120 0.2225 | ev/s 7.81 tau +6.2bp sig 0.021
+ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                  R=400   RUN1 0.1250 (se 0.0165) cm<=0 0.0225 cm<=10bp 0.0400 | v120 0.2400 | ev/s 7.90 tau +6.1bp sig 0.019
+== rc9.taus.jsonl
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-TAUS10a13                 R=300   RUN1 0.1333 (se 0.0196) cm<=0 0.0100 cm<=10bp 0.0300 | v120 0.2500 | ev/s 7.71 tau +14.1bp sig 0.051 | TAUS corr(g, live tau/sig) 0.134
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-TAUS10a00                 R=300   RUN1 0.1300 (se 0.0194) cm<=0 0.0100 cm<=10bp 0.0400 | v120 0.2200 | ev/s 6.17 tau +8.3bp sig 0.044 | TAUS corr(g, live tau/sig) -0.002
+ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-TAUScoldref             R=300   RUN1 0.1233 (se 0.0190) cm<=0 0.0200 cm<=10bp 0.0467 | v120 0.2133 | ev/s 7.30 tau +5.5bp sig 0.047
+ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-TAUS10a13            R=300   RUN1 0.1200 (se 0.0188) cm<=0 0.0000 cm<=10bp 0.0200 | v120 0.2267 | ev/s 7.70 tau +13.6bp sig 0.052 | TAUS corr(g, live tau/sig) 0.132
+ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-TAUS10a00            R=300   RUN1 0.1100 (se 0.0181) cm<=0 0.0133 cm<=10bp 0.0200 | v120 0.2000 | ev/s 6.20 tau +8.2bp sig 0.045 | TAUS corr(g, live tau/sig) -0.002
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-TAUS05a13                 R=300   RUN1 0.1033 (se 0.0176) cm<=0 0.0233 cm<=10bp 0.0333 | v120 0.2000 | ev/s 7.49 tau +8.7bp sig 0.050 | TAUS corr(g, live tau/sig) 0.064
+ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-TAUS05a13            R=300   RUN1 0.0833 (se 0.0160) cm<=0 0.0200 cm<=10bp 0.0267 | v120 0.1800 | ev/s 7.55 tau +8.7bp sig 0.052 | TAUS corr(g, live tau/sig) 0.062
+O1-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-TAUScoldref             R=300   RUN1 0.0767 (se 0.0154) cm<=0 0.0133 cm<=10bp 0.0333 | v120 0.1500 | ev/s 7.34 tau +4.4bp sig 0.049

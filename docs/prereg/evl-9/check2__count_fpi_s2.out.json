@@ -1,0 +1,9 @@
+{
+ "s2_form4_issuers_2025q4_2026q3": 5711,
+ "domestic|issuer_of_a_form4=False": 416,
+ "domestic|issuer_of_a_form4=True": 4082,
+ "fpi|issuer_of_a_form4=False": 631,
+ "fpi|issuer_of_a_form4=True": 519,
+ "no-periodic|issuer_of_a_form4=False": 199,
+ "no-periodic|issuer_of_a_form4=True": 234
+}

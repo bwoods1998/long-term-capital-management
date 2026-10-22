@@ -1,0 +1,14 @@
+c9 = max(PREREG-EVL-6's 0.13, W9 0.1333 rounded up to 0.01) = 0.14
+PREREG-EVL-6's budget 3.90; used at REGISTERED_AT_6 1.95 (fifteen versions)
+  with 0 seatable birth(s) registered before REGISTERED_AT_9: used before this file 2.86 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.14 = 0.28; used after 3.14; LEFT 0.76 (6 charges of 0.13)
+  with 3 seatable birth(s) registered before REGISTERED_AT_9: used before this file 3.25 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.14 = 0.28; used after 3.53; LEFT 0.37 (3 charges of 0.13)
+if LEFT before this file holds 0.28: both ids; if it holds 0.14 only: EVL-WL-ON alone (the larger pool); else this file registers nothing
+this file's lifetime draw: at most 3 runs a version: 6 x 0.14 = 0.84
+
+c9 = max(PREREG-EVL-6's 0.13, W9 0.161 rounded up to 0.01) = 0.17
+PREREG-EVL-6's budget 3.90; used at REGISTERED_AT_6 1.95 (fifteen versions)
+  with 0 seatable birth(s) registered before REGISTERED_AT_9: used before this file 2.86 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.17 = 0.34; used after 3.20; LEFT 0.70 (5 charges of 0.13)
+  with 3 seatable birth(s) registered before REGISTERED_AT_9: used before this file 3.25 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.17 = 0.34; used after 3.59; LEFT 0.31 (2 charges of 0.13)
+if LEFT before this file holds 0.34: both ids; if it holds 0.17 only: EVL-WL-ON alone (the larger pool); else this file registers nothing
+this file's lifetime draw: at most 3 runs a version: 6 x 0.17 = 1.02
+

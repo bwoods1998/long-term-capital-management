@@ -1,0 +1,14 @@
+== rc9.bind.jsonl
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                  R=1000  RUN1 0.1610 (se 0.0116) cm<=0 0.0080 cm<=10bp 0.0300 | v120 0.2770 | ev/s 7.95 tau +9.2bp sig 0.019
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1                  R=600   RUN1 0.1483 (se 0.0145) cm<=0 0.0233 cm<=10bp 0.0367 | v120 0.2800 | ev/s 7.95 tau +8.7bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                  R=600   RUN1 0.1467 (se 0.0144) cm<=0 0.0217 cm<=10bp 0.0350 | v120 0.2817 | ev/s 7.97 tau +10.1bp sig 0.019
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                  R=2000  RUN1 0.1400 (se 0.0078) cm<=0 0.0160 cm<=10bp 0.0385 | v120 0.2450 | ev/s 7.81 tau +6.9bp sig 0.019
+    pooled with the fixer's fresh 0.1265 (R 2000): 0.1333 (se 0.0054, R 4000)
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                           R=1000  RUN1 0.1280 (se 0.0106) cm<=0 0.0100 cm<=10bp 0.0250 | v120 0.2230 | ev/s 7.30 tau +8.4bp sig 0.043
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2                           R=1000  RUN1 0.1260 (se 0.0105) cm<=0 0.0230 cm<=10bp 0.0390 | v120 0.2330 | ev/s 6.62 tau +7.7bp sig 0.041
+ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2                      R=600   RUN1 0.1233 (se 0.0134) cm<=0 0.0150 cm<=10bp 0.0317 | v120 0.2117 | ev/s 7.44 tau +8.6bp sig 0.046
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2                           R=1000  RUN1 0.1160 (se 0.0101) cm<=0 0.0180 cm<=10bp 0.0300 | v120 0.1810 | ev/s 3.63 tau +6.7bp sig 0.039
+    pooled with the fixer's fresh 0.1155 (R 2000): 0.1157 (se 0.0058, R 3000)
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1                           R=600   RUN1 0.1100 (se 0.0128) cm<=0 0.0100 cm<=10bp 0.0133 | v120 0.2067 | ev/s 6.51 tau +7.0bp sig 0.040
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1                           R=600   RUN1 0.0917 (se 0.0118) cm<=0 0.0317 cm<=10bp 0.0533 | v120 0.1450 | ev/s 3.01 tau +0.0bp sig 0.036
+    pooled with the fixer's fresh 0.0970 (R 2000): 0.0958 (se 0.0058, R 2600)

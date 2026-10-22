@@ -1,0 +1,8 @@
+{
+ "domestic|form4_in_365d=False": 417,
+ "domestic|form4_in_365d=True": 4102,
+ "fpi|form4_in_365d=False": 611,
+ "fpi|form4_in_365d=True": 518,
+ "no-periodic-15m|form4_in_365d=False": 186,
+ "no-periodic-15m|form4_in_365d=True": 247
+}

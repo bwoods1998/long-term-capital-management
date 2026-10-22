@@ -1,0 +1,13 @@
+== fresh (round 1 + round 2 pooled per cell; never searched or chosen)
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1              FRESH 0.1475 (se 0.0079, R 2000) round1 0.1370 round2 0.1580 | search 0.155 | pooled-with-search 0.1482 | v120 0.2545 cm<=0 0.0250 cm<=10bp 0.0410 ev/s 7.88 tau +6.9bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2              FRESH 0.1370 (se 0.0077, R 2000) round1 0.1450 round2 0.1290 | search 0.180 | pooled-with-search 0.1409 | v120 0.2505 cm<=0 0.0175 cm<=10bp 0.0330 ev/s 7.92 tau +7.8bp
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1              FRESH 0.1300 (se 0.0075, R 2000) round1 0.1360 round2 0.1240 | search 0.155 | pooled-with-search 0.1323 | v120 0.2345 cm<=0 0.0155 cm<=10bp 0.0375 ev/s 7.81 tau +6.1bp
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-cnt                   FRESH 0.1100 (se 0.0099, R 1000) round1 0.1100 round2 nan | search 0.130 | pooled-with-search 0.1133 | v120 0.1990 cm<=0 0.0220 cm<=10bp 0.0330 ev/s 6.53 tau +4.4bp
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1                       FRESH 0.1070 (se 0.0098, R 1000) round1 0.1070 round2 nan | search 0.130 | pooled-with-search 0.1108 | v120 0.1900 cm<=0 0.0150 cm<=10bp 0.0360 ev/s 4.96 tau +5.0bp
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1-TAUS05a13             FRESH 0.1070 (se 0.0069, R 2000) round1 0.1150 round2 0.0990 | search 0.130 | pooled-with-search 0.1091 | v120 0.2055 cm<=0 0.0160 cm<=10bp 0.0340 ev/s 7.44 tau +7.9bp
+W9 = 0.1475 (O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1, se 0.0079, R 2000); c9 = max(0.13, 0.15) = 0.15
+worst ON: ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2 0.1370 (se 0.0077)
+worst ON without an adversarial prior: ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-cnt 0.1100 (se 0.0099)
+worst O1: O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1 0.1475 (se 0.0079)
+worst O1 without an adversarial prior: O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1 0.1070 (se 0.0098)
+LIFE ['ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2', 'O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1'] COLD ['ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2', 'O1-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1']

@@ -1,0 +1,10 @@
+search: 1/1224 O1-H0-crasht3-skew-rho15-phi15-dr20-tau1-n300-lag1 seed 401005001 54.7s total 55s
+search: 2/1224 O1-H0-crash-skew-rho15-phi15-dr20-tau1-n300-lag1 seed 401001001 56.0s total 56s
+search: 3/1224 O1-H0-crash-skew-rho15-phi15-dr10-tau1-n300-lag1 seed 401000001 56.9s total 57s
+search: 4/1224 O1-H0-crasht3-skew-rho15-phi20-dr10-tau1-n300-lag1 seed 401006001 58.5s total 59s
+search: 5/1224 O1-H0-crash-skew-rho15-phi20-dr20-tau1-n300-lag1 seed 401003001 59.0s total 59s
+search: 6/1224 O1-H0-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1 seed 401007001 62.8s total 63s
+search: 7/1224 O1-H0-crasht3-skew-rho15-phi15-dr10-tau1-n300-lag1 seed 401004001 62.9s total 63s
+search: 8/1224 O1-H0-crash-skew-rho15-phi20-dr10-tau1-n300-lag1 seed 401002001 65.3s total 66s
+/usr/lib/python3.14/multiprocessing/resource_tracker.py:475: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown: {'/mp-hikey58b', '/mp-ysn3rms8', '/mp-e6_qde_n', '/mp-e4inkicv', '/mp-ei6vq3eq', '/mp-jfa0_ga8'}
+  warnings.warn(

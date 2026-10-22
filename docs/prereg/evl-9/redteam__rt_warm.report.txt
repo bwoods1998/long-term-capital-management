@@ -1,0 +1,156 @@
+REF-RANDOM  R=400
+  ev6d: pass(selected)=0.0650 (se 0.0123)  pass(blind cand0)=0.0650  by cand=['0.065']  retired=0.103 exhausted=0.833 mean end=50.9 events until end=415 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0350 (se 0.0092)  pass(blind cand0)=0.0350  by cand=['0.035']  retired=0.072 exhausted=0.892 mean end=54.0 events until end=440 true edge until end=0.0 bp
+  picks/session=8.00 true edge first20=0.0 bp all=0.0 bp beta excess of picks=-0.002
+REF-FWD  R=400
+  ev6d: pass(selected)=0.0600 (se 0.0119)  pass(blind cand0)=0.0600  by cand=['0.060']  retired=0.073 exhausted=0.868 mean end=58.4 events until end=415 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0400 (se 0.0098)  pass(blind cand0)=0.0400  by cand=['0.040']  retired=0.055 exhausted=0.905 mean end=60.3 events until end=430 true edge until end=0.0 bp
+  picks/session=7.24 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.295
+W-NOISE  R=400
+  ev6d: pass(selected)=0.0525 (se 0.0112)  pass(blind cand0)=0.0525  by cand=['0.053']  retired=0.043 exhausted=0.845 mean end=64.1 events until end=304 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0375 (se 0.0095)  pass(blind cand0)=0.0375  by cand=['0.037']  retired=0.035 exhausted=0.868 mean end=65.2 events until end=311 true edge until end=0.0 bp
+  picks/session=5.18 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.348
+W-NOISE-HL40  R=400
+  ev6d: pass(selected)=0.0425 (se 0.0101)  pass(blind cand0)=0.0425  by cand=['0.043']  retired=0.060 exhausted=0.897 mean end=55.1 events until end=395 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0275 (se 0.0082)  pass(blind cand0)=0.0275  by cand=['0.028']  retired=0.050 exhausted=0.922 mean end=56.2 events until end=403 true edge until end=0.0 bp
+  picks/session=7.10 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.282
+W-DECAY  R=400
+  ev6d: pass(selected)=0.0425 (se 0.0101)  pass(blind cand0)=0.0425  by cand=['0.043']  retired=0.080 exhausted=0.878 mean end=53.1 events until end=430 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0250 (se 0.0078)  pass(blind cand0)=0.0250  by cand=['0.025']  retired=0.065 exhausted=0.910 mean end=54.8 events until end=444 true edge until end=0.0 bp
+  picks/session=7.95 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.467
+W-LEAK  R=400
+  ev6d: pass(selected)=0.0450 (se 0.0104)  pass(blind cand0)=0.0450  by cand=['0.045']  retired=0.055 exhausted=0.900 mean end=54.2 events until end=441 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0275 (se 0.0082)  pass(blind cand0)=0.0275  by cand=['0.028']  retired=0.050 exhausted=0.922 mean end=55.4 events until end=451 true edge until end=0.0 bp
+  picks/session=8.00 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.402
+W-TE  R=400
+  ev6d: pass(selected)=0.0350 (se 0.0092)  pass(blind cand0)=0.0350  by cand=['0.035']  retired=0.065 exhausted=0.867 mean end=61.1 events until end=315 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0175 (se 0.0066)  pass(blind cand0)=0.0175  by cand=['0.018']  retired=0.052 exhausted=0.897 mean end=62.6 events until end=324 true edge until end=0.0 bp
+  picks/session=5.44 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.351
+W-TE-tau1  R=400
+  ev6d: pass(selected)=0.9475 (se 0.0112)  pass(blind cand0)=0.9475  by cand=['0.948']  retired=0.000 exhausted=0.052 mean end=15.3 events until end=131 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.9400 (se 0.0119)  pass(blind cand0)=0.9400  by cand=['0.940']  retired=0.000 exhausted=0.060 mean end=17.6 events until end=149 true edge until end=0.0 bp
+  picks/session=8.00 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.126
+BRK-OVL5-gen  R=400
+  ev6d: pass(selected)=0.0800 (se 0.0136)  pass(blind cand0)=0.0800  by cand=['0.080']  retired=0.033 exhausted=0.887 mean end=54.3 events until end=398 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0525 (se 0.0112)  pass(blind cand0)=0.0525  by cand=['0.052']  retired=0.028 exhausted=0.920 mean end=56.0 events until end=410 true edge until end=0.0 bp
+  picks/session=7.18 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.299
+BRK-OVL10-gen  R=400
+  ev6d: pass(selected)=0.0950 (se 0.0147)  pass(blind cand0)=0.0950  by cand=['0.095']  retired=0.033 exhausted=0.873 mean end=53.8 events until end=387 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0625 (se 0.0121)  pass(blind cand0)=0.0625  by cand=['0.062']  retired=0.030 exhausted=0.907 mean end=55.6 events until end=400 true edge until end=0.0 bp
+  picks/session=7.11 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.289
+BRK-OVL5-te  R=400
+  ev6d: pass(selected)=0.0425 (se 0.0101)  pass(blind cand0)=0.0425  by cand=['0.043']  retired=0.068 exhausted=0.838 mean end=61.9 events until end=309 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0200 (se 0.0070)  pass(blind cand0)=0.0200  by cand=['0.020']  retired=0.053 exhausted=0.875 mean end=63.7 events until end=322 true edge until end=0.0 bp
+  picks/session=5.36 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.344
+BRK-OVL10-te  R=400
+  ev6d: pass(selected)=0.0525 (se 0.0112)  pass(blind cand0)=0.0525  by cand=['0.052']  retired=0.048 exhausted=0.885 mean end=60.8 events until end=320 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0375 (se 0.0095)  pass(blind cand0)=0.0375  by cand=['0.037']  retired=0.035 exhausted=0.912 mean end=62.3 events until end=330 true edge until end=0.0 bp
+  picks/session=5.42 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.350
+GRD-OVL0-te  R=400
+  ev6d: pass(selected)=0.0375 (se 0.0095)  pass(blind cand0)=0.0375  by cand=['0.037']  retired=0.062 exhausted=0.867 mean end=61.2 events until end=311 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0275 (se 0.0082)  pass(blind cand0)=0.0275  by cand=['0.028']  retired=0.037 exhausted=0.902 mean end=63.1 events until end=321 true edge until end=0.0 bp
+  picks/session=5.29 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.335
+W-NOISE-HL10  R=400
+  ev6d: pass(selected)=0.0625 (se 0.0121)  pass(blind cand0)=0.0625  by cand=['0.062']  retired=0.053 exhausted=0.885 mean end=54.0 events until end=401 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0275 (se 0.0082)  pass(blind cand0)=0.0275  by cand=['0.028']  retired=0.035 exhausted=0.938 mean end=56.6 events until end=420 true edge until end=0.0 bp
+  picks/session=7.26 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.301
+BRK-OVL10-HL10  R=400
+  ev6d: pass(selected)=0.1350 (se 0.0171)  pass(blind cand0)=0.1350  by cand=['0.135']  retired=0.018 exhausted=0.848 mean end=52.7 events until end=384 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.1000 (se 0.0150)  pass(blind cand0)=0.1000  by cand=['0.100']  retired=0.015 exhausted=0.885 mean end=54.7 events until end=398 true edge until end=0.0 bp
+  picks/session=7.21 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.294
+BRK-OVL20-HL10  R=400
+  ev6d: pass(selected)=0.1175 (se 0.0161)  pass(blind cand0)=0.1175  by cand=['0.118']  retired=0.030 exhausted=0.853 mean end=52.9 events until end=390 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0950 (se 0.0147)  pass(blind cand0)=0.0950  by cand=['0.095']  retired=0.020 exhausted=0.885 mean end=54.3 events until end=400 true edge until end=0.0 bp
+  picks/session=7.21 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.297
+SEL-N1  R=400
+  ev6d: pass(selected)=0.0500 (se 0.0109)  pass(blind cand0)=0.0325  by cand=['0.033', '0.055', '0.048', '0.033', '0.050', '0.028']  retired=0.075 exhausted=0.777 mean end=63.2 events until end=310 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0275 (se 0.0082)  pass(blind cand0)=0.0200  by cand=['0.020', '0.037', '0.035', '0.015', '0.040', '0.018']  retired=0.062 exhausted=0.812 mean end=65.0 events until end=324 true edge until end=0.0 bp
+  picks/session=5.55 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.349
+  selected candidate counts=[64, 65, 56, 59, 46, 110]
+SEL-SECDRIFT15  R=400
+  ev6d: pass(selected)=0.0625 (se 0.0121)  pass(blind cand0)=0.0650  by cand=['0.065', '0.052', '0.055', '0.075', '0.077', '0.050']  retired=0.055 exhausted=0.792 mean end=61.6 events until end=331 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0425 (se 0.0101)  pass(blind cand0)=0.0475  by cand=['0.048', '0.035', '0.030', '0.052', '0.053', '0.037']  retired=0.040 exhausted=0.828 mean end=63.4 events until end=343 true edge until end=0.0 bp
+  picks/session=5.95 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.328
+  selected candidate counts=[50, 65, 53, 64, 63, 105]
+SEL-SECDRIFT30  R=400
+  ev6d: pass(selected)=0.0800 (se 0.0136)  pass(blind cand0)=0.0650  by cand=['0.065', '0.107', '0.105', '0.060', '0.072', '0.022']  retired=0.037 exhausted=0.790 mean end=61.4 events until end=355 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0600 (se 0.0119)  pass(blind cand0)=0.0475  by cand=['0.048', '0.070', '0.085', '0.045', '0.048', '0.010']  retired=0.030 exhausted=0.818 mean end=62.9 events until end=365 true edge until end=0.0 bp
+  picks/session=6.43 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.335
+  selected candidate counts=[30, 91, 67, 52, 53, 107]
+SEL-BETA10  R=400
+  ev6d: pass(selected)=0.0475 (se 0.0106)  pass(blind cand0)=0.0575  by cand=['0.058', '0.053', '0.058', '0.035', '0.043', '0.052']  retired=0.045 exhausted=0.865 mean end=59.3 events until end=375 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0225 (se 0.0074)  pass(blind cand0)=0.0375  by cand=['0.037', '0.037', '0.022', '0.022', '0.030', '0.033']  retired=0.030 exhausted=0.905 mean end=61.2 events until end=388 true edge until end=0.0 bp
+  picks/session=6.66 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.425
+  selected candidate counts=[45, 70, 63, 56, 60, 106]
+WST-REF-RANDOM  R=400
+  ev6d: pass(selected)=0.1100 (se 0.0156)  pass(blind cand0)=0.1100  by cand=['0.110']  retired=0.040 exhausted=0.850 mean end=51.9 events until end=423 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0750 (se 0.0132)  pass(blind cand0)=0.0750  by cand=['0.075']  retired=0.033 exhausted=0.892 mean end=54.0 events until end=440 true edge until end=0.0 bp
+  picks/session=8.00 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.000
+WST-REF-FWD  R=400
+  ev6d: pass(selected)=0.1200 (se 0.0162)  pass(blind cand0)=0.1200  by cand=['0.120']  retired=0.048 exhausted=0.833 mean end=56.5 events until end=405 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0875 (se 0.0141)  pass(blind cand0)=0.0875  by cand=['0.087']  retired=0.037 exhausted=0.875 mean end=58.7 events until end=422 true edge until end=0.0 bp
+  picks/session=7.37 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.105
+WST-W-NOISE  R=400
+  ev6d: pass(selected)=0.0850 (se 0.0139)  pass(blind cand0)=0.0850  by cand=['0.085']  retired=0.033 exhausted=0.855 mean end=59.7 events until end=318 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0675 (se 0.0125)  pass(blind cand0)=0.0675  by cand=['0.068']  retired=0.030 exhausted=0.875 mean end=60.8 events until end=324 true edge until end=0.0 bp
+  picks/session=5.57 true edge first20=0.0 bp all=0.0 bp beta excess of picks=-0.083
+WST-W-NOISE-HL40  R=400
+  ev6d: pass(selected)=0.1275 (se 0.0167)  pass(blind cand0)=0.1275  by cand=['0.128']  retired=0.030 exhausted=0.843 mean end=51.7 events until end=392 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0950 (se 0.0147)  pass(blind cand0)=0.0950  by cand=['0.095']  retired=0.020 exhausted=0.885 mean end=54.0 events until end=409 true edge until end=0.0 bp
+  picks/session=7.41 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.095
+WST-W-NOISE-tau1  R=1200
+  ev6d: pass(selected)=0.1175 (se 0.0093)  pass(blind cand0)=0.1175  by cand=['0.117']  retired=0.051 exhausted=0.827 mean end=52.1 events until end=384 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0867 (se 0.0081)  pass(blind cand0)=0.0867  by cand=['0.087']  retired=0.042 exhausted=0.867 mean end=54.1 events until end=400 true edge until end=0.0 bp
+  picks/session=7.30 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.021
+WST-W-TE-tau1  R=400
+  ev6d: pass(selected)=0.8975 (se 0.0152)  pass(blind cand0)=0.8975  by cand=['0.897']  retired=0.000 exhausted=0.103 mean end=20.2 events until end=169 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.8675 (se 0.0170)  pass(blind cand0)=0.8675  by cand=['0.867']  retired=0.000 exhausted=0.133 mean end=22.7 events until end=189 true edge until end=0.0 bp
+  picks/session=7.99 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.017
+WST-REF-RANDOM-tau1  R=400
+  ev6d: pass(selected)=0.0975 (se 0.0148)  pass(blind cand0)=0.0975  by cand=['0.098']  retired=0.048 exhausted=0.855 mean end=51.9 events until end=423 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0800 (se 0.0136)  pass(blind cand0)=0.0800  by cand=['0.080']  retired=0.037 exhausted=0.883 mean end=53.5 events until end=436 true edge until end=0.0 bp
+  picks/session=8.00 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.000
+WST-REF-FWD-tau1  R=1200
+  ev6d: pass(selected)=0.1208 (se 0.0094)  pass(blind cand0)=0.1208  by cand=['0.121']  retired=0.048 exhausted=0.831 mean end=56.5 events until end=408 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0917 (se 0.0083)  pass(blind cand0)=0.0917  by cand=['0.092']  retired=0.037 exhausted=0.872 mean end=58.6 events until end=425 true edge until end=0.0 bp
+  picks/session=7.46 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.149
+BETA-f0-plain  R=300
+  ev6d: pass(selected)=0.0567 (se 0.0133)  pass(blind cand0)=0.0567  by cand=['0.057']  retired=0.053 exhausted=0.860 mean end=60.0 events until end=339 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0367 (se 0.0109)  pass(blind cand0)=0.0367  by cand=['0.037']  retired=0.043 exhausted=0.890 mean end=61.8 events until end=351 true edge until end=0.0 bp
+  picks/session=5.83 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.383
+BETA-f4-plain  R=300
+  ev6d: pass(selected)=0.0467 (se 0.0122)  pass(blind cand0)=0.0467  by cand=['0.047']  retired=0.063 exhausted=0.863 mean end=59.7 events until end=328 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0200 (se 0.0081)  pass(blind cand0)=0.0200  by cand=['0.020']  retired=0.050 exhausted=0.903 mean end=61.8 events until end=343 true edge until end=0.0 bp
+  picks/session=5.72 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.382
+BETA-f10-plain  R=300
+  ev6d: pass(selected)=0.0500 (se 0.0126)  pass(blind cand0)=0.0500  by cand=['0.050']  retired=0.067 exhausted=0.873 mean end=56.9 events until end=356 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0367 (se 0.0109)  pass(blind cand0)=0.0367  by cand=['0.037']  retired=0.050 exhausted=0.903 mean end=58.4 events until end=366 true edge until end=0.0 bp
+  picks/session=6.38 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.411
+BETA-f10-hedge  R=300
+  ev6d: pass(selected)=0.0633 (se 0.0141)  pass(blind cand0)=0.0633  by cand=['0.063']  retired=0.060 exhausted=0.837 mean end=59.9 events until end=310 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0467 (se 0.0122)  pass(blind cand0)=0.0467  by cand=['0.047']  retired=0.053 exhausted=0.860 mean end=61.2 events until end=320 true edge until end=0.0 bp
+  picks/session=5.49 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.368
+BETA-f20-plain  R=300
+  ev6d: pass(selected)=0.0567 (se 0.0133)  pass(blind cand0)=0.0567  by cand=['0.057']  retired=0.030 exhausted=0.887 mean end=59.5 events until end=359 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0433 (se 0.0118)  pass(blind cand0)=0.0433  by cand=['0.043']  retired=0.023 exhausted=0.907 mean end=60.5 events until end=366 true edge until end=0.0 bp
+  picks/session=6.26 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.409
+BETA-f20-hedge  R=300
+  ev6d: pass(selected)=0.0433 (se 0.0118)  pass(blind cand0)=0.0433  by cand=['0.043']  retired=0.040 exhausted=0.900 mean end=60.4 events until end=341 true edge until end=0.0 bp
+  ev6t: pass(selected)=0.0367 (se 0.0109)  pass(blind cand0)=0.0367  by cand=['0.037']  retired=0.033 exhausted=0.913 mean end=61.1 events until end=346 true edge until end=0.0 bp
+  picks/session=5.99 true edge first20=0.0 bp all=0.0 bp beta excess of picks=+0.397
+PWR-clean-ic05  R=300
+  ev6d: pass(selected)=0.1433 (se 0.0202)  pass(blind cand0)=0.1433  by cand=['0.143']  retired=0.027 exhausted=0.830 mean end=51.5 events until end=418 true edge until end=43.9 bp
+  ev6t: pass(selected)=0.1167 (se 0.0185)  pass(blind cand0)=0.1167  by cand=['0.117']  retired=0.023 exhausted=0.860 mean end=52.7 events until end=428 true edge until end=43.9 bp
+  picks/session=7.97 true edge first20=44.1 bp all=43.9 bp beta excess of picks=+0.471
+PWR-leak-ic05  R=300
+  ev6d: pass(selected)=0.0767 (se 0.0154)  pass(blind cand0)=0.0767  by cand=['0.077']  retired=0.057 exhausted=0.867 mean end=52.9 events until end=431 true edge until end=6.9 bp
+  ev6t: pass(selected)=0.0533 (se 0.0130)  pass(blind cand0)=0.0533  by cand=['0.053']  retired=0.047 exhausted=0.900 mean end=54.5 events until end=444 true edge until end=6.9 bp
+  picks/session=8.00 true edge first20=6.6 bp all=7.4 bp beta excess of picks=+0.421
+PWR-fwdonly-ic05  R=300
+  ev6d: pass(selected)=0.0700 (se 0.0147)  pass(blind cand0)=0.0700  by cand=['0.070']  retired=0.050 exhausted=0.880 mean end=58.8 events until end=427 true edge until end=20.0 bp
+  ev6t: pass(selected)=0.0533 (se 0.0130)  pass(blind cand0)=0.0533  by cand=['0.053']  retired=0.047 exhausted=0.900 mean end=59.7 events until end=434 true edge until end=20.0 bp
+  picks/session=7.52 true edge first20=11.6 bp all=24.7 bp beta excess of picks=+0.395
+FLIP-ic05  R=300
+  ev6d: pass(selected)=0.0067 (se 0.0047)  pass(blind cand0)=0.0067  by cand=['0.007']  retired=0.657 exhausted=0.337 mean end=35.1 events until end=286 true edge until end=-106.3 bp
+  ev6t: pass(selected)=0.0067 (se 0.0047)  pass(blind cand0)=0.0067  by cand=['0.007']  retired=0.643 exhausted=0.350 mean end=36.8 events until end=300 true edge until end=-106.3 bp
+  picks/session=7.86 true edge first20=-107.3 bp all=-103.1 bp beta excess of picks=+0.460

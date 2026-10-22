@@ -1,0 +1,149 @@
+2016 1 60393
+2016 2 48422
+2016 3 35714
+2016 4 37663
+2017 1 62097
+2017 2 48943
+2017 3 33276
+2017 4 36485
+2018 1 60501
+2018 2 48520
+2018 3 34377
+2018 4 37062
+2019 1 59924
+2019 2 47698
+2019 3 33497
+2019 4 34311
+2020 1 62017
+2020 2 46840
+2020 3 34024
+2020 4 37745
+2021 1 64665
+2021 2 52394
+2021 3 37416
+2021 4 39978
+2022 1 63194
+2022 2 50481
+2022 3 33681
+2022 4 34958
+2023 1 62557
+2023 2 50854
+2023 3 33190
+2023 4 34786
+2024 1 61366
+2024 2 48887
+2024 3 32530
+2024 4 35197
+2025 1 57797
+2025 2 46845
+2025 3 31672
+2025 4 33223
+2026 1 56853
+2026 2 49832
+2026 3 33521
+{
+ "by_year": {
+  "2016": {
+   "8k": 70483,
+   "8k_listed_issuer": 59984,
+   "f4": 182192,
+   "f4_with_symbol": 180930,
+   "f4_P_purchase_filings": 17477,
+   "issuers_with_symbol": 5469,
+   "symbols": 5691
+  },
+  "2017": {
+   "8k": 68774,
+   "8k_listed_issuer": 58643,
+   "f4": 180801,
+   "f4_with_symbol": 179380,
+   "f4_P_purchase_filings": 14977,
+   "issuers_with_symbol": 5385,
+   "symbols": 5596
+  },
+  "2018": {
+   "8k": 66433,
+   "8k_listed_issuer": 57213,
+   "f4": 180460,
+   "f4_with_symbol": 179099,
+   "f4_P_purchase_filings": 19003,
+   "issuers_with_symbol": 5315,
+   "symbols": 5512
+  },
+  "2019": {
+   "8k": 64669,
+   "8k_listed_issuer": 55740,
+   "f4": 175430,
+   "f4_with_symbol": 173997,
+   "f4_P_purchase_filings": 17182,
+   "issuers_with_symbol": 5167,
+   "symbols": 5363
+  },
+  "2020": {
+   "8k": 70503,
+   "8k_listed_issuer": 61004,
+   "f4": 180626,
+   "f4_with_symbol": 179201,
+   "f4_P_purchase_filings": 18391,
+   "issuers_with_symbol": 5262,
+   "symbols": 5499
+  },
+  "2021": {
+   "8k": 72872,
+   "8k_listed_issuer": 62814,
+   "f4": 194453,
+   "f4_with_symbol": 192877,
+   "f4_P_purchase_filings": 14374,
+   "issuers_with_symbol": 5807,
+   "symbols": 6067
+  },
+  "2022": {
+   "8k": 68222,
+   "8k_listed_issuer": 58724,
+   "f4": 182314,
+   "f4_with_symbol": 180956,
+   "f4_P_purchase_filings": 16945,
+   "issuers_with_symbol": 5578,
+   "symbols": 5759
+  },
+  "2023": {
+   "8k": 70584,
+   "8k_listed_issuer": 60049,
+   "f4": 181387,
+   "f4_with_symbol": 180111,
+   "f4_P_purchase_filings": 15244,
+   "issuers_with_symbol": 5524,
+   "symbols": 5705
+  },
+  "2024": {
+   "8k": 67098,
+   "8k_listed_issuer": 55947,
+   "f4": 177980,
+   "f4_with_symbol": 176432,
+   "f4_P_purchase_filings": 12097,
+   "issuers_with_symbol": 5173,
+   "symbols": 5307
+  },
+  "2025": {
+   "8k": 66110,
+   "8k_listed_issuer": 54866,
+   "f4": 169537,
+   "f4_with_symbol": 167843,
+   "f4_P_purchase_filings": 12146,
+   "issuers_with_symbol": 5017,
+   "symbols": 5189
+  },
+  "2026": {
+   "8k": 51294,
+   "8k_listed_issuer": 41825,
+   "f4": 140206,
+   "f4_with_symbol": 138860,
+   "f4_P_purchase_filings": 9314,
+   "issuers_with_symbol": 5292,
+   "symbols": 5406
+  }
+ },
+ "form4_issuers_total": 10912,
+ "form4_atom_pages_owner_only": 26553,
+ "distinct_symbols_2016_2026": 12590
+}

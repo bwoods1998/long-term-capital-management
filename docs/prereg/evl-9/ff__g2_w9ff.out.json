@@ -1,0 +1,408 @@
+{
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 0.99,
+  "d_over_u": 0.0404
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.92,
+  "d_over_u": 0.0786
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0401
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.905,
+  "d_over_u": 0.0781
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.1772
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0401
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.208
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.895,
+  "d_over_u": 0.0792
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.2368
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0402
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.92,
+  "d_over_u": 0.0781
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0395
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.88,
+  "d_over_u": 0.0784
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0399
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.915,
+  "d_over_u": 0.078
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0405
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.915,
+  "d_over_u": 0.0803
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.041
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.955,
+  "d_over_u": 0.0798
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.3215
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0411
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.3454
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.905,
+  "d_over_u": 0.0805
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.3703
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0407
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.9,
+  "d_over_u": 0.0799
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 0.99,
+  "d_over_u": 0.0405
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.875,
+  "d_over_u": 0.08
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 0.995,
+  "d_over_u": 0.0406
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.895,
+  "d_over_u": 0.08
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.02|sessions10": {
+  "pass": 0.99,
+  "d_over_u": 0.0403
+ },
+ "correct|fixed|edit0.05|late0.01|elig0.01|map0.04|sessions10": {
+  "pass": 0.905,
+  "d_over_u": 0.0797
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.02|sessions10": {
+  "pass": 0.99,
+  "d_over_u": 0.0404
+ },
+ "correct|fixed|edit0.05|late0.05|elig0.05|map0.04|sessions10": {
+  "pass": 0.9,
+  "d_over_u": 0.0791
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.0|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.3451
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.02|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0403
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.02|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.3658
+ },
+ "correct|fixed|edit0.2|late0.01|elig0.01|map0.04|sessions10": {
+  "pass": 0.92,
+  "d_over_u": 0.0794
+ },
+ "correct|every|edit0.2|late0.01|elig0.01|map0.04|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.3883
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.02|sessions10": {
+  "pass": 0.995,
+  "d_over_u": 0.0405
+ },
+ "correct|fixed|edit0.2|late0.05|elig0.05|map0.04|sessions10": {
+  "pass": 0.92,
+  "d_over_u": 0.0795
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.02|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.04
+ },
+ "correct|fixed|edit0.4|late0.01|elig0.01|map0.04|sessions10": {
+  "pass": 0.9,
+  "d_over_u": 0.0794
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.0|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.02|sessions10": {
+  "pass": 1.0,
+  "d_over_u": 0.0406
+ },
+ "correct|fixed|edit0.4|late0.05|elig0.05|map0.04|sessions10": {
+  "pass": 0.93,
+  "d_over_u": 0.0794
+ },
+ "vintage|vault|close_rev0.001|vol_rev0.02|sessions3": {
+  "pass": 1.0
+ },
+ "vintage|export|close_rev0.001|vol_rev0.02|sessions3": {
+  "pass": 1.0
+ },
+ "vintage|vault|close_rev0.005|vol_rev0.02|sessions3": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.005|vol_rev0.02|sessions3": {
+  "pass": 1.0
+ },
+ "vintage|vault|close_rev0.01|vol_rev0.02|sessions3": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.01|vol_rev0.02|sessions3": {
+  "pass": 0.24
+ },
+ "vintage|vault|close_rev0.001|vol_rev0.02|sessions6": {
+  "pass": 1.0
+ },
+ "vintage|export|close_rev0.001|vol_rev0.02|sessions6": {
+  "pass": 0.995
+ },
+ "vintage|vault|close_rev0.005|vol_rev0.02|sessions6": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.005|vol_rev0.02|sessions6": {
+  "pass": 1.0
+ },
+ "vintage|vault|close_rev0.01|vol_rev0.02|sessions6": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.01|vol_rev0.02|sessions6": {
+  "pass": 0.175
+ },
+ "vintage|vault|close_rev0.001|vol_rev0.02|sessions10": {
+  "pass": 1.0
+ },
+ "vintage|export|close_rev0.001|vol_rev0.02|sessions10": {
+  "pass": 1.0
+ },
+ "vintage|vault|close_rev0.005|vol_rev0.02|sessions10": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.005|vol_rev0.02|sessions10": {
+  "pass": 1.0
+ },
+ "vintage|vault|close_rev0.01|vol_rev0.02|sessions10": {
+  "pass": 0.0
+ },
+ "vintage|export|close_rev0.01|vol_rev0.02|sessions10": {
+  "pass": 0.285
+ },
+ "broken:window|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.8606
+ },
+ "broken:window|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.88
+ },
+ "broken:window|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.8766
+ },
+ "broken:tz4h|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.0787
+ },
+ "broken:tz4h|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.0828
+ },
+ "broken:tz4h|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.0832
+ },
+ "broken:nart|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.0405
+ },
+ "broken:nart|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.0409
+ },
+ "broken:nart|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.0404
+ },
+ "broken:noheld|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.2059
+ },
+ "broken:noheld|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.3482
+ },
+ "broken:noheld|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.367
+ },
+ "broken:gap4|sessions3": {
+  "pass": 1.0,
+  "d_over_u": 0.0406
+ },
+ "broken:gap4|sessions6": {
+  "pass": 0.505,
+  "d_over_u": 0.0883
+ },
+ "broken:gap4|sessions10": {
+  "pass": 0.035,
+  "d_over_u": 0.11
+ },
+ "broken:feed|sessions3": {
+  "pass": 0.0,
+  "d_over_u": 0.0
+ },
+ "broken:feed|sessions6": {
+  "pass": 0.0,
+  "d_over_u": 0.0
+ },
+ "broken:feed|sessions10": {
+  "pass": 0.0,
+  "d_over_u": 0.0
+ },
+ "SUMMARY": {
+  "correct build, fixed live side: pass min over every cell": 0.875,
+  "correct build, fixed live side: pass min at mapping differences 0-2%": 0.99,
+  "correct build, 'every status' live side: pass max": 0.0,
+  "'every status' d/u (the held share) range": [
+   0.1772,
+   0.3883
+  ],
+  "vintage: features from the vault's bars (old reading), pass at close revisions 0.1/0.5/1%": [
+   1.0,
+   0.0,
+   0.0
+  ],
+  "vintage: features from the export's bars (fixed reading), pass at close revisions 0.1/0.5/1%": [
+   0.995,
+   1.0,
+   0.175
+  ],
+  "broken builds, pass max by bug": {
+   "window": 0.0,
+   "tz4h": 0.0,
+   "nart": 0.0,
+   "noheld": 0.0,
+   "gap4": 1.0,
+   "feed": 0.0
+  },
+  "trials_a_cell": 200
+ }
+}

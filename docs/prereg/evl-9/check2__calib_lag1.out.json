@@ -1,0 +1,26 @@
+{
+ "CHAR20-HD08-worst-lag1": {
+  "R": 1000,
+  "run1": 0.106,
+  "se": 0.0097,
+  "either_run_120": 0.2
+ },
+ "CHAR20-HD08-worst-notau-phi20-lag1": {
+  "R": 1000,
+  "run1": 0.111,
+  "se": 0.0099,
+  "either_run_120": 0.21
+ },
+ "N1-H0-worst-lag1": {
+  "R": 1000,
+  "run1": 0.082,
+  "se": 0.0087,
+  "either_run_120": 0.146
+ },
+ "N1-HD08-worst-phi20-lag1": {
+  "R": 1000,
+  "run1": 0.085,
+  "se": 0.0088,
+  "either_run_120": 0.167
+ }
+}

@@ -1,0 +1,20 @@
+constants from origin/rel/1019h: open decide 09:15:00; close decide = close - 14 min; open_until = open - 180 s; close_until = close - 660 s; DECIDE_BUDGET 150 s; CLOSE_GRACE 60 s; EVL5_BUDGET 45 s, EVL5_FINISH 15 s; MINUTE_OFFSET 3 s; book EVENT_DECIDE_WAIT_S open 240 s, close 60 s; SIP_DELAY 16 min
+
+OPEN (EVL-WL-O1):
+  prepass-warm9:open from 09:01:00 (after EVL-8's prepass-meta:open, 09:00:00), lowest priority, YIELDS before each step to any lane task due, writes nothing until whole, never past 09:13:00
+  tau 09:15:00; the lane's decide-open task's Deadline 09:17:30; PREREG-EVL-7's decide-open-lrnlive in that turn once the House's receipt is in, bound min(start + 90 s, 09:17:15); EVL-8's decide-open-px8 the next task, 60 s, never past 09:19:30
+  decide-open-warm9: the next task after both (any status, or their bounds), ahead of any record or verdict pass due; bound 60 s, never past 09:20:30
+  the open late pass for this file's buys: the first book tick after it finishes, after EVL-8's late pass; at the latest 09:21:03; the cut-off 09:27:00: 357 s of slack (every tick from then to 09:26:03 plans again while a pick waits)
+
+CLOSE (EVL-WL-ON; a full day; an early close moves every row by (close - 16:00)):
+  prepass-warm9:close from 15:33:00 (after EVL-8's prepass-meta:close, 15:30:00), as the open's, never past 15:43:00
+  tau 15:46:00; EVL-8's decide-close-px8 ends by 15:46:55; the lane's live close run from 15:47:00, its task's Deadline 15:49:30 (PREREG-EVL-5's part 45 s); PREREG-EVL-7's decide-close-lrnlive in that turn once the House's receipt is in, its first read the '1530' marks of its candidates (this file's candidates), bound min(start + 120 s, 15:49:15); EVL-8's decide-close-meta8 the next task, 15 s, never past 15:48:40
+  decide-close-warm9: the next task after both (any status, or their bounds), ahead of any record or verdict pass due; bound 10 s; no network read; started at any time before the close - 5 minutes (15:55:00)
+  the book's close cut-off 15:49:00; its last tick inside the window 15:48:03; THIS FILE'S BUYS: the close late pass after EVL-8's, at the first tick at which decide-close-warm9 has finished 'ok' naming the learner; real money only for a decision finished before the 15:48:03 tick reads it
+  with EVL-META-ON at its full 15 s and this file's part at its 10 s bound: the lane's close run plus PREREG-EVL-7's part must take at most 38 s (from 15:47:00); PREREG-EVL-5's part at its bound with its finish (60 s) alone exceeds it; PREREG-EVL-7's part at its 120 s bound alone exceeds it
+  with no EVL-META-ON run and this file's part at its 10 s bound: the lane's close run plus PREREG-EVL-7's part must take at most 53 s (from 15:47:00); PREREG-EVL-5's part at its bound with its finish (60 s) alone exceeds it; PREREG-EVL-7's part at its 120 s bound alone exceeds it
+  TEST: decide-close-warm9 finished at 15:47:58 -> first tick 15:48:03: planned at 15:48:03
+  TEST: decide-close-warm9 finished at 15:48:05 -> first tick 15:49:03: not planned (binding 'window'; the shadow keeps it)
+  NOT STARTED by the close - 5 minutes, or CUT at its bound: no intent at that close; decide-close-warm9-late:<D> decides it later by itself exactly as of tau (training state and a reported shadow)
+
+THE HISTORY JOB'S RATE PAUSES, in ET: 09:00-09:45, 15:30-16:20, 18:25-18:45 and 20:25 ET to the finish of the House's 20:30 ET score; the score is 00:30Z (EDT) and 01:30Z from Nov 1 (EST)

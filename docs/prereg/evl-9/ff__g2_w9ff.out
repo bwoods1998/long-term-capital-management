@@ -1,0 +1,28 @@
+{
+ "correct build, fixed live side: pass min over every cell": 0.875,
+ "correct build, fixed live side: pass min at mapping differences 0-2%": 0.99,
+ "correct build, 'every status' live side: pass max": 0.0,
+ "'every status' d/u (the held share) range": [
+  0.1772,
+  0.3883
+ ],
+ "vintage: features from the vault's bars (old reading), pass at close revisions 0.1/0.5/1%": [
+  1.0,
+  0.0,
+  0.0
+ ],
+ "vintage: features from the export's bars (fixed reading), pass at close revisions 0.1/0.5/1%": [
+  0.995,
+  1.0,
+  0.175
+ ],
+ "broken builds, pass max by bug": {
+  "window": 0.0,
+  "tz4h": 0.0,
+  "nart": 0.0,
+  "noheld": 0.0,
+  "gap4": 1.0,
+  "feed": 0.0
+ },
+ "trials_a_cell": 200
+}

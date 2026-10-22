@@ -1,0 +1,7 @@
+form4map: all 43 quarters 2016q1..2026q3: rows 1998762 differ 3126; window 23 quarters: rows 1035350 differ 1021 (0.0010)
+search 0.150 fresh 0.1265: gap 0.0235 = 0.89 SE of the difference
+search 0.145 fresh 0.1135: gap 0.0315 = 1.22 SE of the difference
+search 0.145 fresh 0.1040: gap 0.0410 = 1.59 SE of the difference
+search 0.140 fresh 0.0970: gap 0.0430 = 1.69 SE of the difference
+search 0.135 fresh 0.1155: gap 0.0195 = 0.77 SE of the difference
+search 0.130 fresh 0.1025: gap 0.0275 = 1.11 SE of the difference

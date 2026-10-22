@@ -1,0 +1,42 @@
+{
+ "None": {
+  "mismatching_of_20000": [
+   0,
+   0,
+   0
+  ],
+  "caught_in_all_3_audits": false
+ },
+ "boundary": {
+  "mismatching_of_20000": [
+   32,
+   30,
+   26
+  ],
+  "caught_in_all_3_audits": true
+ },
+ "latest_version": {
+  "mismatching_of_20000": [
+   43,
+   45,
+   37
+  ],
+  "caught_in_all_3_audits": true
+ },
+ "adjusted_level": {
+  "mismatching_of_20000": [
+   5347,
+   5345,
+   5365
+  ],
+  "caught_in_all_3_audits": true
+ },
+ "window_end": {
+  "mismatching_of_20000": [
+   20000,
+   20000,
+   20000
+  ],
+  "caught_in_all_3_audits": true
+ }
+}

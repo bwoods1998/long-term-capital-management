@@ -1,0 +1,8 @@
+== fresh round 1 (1,000 programs a cell, seeds 862e6 +): maximum 0.1450; 4 cells within 0.03 of it get 1,000 more
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n800-lag2              R=1000  RUN1 0.1450 (se 0.0111) v120 0.2690 cm<=0 0.0220 cm<=10bp 0.0410 ev/s 7.92 tau +8.0bp uhz -0.55
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1              R=1000  RUN1 0.1370 (se 0.0109) v120 0.2530 cm<=0 0.0270 cm<=10bp 0.0460 ev/s 7.88 tau +6.9bp uhz -0.57
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1              R=1000  RUN1 0.1360 (se 0.0108) v120 0.2420 cm<=0 0.0140 cm<=10bp 0.0380 ev/s 7.81 tau +6.3bp uhz -0.56
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1-TAUS05a13             R=1000  RUN1 0.1150 (se 0.0101) v120 0.2210 cm<=0 0.0180 cm<=10bp 0.0410 ev/s 7.45 tau +7.7bp uhz 0.29
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-cnt                   R=1000  RUN1 0.1100 (se 0.0099) v120 0.1990 cm<=0 0.0220 cm<=10bp 0.0330 ev/s 6.53 tau +4.4bp uhz 0.14
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n450-lag1                       R=1000  RUN1 0.1070 (se 0.0098) v120 0.1900 cm<=0 0.0150 cm<=10bp 0.0360 ev/s 4.96 tau +5.0bp uhz -0.10
+SELECTED2 4

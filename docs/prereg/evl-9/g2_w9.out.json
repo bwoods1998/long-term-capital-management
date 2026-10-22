@@ -1,0 +1,184 @@
+{
+ "correct|edit0.05|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.92,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.93,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 0.99,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.935,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.05|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.92,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 0.995,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.93,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.905,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 0.995,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.935,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.2|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.94,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.02|sessions3": {
+  "pass": 0.99,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.02|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.04|sessions3": {
+  "pass": 0.91,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.01|elig0.01|map0.04|sessions6": {
+  "pass": 0.925,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.0|sessions3": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.0|sessions6": {
+  "pass": 1.0,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.02|sessions3": {
+  "pass": 0.995,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.02|sessions6": {
+  "pass": 0.995,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.04|sessions3": {
+  "pass": 0.93,
+  "draft_rank_rule_pass": 0.0
+ },
+ "correct|edit0.4|late0.05|elig0.05|map0.04|sessions6": {
+  "pass": 0.915,
+  "draft_rank_rule_pass": 0.0
+ },
+ "broken:window|sessions3": {
+  "pass": 0.0
+ },
+ "broken:window|sessions6": {
+  "pass": 0.0
+ },
+ "broken:tz4h|sessions3": {
+  "pass": 0.0
+ },
+ "broken:tz4h|sessions6": {
+  "pass": 0.0
+ },
+ "broken:director|sessions3": {
+  "pass": 0.995
+ },
+ "broken:director|sessions6": {
+  "pass": 0.99
+ },
+ "broken:nart|sessions3": {
+  "pass": 0.0
+ },
+ "broken:nart|sessions6": {
+  "pass": 0.0
+ },
+ "broken:eref|sessions3": {
+  "pass": 0.99
+ },
+ "broken:eref|sessions6": {
+  "pass": 1.0
+ },
+ "SUMMARY": {
+  "correct_build_pass_min": 0.905,
+  "correct_build_draft_rule_pass_max": 0.0,
+  "broken_build_pass_max (window, tz4h, nart: G2's to catch)": 0.0,
+  "director (INS-BUY's few events: G2b's to catch, not G2's)": 0.995,
+  "eref (a 1.2% set difference G2's tolerance absorbs: E_prev is used by rule)": 1.0,
+  "trials_a_cell": 200
+ }
+}

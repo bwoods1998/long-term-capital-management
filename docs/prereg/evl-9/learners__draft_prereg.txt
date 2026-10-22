@@ -1,0 +1,215 @@
+PREREG-EVL-9, PART L: TWO WARM-STARTED LEARNERS (EVL-WL-O1, EVL-WL-ON). Draft text to freeze (lens: learners and
+protocol). Designed blind from the frozen PREREG-EVL-1..-5, the drafts of PREREG-EVL-6, -7 and -8, the code of
+origin/rel/1019g, the scout's record counts (evl9/scout/), the outcome-free facts files, the literature, and synthetic
+Monte Carlo only (evl9/learners/calib_evl9.py). No price, return, look, band, bar or P&L of any event, symbol or
+program, historical or live, was read.
+
+W0. WHAT A WARM LEARNER IS, AND THE ORDER OF THINGS.
+A seatable program whose rule is ONE FIXED PROCEDURE with three stages, every part of which this file fixes before any
+of its events exists: TRAIN (a deterministic trainer fits a prior on a history table that a deterministic builder makes
+from the data spec W4), LEARN FORWARD (at each decision the House refits on that prior plus pool outcomes settled and
+stored before the decision), PICK (W6). The order is fixed: (1) THIS TEXT, with every constant, is committed and
+registered (REGISTERED_AT_9, A92's method: the latest of the commit time, GitHub's activity time for the branch push and
+the pushing client's clock after the tag push); counting starts here; (2) CODE_PIN: the commit sha and sha256s of
+scripts/evl9/build_table.py, scripts/evl9/train.py and league/events/warm.py (its `features`, `gbt_eval` and `decide`)
+are recorded in the captain's amendment BEFORE the first training run; the implementers read no outcome, price or label
+(counts-only logs, synthetic tests); (3) the builder builds and the trainer trains, deterministically, and the job
+writes TABLE_SHA and MODEL_SHA into the training receipt; (4) the House verifies MODEL_SHA and decides, the decisions
+since REGISTERED_AT_9 first (W7). A program of this file counts only events knowable after REGISTERED_AT_9 (and after
+its own version's registration). NOBODY READS ANY FIT OF THE HISTORY, in-sample or out-of-sample, before or after
+registration: the receipt carries counts and hashes only. Any change after the CODE_PIN (a feature, a constant, a
+source, a window, a builder fix that changes any row) is a new registration of a new version that counts only events knowable after it; a re-run of the SAME code on the SAME inputs is not a change.
+
+W1. THE PROGRAMS, POOLS AND CANDIDATES.
+- EVL-WL-O1 version 1: entry OPEN of D, exit CLOSE of D (hold 1, block D); tau = D's open decision time (09:15 ET).
+  POOL, in order (each version 1): EVL-CTRL-NEWS-ALL-O1, EVL-CTRL-8K-ALL-O1, EVL-CTRL-ERN-ALL-O1, EVL-INS-BUY-O1.
+- EVL-WL-ON version 1: entry CLOSE of D, exit OPEN of D+1 (hold 1, block D); tau = D's close decision time (close - 14
+  min). POOL, in order: EVL-CTRL-NEWS-DAY-ON, EVL-CTRL-NEWSPM-ON, EVL-CTRL-8K-ON, EVL-ERN-REACT-ON, EVL-ERN-DROP-ON,
+  EVL-CTRL-ERN-UNDER-ON. A pool program not yet live contributes nothing.
+- Every pool program is VERDICT-FREE (rule none), so each pool has an exact history twin made of structured records.
+- CANDIDATES at tau, KEPT, ELIGIBLE TO BE PICKED, PRIMARY EVENT, POOL OUTCOME: PREREG-EVL-7 draft section 1.1 and 1.3
+  word for word, stated here so this file stands alone: for each pool program p in order, the events p's own rule takes
+  for D as real money reads them (book.picks(lane, p, D, decided_at=tau)); ONE CANDIDATE PER ISSUER, its primary event
+  the event of the first pool program selecting it; KEPT when TRADABLE at decision (1.25 x prev_close <= 10% of E_prev);
+  ELIGIBLE TO BE PICKED when also its primary event is knowable after REGISTERED_AT_9 (and the version's own
+  registration) and the learner holds no intent of the issuer entered before D that exits within the last 5 sessions or
+  later, nor a written non-skipped intent of it entering within the 5 sessions after D. PREREG-EVL-2's LIMIT AT ENTRY
+  applies, shadow and real.
+- Free derived controls (no intents, no settlement, never seat, no charge): EVL-WL-O1-POOL and EVL-WL-ON-POOL, every
+  kept candidate of each decision whose primary event is knowable after the version's registration, valued on its pool
+  outcome (PREREG-EVL-7 draft section 6's construction).
+
+W2. FEATURES (structured fields only: never a verdict, a model output, a price or a bar after tau). ONE stdlib function
+(league/events/warm.py `features`) computes them for the history builder and the House alike, from rows of the House's
+schema (league/events/store.py) read as stored before tau (live) or as knowable before tau_s (history). A missing input
+reads 0 with its indicator where one is listed. Order and scaling never change within a version.
+ COMMON (both):  1 primary pool dummies (O1: 3, ON: 5; the first pool program the baseline); 2 multi (>= 2 pool programs
+ select the issuer); 3 the items of the issuer's 8-Ks (any 8-K) in the decision's EDGAR window (O1: the open window
+ of D; ON: the close window of D): 1.01, 2.01, 5.02, 7.01, 8.01, 9.01 (6);
+ 4 src_benzinga (primary article); hl = ln(1 + headline characters) / 5 (primary article; 0 otherwise); 5 n_art =
+ ln(1 + single-symbol articles of the ticker knowable in the primary family's window), n_att20 (the same over the 20
+ sessions before that window), first20 (the issuer in none of this learner's candidate sets of the previous 20
+ sessions) (3); 6 mon, fri (2); 7 issuer from D's universe row and cik_info: ln(adv20/1e7), ln(prev_close/20),
+ ln(sig20/0.03), bench_iwm, SIC bio/tech/fin/energy (8, PREREG-EVL-7 draft item 10's definitions); 8 r1, r5, r20 and
+ hist_missing (PREREG-EVL-7 draft items 11-12) (4); 9 the 16 KEYWORDS flags and dup72 of evl7/reader/features_spec.py
+ (copied with its sha256) (17); 10 FROM SEC HISTORY: ern_sched (the issuer has an item-2.02 8-K in that window and its
+ previous item-2.02 8-K was accepted 70-110 days before it), ern_first (an item-2.02 8-K in that window and none in the
+ 400 days before), n8k365 = ln(1 + the issuer's 8-Ks accepted in the 365 days before the window) (3); 11 g, the frozen
+ cross-fitted GBT score of W5, standardised (1).
+ EVL-WL-O1 ADDS: overnight [20:00, 04:00), pre [04:00, 07:00), late [07:00, 09:00) ET of the primary's knowable time;
+ ln_ins = ln(1 + purchase value / $50,000) of an EVL-INS-BUY-O1 primary (4).
+ EVL-WL-ON ADDS: morning (knowable 09:00-12:00 ET of D), before (knowable before 09:00 ET of D); dmove = clip(ln(m1530 /
+ prev_close), +-0.5), dmove_missing, |dmove|; gap = clip(ln(m0930 / prev_close), +-0.5), gap_missing (the '1530' and
+ '0930' marks of run.py's rules, stored before tau) (7).
+ So D = 54 columns for EVL-WL-O1 and 59 for EVL-WL-ON, g included.
+
+W3. LABELS. y = clip(G / sig20, -5, 5), G the GROSS abnormal return of the candidate's one-session hold at the learner's
+auctions: FORWARD (House): exit_px / entry_px - bench_exit / bench_entry of its POOL OUTCOME (outcomes status
+'settled', tradable 1, settled_at < tau; the replay's prints); HISTORY: the same ratio from SIP 1Day bars (W4): O1 the
+raw open and close of D; ON the close of D to the open of D+1 by the adjustment=split ratio; the benchmark IWM when
+ADV20 < $50M else SPY, the same bars. The replay's cost enters once, at W6's hurdle (score.cost_bp is a known function
+of adv20 and equity, so learning it would count it twice).
+
+W4. THE DATA SPEC (history; machine-only outputs).
+- Entry sessions 2022-01-03 .. 2026-10-15 (1,201 NYSE sessions, league.equity.store.nyse_sessions); metadata
+  lookbacks from 2021-01-01; no price or bar of 2020 is read (league/xs/config.py RESERVE_YEARS is respected).
+  [If the data lens's window is adopted instead, its window replaces this one with nothing else changed.]
+- Sources, all $0 metered: SEC submissions.zip (forms, items, filing dates, current SIC, 10-K/10-Q/20-F/40-F dates for
+  the operating test); the getcompany Atom <updated> as every filing's acceptance time (never the bulk
+  acceptanceDateTime); the Insider Transactions Data Sets 2021q1-2026q3 (owners, relationships, non-derivative
+  transactions: PREREG-EVL-2's INSIDER BUY test via programs._insider_buy over form4_owners/form4_tx rows); Alpaca news
+  v1beta1 (id, created_at, updated_at, source, headline, symbols; include_content false; the backfill exclusion
+  updated_at - created_at > 10 min applied to every historical article); Alpaca SIP 1Day bars raw and split with asof
+  inside each symbol's spell; SIP 1Min bars of the ON pool's candidates for the 09:30 minute and 15:00-15:30.
+- Point-in-time eligibility: PREREG-EVL-1 section 2 with the CIK-to-symbol map of the insider data sets'
+  ISSUERTRADINGSYMBOL spells (never today's company_tickers.json), "listed" = a SIP 1Day bar on each of the 20 sessions
+  before D, raw previous close >= $3, ADV20 >= $1M, the operating test from submissions' periodic filings, SIC not 6221
+  or 6770 (current SIC: a stated approximation). A CIK with no spell at D is not a candidate.
+- The pools and windows of each historical session are made by programs.py's OWN functions (open_window, close_window,
+  news_window, day_news_window, family_8k, excluded, close_rows_4, taken_close_5, dropped_ciks, select) over a historical
+  store in the House's schema, so a history candidate is a live candidate's twin; the one-position rule reads each pool
+  program's own historical selections.
+- Every raw response is stored with its sha256 outside the repository and outside every goal directory a designer
+  reads (~/Work/.ltcm-main/evl9-data/); the canonical table (rows sorted by (session, cik); floats as repr) is hashed:
+  TABLE_SHA. A row without a label (no bar) is dropped and counted.
+- Builders and fetchers print and log COUNTS ONLY. Their tests run on synthetic tables. Nobody computes a summary of
+  a label, a return or a fit.
+
+W5. THE TRAINER (blake-desktop, deterministic; numpy allowed outside league/; reference environment pinned in the
+receipt: x86-64, Python 3.14, numpy 2.5.3).
+- GBT G (the nonlinear prior): target y~ = y minus its session mean; squared loss; every continuous column cut at its
+  32 table quantiles (np.quantile, method 'linear', on the full table; binaries 2 bins); depth 3; learning rate 0.05;
+  leaf value sum(residual) / (n + 2,000); a split needs >= 2,000 rows each side; gain (sum r_L)^2/(n_L + 2,000) +
+  (sum r_R)^2/(n_R + 2,000) - (sum r)^2/(n + 2,000); ties to the lowest column, then the lowest bin; gradient sums by
+  np.bincount in table order. ROUNDS R* (the one inner procedure, never read): fit on the first 80% of sessions, score
+  the last 20% at 25, 50, 100, 150, 200 and 300 rounds by the mean within-session Spearman correlation of prediction and
+  y; R* = the best, ties to fewer.
+- CROSS-FIT: five contiguous session folds; fold k's g_oof from a G of R* rounds fitted on the other four; G_full of R*
+  rounds on all rows (the House's g); g standardised by the mean and sd of g_oof over the table.
+- RIDGE PRIOR: columns (W2 with g = g_oof); within-session demeaned; A_h = sum x~ x~', b_h = sum x~ y~ (products in
+  float64, every entry summed by math.fsum: exact, order-free), N_h rows. PRIOR: A_0 = (N_EQ / N_h) A_h, b_0 = (N_EQ /
+  N_h) b_h, N_0 = N_EQ with N_EQ = 25,000 rows (W12's calibration: the most robust measured weight). The prior never
+  decays; the forward stream's steady weight at H = 40 is 58.2 x its rows a session (19,800-49,500 at the pools' 340-850
+  candidates), so after about 40-75 sessions history and the live stream weigh about the same.
+- OUTPUT: one canonical JSON model (column names, bin edges, trees, R*, g's mean and sd, A_0, b_0, N_0, TABLE_SHA, the
+  code sha, and the outcome-free META: every 8-K acceptance time and its item-2.02 flag per CIK from 2025-08-01 to the
+  snapshot, which item 10 unions with the House's own filings table) and its sha256 MODEL_SHA. THE TRAINER RUNS TWICE in one job: equal MODEL_SHA -> the model; unequal only in
+  G -> the pre-registered FALLBACK (g := 0, its row and column dropped from A_0, b_0), that model's sha the MODEL_SHA;
+  unequal in the ridge part -> no model (W7 VOID clock keeps running).
+- RECEIPT (committed to docs/prereg/evl-9/TRAINING-RECEIPT.json within 1 hour of the job's end, by the job): TABLE_SHA,
+  MODEL_SHA, the raw-input manifest's sha256, row counts by year and primary pool program, dropped rows by cause,
+  fallback yes/no, start/end times, environment. NO fit statistic, coefficient, R*, score quantile or IC. A committed
+  receipt binds: its model is the version's model whatever anyone later sees.
+- The model and the table are MACHINE-ONLY: the model reaches the House by `floor_box.py put-data` (one upload, the
+  House refuses a file whose sha256 is not MODEL_SHA); neither is committed, published or shown to any designer; R3's
+  facts authorizer refuses them and every warm table.
+
+W6. FORWARD UPDATE AND PICKS (the House, stdlib).
+- NIGHTLY, after the score: for each entry session s whose every pool outcome is terminal, warm_stats(program, version,
+  s, A_s, b_s, n_s) is written ONCE from the candidate set and features stored at tau_s (never recomputed) and W3's
+  forward labels (math.fsum, cik order); a pool outcome settling later is never added.
+- AT tau of D: A = A_0 + sum_s w_s A_s and b likewise over the warm_stats rows written before tau with n(D) - n(s) <= 250,
+  w_s = 2^(-(n(D) - n(s)) / H), H = 40 sessions; N_w = N_0 + sum w_s n_s; d_j = sqrt(A_jj / N_w) (d_j < 1e-9: d_j := 1, its
+  row and column 0); beta = diag(d)^-1 (diag(d)^-1 A diag(d)^-1 + 8,000 I)^-1 diag(d)^-1 b, Cholesky in float64.
+- PREDICTION: e_i = (x_i - xbar_D) . beta (xbar_D over D's kept candidates); c_i = the replay's round trip for i
+  (score.cost_bp entry + exit at adv20 and E_prev) / 1e4; z_i = e_i - c_i / sig20_i; ahat_i = sig20_i x z_i.
+- PICKS: the eligible candidates with z_i > 0, ranked by ahat_i, then adv20 (higher first), then event id; the first
+  K = 8 are the learner's intents of D (rank_key = ahat_i). No other pick exists; a decision may pick fewer or none.
+- The lane's sessions before REGISTERED_AT_9 (from Oct 19) have their candidate sets RECONSTRUCTED ONCE as of each
+  tau_s and their warm_stats written: they train, they never count.
+
+W7. WARM-UP, FAILURE, THE RECORD BEFORE THE MODEL, VOID.
+- No warm-up beyond the model: the first decision with a verified model picks.
+- FAIL CLOSED: no verified model, an unreadable pool, outcome or feature, or a non-finite fit -> no pick; the receipt
+  says why.
+- ISOLATION: the warm part runs after every row of PREREG-EVL-1 to -8 at its auction, under its own bound (90 s at the
+  open, 120 s at the close); its failure never cuts an earlier row.
+- THE RECORD BEFORE THE MODEL AND THE RELEASE: every decision from REGISTERED_AT_9 to the first live one is decided BY
+  ITSELF, once, oldest first, exactly as of its tau (every cut-off from stored times; the model's content is fixed by
+  public records of sessions before 2026-10-16, current SIC excepted, and by nothing stored after tau), in shadow only, never traded, receipts
+  `decide-open-wl:<day>` / `decide-close-wl:<day>`. Real money starts at the first decision after the release carrying
+  the code is live AND the model is verified.
+- VOID: if no training receipt is committed by the close of the 10th session after REGISTERED_AT_9, the version is
+  VOID: it never seats, its record is never judged, and its charge is returned (it never had a chance to pass). A VOID
+  is decided by the clock alone; once a receipt is committed the version is judged with its model, whatever follows.
+
+W8. WHAT IS WRITTEN: warm_stats (above), warm_fits (program, version, day, tau, MODEL_SHA, n_sessions, N_w, the sha256
+of the ordered warm_stats keys; beta stays machine-only), warm_cands (program, version, day, cik, event, families,
+features, g, e, z, ahat, eligible, picked, rank). Additive tables; SCHEMA_VERSION unchanged. A nightly recompute of the
+last decisions alarms on a mismatch and never rewrites.
+
+W9. REAL MONEY: PREREG-EVL-7 draft section 1.9 word for word with this file's ids (learning: 2% target, at most 8 open,
+whole shares, the one-share rule; Probe and Sized as PREREG-EVL-6 gives later files, with A99: Probe at most 14 open and
+buys at 0.8 of the band's target). The book takes a learner's intents in rank order less its skips. ROOM: in each band
+after every row of PREREG-EVL-1 to -8 and before R3's births (A101), EVL-WL-O1 at the open, EVL-WL-ON at the close. In
+real money only, EVL-WL-ON does not buy an issuer with an 8-K knowable at or after 09:00 ET of D whose PROMPT-DOC verdict
+is ok with score >= 2, or ok with score >= 1 and guidance raised, or unanswered at tau (PREREG-EVL-4/-5 section 1.3: the
+sale gate's reason; the shadow keeps every pick). Walls, loss budget, open-risk weight, stops: unchanged.
+
+W10. THE JUDGE: PREREG-EVL-6 sections 1-3 as frozen (its record = the version's settled TRADABLE forward picks knowable
+after its registration; a READ version whose control is its derived POOL record, valued over its own block sessions;
+seed strings with this file's ids and versions). If PREREG-EVL-6 is NOT frozen before REGISTERED_AT_9, these versions
+are judged by THE WARM SCREEN, PREREG-EVL-6's draft sections 1.2-3 (as of its 20:58 PDT Oct 21 text) stated here word
+for word (sign-flip p over session blocks of x_s = B_s - 0.0010, exact to 16 blocks and over 99,999 seeded vectors
+beyond; looks at S_k = 6, 7, ..., 16, 18, 20, 22, 25, 30, 35, 40, 50, 60 blocks with >= 30 TRADABLE events and >= 30
+issuers; alpha 0.016 to 20 blocks and 0.004 beyond; RETIRE first when mean a < 0 and q <= alpha; PASS with mean a > 0,
+mean r > 0, the control condition and the issuer-block p_I <= 0.10; EXHAUSTION at the 60th block; stays, Sized,
+demotion and re-promotion as its section 3), NEVER PREREG-EVL-3's (whose worst measured here is 0.153-0.185 a version, above
+15%). If PREREG-EVL-6 freezes constants or a plausible grid other than its draft's, the freeze of this file re-runs
+run_rest3.sh's null and char grids and run_phi.sh under the frozen rule and W12's charge takes the result. The code
+never edits the screen that judges it.
+
+W11. RE-ENTRY: PREREG-EVL-7 draft section 1.10 with this file's ids: when a version is RETIRED by its judge (lower tail,
+or EXHAUSTION), version n + 1 with this rule AND THIS MODEL unchanged is registered the first night after through R3's
+route, at most versions 1-3 of an id, each counting only events knowable after its own registration and training on
+every forward pool outcome settled before each decision; each draws W12's charge at registration and is refused when the
+lane's budget cannot hold it. If PREREG-EVL-6 freezes "exhaustion ends a run, never the version", its runs replace
+re-entry and each run is charged as PREREG-EVL-6 charges a fresh run.
+
+W12. FALSE PASSES AND THE BUDGET (synthetic, evl9/learners/calib_evl9.py; generator = PREREG-EVL-7's learner lens's,
+imported unchanged; the history prior per W5 at N_hist 500,000 rows; per version, within 120 sessions, under W10's
+screen as drafted):
+- a learner fed NOISE HISTORY (ic_h 0): base 0.043 (R 300), worst plausible 0.094 (R 800);
+- THE DECAYED EDGE (history carried ic 0.05 / 0.08, live carries none: a stable, confident picker of mean-zero names):
+  base 0.047, worst plausible 0.104 / 0.095, without issuer effects 0.119 (R 800) and 0.145 (R 200, 300 sessions;
+  pooled 0.124), day momentum 0.20 0.115;
+- its own CHARACTERISTIC DRIFT (a zero-mean AR 0.97 drift on exactly the direction it picks, pool-demeaned so its control
+  never sees it): 5 / 10 / 20 bp a unit 0.110 / 0.118 / 0.132 (R 600), with day momentum 0.20 0.092;
+- the KNIFE EDGE (history and live rank the pool for real; the top 5% have mean exactly 0): 0.081 (ic 0.08), 0.097
+  (ic 0.05);
+- the cold learner on the same paths 0.091 (0.132 at day momentum 0.20); three chained versions 0.17-0.26 within 120
+  sessions and 0.29-0.36 within 300.
+- THE CHARGE: each version 0.14 (PREREG-EVL-6's per-version charge, above this learner's worst plausible 0.124 pooled
+  and its 0.132 stress); if PREREG-EVL-6 freezes another per-version charge c, the larger of c and the re-measured worst
+  rounded up to 0.01. Two versions: 0.28 at registration; each re-entry 0.14 more (at most 0.56). The lane's budget on
+  PREREG-EVL-6's basis (4.2): used before this file 2.10 + 0.14 x the seatable births + PREREG-EVL-7's 0.28 + PREREG-EVL-8's
+  0.61 = 2.99 + 0.14 B; after it 3.27 + 0.14 B; this file is refused if what is left cannot hold 0.28.
+
+W13. REPORTED BESIDE (never a judge): per decision candidates, picks, N_w, forward sessions; after settlement the
+realised IC and picks-minus-pool (outcome-derived: machine-only for designers, R3's authorizer refuses them); the
+training receipt.
+
+W14. NOT DECIDED HERE: the code (scripts/evl9/fetch.py, build_table.py, train.py; league/events/warm.py; run.py's
+part; book.py, screen.py, programs.py rows and REGISTERED_AT_9; floor_box.py put-data; the report). An ambiguity takes
+the reading less likely to pass or that trades less, fixed before the first settled event and recorded as an
+amendment.

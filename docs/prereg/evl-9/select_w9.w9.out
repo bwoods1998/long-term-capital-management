@@ -1,0 +1,16 @@
+fresh seeds: 6 cells of 6 selected (and 7 reference cells: cold twins, the base model and the CHAR20 stress, never in W9)
+  REFERENCE fresh 0.1000 (se 0.0122, R 600) | search 0.1300 | ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+  REFERENCE fresh 0.0883 (se 0.0116, R 600) | search 0.1550 | ON-CHAR20-HD08-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2
+  REFERENCE fresh 0.0700 (se 0.0104, R 600) | search 0.0000 | O1-cold-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1
+  REFERENCE fresh 0.0500 (se 0.0089, R 600) | search 0.0200 | O1-H0-t3-sym-rho05-phi10-dr00-tau0-n300-lag1
+  REFERENCE fresh 0.0317 (se 0.0071, R 600) | search 0.0300 | O1-HD08-t3-sym-rho05-phi10-dr00-tau0-n300-lag1
+  REFERENCE fresh 0.0267 (se 0.0066, R 600) | search 0.0350 | ON-HD08-t3-sym-rho05-phi10-dr00-tau0-n300-lag2
+  REFERENCE fresh 0.0133 (se 0.0047, R 600) | search 0.0100 | ON-H0-t3-sym-rho05-phi10-dr00-tau0-n300-lag2
+  fresh 0.1265 (se 0.0074, R 2000) | search 0.1500 | pooled 0.1286 (se 0.0071) | version by 120 0.2450 | true mean a <= 0 at the pass 0.0185 | ev/s 7.80 | ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+  fresh 0.1155 (se 0.0071, R 2000) | search 0.1350 | pooled 0.1173 (se 0.0069) | version by 120 0.1935 | true mean a <= 0 at the pass 0.0185 | ev/s 3.67 | ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+  fresh 0.1135 (se 0.0071, R 2000) | search 0.1450 | pooled 0.1164 (se 0.0068) | version by 120 0.1870 | true mean a <= 0 at the pass 0.0250 | ev/s 3.56 | ON-H0-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag2
+  fresh 0.1040 (se 0.0068, R 2000) | search 0.1450 | pooled 0.1077 (se 0.0066) | version by 120 0.1965 | true mean a <= 0 at the pass 0.0185 | ev/s 4.07 | ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+  fresh 0.1025 (se 0.0068, R 2000) | search 0.1300 | pooled 0.1050 (se 0.0065) | version by 120 0.1855 | true mean a <= 0 at the pass 0.0220 | ev/s 3.57 | ON-H0-crasht3cl-skew-rho15-phi20-dr10-tau1-n300-lag2
+  fresh 0.0970 (se 0.0066, R 2000) | search 0.1400 | pooled 0.1009 (se 0.0064) | version by 120 0.1430 | true mean a <= 0 at the pass 0.0245 | ev/s 2.96 | O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1
+W9 (the maximum fresh per-run rate) = 0.1265 at ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2; its pooled figure 0.1286
+c9 = max(0.13, W9 rounded up to two decimals) = 0.13

@@ -1,0 +1,6 @@
+c9 = max(PREREG-EVL-6's 0.13, W9 (not given) rounded up to 0.01) = 0.13
+PREREG-EVL-6's budget 3.90; used at REGISTERED_AT_6 1.95 (fifteen versions)
+  with 0 seatable birth(s) registered before REGISTERED_AT_9: used before this file 2.86 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.13 = 0.26; used after 3.12; LEFT 0.78 (6 charges of 0.13)
+  with 3 seatable birth(s) registered before REGISTERED_AT_9: used before this file 3.25 (PREREG-EVL-7 0.26, PREREG-EVL-8 0.65); this file 2 x 0.13 = 0.26; used after 3.51; LEFT 0.39 (3 charges of 0.13)
+if LEFT before this file holds 0.26: both ids; if it holds 0.13 only: EVL-WL-ON alone (the larger pool); else this file registers nothing
+this file's lifetime draw: at most 3 runs a version: 6 x 0.13 = 0.78

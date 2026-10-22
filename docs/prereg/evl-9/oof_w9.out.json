@@ -1,0 +1,44 @@
+{
+ "a0.0": {
+  "contiguous": {
+   "beta_g": 0.06112,
+   "live_ic": 0.07648,
+   "g_hist_ic": 0.07819
+  },
+  "forward": {
+   "beta_g": 0.04618,
+   "live_ic": 0.07423,
+   "g_hist_ic": 0.07686
+  },
+  "full_score_live_ic": 0.07711,
+  "reps": 40
+ },
+ "a0.3": {
+  "contiguous": {
+   "beta_g": 0.05527,
+   "live_ic": 0.06841,
+   "g_hist_ic": 0.07381
+  },
+  "forward": {
+   "beta_g": 0.04276,
+   "live_ic": 0.06684,
+   "g_hist_ic": 0.07181
+  },
+  "full_score_live_ic": 0.06946,
+  "reps": 40
+ },
+ "a0.6": {
+  "contiguous": {
+   "beta_g": 0.03436,
+   "live_ic": 0.05005,
+   "g_hist_ic": 0.05871
+  },
+  "forward": {
+   "beta_g": 0.02874,
+   "live_ic": 0.05108,
+   "g_hist_ic": 0.05566
+  },
+  "full_score_live_ic": 0.0519,
+  "reps": 40
+ }
+}

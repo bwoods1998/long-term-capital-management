@@ -1,0 +1,33 @@
+search: 87 warm cells; maximum per-run rate 0.1500 (ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2); band 0.04; selected 6
+ * 0.1500 (se 0.0252) ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+ * 0.1450 (se 0.0249) ON-H0-crasht3cl-skew-rho15-phi20-dr00-tau1-n300-lag2
+ * 0.1450 (se 0.0249) ON-H0-tauh-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+ * 0.1400 (se 0.0245) O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1
+ * 0.1350 (se 0.0242) ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+ * 0.1300 (se 0.0238) ON-H0-crasht3cl-skew-rho15-phi20-dr10-tau1-n300-lag2
+   0.1250 (se 0.0234) ON-H0-tauh-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2
+   0.1150 (se 0.0226) O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.1100 (se 0.0221) O1-H0-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag1
+   0.1100 (se 0.0221) ON-H0-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag2
+   0.1100 (se 0.0221) ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2
+   0.1050 (se 0.0217) O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt
+   0.1050 (se 0.0217) O1-HD08-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt
+   0.1000 (se 0.0212) O1-H0-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.1000 (se 0.0212) O1-HD05-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.1000 (se 0.0212) O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1
+   0.1000 (se 0.0212) ON-H0-crasht3-skew-rho15-phi20-dr20-tau0-n300-lag2
+   0.1000 (se 0.0212) ON-H0-crasht3cl-skew-rho05-phi20-dr20-tau1-n300-lag2
+   0.1000 (se 0.0212) ON-H0-tauh-crash-skew-rho15-phi20-dr20-tau1-n300-lag2
+   0.0950 (se 0.0207) O1-H0-crasht3cl-skew-rho15-phi20-dr10-tau1-n300-lag1
+   0.0950 (se 0.0207) ON-ADVrand60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2
+   0.0900 (se 0.0202) O1-H0-crasht3cl-skew-rho15-phi10-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-H0-crash-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-H0-crasht3cl-skew-rho15-phi15-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-H0-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-HD08-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) O1-H0-crashcl-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt
+   0.0900 (se 0.0202) O1-HD05-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1
+   0.0900 (se 0.0202) ON-CHAR10-HD08-crash-skew-rho15-phi20-dr20-tau1-n300-lag2
+stress re-run on fresh seeds: ON-CHAR20-HD08-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2 (search 0.1550)
+cold references for the fresh seeds: ['ON-cold-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2', 'O1-cold-crasht3cl-skew-rho15-phi20-dr20-tau0-n300-lag1', 'ON-CHAR20-HD08-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag2', 'O1-H0-t3-sym-rho05-phi10-dr00-tau0-n300-lag1', 'O1-HD08-t3-sym-rho05-phi10-dr00-tau0-n300-lag1', 'ON-HD08-t3-sym-rho05-phi10-dr00-tau0-n300-lag2', 'ON-H0-t3-sym-rho05-phi10-dr00-tau0-n300-lag2']

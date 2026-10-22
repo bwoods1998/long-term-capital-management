@@ -1,0 +1,14 @@
+REPRO-noiseR-HD08-worst        R= 1000 run1 0.0470 (se 0.0067) version 0.1040 | picks' mean tau +0.1 bp, mean a -1.0 bp | ev/s 7.97
+REPRO-noiseR-cold-worst        R= 1000 run1 0.0720 (se 0.0082) version 0.1410 | picks' mean tau +2.0 bp, mean a +3.1 bp | ev/s 7.57
+R-cold-worst-notau             R= 1000 run1 0.0740 (se 0.0083) version 0.1340 | picks' mean tau +0.0 bp, mean a +0.5 bp | ev/s 7.53
+R-HD08-worst-notau             R=  950 run1 0.0747 (se 0.0085) version 0.1453 | picks' mean tau +0.0 bp, mean a -0.0 bp | ev/s 7.96
+R-cold-worst-tau1              R=  400 run1 0.1350 (se 0.0171) version 0.2450 | picks' mean tau +17.9 bp, mean a +16.9 bp | ev/s 7.62
+R-H0-worst-tau1                R=  400 run1 0.1175 (se 0.0161) version 0.2600 | picks' mean tau +17.4 bp, mean a +17.3 bp | ev/s 6.92
+R-HD08-worst-tau1              R=  400 run1 0.0675 (se 0.0125) version 0.1875 | picks' mean tau +8.1 bp, mean a +8.6 bp | ev/s 7.97
+R-H0-worst-tau1-tauhist        R=  400 run1 0.1400 (se 0.0173) version 0.2575 | picks' mean tau +20.8 bp, mean a +22.5 bp | ev/s 7.96
+R-cold-worst-tau05             R=  400 run1 0.0550 (se 0.0114) version 0.1125 | picks' mean tau +2.5 bp, mean a +5.0 bp | ev/s 7.56
+R-cold-base-tau1               R=  400 run1 0.0575 (se 0.0116) version 0.1025 | picks' mean tau +15.4 bp, mean a +16.2 bp | ev/s 7.61
+RM-cold-worst-tau1             R=  400 run1 0.0675 (se 0.0125) version 0.1375 | picks' mean tau +1.3 bp, mean a -0.3 bp | ev/s 7.57
+RM-H0-worst-tau1-tauhist       R=  400 run1 0.0650 (se 0.0123) version 0.1475 | picks' mean tau +1.6 bp, mean a +1.7 bp | ev/s 5.95
+R-H0-worst-tau1-tauhist-T300   R=  200 run1 0.1500 (se 0.0252) version 0.5200 | picks' mean tau +20.8 bp, mean a +26.4 bp | ev/s 7.96
+RM-H0-worst-tau1-tauhist-T300  R=  200 run1 0.0650 (se 0.0174) version 0.3500 | picks' mean tau +2.3 bp, mean a +4.5 bp | ev/s 6.01

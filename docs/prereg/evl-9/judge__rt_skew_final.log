@@ -1,0 +1,11 @@
+{"cell": "SYM", "reps": 1500, "ev6f_run1_pass": 0.0207, "se": 0.0037}
+{"cell": "LEFT-steamroller-sig1-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.2587, "se": 0.0113}
+{"cell": "LEFT-steamroller-sig2-jumps2pct-20down", "reps": 1500, "ev6f_run1_pass": 0.0887, "se": 0.0073}
+{"cell": "LEFT-steamroller-sig3to8-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.046, "se": 0.0054}
+{"cell": "LEFT-steamroller-sig1.5to2.5-jumps0.5pct-30down", "reps": 1500, "ev6f_run1_pass": 0.048, "se": 0.0055}
+{"cell": "LEFT-steamroller-sig1.5to2.5-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.088, "se": 0.0073}
+{"cell": "LEFT-steamroller-sig1-jumps0.3pct-30down", "reps": 1500, "ev6f_run1_pass": 0.0233, "se": 0.0039}
+{"cell": "MIX25-steamroller-sig1-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.0353, "se": 0.0048}
+{"cell": "MIX50-steamroller-sig1-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.046, "se": 0.0054}
+{"cell": "LEFT-steamroller-sig1to1.5-jumps1pct-30down", "reps": 1500, "ev6f_run1_pass": 0.1847, "se": 0.01}
+{"cell": "LEFT-steamroller-sig1to1.5-jumps0.5pct-30down", "reps": 1500, "ev6f_run1_pass": 0.0633, "se": 0.0063}

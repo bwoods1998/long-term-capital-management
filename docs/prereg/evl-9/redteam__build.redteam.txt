@@ -1,0 +1,57 @@
+BUILD (the red team's part of the warm-start build; stdlib in league/, the desktop only for fetch and the sealed train)
+
+FILES
+1. gateway/lib/caps.mjs: one row ['GET', /^v2\/stocks\/auctions$/] in VENUE_PATHS.alpaca (DATA_PREFIXES already routes
+   v2/stocks/ to the data host); gateway/test/caps.test.mjs: auctions admitted for GET, refused for POST, per-symbol
+   path refused. Reviewed; CI green on the exact head; shipped in a deploy window BEFORE T_F (next: 20:05Z Oct 22).
+   Before T_F the captain runs a COUNT-ONLY probe (probe_counts.py P5, new): the earliest day with an auction record for
+   5 liquid symbols and the share of 200 random (symbol, day) pairs with both auctions; dates and counts only.
+2. league/events/warm/vintage.py: S_CUT from the calendar; clamp(end); the vault layout; MANIFEST.jsonl writer
+   (request, fetched_at, bytes, sha256); RESERVE check (no 2020 session); FORBIDDEN tuple (source names and paths).
+3. league/events/warm/views.py: VaultView and StoreView with the same methods (filings_before(cik, t),
+   form4_before(cik, t), news_before(symbol, t), bars_before(symbol, day, n), mark_1530(symbol, day), universe(day,
+   cik)); every method returns rows with their knowable time and raises if asked for anything at or after t.
+4. league/events/warm/features.py: features(event, view, tau) -> (vector, inputs_at); the column list and its version;
+   within-session percentile ranks for counts (R5(b)); no issuer identity (R5(a)).
+5. league/events/warm/label.py: auction prints, the adj/raw ratio, the LIMIT AT ENTRY, TRADABLE at E_REF, gross and
+   beta-hedged labels, drop reasons (R4).
+6. league/events/warm/pit.py: the point-in-time CIK -> symbol map from S2 (the latest ISSUERTRADINGSYMBOL on a Form 4 of
+   that issuer filed in the 400 days before D), the operating test from S1's complete periodic dates, the ALIVE cells,
+   coverage counts and weights (R6).
+7. league/events/warm/gates.py: G1-G5 (R8), each returning counts and a pass flag; VOID receipt.
+8. scripts/warm_fetch.py (desktop): the vault fetch; SEC at <= 6.67 requests/s with ltcm.data's User-Agent; Alpaca at
+   <= 100/min through the gateway, pausing 13:00-13:45Z, 19:30-20:20Z and 22:25-22:45Z and around the House's 01:40Z /
+   01:55Z jobs; price-bearing endpoints refuse to run before T_F (they read the tag).
+9. scripts/warm_train.py (desktop, sealed, R7): tag check, vault-only reads, gates, fit, model file, stdout whitelist.
+10. scripts/make_fixture_vault.py: a SYNTHETIC vault (random filings, news, bars and prints) for every test and every dry
+    run; the only data a run before T_F may train on.
+11. House: league/events/run.py hook for the warm programs (after every earlier row, isolated and time-bound as
+    PREREG-EVL-7 section 1.7); store.py additive tables warm_cands (write-once) and warm_models (id, version, sha256,
+    s_cut, count_from, path); R9's fail-closed checks; the backfill receipts decide-open-warm / decide-close-warm.
+
+TESTS (each must pass on the exact head before T_F; they read only fixtures)
+- test_warm_clamp: no request built by warm_fetch has an end after S_CUT + 1 day; a price endpoint before T_F refuses.
+- test_warm_knowable: the 8-K and Form 4 fallbacks (17:30 / 22:00 ET); news edited > 10 min excluded; a feature whose
+  input is at or after tau raises; inputs_at < tau on every fixture row.
+- test_warm_lint: the builder, label, pit and trainer modules contain none of FORBIDDEN (company_tickers, status=active,
+  tradable, acceptanceDateTime, 'tickers', 'exchanges', 'formerNames', verdicts, outcomes, looks) and import nothing
+  from league.events.verdicts, score's outcome writers, screen or bands.
+- test_warm_parity: the same fixture event through VaultView and StoreView gives identical features and knowable times.
+- test_warm_identity: no column name holds cik, ticker, symbol or issuer; no code path groups labels by issuer.
+- test_warm_determinism: two trainings of one fixture vault give identical bytes.
+- test_warm_sealed: the trainer's stdout and every file it writes match the whitelist (counts, hashes, the model file
+  schema); no float other than the model's own numbers is printed.
+- test_warm_count_from: the House refuses a decision at tau < COUNT_FROM_9, a model whose sha256 is not pinned, and a
+  model whose S_CUT is on or after its first counted session; the backfill decides each session once, as of tau.
+- test_warm_reserve: no request names a 2020 session.
+
+SHIP ORDER AND WINDOWS
+- (1) caps.mjs row: next deploy window (20:05Z Oct 22), then probe P5 and probe P2 (counts) the same night.
+- (2) builder, label, pit, gates, trainer, fixture vault, tests, House hook: one PR from rel/1019g's successor; reviews;
+  CI green; frozen with this file at T_F right after a close (it is code, not a deploy: T_F needs no window).
+- (3) the night of T_F: price fetch (bars <= 6,966 + 25,180 requests, auctions about 21,728: at 100/min about 9 h),
+  gates, sealed train, T_M commit before 13:15Z.
+- (4) the House release with the scorer and the model: the next window after T_M; the backfill decides COUNT_FROM_9 to
+  the release in shadow.
+- RISK: the parity gate G2 can only run once the price fetch has covered the lane's sessions; a parity VOID costs one
+  night and one re-registration (no charge).

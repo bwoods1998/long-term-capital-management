@@ -1,0 +1,2 @@
+{"cell": "LEFT-steamroller-sig1to1.5-jumps1pct-30down", "reps": 1500, "block_skew": -3.774, "ev6d_pass": 0.226, "ev6d_trim_pass": 0.226, "ev6t_pass": 0.136, "ev6t_trim_pass": 0.136, "ev6d_se": 0.0108, "ev6d_trim_se": 0.0108, "ev6t_se": 0.0089, "ev6t_trim_se": 0.0089}
+{"cell": "LEFT-steamroller-sig1to1.5-jumps0.5pct-30down", "reps": 1500, "block_skew": -4.128, "ev6d_pass": 0.0733, "ev6d_trim_pass": 0.0733, "ev6t_pass": 0.0293, "ev6t_trim_pass": 0.0293, "ev6d_se": 0.0067, "ev6d_trim_se": 0.0067, "ev6t_se": 0.0044, "ev6t_trim_se": 0.0044}

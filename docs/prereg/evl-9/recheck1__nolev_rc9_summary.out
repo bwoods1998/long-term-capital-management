@@ -1,0 +1,5 @@
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-NOLEV    R=400  RUN1 0.1550 (se 0.0181) v120 0.2750 ev/s 7.95 tau +7.8bp
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-NOLEV             R=400  RUN1 0.1250 (se 0.0165) v120 0.2075 ev/s 3.43 tau +5.2bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV    R=600  RUN1 0.1400 (se 0.0142) v120 0.2767 ev/s 7.95 tau +9.1bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV-SP20 R=400  RUN1 0.1225 (se 0.0164) v120 0.2000 ev/s 7.88 tau +7.1bp
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV             R=400  RUN1 0.0925 (se 0.0145) v120 0.1950 ev/s 6.48 tau +6.8bp

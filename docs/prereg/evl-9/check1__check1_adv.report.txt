@@ -1,0 +1,7 @@
+ADV-leak-k30-worst                   R=  400 run1 0.0725 (se 0.0130) version 0.1425 | ev/s 7.99 | picks' median sigma 6.71%
+ADV-rand-k60-worst-notau             R=  400 run1 0.0900 (se 0.0143) version 0.1450 | ev/s 8.00 | picks' median sigma 7.31%
+ADV-lowvol-k30-worst                 R=  400 run1 0.1100 (se 0.0156) version 0.1800 | ev/s 8.00 | picks' median sigma 1.53%
+ADV-lowvol-k30-worst-notau           R=  400 run1 0.0775 (se 0.0134) version 0.1575 | ev/s 7.99 | picks' median sigma 1.53%
+ADV-lowvol-k30-worst-notau-g15       R=  400 run1 0.0775 (se 0.0134) version 0.1725 | ev/s 7.97 | picks' median sigma 1.78%
+ADV-lowvol-k30-worst-notau-g15on     R=  400 run1 0.0925 (se 0.0145) version 0.1475 | ev/s 7.99 | picks' median sigma 1.53%
+ADV-lowvol-k30-worst-notau-phi20     R=  400 run1 0.0950 (se 0.0147) version 0.1600 | ev/s 8.00 | picks' median sigma 1.52%

@@ -1,0 +1,127 @@
+{
+ "inputs": {
+  "distinct_8k_2016_2026": 737042,
+  "distinct_form4_2016_2026": 1952640,
+  "8k_listed_issuer": 626809,
+  "form4_with_symbol": 1929686,
+  "form4_P_purchase_filings": 167150,
+  "pit_symbols": 12590,
+  "sessions": 2716,
+  "atom_8k_pages": 17596,
+  "atom_f4_pages": 26553
+ },
+ "rows": [
+  {
+   "source": "SEC bulk submissions.zip (forms, items, filing dates, every CIK)",
+   "requests": 1,
+   "hours": 0.0,
+   "download_MB": 1570.2,
+   "metered_usd": 0.0,
+   "note": "one file on www.sec.gov; measured ~2-3 min on blake-desktop"
+  },
+  {
+   "source": "SEC Insider Transactions Data Sets 2016q1-2026q3 (Form 4 XML, parsed by SEC)",
+   "requests": 43,
+   "hours": 0.0,
+   "download_MB": 436.2,
+   "metered_usd": 0.0,
+   "note": "two quarters under /files/datastandardsinnovation/"
+  },
+  {
+   "source": "8-K acceptance times: browse-edgar getcompany Atom, 100 a page, per filer CIK",
+   "requests": 17596,
+   "hours": 0.73,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "<updated> = .hdr.sgml acceptance (24/24 checked)"
+  },
+  {
+   "source": "8-K acceptance times ALTERNATIVE: one .hdr.sgml per 8-K",
+   "requests": 737042,
+   "hours": 30.71,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "slow; exact; items too"
+  },
+  {
+   "source": "Form 4 acceptance times: getcompany type=4 owner=only Atom per issuer CIK",
+   "requests": 26553,
+   "hours": 1.11,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "type=4 with owner=include prefix-matches 424B*; owner=only lists Form 4s"
+  },
+  {
+   "source": "Alpaca SIP 1Day bars raw + all, PIT symbols (Form 4 issuers with a symbol), UPPER bound 12590 x 2716 sessions",
+   "requests": 6966,
+   "hours": 1.16,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "200 symbols a request, 10,000 bars a page"
+  },
+  {
+   "source": "Alpaca SIP 1Day bars raw + all, ENDED spells fetched alone with asof inside the spell, UPPER bound 12590 spells",
+   "requests": 25180,
+   "hours": 4.2,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "equity_panel's plan: each ended asset alone"
+  },
+  {
+   "source": "Alpaca SIP 1Min 09:30 minute of event names (<= 1457 names a session)",
+   "requests": 21728,
+   "hours": 3.62,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "15:00-15:30 is 31 bars a name: 200 names = 6,200 points, one page"
+  },
+  {
+   "source": "Alpaca SIP 1Min 15:00-15:30 minutes of event names (<= 1457 names a session)",
+   "requests": 21728,
+   "hours": 3.62,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "15:00-15:30 is 31 bars a name: 200 names = 6,200 points, one page"
+  },
+  {
+   "source": "Alpaca auctions (open+close prints) of event names, IF the gateway admits v2/stocks/auctions",
+   "requests": 21728,
+   "hours": 3.62,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "reviewed gateway change: one VENUE_PATHS row; one day object holds both auctions (to verify on the first probe)"
+  },
+  {
+   "source": "Alpaca news history 2016-2026 at 130 articles/day (metadata, include_content=false)",
+   "requests": 10263,
+   "hours": 1.71,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "the per-day count is a count-only probe (gap)"
+  },
+  {
+   "source": "Alpaca news history 2016-2026 at 500 articles/day (metadata, include_content=false)",
+   "requests": 39470,
+   "hours": 6.58,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "the per-day count is a count-only probe (gap)"
+  },
+  {
+   "source": "Alpaca news history 2016-2026 at 1500 articles/day (metadata, include_content=false)",
+   "requests": 118410,
+   "hours": 19.73,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "the per-day count is a count-only probe (gap)"
+  },
+  {
+   "source": "Alpaca news history 2016-2026 at 3000 articles/day (metadata, include_content=false)",
+   "requests": 236820,
+   "hours": 39.47,
+   "download_MB": null,
+   "metered_usd": 0.0,
+   "note": "the per-day count is a count-only probe (gap)"
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+stress: 1/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 72.2s total 73s
+stress: 2/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 77.2s total 78s
+stress: 3/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 77.7s total 78s
+stress: 4/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 79.2s total 80s
+stress: 5/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 80.3s total 81s
+stress: 6/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 82.4s total 83s
+stress: 7/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 82.8s total 83s
+stress: 8/16 ON-ADVlowvol60-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2 85.3s total 86s
+stress: 9/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 59.0s total 132s
+stress: 10/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 59.0s total 137s
+stress: 11/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 58.4s total 138s
+stress: 12/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 61.0s total 139s
+stress: 13/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 59.4s total 142s
+stress: 14/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 61.6s total 143s
+stress: 15/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 57.5s total 143s
+stress: 16/16 ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-LVSTY10 61.8s total 145s

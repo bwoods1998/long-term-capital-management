@@ -1,0 +1,127 @@
+PREREG-EVL-9 CLAUSES FROM THE LEAKAGE AND SURVIVORSHIP RED TEAM (to be pasted as written; every figure is from
+evl9/redteam/rt_warm.report.txt or rt_skew.out*.jsonl)
+
+R1 TIMES AND COUNTING.
+(a) REGISTERED_AT_9 (T_F) is fixed by A92's three-clock method; the tag prereg-evl-9 never moves; the code sha it names
+    holds the fetcher, the historical builder, the label, the trainer, the gates and the House scorer.
+(b) S_CUT is the last NYSE session (league.equity.store.nyse_sessions) whose close is before T_F. No input of the model
+    names a session, filing date, acceptance time or news time after S_CUT; every market-data request's end is the
+    earlier of (S_CUT + 1 day) 00:00 America/New_York and now - 16 minutes.
+(c) MODEL_AT (T_M) of a version is GitHub's commit time of docs/prereg/evl-9/model-<id>-v<n>.json, its MANIFEST digest
+    and its gate receipts; the file's sha256 is pinned in the captain's amendment WARM_MODEL_<id>_v<n> in the same hour.
+(d) COUNT_FROM_9 of a version = max(T_F, T_M). The version counts only events knowable after COUNT_FROM_9 (PREREG-EVL-1
+    section 3), and no decision of it exists before COUNT_FROM_9. "Judged only on events after its registration" is
+    read as "after COUNT_FROM_9", which is never earlier.
+(e) The decisions from COUNT_FROM_9 to the first decision of the House release carrying the model are decided by that
+    release, once each, oldest first, exactly as of each decision time with A72's stored-before cut-offs, in shadow
+    only, with receipt kinds decide-open-warm:<day> and decide-close-warm:<day>; none is ever traded and none is
+    decided again.
+(f) If T_M is not on GitHub within 96 hours of T_F the version is VOID (R8).
+
+R2 THE VINTAGE.
+(a) Inputs that carry no price (SEC submissions.zip, the SEC Insider Transactions Data Sets, the browse-edgar Atom
+    acceptance times, Alpaca news metadata with include_content=false) may be fetched before T_F; inputs that carry a
+    price (Alpaca 1Day bars raw and adjustment=all, 1Min bars, auctions) are fetched only after T_F. Every response is
+    stored compressed under the vault (~/Work/.ltcm-main/evl9-vault/<T_F>/) with its request, fetch time and sha256 in
+    MANIFEST.jsonl; the model is built from the vault only, never from a live re-fetch.
+(b) ALLOWED fields: SEC filings by their own filingDate <= S_CUT, form exactly "8-K" or "4" (no amendments), the 8-K
+    items field; the Atom <updated> acceptance time; Form 4 non-derivative transactions of original filings by their own
+    FILING_DATE; ISSUERTRADINGSYMBOL as the symbol of its issuer as of that filing; raw daily bars for every level and
+    adjustment=all only as a ratio of two days inside one window; asof only to fetch a point-in-time symbol; auction
+    prints; news id, created_at, updated_at, source, headline, symbols; the NYSE calendar; the complete 10-K/10-Q dates.
+(c) FORBIDDEN in the vault and the model (forward refits are R9's) as a feature, a filter, a label input, a weight or a
+    reason a row exists: company_tickers.json and
+    company_tickers_exchange.json; Alpaca asset status, tradable and exchange; the submissions files' current tickers,
+    exchanges and former names; their acceptanceDateTime; any reader verdict or model call; restated XBRL comparatives (a fact is read only from the submission that
+    first reports its period, at that submission's acceptance + 10 minutes); amended documents; any
+    House outcome, mark or look of a session after S_CUT; any year-2020 session (league/xs/config.py RESERVE_YEARS).
+    Current SIC is read only for PREREG-EVL-7 section 1.4 item 10's four groups and the 6221 exclusion.
+
+R3 KNOWABLE TIMES OF HISTORY.
+    8-K: the Atom <updated> + 10 minutes, else filingDate 17:30 ET + 10 minutes. Form 4: the issuer's owner=only Atom
+    <updated> + 10 minutes, else FILING_DATE 22:00 ET + 10 minutes. News: created_at + 2 minutes, and an article whose
+    updated_at is more than 10 minutes after created_at is excluded. A decision for session D reads daily bars of
+    sessions before D only; the '1530' mark is league/events/run.py `_marks_1530`'s rule, knowable at 15:46 ET. Every
+    feature row records inputs_at, the latest time of any input it read.
+
+R4 THE LABEL.
+    At the version's own entry and exit auctions, the listing exchange's auction print (v2/stocks/auctions) and the
+    benchmark's (SPY when adv20 >= $50M, else IWM) at the same auctions; prices adjusted by the day's adjusted/raw close
+    ratio as league/events/score.py `_ratio`; an entry print above 1.25 x the previous raw close is skipped (PREREG-EVL-2);
+    TRADABLE at E_REF = the account equity at the close before T_F. y = clip(a_g / sigma20, -5, 5) with the GROSS
+    abnormal return a_g = exit/entry - bench_exit/bench_entry. The cost is charged once, at the
+    pick hurdle, on the judge's basis for that event. A row with no auction print at entry or no exit print within 5
+    sessions is dropped and counted by reason. If v2/stocks/auctions is not admitted by T_F, a closing print is the raw
+    daily bar close (label_source 'bar', its share reported); no version entering or exiting at an opening auction is
+    registered until it is admitted.
+
+R5 FEATURES.
+(a) No CIK, ticker or name indicator; no encoding of past labels, returns or reactions by issuer or by any group of fewer
+    than 200 issuers; a tree learner's every leaf holds rows of at least 200 distinct issuers (rt_warm W-TE-tau1: an
+    issuer encoding passes 94.75%, and 89.75% at the worst corner, where the lane's null holds a 1% persistent issuer effect).
+(b) Counts and lengths (articles, symbols, filings, items, headline characters) enter as within-session percentile ranks.
+(c) Form 4's 10b5-1 flag is not read.
+(d) ONE function, league/events/warm/features.py `features(event, view, tau)`, computes every feature, over the vault
+    (VaultView) for history and over the House store (StoreView) for decisions; both views expose the same methods.
+(e) The House writes each candidate's features at its decision into warm_cands (program, version, day, tau, cik, event,
+    inputs_at, features, e, z, ahat, eligible, picked, rank), write-once; nothing recomputes a written row.
+
+R6 TRAINING.
+    Years 2016-2019 and 2021 to S_CUT; each calendar year's rows carry equal total weight; rows of a (year, ALIVE or not) cell, ALIVE = the issuer filed any
+    form in the 365 days before S_CUT (from the submissions file, filtered to filing dates <= S_CUT), whose coverage (rows
+    kept / events) is more than 10 points below the year's other cell are weighted by the ratio of the two coverages;
+    the registered inner procedure (era folds 2016-17, 2018-19, 2021, 2022-23, 2024-S_CUT; a column whose fold
+    sign differs from its full-window sign in two or more folds is zeroed) runs inside the sealed run; nothing else is
+    tuned. No in-sample statistic of any kind is computed. A version whose forward refits forget does so with a half-life
+    of at least 120 sessions (rt_warm SEL-SECDRIFT30: half-lives 20 and 40 pass 10.7% and 10.5% under a 30 bp sector drift
+    against 6.5% at 500).
+
+R7 THE SEALED RUN.
+    scripts/warm_train.py runs on blake-desktop only from the commit tagged prereg-evl-9, after T_F (it reads the tag
+    with `git ls-remote` and refuses otherwise), with Python's standard library, math.fsum in (session, CIK) order and a
+    float64 Cholesky; it prints and writes counts, hashes and the model file only. A second run from the vault must
+    agree to 1e-12 relative in every number. The model file holds the column scaling, the coefficients, the sufficient
+    statistics forward refits need, the zeroed columns, the sha256 of the ordered row keys, the MANIFEST sha256 and the
+    code sha.
+
+R8 GATES AND VOID.
+    Before T_M, in order: G1 coverage (rows per training year >= 2,000; point-in-time symbol coverage >= 70% of each year's
+    events; label coverage >= 80%; no coverage cell below 50%); G2 parity over the sessions both hold (Oct 19 to S_CUT):
+    candidate sets Jaccard >= 0.95 per family, features equal to 1e-9 on >= 99% of rows, knowable times within 1 second
+    on >= 99%; G3 leakage lint (static: no forbidden source in the code paths; dynamic: no vault session after S_CUT, no
+    row with inputs_at >= its tau, no label exit after S_CUT, no 2020 row); G4 determinism; G5 finite fit. A failure
+    makes the version VOID: never seated, its charge not drawn, the gate, its counts and the reason written in the
+    amendments. At most two VOIDs an id; a third attempt draws its charge whatever happens. After T_M nothing voids a
+    version.
+
+R9 THE HOUSE.
+    The House decides nothing for a version at a time before its COUNT_FROM_9, reads only a model whose sha256 is the
+    pinned one and whose MANIFEST S_CUT precedes its first counted session, and fails closed (no picks, a receipt
+    saying why) otherwise. Forward refits read only pool outcomes settled before tau, of entry sessions after S_CUT,
+    with features as written at their own decisions.
+
+R10 WHAT NOBODY READS.
+    The vault's price files, every model file and every refit state are outcome-derived: no designer, architect brief,
+    birth prompt or R3 facts file reads or cites them (R3's facts authorizer refuses their paths), and no report prints
+    an in-sample figure. A captain read is written in the amendments with its time.
+
+R11 CHANGES.
+    Any change to the code, the data spec, a constant or the model after T_F is a new version with its own T_F, S_CUT,
+    T_M and COUNT_FROM_9 and its own charge. Re-entry is PREREG-EVL-7 section 1.10's mechanical rule only; a re-entered
+    version is re-trained from a new vault with the same code and counts only after its own COUNT_FROM_9.
+
+R12 THE SHAPE GUARD (this file's versions only).
+    A candidate whose sigma20 (the standard deviation of its 19 raw daily log changes before D) is below 1.5% is not
+    eligible to be picked; it stays in the pool, the fit and the control. (rt_skew.py: a pick set made only of low-
+    volatility steady-gain rare-crash events, every event's mean exactly 0, passes PREREG-EVL-6's drafted screen 32.35%
+    at sigma 1%, 22.6% at 1-1.5%, 13.53% at 1.5-2.5% with a 1% chance of -30% a session; 6.13% at 0.5%.) The report
+    shows, per look, the record's share of events with a below -15% beside the pool's.
+
+R13 HONESTY.
+    The designers, the judge and the checks read no outcome, return, price, bar, look, band or P&L of any event, symbol
+    or program; only counts, code, documentation and synthetic simulations (rt_warm.py, rt_skew.py and the other lenses'
+    scripts, copied with their sha256 into docs/prereg/evl-9/ at the freeze). The registering captain session has read
+    per-program shadow means of the existing programs for Oct 19-20 and the lane's aggregate real-money figures, and
+    earlier lanes' agents read index-ETF, options and S&P 500 cross-sectional outcomes for 2016-2019 and 2021-2024; the
+    captain chose none of these rules, and every session up to S_CUT enters the training by rule, not by choice. Nobody
+    computes or reads an in-sample figure before or after T_M.

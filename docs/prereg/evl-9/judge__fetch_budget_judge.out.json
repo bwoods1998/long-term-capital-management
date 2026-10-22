@@ -1,0 +1,73 @@
+{
+ "sessions": {
+  "O1": 1202,
+  "ON": 1201
+ },
+ "news_days": 1797,
+ "sec_before_T_F": {
+  "atom_8k_pages": 9458,
+  "atom_form4_owner_only_pages": 14321,
+  "form345_quarters_2021q1_2026q3": 23,
+  "fsds_sub_range_reads_2021q1_2026q3": 69,
+  "form4_txt_2026_10_01_to_10_16": 12952,
+  "form4_txt_overlap_2026_10_19_to_10_22_est": 3200,
+  "submissions_zip": 0,
+  "requests": 40023,
+  "hours_at_6.67_per_s": 1.67
+ },
+ "news_before_T_F": {
+  "130": {
+   "requests": 5391,
+   "hours_at_100_per_min": 0.9,
+   "hours_at_190_per_min": 0.47
+  },
+  "500": {
+   "requests": 17970,
+   "hours_at_100_per_min": 2.99,
+   "hours_at_190_per_min": 1.58
+  },
+  "1500": {
+   "requests": 53910,
+   "hours_at_100_per_min": 8.99,
+   "hours_at_190_per_min": 4.73
+  },
+  "3000": {
+   "requests": 107820,
+   "hours_at_100_per_min": 17.97,
+   "hours_at_190_per_min": 9.46
+  }
+ },
+ "price_after_CODE_PIN": {
+  "bars_1day": {
+   "batched_one_adjustment": 3150,
+   "batched_raw_and_all": 6300,
+   "asof_alone_worst_extra": 25180
+  },
+  "min1_on_marks": {
+   "on_candidates_420": 12010,
+   "on_candidates_850": 21618
+  },
+  "auctions": {
+   "per_session": 6,
+   "requests": 7212,
+   "hours_at_90_per_min": 1.34
+  },
+  "total": {
+   "requests_typical_lo": 25522,
+   "requests_worst_hi": 60310,
+   "hours_at_100_per_min": [
+    4.25,
+    10.05
+   ],
+   "hours_at_190_per_min": [
+    2.24,
+    5.29
+   ]
+  }
+ },
+ "gbt_train": {
+  "secs_per_round_700k_x_54": 3.289,
+  "rounds_per_run_at_Rstar_200": 1400,
+  "hours_per_run": 1.28
+ }
+}

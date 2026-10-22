@@ -1,0 +1,15 @@
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-G20      R=400  RUN1 0.1600 (se 0.0183) v120 0.3000 ev/s 7.41 tau +12.4bp
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-NOLEV    R=400  RUN1 0.1550 (se 0.0181) v120 0.2750 ev/s 7.95 tau +7.8bp
+O1-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag1-SP20     R=800  RUN1 0.1175 (se 0.0114) v120 0.2188 ev/s 7.88 tau +7.2bp
+O1-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-NOLEV             R=400  RUN1 0.1250 (se 0.0165) v120 0.2075 ev/s 3.43 tau +5.2bp
+O1-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-SP05              R=200  P(promoted) by25/40/60/120 0.125/0.150/0.150/0.240 | edge bp 1-10 49.4 51-60 48.8 | ev/s 7.91
+O1-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n300-lag1-SP20              R=200  P(promoted) by25/40/60/120 0.075/0.105/0.105/0.265 | edge bp 1-10 49.5 51-60 43.1 | ev/s 7.85
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-G20      R=400  RUN1 0.1400 (se 0.0173) v120 0.2750 ev/s 7.41 tau +12.5bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV    R=600  RUN1 0.1400 (se 0.0142) v120 0.2767 ev/s 7.95 tau +9.1bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV-SP20 R=400  RUN1 0.1225 (se 0.0164) v120 0.2000 ev/s 7.88 tau +7.1bp
+ON-ADVlowvol30-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-SP20     R=800  RUN1 0.1138 (se 0.0112) v120 0.2213 ev/s 7.89 tau +6.9bp
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-G20               R=400  RUN1 0.1175 (se 0.0161) v120 0.2325 ev/s 5.78 tau +10.1bp
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-NOLEV             R=400  RUN1 0.0925 (se 0.0145) v120 0.1950 ev/s 6.48 tau +6.8bp
+ON-H0-crasht3cl-skew-rho15-phi20-dr20-tau1-n600-lag2-SP20              R=400  RUN1 0.0850 (se 0.0139) v120 0.1850 ev/s 6.12 tau +5.5bp
+ON-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n600-lag2-SP05              R=200  P(promoted) by25/40/60/120 0.140/0.220/0.225/0.350 | edge bp 1-10 60.6 51-60 57.7 | ev/s 7.99
+ON-rho10-ic05-t3-sym-rho05-phi10-dr00-tau0-n600-lag2-SP20              R=200  P(promoted) by25/40/60/120 0.085/0.145/0.145/0.275 | edge bp 1-10 59.5 51-60 53.7 | ev/s 7.97

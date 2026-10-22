@@ -1,0 +1,98 @@
+{
+ "part1": {
+  "admitted_hold_sigma_at_sig20_1.5pct": [
+   {
+    "f": 0.15,
+    "on_hold": 0.00581,
+    "o1_hold": 0.01383,
+    "on_abn_beta1": 0.00433,
+    "o1_abn_beta1": 0.01031
+   },
+   {
+    "f": 0.2,
+    "on_hold": 0.00671,
+    "o1_hold": 0.01342,
+    "on_abn_beta1": 0.005,
+    "o1_abn_beta1": 0.01
+   },
+   {
+    "f": 0.3,
+    "on_hold": 0.00822,
+    "o1_hold": 0.01255,
+    "on_abn_beta1": 0.00612,
+    "o1_abn_beta1": 0.00935
+   },
+   {
+    "f": 0.4,
+    "on_hold": 0.00949,
+    "o1_hold": 0.01162,
+    "on_abn_beta1": 0.00707,
+    "o1_abn_beta1": 0.00866
+   },
+   {
+    "f": 0.5,
+    "on_hold": 0.01061,
+    "o1_hold": 0.01061,
+    "on_abn_beta1": 0.00791,
+    "o1_abn_beta1": 0.00791
+   }
+  ],
+  "jump_window": {
+   "sig20_ddof1_mean": 0.05134,
+   "sig20_ddof0_mean": 0.04997,
+   "robust_drop_largest_mean": 0.00397,
+   "sessions_inflated": 19,
+   "true_daily_sigma": 0.004
+  }
+ },
+ "part2": [
+  {
+   "cell": "STEAM-sig0.5to0.8-j1pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.434,
+   "se": 0.0157
+  },
+  {
+   "cell": "STEAM-sig0.5to0.8-j0.5pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.109,
+   "se": 0.0099
+  },
+  {
+   "cell": "STEAM-sig0.8to1.1-j1pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.264,
+   "se": 0.0139
+  },
+  {
+   "cell": "STEAM-sig0.8to1.1-j0.5pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.079,
+   "se": 0.0085
+  },
+  {
+   "cell": "STEAM-sig1.1to1.4-j1pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.184,
+   "se": 0.0123
+  },
+  {
+   "cell": "STEAM-sig0.5to0.8-j0.3pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.025,
+   "se": 0.0049
+  },
+  {
+   "cell": "MIX50-STEAM-sig0.5to0.8-j1pct",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.043,
+   "se": 0.0064
+  },
+  {
+   "cell": "STEAM-sig1.5to2.5-j1pct-repro",
+   "reps": 1000,
+   "ev6f_run1_pass": 0.094,
+   "se": 0.0092
+  }
+ ]
+}
