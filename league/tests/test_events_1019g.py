@@ -8,14 +8,18 @@ says how).
 
 1. ROOM: PREREG-EVL-5's rows come after PREREG-EVL-4's and before R3's births in A85's tiers, its round-robin and its
    send order, at learning size; a learning buy of theirs at D's close leaves the next open's Probe programs A85's
-   reservation; and (THE INTEGRATION'S CHANGE, league/equity/live.py `_event_send` `ahead`) while a PREREG-EVL-5 buy
-   waits for the lane's own close decision to name its program (`book.part_hold`), the buys after it in ROOM's order
-   leave it its cash, invested room, loss budget and day orders, and one left no whole share waits for it.
+   reservation; and while a PREREG-EVL-5 buy waits for the lane's own close decision to name its program
+   (`book.part_hold`), feat/evl-5's `HeldAhead` (its review round) keeps it, from the buys after it in A85's send order,
+   A86's Probe size net of A85's reservation, its name wall and its two line orders, and one that fits only without
+   that room waits for it; a dry sizing writes no release 1019f record. (Release 1019g's first build had its own form
+   of this, `ahead`; the fix round kept feat/evl-5's alone and ported its tests here: each undone, `_event_keep_room`
+   keeping nothing, fails.) The held turn (`house.HOLD_LEAD`) never meets release 1019f's screen after the open.
 2. The final record: PREREG-EVL-5 section 2's span (from P''s close decision) is judged by A84's per-feed clean reads,
    and its backfill runs through the index that holds X's filings when X is an SEC holiday (1019f's fix round).
 3. The alarms: evl_score waits for the next pass on a `decide-close-evl5` catch-up's intents; evl_final judges the three
    rows and reads a close decided without them until their own decision names them; evl_entries names a buy
-   `part_hold` held as held by a gate of real opens.
+   `part_hold` held as held by a gate of real opens (`book.PART_WAIT`'s words, the review round's, and a receipt that
+   cannot be read), a buy waiting for the room kept by its own sizing's binding.
 4. The event kind's 150-order line refuses in ROOM's order with the new rows (PREREG-EVL-5 section 1.3 (a)), whatever the
    minute each buy goes; A80's one re-send carries a PREREG-EVL-5 buy the venue cancelled at once.
 5. A86 REVISED's Probe rows leave PREREG-EVL-5's learning rows as frozen (2%, one share at most 5%, eight open); at Probe
@@ -26,8 +30,10 @@ Through the REAL book (league/equity/live.py), the REAL `size_entry`, the money 
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
+import sqlite3
 import tempfile
 import unittest
 from decimal import Decimal as D
@@ -247,6 +253,193 @@ class RoomCash(TB.EventTest):
         self.assertEqual(len(sent(h, probe)), 2)
 
 
+    # ------------------------------------- feat/evl-5's HeldAhead (its review round) with A85 and A86 (release 1019f)
+    def probe_drop(self, h: TB.Harness) -> str:
+        """EVL-ERN-DROP-ON at PROBE with one fall (ACME), and EVL-NEWS-READ-ON at learning with one day article: both
+        DAY's close entries; DROP's buy is first in A85's send order (Probe before learning)."""
+        h.lane.band(DROP, "probe", version=1)
+        fall(h, "ACME", TB.CIK, "e-1")
+        [news] = day_articles(h, 1)
+        h.venue.prints[(news, DAY.isoformat(), "close")] = D("20.00")
+        h.lane.decided(DAY, "open")
+        return news
+
+    def to_close(self, h: TB.Harness) -> None:
+        for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+
+    def record(self, h: TB.Harness, iid: int) -> tuple:
+        """Release 1019f's record of a buy's sizing on its side row: (target_usd, binding, sized_usd)."""
+        row = h.state.rows("SELECT target_usd, binding, sized_usd FROM eq_event_intents WHERE iid=?", (iid,))[0]
+        return row["target_usd"], row["binding"], row["sized_usd"]
+
+    def test_a_learning_buy_behind_a_waiting_probe_drop_buy_leaves_it_a86s_probe_size(self):
+        """$80 above the reserve. The book's close decision (15:47) is made before the lane's own (the book waits 60 s
+        for it): DROP's Probe buy waits for it (`book.part_hold`) and keeps A86 REVISED's Probe size from the buys after
+        it (`HeldAhead`: 3.5% of $2,000 at its $20.00 limit, three shares, $60; five, $100, at feat/evl-5's 5%), so
+        EVL-NEWS-READ-ON's learning buy, after it in A85's send order, sends one share on the $20 left. Once the lane's
+        decision names DROP, its buy goes whole."""
+        h = short_of_cash(self.harness(cash="130"), "130")
+        news = self.probe_drop(h)
+        self.to_close(h)
+        self.assertEqual(sent(h), [(news, "1")], "the learning buy leaves the waiting Probe buy its $60")
+        [on] = buys_of(h, LEARN_ON)
+        [drop] = buys_of(h, DROP)
+        self.assertEqual((drop["band"], drop["status"]), ("probe", "planned"))
+        self.assertIn(EB.PART_WAIT, drop["why"])
+        order = h.state.rows("SELECT why FROM eq_orders WHERE iid=?", (on["iid"],))[0]["why"]
+        self.assertIn("1 shares at learning (sleeve_cash)", order)
+        self.assertIn("the sleeve has $20.00 of free cash", order, "$80 less the $60 kept for DROP")
+        lane_close(h, DROP, f"{LEARN_ON}@v2")
+        h.tick(15, 48)
+        self.assertEqual(sent(h), [(news, "1"), ("ACME", "3")], "3.5% of E at the $20.00 limit: whole")
+
+    def test_undone_the_learning_buy_takes_the_probe_buys_cash(self):
+        """The defect the money review found, on the same rows, with `HeldAhead` undone (`_event_keep_room` keeps
+        nothing): the learning buy sends two shares at 15:47 and DROP's Probe buy, ahead of it in ROOM's order, gets two
+        of its three."""
+        with mock.patch.object(L.EquityBook, "_event_keep_room", lambda self, *a, **k: None):
+            h = short_of_cash(self.harness(cash="130"), "130")
+            news = self.probe_drop(h)
+            self.to_close(h)
+            lane_close(h, DROP, f"{LEARN_ON}@v2")
+            h.tick(15, 48)
+        self.assertEqual(sent(h), [(news, "2"), ("ACME", "2")])
+
+    def test_a_birth_behind_a_waiting_learning_drop_buy_waits_for_it(self):
+        """$40 above the reserve: one learning buy. DROP (ACME, -5%) waits for the lane's decision; the registered
+        close-entry birth (BETA, -3.5%: its event, not DROP's), after every file's rows in A85's tiers, fits only
+        without the room DROP keeps and WAITS (`HELD_ROOM`, never refused for it); once DROP's buy goes, the birth is
+        refused on the cash there is. Undone, the birth takes the cash ROOM gives DROP first."""
+        for undone in (False, True):
+            with self.subTest(undone=undone), contextlib.ExitStack() as stack:
+                self.setUp()
+                if undone:
+                    stack.enter_context(mock.patch.object(L.EquityBook, "_event_keep_room", lambda self, *a, **k: None))
+                h = short_of_cash(self.harness(cash="90"), "90")
+                register_birth(h, self)
+                fall(h, "ACME", TB.CIK, "e-1")
+                fall(h, "BETA", TB.CIK2, "e-2", reaction=0.965)
+                h.lane.decided(DAY, "open")
+                self.to_close(h)
+                if undone:
+                    lane_close(h, DROP)
+                    h.tick(15, 48)
+                    self.assertEqual(sent(h), [("BETA", "2")], "undone: the birth took the cash ROOM gives DROP first")
+                    continue
+                self.assertEqual(sent(h), [], "the birth waits behind DROP's buy")
+                [born] = buys_of(h, BIRTH)
+                self.assertEqual((born["symbol"], born["band"], born["status"]), ("BETA", "learning", "planned"))
+                self.assertTrue(born["why"].startswith(L.HELD_ROOM), born["why"])
+                self.assertIn(L.HELD_AHEAD, born["why"], "report.ROOM_WAIT's words")
+                self.assertEqual(EV.unsent_reason(born["why"]), "cash")
+                lane_close(h, DROP)
+                h.tick(15, 48)
+                self.assertEqual(sent(h), [("ACME", "2")])
+                [born] = buys_of(h, BIRTH)
+                self.assertEqual(born["status"], "refused")
+                self.assertNotIn(L.HELD_ROOM, born["why"])
+
+    def test_a_drop_buy_whose_part_failed_frees_what_it_kept(self):
+        """The lane's close decision finishes without PREREG-EVL-5's rows (their part failed): DROP's buy is refused
+        (never traded, a gate of real opens in evl_entries' words), and the learning buy behind it, which waited for it,
+        goes on the cash there is. Undone, the learning buy goes at 15:47 without waiting."""
+        for undone in (False, True):
+            with self.subTest(undone=undone), contextlib.ExitStack() as stack:
+                self.setUp()
+                if undone:
+                    stack.enter_context(mock.patch.object(L.EquityBook, "_event_keep_room", lambda self, *a, **k: None))
+                h = short_of_cash(self.harness(cash="90"), "90")
+                news = self.probe_drop(h)
+                self.to_close(h)
+                if undone:
+                    self.assertEqual(sent(h), [(news, "2")])
+                    continue
+                self.assertEqual(sent(h), [], "$40 above the reserve, all of it kept for DROP's Probe buy")
+                [on] = buys_of(h, LEARN_ON)
+                self.assertEqual(on["status"], "planned")
+                rid = h.lane.st.start_receipt(f"decide-close:{DAY.isoformat()}")
+                h.lane.st.finish_receipt(rid, "ok", {f"{LEARN_ON}@v2": {"planned": 1},
+                                                     "evl5_error": "PartDeadline: invented"})
+                h.tick(15, 48)
+                [drop] = buys_of(h, DROP)
+                self.assertEqual(drop["status"], "refused")
+                self.assertIn("never traded", drop["why"])
+                self.assertEqual(EV.unsent_reason(drop["why"]), "blocked", "a gate of real opens")
+                self.assertEqual(sent(h), [(news, "2")])
+
+    def test_a_dry_sizing_writes_no_record(self):
+        """Release 1019f's record of a buy's sizing (`_event_sized`: target_usd, binding, sized_usd on its side row) is
+        the answer of the sizing a send reads; HeldAhead's dry sizings (`_event_keep_room`'s of the waiting buy, and the
+        free one of a buy after it) write none. So the waiting DROP buy holds no record until it is sized to send (then
+        A86's $70 target and the $60 it sends), and the learning buy after it that waits for the room kept holds its
+        own sizing's (cut to no share by cash: $0), never the free sizing's $40."""
+        h = short_of_cash(self.harness(cash="100"), "100")
+        news = self.probe_drop(h)
+        self.to_close(h)
+        self.assertEqual(sent(h), [], "$50 above the reserve: DROP keeps $40 (two shares) and NEWS's one share is $20")
+        [on] = buys_of(h, LEARN_ON)
+        [drop] = buys_of(h, DROP)
+        self.assertEqual(self.record(h, drop["iid"]), (None, None, None), "the waiting buy's dry sizing wrote nothing")
+        self.assertIn(L.HELD_ROOM, on["why"])
+        target, binding, sends = self.record(h, on["iid"])
+        self.assertEqual((D(target), binding, D(sends)), (D(40), "cash", D(0)), "the sizing with the room kept")
+        lane_close(h, DROP, f"{LEARN_ON}@v2")
+        h.tick(15, 48)
+        self.assertEqual(sent(h), [("ACME", "2")])
+        target, binding, sends = self.record(h, drop["iid"])
+        self.assertEqual((D(target), D(sends)), (D(70), D(40)), "A86's target, cut by cash to two shares")
+
+    def test_waiting_drop_buys_keep_what_a85_leaves_them_and_a_birth_after_them_waits(self):
+        """A85's reservation with HeldAhead: EVL-ERN-DROP-ON at learning, eight falls at DAY's close, waits at 15:47 for
+        the lane's decision; each keeps what a dry sizing gives it net of A85's $210 for NEXT's open Probe program and
+        of the buys before it (six two-share buys: $240 of the $450 above the reserve), so the registered birth after
+        them (its own -3.5% fall) waits. Once the decision names DROP, six go, two are cut by A85, the birth is refused,
+        and NEXT's open sends the Probe program its three whole buys. Undone (`_event_keep_room` keeps nothing), the
+        birth takes $40 at 15:47 and DROP gets five."""
+        s = EB.settings()
+        for undone in (False, True):
+            with self.subTest(undone=undone), contextlib.ExitStack() as stack:
+                self.setUp()
+                if undone:
+                    stack.enter_context(mock.patch.object(L.EquityBook, "_event_keep_room", lambda self, *a, **k: None))
+                h = short_of_cash(self.harness(cash="500"), "500")
+                h.lane.band(PROBE_O1, "probe")
+                seed_history(h, PROBE_O1, (3, 3, 3, 3, 3))
+                register_birth(h, self)
+                for i in range(8):
+                    fall(h, f"DR{i:02d}", f"{i + 300:010d}", f"dr-{i}")
+                fall(h, "BETA", f"{399:010d}", "b-1", reaction=0.965)
+                probe = next_open_filings(h, 3)
+                for symbol in probe:
+                    h.venue.prints[(symbol, NEXT.isoformat(), "open")] = D("20.00")
+                h.lane.decided(DAY, "open")
+                self.to_close(h)
+                if not undone:
+                    self.assertEqual(sent(h), [], "the birth waits behind the eight DROP buys")
+                    [born] = buys_of(h, BIRTH)
+                    self.assertTrue(born["why"].startswith(L.HELD_ROOM), born["why"])
+                lane_close(h, DROP)
+                for hh, mm in ((15, 48), (16, 1), (16, 3)):
+                    h.tick(hh, mm)
+                drop = buys_of(h, DROP)
+                filled = [r for r in drop if r["status"] == "done"]
+                held = min(s.max_open("probe"), 3) * s.share("probe") * D(2000)               # $210
+                self.assertEqual(len(filled), 5 if undone else 6)
+                [born] = buys_of(h, BIRTH)
+                self.assertEqual(born["status"], "done" if undone else "refused")
+                if not undone:
+                    cut = [r for r in drop if r["status"] == "refused"]
+                    self.assertEqual(len(cut), 2)
+                    self.assertIn(f"A85 holds ${held.quantize(D('0.01'))} of cash and invested room", cut[0]["why"])
+                TB.EventTest.ready(self, h, NEXT)
+                for hh, mm in ((9, 15), (9, 16), (9, 31), (9, 33)):
+                    h.tick(hh, mm, day=NEXT)
+                whole = (s.share("probe") * D(2000) / D("20.00")).to_integral_value(rounding="ROUND_DOWN")
+                self.assertEqual(sorted(sent(h, probe)), [(symbol, str(whole)) for symbol in probe],
+                                 "A85's reservation is never consumed by the waiting rows or the birth")
+
+
 # =========================================================================== 2. the final record (A84 + section 2)
 class FinalRecord(unittest.TestCase):
     """PREREG-EVL-5 section 2: FOR THESE ROWS A69's span begins at P''s close decision (two sessions before X); "A84's
@@ -448,14 +641,25 @@ class EntriesWord(unittest.TestCase):
         self.addCleanup(st.close)
         lane = EB.Lane(Path(tmp.name) / "events" / S.DB_NAME)
         self.addCleanup(lane.close)
-        holds = [EB.part_hold(None, DROP, 1, DAY), EB.part_hold(lane, DROP, 1, DAY)]
+        broken = mock.Mock(db=mock.Mock(execute=mock.Mock(side_effect=sqlite3.OperationalError("invented"))))
+        holds = [EB.part_hold(None, DROP, 1, DAY), EB.part_hold(lane, DROP, 1, DAY), EB.part_hold(broken, DROP, 1, DAY)]
+        self.assertIn("cannot be read", holds[-1][1])
         rid = st.start_receipt(f"decide-close:{DAY.isoformat()}")
         st.finish_receipt(rid, "ok", {"evl5_error": "PartDeadline: invented"})
         holds.append(EB.part_hold(lane, DROP, 1, DAY))
-        self.assertEqual([h[0] for h in holds], ["wait", "wait", "never"])
+        self.assertEqual([h[0] for h in holds], ["wait", "wait", "wait", "never"])
         for kind, why in holds:
             self.assertEqual(EV.unsent_reason(f"not filled at the close auction (never sent: {why})"), "blocked", why)
             self.assertEqual(EV.unsent_reason(why), "blocked", why)
+            self.assertEqual(EV.unsent_reason(f"{L.A80_HELD}{why}"), "blocked", why)
+        self.assertEqual(EV.PART_WAIT_WORDS, EB.PART_WAIT.lower(), "feat/evl-5's review round's words")
+        # (a later buy that waits for the room kept for them is named by its own sizing's binding; the line's refusal
+        # with their slots kept is the line)
+        self.assertEqual(EV.unsent_reason(f"{L.HELD_ROOM} (1 {L.HELD_AHEAD}): no whole share fits (cash): invented"),
+                         "cash")
+        self.assertEqual(EV.unsent_reason("the event kind's day order count: 148 of 150 sent, 1 kept for exiting its "
+                                          f"lots and buys held and this one, 2 for the 1 buys ahead of it that "
+                                          f"{L.HELD_AHEAD}"), "order_line")
 
 
 # ================================================================================ 4. the 150-order line and A80
@@ -494,6 +698,42 @@ class TheLine(TB.EventTest):
         self.assertEqual(L.event_orders_today(h.state.rows, DAY.isoformat()), 149)
 
 
+    def test_a_birth_behind_a_waiting_drop_buy_keeps_the_line_for_it(self):
+        """148 orders sent, DROP waiting for the lane's decision at 15:47: the birth after it keeps DROP's send and exit
+        (148 + 1 + 1 + 2 > 150: `HeldAhead.orders`) and waits; at 15:48 DROP takes the line's last room and the birth is
+        held by the line. Undone (`_event_keep_room` keeps nothing), the birth takes it at 15:47 and DROP is held by
+        the line it took."""
+        for undone in (False, True):
+            with self.subTest(undone=undone), contextlib.ExitStack() as stack:
+                self.setUp()
+                if undone:
+                    stack.enter_context(mock.patch.object(L.EquityBook, "_event_keep_room", lambda self, *a, **k: None))
+                h = self.harness()
+                register_birth(h, self)
+                fall(h, "ACME", TB.CIK, "e-1")
+                fall(h, "BETA", TB.CIK2, "e-2", reaction=0.965)
+                h.lane.decided(DAY, "open")
+                h.tick(9, 15)
+                self.filler(h, 148)
+                for hh, mm in ((15, 46), (15, 47)):
+                    h.tick(hh, mm)
+                if not undone:
+                    self.assertEqual(sent(h), [])
+                    [born] = buys_of(h, BIRTH)
+                    self.assertIn(f"2 for the 1 buys ahead of it that {L.HELD_AHEAD}", born["why"])
+                lane_close(h, DROP)
+                h.tick(15, 48)
+                if undone:
+                    self.assertEqual(sent(h), [("BETA", "2")])
+                    [drop] = buys_of(h, DROP)
+                    self.assertIn("the event kind's day order count: 149 of 150 sent", drop["why"])
+                    continue
+                self.assertEqual(sent(h), [("ACME", "2")])
+                [born] = buys_of(h, BIRTH)
+                self.assertIn("the event kind's day order count: 149 of 150 sent", born["why"])
+                self.assertIsNone(h.book._count_refusal(DAY.isoformat(), exit_=True), "an exit still goes at the line")
+
+
 class TheResend(VC.VenueCancelTest):
     """A80 (release 1019e) with PREREG-EVL-5's rows: a DROP buy at D's close the venue cancelled at once goes again ONCE
     through every gate (the lane's close decision names its program, so `part_hold` lets it go again), the same shape
@@ -526,6 +766,21 @@ class TheResend(VC.VenueCancelTest):
 
     def buys(self, h):
         return h.event_intents("buy")
+
+
+class TheHeldTurn(unittest.TestCase):
+    """feat/evl-5's held turn for the live close decision (league/events/house.py `HOLD_LEAD`: from 150 s before it a
+    turn keeps going, each task bounded to end before the decision) with release 1019f's screen after the open
+    (`screen-open`: CPU only, UNBOUNDED, never started within `SCREEN_CLEAR` of a decision): the screen can never start
+    inside the hold, so every task the held turn runs is bounded. (Fails on rel/1019f, which has no hold, and on
+    feat/evl-5, which has no screen after the open.)"""
+
+    def test_the_screen_after_the_open_never_starts_inside_the_hold(self):
+        from league.events import house as H
+
+        self.assertIn(H.SCREEN_OPEN_JOB, H.SCREEN_JOBS)
+        self.assertLess(H.HOLD_LEAD, H.SCREEN_CLEAR)
+        self.assertGreater(H.DECISION_MARGIN, 0)
 
 
 # ===================================================================================== 5. A86 and the new rows

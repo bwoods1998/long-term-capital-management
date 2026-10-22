@@ -1629,9 +1629,14 @@ path.
   program of the same auction; the median of five decisions, the room cap, the buys' weights; the cash this auction's
   sales give back; the loss budget held by R x the weight. league/tests/test_events_1019g.py (release 1019g): A85 with
   PREREG-EVL-5's rows (their tiers, round-robin and send order; a learning DROP close buy leaving the next open's Probe
-  program its reservation); `ahead` (a learning buy behind a waiting Probe DROP buy leaves it its three shares, a birth
-  behind a waiting DROP buy waits for it, a DROP buy whose part failed frees what it was left; each undone in a
-  counterfactual); the line in ROOM's order with the new rows; A80's re-send of a DROP buy; A86 REVISED's sizes.
+  program its reservation); feat/evl-5's `HeldAhead` with A85 and A86 (a learning buy behind a waiting Probe DROP buy
+  leaves it A86's three shares, a birth behind a waiting DROP buy waits for it, a DROP buy whose part failed frees what
+  it kept, waiting DROP buys keep only what A85's reservation leaves them; each undone in a counterfactual,
+  `_event_keep_room` keeping nothing); a dry sizing writes no release 1019f record (`_size_event(dry=True)`: neither the
+  intent's why nor the side row's `target_usd`, `binding`, `sized_usd`); the line in ROOM's order with the new rows (a
+  birth behind a waiting DROP buy keeps its two orders, `HeldAhead.orders`); A80's re-send of a DROP buy; A86
+  REVISED's sizes. (Release 1019g first built its own `ahead` for this, `_event_part_waits` and `_event_ahead`; its fix
+  round dropped it for feat/evl-5's review round's `HeldAhead`, the one form.)
 
 ## 21. The event kind's own day order count (release 1019c, Oct 2026; under the owner's goal of Oct 19, 2026; money and book, as built)
 

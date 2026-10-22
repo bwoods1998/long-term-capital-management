@@ -958,9 +958,12 @@ UNSENT_WORDS = (("order count", "order_line"), ("has on order more than its", "r
                 ("kill switch", "blocked"), ("paper proof", "blocked"), ("exits only", "blocked"),
                 ("reconciliation", "blocked"), ("not at probe or sized", "blocked"), ("real-money block", "blocked"))
 #: RELEASE 1019g: PREREG-EVL-5's buys held for the lane's own close decision (league/events/book.py `part_hold`: it
-#: waited for that decision to name its program, or the decision finished without its rows: never traded) are held by a
-#: gate of real opens, as its section 1.3 states it, not another reason.
-UNSENT_WORDS += (("prereg-evl-5's", "blocked"),)
+#: waited for that decision to name its program, its words `book.PART_WAIT`, or the decision finished without its
+#: rows: never traded) are held by a gate of real opens, as its section 1.3 states it, not another reason; FIRST, so a
+#: wait whose receipt "cannot be read" is that gate too. (A later buy that waits for the room kept for them,
+#: live.py `HELD_ROOM`, is named by its own sizing's binding, as any buy no whole share fits.)
+PART_WAIT_WORDS = "waits for the lane's own close decision"
+UNSENT_WORDS = ((PART_WAIT_WORDS, "blocked"), ("prereg-evl-5's", "blocked"), *UNSENT_WORDS)
 UNSENT_SAID = {"order_line": "the day order count", "cash": "cash", "budget": "the loss budget",
                "name_wall": "the 10% a name", "invested": "the invested cap", "room": "the program's room",
                "price": "one share too dear", "min_order": "under the minimum order", "gateway": "the gateway",
