@@ -967,6 +967,16 @@ class TheAlarms(WorldCase):
         self.assertIn("trained through no row", cause["what"], "no training row at all: the lag alarm")
         self.assertNotIn("ahat", json.dumps(cause), "counts and dates only")
 
+    def test_the_cause_is_the_stall_jobs_and_the_gateway_words_it(self):
+        from league.ops import evl_health as EV
+        from league.ops import stall as ST
+
+        self.assertIn("evl_learner", EV.CAUSES)
+        self.assertIn("evl_learner", ST.CAUSES)
+        self.assertIn("evl_learner", EV.DOING)
+        gateway = (REPO / "gateway" / "lib" / "email.mjs").read_text()
+        self.assertIn("  evl_learner: '", gateway, "an older gateway refuses a notice naming a cause it does not word")
+
     def test_unpinned_nothing_is_judged(self):
         pin(self, None)
         cause = EL.judge(0.0, EL.facts(self.w.root, et(dt.date(2026, 10, 27), 12).timestamp()))
@@ -988,6 +998,12 @@ class TheReportAndTheFacts(WorldCase):
         for word in ("beta", "ahat", "xbar", "\"e\"", "\"z\""):
             self.assertNotIn(word, text)
         self.assertIn(f"{O1} v1: live warmup, candidates 4", RP.render(rep))
+        self.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                           "exit_day, exit_at, rank_key, mode, status) VALUES(?, 1, 'news:r', 'ZR', '9', 'x', ?, 'open', ?, "
+                           "'close', 0.1, 'shadow', 'planned')", (O1, days[1].isoformat(), days[1].isoformat()))
+        [mine] = [p for p in RP.build(self.st, days[1], now=et(days[1], 21, 0))["programs"] if p["program"] == O1]
+        self.assertEqual((mine["next_look"]["at_sessions"], mine["next_look"]["sessions"]), (22, 0),
+                         "PREREG-EVL-6's first look at the 22nd block of live decisions, never PREREG-EVL-3's")
 
     def test_r3s_facts_refuse_the_learners_and_cost7s_tables_and_the_intents(self):
         for table in ("learner_fits", "learner_cands", "learner_stats", "costs7", "cost_basis", "intents",
@@ -1131,6 +1147,56 @@ class TheMoney(TB.EventTest):
             self.assertIsNone(h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, held=0))
             why = h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, held=EB.line_keep(O1))
             self.assertIn("the event kind's day order count", why)
+
+
+# ----------------------------------------------------------------------------------------------- the House's plan
+from league.events import house as H  # noqa: E402
+from league.tests import test_events_house as TH  # noqa: E402
+
+
+class TheHousePlan(TH.LaneCase):
+    """The House's lane (league/events/house.py): no learner work, no cost-basis step while REGISTERED_AT_7 is None;
+    pinned, the learner task once something is owed (after every other task, clear of the next decision), and the night's
+    cost-basis row after the score and before the screen, never holding the screen."""
+
+    def test_unpinned_no_learner_task_and_no_cost_basis_step(self):
+        now = TH.et("2026-10-20", "21:00")
+        self.at(now)
+        with self.store() as st:
+            self.assertIsNone(self.lane._learner_due(st, now, now.astimezone(C.NY).date(), None, []))
+            task = self.lane._nightly(st, now, now.astimezone(C.NY).date(), C.session(st, now.astimezone(C.NY).date()), [])
+            self.assertNotEqual(getattr(task, "name", None), H.COST_BASIS_JOB)
+
+    def test_pinned_the_learner_task_reconstructs_and_the_cost_basis_comes_before_the_screen(self):
+        pin(self)
+        now = TH.et("2026-10-20", "08:00")
+        self.at(now)
+        with self.store() as st:
+            task = self.lane._learner_due(st, now, now.astimezone(C.NY).date(), None, [])
+            self.assertEqual(task.name, "learner")
+            status, out = self.lane._do(st, task)
+            self.assertEqual(status, "ok")
+            self.assertGreaterEqual(out["catchup"]["reconstruct"], 2, "Monday's open and close, for each learner")
+            kinds = {(r[0], r[1]) for r in st.db.execute("SELECT program, kind FROM learner_fits")}
+            self.assertEqual(kinds, {(O1, "reconstruct"), (ON, "reconstruct")})
+            self.assertIsNone(self.lane._learner_due(st, now, now.astimezone(C.NY).date(), None, []),
+                              "nothing owed now, and the list is read again only a minute later")
+        evening = TH.et("2026-10-20", "20:40")
+        self.at(evening)
+        with self.store() as st:
+            st.set_meta("equity:2026-10-20", "10000.0")
+            rid = st.start_receipt("score", now=TH.et("2026-10-20", "20:31"))
+            st.finish_receipt(rid, "ok", {}, now=TH.et("2026-10-20", "20:35"))
+            day = evening.astimezone(C.NY).date()
+            task = self.lane._nightly(st, evening, day, C.session(st, day), [])
+            self.assertEqual(task.name, H.COST_BASIS_JOB, "after the score, before the screen")
+            self.lane._failed[H.COST_BASIS_JOB] = evening
+            task = self.lane._nightly(st, evening, day, C.session(st, day), [])
+            self.assertEqual(task.name, "screen", "a failing cost-basis step never holds the screen")
+            del self.lane._failed[H.COST_BASIS_JOB]
+            status, out = self.lane._do(st, self.lane._nightly(st, evening, day, C.session(st, day), []))
+            self.assertEqual((out["m_in"], out["g_bp"]), (2.5, 0.0))
+            self.assertEqual(self.lane._nightly(st, evening, day, C.session(st, day), []).name, "screen")
 
 
 # ------------------------------------------------------------------------------------------------------- the proof

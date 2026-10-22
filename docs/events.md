@@ -1024,3 +1024,101 @@ counted. It ships false: switching it on needs the gateway release with the birt
 route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
 fallback after two failing nights of Haiku proposals (moot since A109's Opus architect), and a ranking of learning
 room by look statistics (a later, pre-registered version).
+
+## PREREG-EVL-7: two online learners (built for release 1019i; nothing runs until the freeze pins `REGISTERED_AT_7`)
+
+PREREG-EVL-7 (the design: `goal-2026-10-19/evl7/PREREG-EVL-7.draft.md` as the captain's decisions E1-E11 change it;
+`docs/prereg/PREREG-EVL-7.md` once frozen, which wins) registers two seatable programs whose rule is a fixed LEARNING
+ALGORITHM: EVL-LRN-O1 (open of D to close of D, its pool EVL-CTRL-NEWS-ALL-O1, EVL-CTRL-8K-ALL-O1, EVL-CTRL-ERN-ALL-O1,
+EVL-INS-BUY-O1) and EVL-LRN-ON (close of D to the next open, its pool EVL-CTRL-NEWS-DAY-ON, EVL-CTRL-NEWSPM-ON,
+EVL-CTRL-8K-ON, EVL-ERN-REACT-ON, EVL-ERN-DROP-ON, EVL-CTRL-ERN-UNDER-ON), version 1 each at PREREG-EVL-3's learning
+band from birth, hold 1, PREREG-EVL-2's limit at entry. The code is `league/events/learner.py` and
+`league/events/costs7.py` (both behind league/ci.py's wall with the lane's other judges: a program's rule and a judge's
+cost basis), with `league/ops/evl_learner.py` (the alarms, outside it); league/events/programs.py `REGISTERED_AT_7` is
+None until the freeze's amendment sets it,
+and while it is None the learners are in no registry: nothing decides, trades or is charged (E3: nor when it is not
+after PREREG-EVL-6's registration time, `REGISTERED_AT_6_FOR_7`).
+
+**A decision** (`learner.decide`), for entry session D at its tau (09:15 ET for O1, the close less 14 minutes for ON),
+reads only the store, every cut-off from stored times as of tau:
+
+- CANDIDATES: each pool program's events as real money reads them (league/events/book.py `picks` at `decided_at` tau)
+  over a view whose live eligibility is TIME-BOUND (E5: a live result decided at or before the finish of the House's own
+  decision of the auction, `learner.eligible_by`, and never after the learner's entry auction), the reaction from
+  stored marks and bars only; one candidate per CIK (its pool families, its primary event the first family's); KEPT when
+  TRADABLE at decision (1.25 x prev_close <= 10% of E_prev); ELIGIBLE TO BE PICKED when also knowable after
+  REGISTERED_AT_7 and not held in the five sessions either way (`learner.held_7`: the learner's own intents of D
+  itself never count, so a re-decision reads its picks as they were).
+- FEATURES (`learner.FEATURES`, 57 for O1 and 63 for ON, section 1.4's order): the pool dummies, the best `ok`
+  verdict answered before tau, guidance, items, the source, the article counts of the primary family's window and of the
+  20 sessions before it, first20, the week's first and last session, ADV, price, sig20 (the sample sd of 19 log changes
+  of the 20 latest stored raw closes before D, 0.005-0.25; 0.03 with fewer), the benchmark, four SIC groups, r1/r5/r20,
+  the reader lens's 16 frozen headline flags and dup72 (its `KEYWORDS`, `STOP`, `words` and `jaccard` copied verbatim,
+  sha256 `b2f3aaaa...` held by a test), O1's knowable-hour buckets (overnight 20:00-04:00 ET or any hour of a day that is
+  not a session, pre, late) and insider value, ON's morning/before buckets and dmove from D's '1530' mark read BY ITS
+  BAR TIME, whatever its fetch time (E6; the live close part fetches its candidates' marks in the batched requests
+  first).
+- TRAINING ROWS: every kept candidate of an earlier session of the learner (at most 250 back) with a POOL OUTCOME (the
+  first pool program in pool order holding an intent of the issuer at the learner's auctions, settled, tradable, settled
+  before tau, its raw entry print at most 1.25 x the previous close), its features as written at its own tau, the GROSS
+  label clip((exit/entry - bench_exit/bench_entry) / sig20, +-5) (E7: no cost column, r or a is read).
+- THE FIT: weights 2^(-age/40), within-session demeaning, A, b and N_w as nested `math.fsum`s (sessions in day order,
+  rows in CIK order), standardized columns (one under 1e-9 zeroed), ridge lambda 8,000, a float64 Cholesky
+  (`learner.cholesky`, standard library: league/ may not import numpy, which the draft's section 1.11 item 6 names).
+  The per-session sums are cached in `learner_stats` keyed by the session's ordered training keys' sha256 and the code
+  sha (`learner.CODE_SHA`, this file's bytes).
+- THE PICK: e = (x - xbar_D) . beta, z = e - c / sig20 (c the replay's round trip, score.py `cost_bp`), ahat = sig20 z;
+  the eligible candidates with z > 0 by ahat, adv20, event id; the first 8 are its intents (`intents.rank_key` = ahat).
+  No pick before 2,000 training rows from 3 sessions; no E_prev, a non-finite fit or a failed Cholesky picks nothing.
+
+**One decision, written once** (`learner_cands`, `learner_fits` with its kind, receipt, code sha and the training keys'
+sha, and the picks as intents, in one transaction), never decided again. KINDS: `live` (the House's own decision of the
+auction: league/events/run.py `learner_part` runs AFTER that decision's receipt is finished, only for the session's first
+such receipt and only when it was live, under 90 s at the open and 120 s at the close, never past the task's bound less
+15 s; it never raises: a failure or an expiry writes only meta `evl7:part:...`); `catchup` (the decisions from
+REGISTERED_AT_7 to the release's first live one, E4) and `late` (a part that failed or expired), both decided later by
+the learner by itself exactly as of tau under receipts `decide-open-lrn:<D>` / `decide-close-lrn:<D>`, shadow only, never
+traded, never judged; `reconstruct` (the candidate sets of the sessions from Oct 19 whose tau is at or before
+REGISTERED_AT_7, once). The House's learner task (league/events/house.py `_learner_due`, after every other task, never
+within 5 minutes of a decision) runs them oldest first, then the night's RECOMPUTE once the score is in
+(`learner.recompute`: each live decision re-decided in memory, beta and the picks compared only where the stored inputs
+the decision read are unchanged since it, `learner.inputs_sha`, kept at the decision; a mismatch is an alarm, a change
+is said; nothing is rewritten).
+
+**Real money** (section 1.9): the House's book decides the learners' buys of an auction AFTER that auction's own
+decision of every other row, births included (league/equity/live.py `_event_decide_lrn`, its row `"<at>-lrn"` in
+`eq_event_decisions`; E5 bounds the learner's eligibility by the finish of the House's decision, so its picks exist only
+after it, and no earlier row's real money waits on a learner): its LIVE decision's intents in rank order (book.py
+`learner_picks`; a catch-up's or a late decision's are never traded), passing over every name given at the auction, the
+gate's skips, EVL-LRN-O1's ERN guard (E8: no buy of an issuer with an item 2.02 8-K knowable in D's close window and
+stored by tau), EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable from 09:00 ET of D and stored by tau,
+whatever the primary event; barred on an `ok` score >= 2, an `ok` score >= 1 with guidance raised, or no answer by tau),
+one position per issuer on its earlier intents and real lots; sized at learning (2% of E, A85's reservation), sent after
+every earlier row's in ROOM's order (`send_key`: the learners after every earlier file's row, before R3's births), and
+each entry leaves `book.LEARNER_LINE_KEEP` (32) slots of the day order line to the earlier rows. It waits for a running
+part up to 240 s after the open decision time and 150 s after the close's (15:48:30 ET on a full day), then decides on
+what is on record. STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close takes the name from an
+earlier close row by the sale gate, ON's sale at the next open the same; their lots hold cash at the auction they are
+sold in.
+
+**COST-7** (`league/events/costs7.py`, section 2; for `costs7.VERSIONS`, PREREG-EVL-7's two ids, never "prereg >= 7"):
+r7 = exit x (1 - (M_out + FEE_out + IMP)/1e4) / (entry x (1 + (M_in + FEE_in + IMP)/1e4)) - 1 - G/1e4, a7 = r7 - b; IMP
+the square-root impact at Sized size with E9's sigma (sig20 floored 0.02, capped 0.25, 0.04 with fewer than 20 closes;
+the universe's `sigma60`, never written, is never read); FEE the larger of the penny ceiling at the Probe share 0.035
+(fixed) and 1.25 x the measured fee rate; M (slippage UCB of the real fills as done.py measures their gaps), G (the
+selection charge from non-filled attempts at the checkpoints 100, 200, 400, ...) and Fbar only ever rise, one
+`cost_basis` row a night after the score and before the screen (house.py's `cost-basis` step; one that fails never holds
+the screen). With no attempt ledger (`real_attempts`, release 1019i's infrastructure) every session with a real buy is
+incomplete: the floors stand (2.5 bp, 0) and the row says why. `costs7.record7` (live decisions only, a = a7, r = r7)
+and `costs7.control7` (the POOL control of those decisions on a7) are the learners' judged record; `costs7.judge_record`
+is the ONE call into PREREG-EVL-6's frozen screen (`screen.v6_judge` over `screen.blocks6`, PREREG-EVL-6's code); with no
+such screen in the tree no look is judged. The learners' looks (runs of 60 blocks from the 22nd) wire into PREREG-EVL-6's
+look runner when release 1019i joins `feat/evl-6` and `feat/evl-7`; none can fall due before the 22nd settled block of a
+live run.
+
+**Machine-only**: beta, d, xbar, e, z, ahat and the per-session sums stay in `learner_fits`, `learner_cands`,
+`learner_stats` (and `intents.rank_key`); the daily report's learner lines are counts (`learner.report_lines`: kind,
+status, candidates, kept, picks, training rows and sessions, warm-up, a failed part), and R3's facts refuse every
+learner and COST-7 table and the intents (births.py `FACTS_DENY`). The stall job's `evl_learner` (league/ops/
+evl_learner.py) alarms on a failed or expired part, a decision owed more than 2 h, a training that lags (O1 without
+D-1's outcomes, ON without D-2's), a recompute mismatch, and a warm-up unmet after 5 live decisions.

@@ -290,6 +290,39 @@ functions on 3.14 and 3.11, are the release's: money `8e63ce64`, constitution `c
 S2's instant rollback, the `reach_bar` rows to "0", one money-digest move the grant re-ratifies; the full rollback,
 the House to release 1019g's deployed head `b374d862`, then the gateway).
 
+### PREREG-EVL-7's two online learners and COST-7, on `feat/evl-7` (unreleased; cut from `rel/1019h` `59663f06`; joins release 1019i with `feat/evl-6` and `feat/infra-1019i`; an owner deploy, THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_learner`'s words; an older gateway refuses a notice naming it, which only a pinned learner's stall can send), then the House: league/events/learner.py and costs7.py join league/ci.py's wall beside the lane's other judges, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES, pinned or not: the money digest `8e63ce64` and the constitution `c3026eba` are release 1019h's, read with the tree's own functions on 3.14 and 3.11; no money row, no setting; NOTHING RUNS UNTIL THE FREEZE SETS `programs.REGISTERED_AT_7`)
+
+PREREG-EVL-7's design (the draft as the captain's decisions E1-E11 change it; the frozen text wins) built ahead of its
+freeze (A117), each part held by tests that fail without it (league/tests/test_events_evl7.py, invented data only):
+
+- **The learners** (league/events/learner.py): EVL-LRN-O1 (open to close, a pool of four controls and INS-BUY) and
+  EVL-LRN-ON (close to next open, a pool of six), version 1 at learning from birth. Candidates through each pool
+  program's real-money reading with live eligibility TIME-BOUND by the House's own decision (E5); one a CIK; KEPT and
+  ELIGIBLE TO BE PICKED; section 1.4's 57 and 63 features with the reader lens's frozen headline spec; pool outcomes
+  settled before tau, the GROSS label (E7); weights 2^(-age/40), within-session demeaning, ridge lambda 8,000 on
+  standardized columns by a float64 Cholesky (standard library), nested fsums; the top 8 by ahat above the replay
+  hurdle; the per-session sums cached by the training keys' sha256 and the code sha; a nightly recompute that compares
+  beta and the picks only where the inputs are unchanged.
+- **Isolation and the record** (league/events/run.py, house.py): the learner part runs after the House's receipt is
+  finished, under 90 s / 120 s, and never raises; a failed or expired part and the decisions before the release are
+  decided later by themselves (`decide-open-lrn:<D>`, `decide-close-lrn:<D>`; shadow only, never traded, never
+  judged); the reconstruction once; the code sha on every fits row.
+- **Real money** (league/events/book.py, league/equity/live.py): the learners' decision of each auction after every
+  other row's (births included), their LIVE picks in rank order, EVL-LRN-O1's ERN guard (E8), EVL-LRN-ON's per-issuer
+  8-K guard (E10), one position per issuer (A72), the day line's 32 slots kept for the earlier rows.
+- **COST-7** (league/events/costs7.py): E9's sigma, the penny ceiling at the fixed 0.035, the impact, the measured
+  terms that only rise and the nightly `cost_basis` row; the judged record of live decisions on a7 and r7 with the POOL
+  control; the one call into PREREG-EVL-6's frozen screen.
+- **Alarms, report, facts**: the stall job's `evl_learner` (H5), worded in the gateway's stall notice; the lane report's learner lines (counts only), its learners' next look PREREG-EVL-6's; R3's
+  `FACTS_DENY` gains `learner_fits`, `learner_cands`, `learner_stats`, `costs7`, `cost_basis` and `intents`.
+- **THE PROOF**: on PREREG-EVL-5's invented week (two births among its programs), decided by the House's own code with
+  the learners pinned and picking and without them, every earlier program's shadow intents, real-money picks and the
+  House's decision receipts are the same; the real book's earlier rows' buys are the same with a learner's live picks on
+  the store; a learner fed noise picks noise; rows planted after tau leave a decision unchanged.
+
+Charge: c7 = max(0.13, W7 rounded up) = 0.13 a learner run on PREREG-EVL-6's basis (the fix round's W7 at most 0.100):
+the two learners' run 1 is 0.26 of the lane's 3.9.
+
 ### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (DEPLOYED 05:36Z Oct 22 in PR 595, the gateway first at 05:34Z; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
 - **Deployed 05:36Z Oct 22, 2026** (PR 595): House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`.

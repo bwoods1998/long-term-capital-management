@@ -295,7 +295,8 @@ class TheEquityLane(unittest.TestCase):
                                               "league/events/calendar.py", "league/events/edgar.py",
                                               "league/events/news.py", "league/events/run.py",
                                               "league/events/store.py", "league/events/house.py",
-                                              "league/events/births.py", "league/events/done.py"),
+                                              "league/events/births.py", "league/events/done.py",
+                                              "league/events/learner.py", "league/events/costs7.py"),
                          "the gateway's merge list holds E2's five since its follow-up of Oct 11 and E3's three with "
                          "the release; E4's two, FWD1-R's seat path, R0's data plan, R1's event-lane judges, "
                          "PREREG-EVL-3's band rules, R2's event kind, the lane's rule inputs, 1019c's verdict line, "

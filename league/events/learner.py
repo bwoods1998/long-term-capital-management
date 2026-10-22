@@ -690,18 +690,20 @@ def pool_outcomes(store: Any, learner: P.Program, s: dt.date, tau: dt.datetime) 
             continue
         by.setdefault(str(r["cik"]), []).append(dict(r))
     out: dict[str, dict[str, Any]] = {}
+    if not by:
+        return out
     label = "open" if learner.entry_at == "open" else "close"
+    prints = {str(r[0]).upper(): r[1] for r in store.db.execute("SELECT symbol, px FROM marks WHERE day=? AND label=?",
+                                                               (s.isoformat(), label))}
+    closes = {str(r[0]).upper(): r[1] for r in store.db.execute("SELECT symbol, prev_close FROM universe WHERE day=?",
+                                                               (s.isoformat(),))}
     for cik, got in by.items():
         for pid in pool:
             for r in (x for x in got if x["program"] == pid):
                 symbol = str(r["symbol"]).upper()
-                mark = store.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=?",
-                                        (symbol, s.isoformat(), label)).fetchone()
-                uni = store.db.execute("SELECT prev_close FROM universe WHERE day=? AND symbol=?",
-                                       (s.isoformat(), symbol)).fetchone()
                 try:
-                    raw, prev = float(mark["px"]), float(uni["prev_close"])
-                except (TypeError, ValueError, IndexError):
+                    raw, prev = float(prints[symbol]), float(closes[symbol])
+                except (KeyError, TypeError, ValueError):
                     continue
                 if not (math.isfinite(raw) and math.isfinite(prev) and prev > 0) or raw > LIMIT_MULTIPLE * prev:
                     continue

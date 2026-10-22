@@ -139,6 +139,8 @@ DECISION_MARGIN = 5.0
 #: basis step's job (league/events/costs7.py `nightly`, after the score and before the screen).
 LEARNER_BUDGET = 120.0
 COST_BASIS_JOB = "cost-basis"
+LEARNER_RECHECK = dt.timedelta(minutes=1)    # nothing owed: the learners' owed list is read again this soon
+RECOMPUTE_NEEDS = 60.0                       # the night's recompute starts only with this much of the task's bound left
 #: The verdict step of a record pass starts only with this much of its bound left.
 VERDICT_STEP_MIN = 10.0
 
@@ -1675,6 +1677,9 @@ class EventLane:
         score is in. None while no learner is pinned (REGISTERED_AT_7 None: nothing of it ever runs)."""
         if not P.learners() or self._quiet("learner", now, soon):
             return None
+        checked = getattr(self, "_learner_next", None)
+        if checked is not None and now < checked:
+            return None         # (the owed list is read at most once a minute when nothing was owed)
         from . import learner as LR
 
         try:
@@ -1686,7 +1691,9 @@ class EventLane:
             self.warn("learner plan", exc)
             return None
         if not owed and not recompute:
+            self._learner_next = now + LEARNER_RECHECK
             return None
+        self._learner_next = None
         if not self._clear_of_decision(st, now, soon):
             return None
         return Task("learner", lambda ctx, deadline: self._learner(ctx, deadline, night if recompute else None),
@@ -1706,7 +1713,7 @@ class EventLane:
         except LR.Expired as exc:
             out["cut"] = str(exc)[:200]
             return out | {"_status": "cut"}
-        if night is not None:
+        if night is not None and (deadline is None or deadline - self._mono() > RECOMPUTE_NEEDS):
             got = LR.recompute(ctx.store, night, ctx.now)
             out["recompute"] = {k: v.get("status") for k, v in got.items()}
             bad = {k: v for k, v in got.items() if v.get("status") == "mismatch"}

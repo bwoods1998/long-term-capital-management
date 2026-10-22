@@ -420,6 +420,11 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
     now = now or S.utc_now()
     left = kept_out(store, day)
     programs = [program_status(store, p, v, day, left=left) for p, v in _programs(store)]
+    from .programs import is_learner
+
+    for p in programs:      # (PREREG-EVL-7: its learners' looks are PREREG-EVL-6's on COST-7, never PREREG-EVL-3's)
+        if is_learner(p["program"]):
+            p["next_look"] = _learner_next(store, p["program"], p["version"])
     with_rows = {p["program"] for p in programs}
     return {
         "day": day.isoformat(), "generated_at": S.iso(now), "session": C.session(store, day) is not None,
@@ -429,6 +434,21 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
         "learners": _learners(store, day),
     }
+
+
+def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
+    """A learner's next look as the report reads it: PREREG-EVL-6's first look of a run at its 22nd settled block, the
+    blocks counted over its LIVE decisions' settled picks only (league/events/costs7.py `record7`: never a catch-up's)."""
+    try:
+        blocks = store.db.execute("SELECT COUNT(DISTINCT i.entry_day) FROM intents i JOIN learner_fits f ON "
+                                  "f.program=i.program AND f.version=i.version AND f.day=i.entry_day JOIN outcomes o ON "
+                                  "o.program=i.program AND o.version=i.version AND o.event=i.event WHERE i.program=? AND "
+                                  "i.version=? AND f.kind='live' AND o.status='settled' AND o.tradable=1",
+                                  (program, int(version))).fetchone()[0]
+    except Exception:  # noqa: BLE001 - no learner table yet: no block
+        blocks = 0
+    return {"k": 1, "at_sessions": 22, "sessions": int(blocks or 0),
+            "status": "PREREG-EVL-6's screen on COST-7, live decisions only"}
 
 
 def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:

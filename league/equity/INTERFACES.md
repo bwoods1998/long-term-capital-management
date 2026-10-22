@@ -1868,3 +1868,25 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   waiting Probe PREREG-EVL-5 row goes at the 15:48:40 minute with the cash; a birth behind a waiting learning row still
   waits and its alert stays info; a PREREG row that waited and ended unsent, no book minute in the overdue minute, is a
   warning the first time; the rows freed are files 1 to 4 alone).
+
+## 28. PREREG-EVL-7's learners in the event book (release 1019i; `feat/evl-7`; book, as built; after section 27, PREREG-EVL-6's)
+
+The two learners (league/events/learner.py; nothing of them exists while league/events/programs.py `REGISTERED_AT_7`
+is None) trade through the event kind's own path with these additions, each additive:
+
+- `book.picks(lane, program, ...)` for a learner returns `book.learner_picks`: the intents of its LIVE decision of the
+  session (`learner.live_picks`; none for a catch-up, a late decision or an auction its part did not decide) in its
+  rank order, less EVL-LRN-O1's ERN guard (`book.ern_issuer`), EVL-LRN-ON's per-issuer 8-K guard
+  (`book.issuer_8k_guard`), one position per issuer (`held_recently` and `held`). Each `Pick.rank` is the pick's place
+  counted down from 8: no fitted figure reaches live.sqlite.
+- `book.is_learner`, `book.learner_pending` (no decision and no recorded failure yet), `book.line_keep` (16 buys' worth
+  of the day order line, `LEARNER_LINE_KEEP` 32 slots, for a learner's entry; 0 otherwise).
+- `book.universe_rows(lane, day)` reads, for a lane view carrying `eligible_by` (the learner's own `learner.AsOf`), only
+  the live results decided at or before it (E5); every other caller's reading is unchanged.
+- `EquityBook._event_decide` passes over a learner's instance (`live._learner`); `EquityBook._event_decide_lrn` decides
+  the learners' buys of the auction once, after the auction's own decision (row `"<at>-lrn"` in
+  `eq_event_decisions`), waiting for a running part up to `EVENT_LRN_WAIT_S` (`open` 240 s, `close` 150 s after the
+  decision time), passing over every name the auction's decision gave; the buys are planned with their side rows as
+  any event buy's and sent by `_event_send` in `send_key`'s order (the learners after every earlier file's row, before
+  R3's births at learning). `_event_work_entry` adds `book.line_keep` to the buys it counts ahead on the day order
+  line for a learner's entry. Nothing here changes for any other program.
