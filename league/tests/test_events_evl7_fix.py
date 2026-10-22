@@ -172,6 +172,18 @@ class TheLooks(JudgeCase):
             again = J7.run(self.st, last, now=now)
         self.assertEqual((again["written"], fake.calls), ([], []), "a look is written once; none at 23 blocks")
 
+    @unittest.skipUnless(getattr(SN, "v6_judge", None) is not None, "PREREG-EVL-6's screen is not in this tree")
+    def test_with_preregevl6s_own_screen_the_look_is_judged_by_it(self):
+        days = self.days(23)
+        live_sessions(self, days, a_g=0.02)
+        got = J7.run(self.st, days[-1], now=self.night(days[-1]), draws=999)
+        self.assertEqual(got["errors"], [])
+        [look] = got["written"]
+        detail = json.loads(self.st.meta(J7.LOOK_KEY.format(program=O1, version=1, k=look["k"])))
+        self.assertEqual((detail["S"], detail["tag"], detail["seed"]), (22, "", f"{O1}|v1|evl6|S22"))
+        self.assertIsNotNone(detail["p"])
+        self.assertIn(detail["decision"], (None, "pass", "retire"))
+
     def test_with_no_preregevl6_screen_nothing_is_written_and_the_gate_stays_shut(self):
         days = self.days(23)
         live_sessions(self, days)

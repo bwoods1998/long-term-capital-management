@@ -1020,6 +1020,15 @@ def wall_equity(E: Decimal, account: Mapping[str, Any] | None) -> Decimal:
     return E if now is None else min(E, now)
 
 
+def _max_open(s: Any, band: str, program: Any) -> int:
+    """`Settings.max_open` of `band` for `program` where the book's settings read a program's own row (release 1019i's
+    PREREG-EVL-6 section 6: its versions' 14 Probe slots), else the band's."""
+    try:
+        return int(s.max_open(band, program))
+    except TypeError:
+        return int(s.max_open(band))
+
+
 def _learner(adapter: Any, inst: Any) -> bool:
     """Whether an event instance is a PREREG-EVL-7 learner's (league/events/book.py `is_learner`; an adapter without it
     has none): its auction's picks are its own decision's, after every other row's (`EquityBook._event_decide_lrn`)."""
@@ -5526,7 +5535,7 @@ class EquityBook:
             return None
         may = []
         for inst, program in self._event_learners(at, adapter):
-            if s.max_open(inst.band) - self._event_open_count(inst.id) <= 0:
+            if _max_open(s, inst.band, program) - self._event_open_count(inst.id) <= 0:
                 continue
             try:
                 if adapter.learner_gate(lane, program) is not None:
@@ -5580,7 +5589,8 @@ class EquityBook:
                     continue
                 held = self._event_open_count(o.id) - self._event_selling(o.id, day, "open") - \
                     self._event_selling(o.id, day, "close")
-                keep += 2 * max(0, min(s.max_open(o.band), s.max_open(o.band) - held))
+                top = _max_open(s, o.band, program)
+                keep += 2 * max(0, min(top, top - held))
         return keep
 
     def _event_summary(self, day: str, at: str) -> dict[str, Any]:
@@ -5645,7 +5655,7 @@ class EquityBook:
             rooms[family], bands[family], insts[family] = int(d.get("room") or 0), str(d.get("band")), (inst, program)
             summary["programs"][family] = {"picks": len(wanted[family]), "room": rooms[family], "after": "learners"}
         for inst, program in learners:
-            room = s.max_open(inst.band) - self._event_open_count(inst.id)
+            room = _max_open(s, inst.band, program) - self._event_open_count(inst.id)
             insts[inst.family], bands[inst.family] = (inst, program), inst.band
             if room <= 0:
                 wanted[inst.family], rooms[inst.family] = [], 0
