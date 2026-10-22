@@ -1326,7 +1326,8 @@ class EquityBook:
                 "freeze": self.state.get("eq_freeze"), "seats": self.seats(), "events": self._event_health()}
 
     def _event_health(self) -> dict[str, Any] | None:
-        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares, each seating version's band as
+        """THE EVENT KIND'S LINE (release R2): its switch and the bands' target shares (and, release 1019h, the Probe
+        and Sized bands' Done size bar, `reach_bar`), each seating version's band as
         the book last read it from the lane (`eq_event_programs`),
         the auction paper proof's stages, the eligible list at the gateway, the last decisions (counts only). None when
         the event adapter cannot be imported."""
@@ -1339,6 +1340,8 @@ class EquityBook:
             stages = proof.status().get("stages") if proof is not None else None
             return {"enabled": bool(s.enabled),
                     "shares": {band: text(s.share(band)) for band in EVENT_LIVE_BANDS},
+                    # (release 1019h, A100: Done's size bar a Probe or Sized buy rounds up to; "0" is no round-up)
+                    "reach_bar": {band: text(s.reach_bar(band)) for band in adapter.PROBE_UP},
                     "programs": [{k: r[k] for k in ("program", "version", "band", "since", "why")}
                                  for r in self.state.rows("SELECT * FROM eq_event_programs ORDER BY program")],
                     "proof": {name: (stage or {}).get("status") for name, stage in (stages or {}).items()} or None,
@@ -6168,16 +6171,19 @@ class EquityBook:
         the buys after it (PREREG-EVL-5 section 1.3's ROOM, `HeldAhead`): the whole shares `_size_event` would give it
         now at its limit, against what the buys held before it keep (nothing is written: `dry`), their dollars out of
         the cash and the invested room, those at its own weight out of the loss budget, the name's dollars out of the
-        10% a name, and one held buy (its send and exit) out of the lines. When a figure cannot be read this minute, its
-        band's whole target (`share(band)` x E, uncapped: the reading that keeps more) is kept; a buy no whole share of
-        fits keeps nothing (it would be refused)."""
+        10% a name, and one held buy (its send and exit) out of the lines; the dry sizing includes S2's round-up to
+        Done's size bar (release 1019h: it sits inside `_size_event`), so a waiting Probe buy keeps the shares it will
+        send. When a figure cannot be read this minute, the most its band may ask is kept (`book.most_ask`:
+        `share(band)` x E, or the band's frozen envelope x E while the round-up is on, uncapped: the reading that keeps
+        more); a buy no whole share of fits keeps nothing (it would be refused)."""
         limit = D(side.get("limit_px"), ZERO)
         if limit <= 0:
             return
         sized = self._size_event(intent, inst, side, limit, day, s, ahead=ahead, dry=True)
         if sized is None:
+            # (release 1019h: the most it may ask, S2's round-up to Done's size bar included: `book.most_ask`)
             E = self.sizing_equity()
-            usd = s.share(inst.band) * E if E is not None and E > 0 else ZERO
+            usd = self._event_adapter().most_ask(s, inst.band, E) if E is not None and E > 0 else ZERO
         else:
             usd = sized[0] * limit
         if usd <= 0:
@@ -6238,7 +6244,10 @@ class EquityBook:
         10%) of the walls' equity (`book.round_up`), only when ROUNDING caused the shortfall (`size_entry`'s fractional
         dollars reach the bar; never past a cap that cut them under it) and `size_entry` asked again at those dollars
         still gives every share (the name wall, the 100% book, cash, the loss budget at the lot's weight); a cap that
-        refuses the round-up is recorded as the buy's binding. The target stays the band's; learning never rounds up. A
+        refuses the round-up is recorded as the buy's binding. The bar is the band's `equity_money.event.reach_bar` row
+        (A100: 0.8, the judge's line; 0 is no round-up, the tighten-only switch). The round-up sits inside this sizing,
+        so a `dry` one (`_event_keep_room`'s) gives it too and writes nothing. The target stays the band's; learning
+        never rounds up. A
         LEARNING buy, and any buy of a lower ROOM tier (a birth's AT LEARNING, R3: after every PREREG program; a promoted
         birth is in its band's tier, A97 PL-2, and sizes as a PREREG program of its band), sizes on the cash, the
         invested room and the loss budget less THE NEXT AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what
@@ -6338,8 +6347,12 @@ class EquityBook:
             # fractional dollars `size_entry` gave reach the bar: a cap that cut them under it is never rounded past)
             # and `size_entry` asked again at those shares' dollars still gives every one of them (the name wall, the
             # 100% book, cash and the loss budget at the lot's weight judge the round-up). The target stays the band's.
+            # The bar is the band's `equity_money.event.reach_bar` row (A100; 0.8 in force, the Done reader's own line):
+            # 0 is release 1019f's floor rounding, no round-up (the tighten-only switch).
             adapter = self._event_adapter()
-            n = adapter.round_up(inst.band, target, limit, whole, walls) if adapter.at_size(target, sized.usd) else None
+            bar = s.reach_bar(inst.band)
+            n = adapter.round_up(inst.band, target, limit, whole, walls, bar=bar) \
+                if bar > 0 and adapter.at_size(target, sized.usd, bar) else None
             binding, reason = sized.binding, sized.reason
             if n is not None:
                 ask = replace(x, usd=n * limit)

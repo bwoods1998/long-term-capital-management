@@ -1236,6 +1236,27 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   as at learning, where PREREG-EVL-1 bought one share (the shadow keeps it). The screen's cost allowance keeps its
 #   frozen 5% notional (league/events/score.py), so it understates the fixed CAT/TAF fees of a 3.5% Probe lot.
 #   Learning and Sized do not move.
+# - `reach_bar` (release 1019h; the captain's A97, S2 of the done-speed brief, and A100, which names the rows): PROBE
+#   AND SIZED BUYS AT DONE'S SIZE. A Probe or Sized buy that flooring to whole shares at the limit took under
+#   `reach_bar` x its band target buys the fewest whole shares that reach it (league/events/book.py `round_up`,
+#   league/equity/live.py `_size_event`), only when ROUNDING caused the shortfall (`size_entry`'s fractional dollars
+#   reach the bar: a cap that cut them under it is never rounded past), only when those shares at the limit are at most
+#   the band's FROZEN PREREG-EVL-1 section 8 target of the walls' equity (the loose end of its `position_share` bounds
+#   row: Probe 0.05, Sized 0.10; never a literal), and only when `size_entry` asked again for them gives every share
+#   (the name wall, the 100% book, cash and the loss budget at the lot's weight). 0.8 is the Done reader's own size line
+#   (league/events/done.py `PROBE_SIZE_SHARE`, read and never edited; a test pins the two equal): Done counts a Probe+
+#   buy only at 0.8 of its target, and whole-share flooring left about a third of Probe buys under it. The target stays
+#   position_share x E (`target_usd`, what the judge reads); the shares are never above floor(5% E / limit),
+#   PREREG-EVL-1 section 8's own count, so the buys stay inside the frozen envelope (A86 REVISED's doctrine: no program
+#   rule, selection, look, judge or Done rule moves). Learning has no row and never rounds up. Each row's bound is
+#   0-0.8: 0 is release 1019f's floor rounding (no round-up: THE TIGHTEN-ONLY SWITCH, one money-digest move), a lower
+#   bar rounds up less (at or under 0.5 never: a floored buy of one share or more is always above half its target). ITS
+#   COST, PLAINLY: a Probe lot is at most 5% of E at the limit ($94.90 at E $1,898) where A86 REVISED's floor kept it at
+#   most 3.5%; at E $1,898 a limit of about $33-47 grows from one share to two and one of about $22-27 from two to three
+#   (about 15% more cash a Probe buy across prices); a lot's open risk stays at most about $10 (weight 0.105); no wall
+#   moves and the book's open-risk ceiling is unchanged (cash binds). About 5% of Probe buys stay under size (the limits
+#   $47.45-53.14 at E $1,898: one share is under the bar, two above 5% of E). At Sized the envelope is the target
+#   itself, so no Sized buy rounds up while `position_share.sized` is 0.10.
 # - `per_name_share`: THE GOAL'S 10% A NAME, BOOK-WIDE: every lot of the name on the book, every working buy of it and
 #   the account's own position, all programs and lanes together, plus this entry, at most 0.10 x E (`size_entry`'s
 #   instrument cap; the gateway holds the same 10% of its own equity reading as a code ceiling).
@@ -1277,6 +1298,7 @@ CONSTITUTION["equity_money"]["event"] = {
     "enabled": True,
     "position_share": {"learning": "0.02", "probe": "0.035", "sized": "0.10"},
     "one_share_max": {"learning": "0.05", "probe": "0.05"},
+    "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
@@ -1520,6 +1542,11 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # A86 REVISED: Probe's own one-share cap (before it, one share at Probe went up to the name's wall), held under the
     # wall by `equity_money_problems`.
     "event.one_share_max.probe": ("0", "0.05"),
+    # RELEASE 1019h (the captain's A97 S2, A100): the share of its band target a Probe or Sized buy rounds up to when
+    # whole-share flooring left it under (Done's size bar). The loose end is the Done reader's own 0.8 (league/events/
+    # done.py `PROBE_SIZE_SHARE`); 0 is no round-up (release 1019f's floor rounding); a bar under 0.8 rounds up less.
+    "event.reach_bar.probe": ("0", "0.8"),
+    "event.reach_bar.sized": ("0", "0.8"),
     "event.max_open.learning": ("0", "8"),
     "event.max_open.probe": ("0", "6"),
     "event.max_open.sized": ("0", "8"),
@@ -1775,4 +1802,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '24f73f1876b6e6451061248b29b2aa38df3d4df19836c81a4edcaa63bc492716'
+PINNED_DIGEST = 'c3026ebacddf03bc853d7dc1f1b64d5788ecdd9dd90623adb2e6365baf9e9f53'

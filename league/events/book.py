@@ -74,13 +74,14 @@ docs/prereg/PREREG-EVL-4.md and PREREG-EVL-5.md section 1.3 for those files' thr
   close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares; when that
   rounds to none, one share when one share fits every wall (and, at learning and at Probe, one share at the limit is at
   most the band's `one_share_max`, 5%, of E; A86 REVISED added Probe's, which went up to the name's wall before); else
-  skipped (the shadow keeps the event). AT DONE'S SIZE (S2, the captain's A97, release 1019h): a Probe or Sized buy that
-  flooring to whole shares took under Done's size bar (0.8 of its target, the judge's own `at_size`) buys the fewest
-  whole shares that reach it, when they are at most the band's frozen PREREG-EVL-1 section 8 target (the loose end of
-  its `position_share` bounds row: Probe 5%, Sized 10%) of the walls' equity and `size_entry` asked again for them
-  still gives them all (`round_up`; never when a cap, not rounding, left it under the bar); the target stays the
-  band's (`target_usd` is never the rounded ask). Learning never rounds up. The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the
-  loss budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
+  skipped (the shadow keeps the event). AT DONE'S SIZE (S2, the captain's A97 and A100, release 1019h): a Probe or Sized
+  buy that flooring to whole shares took under Done's size bar (its band's `equity_money.event.reach_bar` row of its
+  target, 0.8 in force: the judge's own `at_size`; 0 turns the round-up off) buys the fewest whole shares that reach it,
+  when they are at most the band's frozen PREREG-EVL-1 section 8 target (the loose end of its `position_share` bounds
+  row: Probe 5%, Sized 10%) of the walls' equity and `size_entry` asked again for them still gives them all (`round_up`;
+  never when a cap, not rounding, left it under the bar); the target stays the band's (`target_usd` is never the rounded
+  ask). Learning never rounds up. The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the loss
+  budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
   WALLS' EQUITY (release 1019f, the reading that trades less): the 10% a name (the decision's skip and the send's caps)
   and the 100% book are judged on the LOWER of E and the account's current equity as the House last read it, since the
   gateway judges the current equity (a buy sized on a higher E met its final refusal there); the target and the
@@ -277,47 +278,72 @@ def envelope_share(band: str | None) -> Decimal | None:
     return Decimal(EQUITY_MONEY_BOUNDS[f"event.position_share.{band}"][1])
 
 
-def at_size(target: Decimal | float | str, usd: Decimal | float | str) -> bool:
-    """Whether a buy of `usd` dollars at the limit is AT DONE'S SIZE for the band target `target`: the Done reader's
-    own test (league/events/done.py `at_size`, the judge, read and never edited: `sized_usd` >= `PROBE_SIZE_SHARE` x
-    `target_usd` on the floats the lane's `real_fills` hold), so the House's buys are judged by the very comparison
-    that counts them (an exact-equality case is never lost to a rounding the judge does not make)."""
+def at_size(target: Decimal | float | str, usd: Decimal | float | str, bar: Decimal | float | str | None = None) -> bool:
+    """Whether a buy of `usd` dollars at the limit reaches `bar` x the band target `target` (`bar` None: the Done
+    reader's own `PROBE_SIZE_SHARE`). At the judge's line (None, or a row equal to it: the row in force is 0.8, a test
+    pins them equal) this IS the Done reader's own test (league/events/done.py `at_size`, the judge, read and never
+    edited: `sized_usd` >= `PROBE_SIZE_SHARE` x `target_usd` on the floats the lane's `real_fills` hold), so the House's
+    buys are judged by the very comparison that counts them (an exact-equality case is never lost to a rounding the
+    judge does not make); at a lower row (the tighten-only `event.reach_bar` rows, release 1019h) the same float
+    comparison at that share. False when the target is not above 0."""
     from . import done as DN
 
-    return DN.at_size(float(Decimal(str(target))), float(Decimal(str(usd))))
+    t, u = float(Decimal(str(target))), float(Decimal(str(usd)))
+    share = DN.PROBE_SIZE_SHARE if bar is None else float(Decimal(str(bar)))
+    if share == DN.PROBE_SIZE_SHARE:
+        return DN.at_size(t, u)
+    return t > 0 and u >= share * t
 
 
-def round_up(band: str | None, target: Decimal, limit: Decimal, whole: Decimal, walls: Decimal) -> Decimal | None:
-    """S2 (= SUP-1's sizing; the captain's A97, release 1019h, inside A86 REVISED's doctrine): THE WHOLE SHARES THAT
-    REACH DONE'S SIZE, or None (the buy goes as today). Only at Probe or Sized (`PROBE_UP`), only for a buy that
-    flooring to `whole` (>= 1) shares at the limit took UNDER Done's size bar (`at_size`: whole x limit under
-    `PROBE_SIZE_SHARE` x `target`, the band's target, position_share x E at the previous close): the fewest whole shares
-    n > whole whose dollars n x limit reach the bar, provided n x limit is at most `envelope_share(band)` x `walls`
-    (the walls' equity, the lower of E and the account's current equity: the reading that trades less). So n is never
-    above floor(envelope x E / limit), PREREG-EVL-1 section 8's own count at its frozen target (Probe 5%, Sized 10%):
-    inside the frozen envelope. At Sized the envelope is the target itself (whole shares of 10% are already that
-    count), so no Sized buy ever rounds up; the rule is one rule for both bands. The caller (league/equity/live.py
+def round_up(band: str | None, target: Decimal, limit: Decimal, whole: Decimal, walls: Decimal, *,
+             bar: Decimal | str | None = None) -> Decimal | None:
+    """S2 (= SUP-1's sizing; the captain's A97 and A100, release 1019h, inside A86 REVISED's doctrine): THE WHOLE SHARES
+    THAT REACH DONE'S SIZE BAR, or None (the buy goes as today). `bar`: the band's `equity_money.event.reach_bar` row
+    (None: the row in force, `settings().reach_bar(band)`); 0 is release 1019f's floor rounding, NO ROUND-UP (the
+    tighten-only switch). Only at Probe or Sized (`PROBE_UP`; learning has no row), only for a buy that flooring to
+    `whole` (>= 1) shares at the limit took UNDER the bar (`at_size`: whole x limit under `bar` x `target`, the band's
+    target, position_share x E at the previous close; at the row in force, 0.8, the Done reader's own test): the fewest
+    whole shares n > whole whose dollars n x limit reach it, provided n x limit is at most `envelope_share(band)` x
+    `walls` (the walls' equity, the lower of E and the account's current equity: the reading that trades less). So n is
+    never above floor(envelope x E / limit), PREREG-EVL-1 section 8's own count at its frozen target (Probe 5%, Sized
+    10%): inside the frozen envelope. At Sized the envelope is the target itself (whole shares of 10% are already that
+    count), so no Sized buy rounds up today; the rule is one rule for both bands. The caller (league/equity/live.py
     `_size_event`) rounds up only when ROUNDING caused the shortfall (`size_entry`'s fractional dollars reach the bar; a
     cap that cut them under it is never rounded past) and only when `size_entry` asked again at n x limit still gives
     n shares (the name wall, the 100% book, cash and the loss budget at the lot's weight all judge the round-up)."""
     if str(band) not in PROBE_UP:
         return None
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return None
     target, limit, whole, walls = (Decimal(str(v)) for v in (target, limit, whole, walls))
-    if not (target > 0 and limit > 0 and whole >= 1) or at_size(target, whole * limit):
+    if not (target > 0 and limit > 0 and whole >= 1) or at_size(target, whole * limit, share):
         return None
     cap = envelope_share(band)
     if cap is None:
         return None
-    from . import done as DN
-
     top = cap * walls
     # (the bar's own ceiling, less one so the judge's float comparison decides the edge; at most two steps)
-    n = max(whole + 1, (Decimal(str(DN.PROBE_SIZE_SHARE)) * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
+    n = max(whole + 1, (share * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
     while n * limit <= top:
-        if at_size(target, n * limit):
+        if at_size(target, n * limit, share):
             return n
         n += 1
     return None
+
+
+def most_ask(s: "Settings", band: str | None, E: Decimal) -> Decimal:
+    """THE MOST A BUY OF `band` MAY ASK at equity `E` before its figures are read (league/equity/live.py
+    `_event_keep_room`'s keep when a sizing figure cannot be read this minute: the reading that keeps more): its target,
+    `share(band)` x E, or, while S2's round-up is on for the band (`reach_bar` above 0, release 1019h), the band's frozen
+    envelope, `envelope_share(band)` x E, when that is more (a round-up asks at most the envelope of the walls' equity,
+    which is never above E)."""
+    E = Decimal(str(E))
+    usd = s.share(str(band)) * E
+    cap = envelope_share(band)
+    if cap is not None and s.reach_bar(str(band)) > 0:
+        usd = max(usd, cap * E)
+    return usd
 
 
 def send_key(program: str, band: str | None, n: int) -> tuple[int, int, int]:
@@ -397,12 +423,20 @@ class Settings:
     #: THE EVENT KIND'S OWN DAY ORDER COUNT (`event.max_orders_day`, release 1019c): its auction orders of a day count
     #: against this line, never the old lanes' 60 (league/equity/live.py `_count_refusal`). 0 when unread: no entry.
     max_orders_day: int = 0
+    #: DONE'S SIZE BAR a Probe or Sized buy rounds up to (`event.reach_bar`, release 1019h, the captain's A97 S2 and
+    #: A100; `round_up`): a share of the band target, 0.8 in force (the Done reader's `PROBE_SIZE_SHARE`). Empty (0 for
+    #: every band) when unread: no round-up, release 1019f's floor rounding.
+    reach_bars: Mapping[str, Decimal] = dataclasses.field(default_factory=dict)
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
 
     def max_open(self, band: str) -> int:
         return int(self.max_opens.get(str(band), 0))
+
+    def reach_bar(self, band: str) -> Decimal:
+        """The band's Done size bar for S2's round-up (`reach_bars`), 0 (no round-up) at learning and when unread."""
+        return Decimal(self.reach_bars.get(str(band), ZERO))
 
     def one_share_cap(self, band: str) -> Decimal | None:
         """The band's one-share rule's own cap (a share of E: one share at the limit at most this), None for none."""
@@ -434,7 +468,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             risk_floor=Decimal(str(e["open_risk"]["floor"])), risk_z=Decimal(str(e["open_risk"]["z"])),
             sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
             offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
-            max_orders_day=int(e["max_orders_day"]))
+            max_orders_day=int(e["max_orders_day"]),
+            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP})
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
@@ -1400,4 +1435,4 @@ __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_ROBIN_TIERS", "reserved_for",
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
-__all__ += ["envelope_share", "at_size", "round_up"]
+__all__ += ["envelope_share", "at_size", "round_up", "most_ask"]

@@ -9,8 +9,10 @@ under it now buys the fewest whole shares that reach it, only when those are at 
 section 8 target (the loose end of its `position_share` bounds row: Probe 5%, Sized 10%) of the walls' equity, only when
 rounding (not a cap) caused the shortfall, and only when `size_entry` asked again for them gives every share (the name
 wall, the 100% book, cash, the loss budget). The count is never above floor(5% E / limit), PREREG-EVL-1 section 8's
-own, so it stays inside the frozen envelope (A86 REVISED's doctrine; no money or constitution digest moves: no row is
-added). The check's worked cases at E = $1,898 (target $66.43, bar $53.144, envelope $94.90): $40 -> 2 shares, $47 -> 2
+own, so it stays inside the frozen envelope (A86 REVISED's doctrine). The bar is a money row of its own, as the design,
+its check (condition 4) and the captain's A100 require: `equity_money.event.reach_bar.probe` and `.sized`, 0.8 (pinned
+equal to the Done reader's `PROBE_SIZE_SHARE`), bound 0-0.8, 0 being release 1019f's floor rounding (the tighten-only
+switch); both digests move once with those two rows and nothing else. The check's worked cases at E = $1,898 (target $66.43, bar $53.144, envelope $94.90): $40 -> 2 shares, $47 -> 2
 ($94), $50 -> 1 (2 would be $100 > $94.90: under size, shown beside), $90 -> 1 (one share), $96 -> skipped; a cash
 case that refuses the round-up. The target stays the band's (`target_usd`); learning never rounds up.
 
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import json
 import random
 import tempfile
 import unittest
@@ -38,6 +41,7 @@ from league.events import book as EB
 from league.events import done as DN
 from league.events import programs as P
 from league.events import store as S
+from league.tests import equity_design as X
 from league.tests import test_events_a85 as A85
 from league.tests import test_events_book as TB
 from league.tests.test_events_book import CIK, CIK2, CIK3, DAY, earnings
@@ -114,12 +118,103 @@ class TheRule(unittest.TestCase):
         # (0.8 x 54.25 = 43.400000000000006) counts UNDER size: three shares ($65.10 <= $77.50) reach it.
         self.assertEqual(self.n("21.70", E=D("1550")), 3)
 
-    def test_no_row_moves_the_tables_pass_and_the_digests_are_release_1019gs(self):
+    def test_the_bar_is_a_row_and_the_row_sets_it(self):
+        """`round_up` reads the band's `reach_bar` row (the one in force when `bar` is None): 0 is no round-up; a lower
+        bar rounds up less (0.7 x $66.43 = $46.50: $47 reaches it at one share), and at or under 0.5 never (a floored
+        buy of one share or more is always above half its target)."""
+        target = EB.settings().share("probe") * E1898
+        self.assertEqual(EB.round_up("probe", target, D("40"), D(1), E1898), 2, "the row in force, 0.8")
+        self.assertIsNone(EB.round_up("probe", target, D("40"), D(1), E1898, bar=D(0)), "0: release 1019f's floor")
+        self.assertEqual(EB.round_up("probe", target, D("40"), D(1), E1898, bar=D("0.7")), 2)
+        self.assertIsNone(EB.round_up("probe", target, D("47"), D(1), E1898, bar=D("0.7")), "$47 >= $46.50 already")
+        self.assertEqual(EB.round_up("probe", target, D("47"), D(1), E1898, bar=D("0.8")), 2)
+        for cents in range(500, 12000, 3):
+            L = D(cents) / 100
+            whole = (target / L).to_integral_value(rounding="ROUND_DOWN")
+            if whole >= 1:
+                self.assertIsNone(EB.round_up("probe", target, L, whole, E1898, bar=D("0.5")), L)
+        off = dataclasses.replace(EB.settings(), reach_bars={"probe": D(0), "sized": D(0)})
+        with mock.patch.object(EB, "settings", lambda *a, **k: off):
+            self.assertIsNone(EB.round_up("probe", target, D("40"), D(1), E1898), "the row in force read at 0")
+        self.assertEqual(EB.most_ask(EB.settings(), "probe", D(2000)), D("100.00"), "5% of E while the round-up is on")
+        self.assertEqual(EB.most_ask(off, "probe", D(2000)), D("70.000"), "the target with it off")
+        self.assertEqual(EB.most_ask(EB.settings(), "learning", D(2000)), D("40.00"), "learning: its target")
+
+
+class TheRows(unittest.TestCase):
+    """S2's money rows (the design's `at_size.probe` as the captain's A100 names them, `event.reach_bar.probe` and
+    `.sized`) and the digests they move: the design's check, condition (4): "Ship the new row and its bound in one
+    commit, with a test that settings() != FALLBACK"."""
+
+    def test_the_rows_are_dones_line_inside_their_bounds_and_in_force(self):
+        event = K.CONSTITUTION["equity_money"]["event"]
+        self.assertEqual(event["reach_bar"], {"probe": "0.8", "sized": "0.8"})
+        for band in ("probe", "sized"):
+            self.assertEqual(D(event["reach_bar"][band]), D(str(DN.PROBE_SIZE_SHARE)),
+                             "the bar is the Done reader's own line (league/events/done.py, never edited)")
+            self.assertEqual(EQUITY_MONEY_BOUNDS[f"event.reach_bar.{band}"], ("0", "0.8"))
+            self.assertEqual(D(EQUITY_MONEY_BOUNDS[f"event.reach_bar.{band}"][1]), D(str(DN.PROBE_SIZE_SHARE)),
+                             "the loose end is the judge's line: a row may only round up less")
+        self.assertNotIn("event.reach_bar.learning", EQUITY_MONEY_BOUNDS, "learning never rounds up")
         self.assertEqual(equity_money_problems(), [])
-        self.assertIsNot(EB.settings(), EB.FALLBACK, "the event block in force is read")
-        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("c2f0a478", "24f73f18"),
-                         "S2 and PL-2 add no constitution row: neither digest moves")
+        s = EB.settings()
+        self.assertIsNot(s, EB.FALLBACK, "the event block in force is read")
+        self.assertNotEqual(s, EB.FALLBACK)
+        self.assertEqual((s.reach_bar("probe"), s.reach_bar("sized"), s.reach_bar("learning")), (D("0.8"), D("0.8"), 0))
+        self.assertEqual(EB.FALLBACK.reach_bar("probe"), 0, "unread: no round-up")
+
+    def test_a_row_outside_its_bound_or_missing_opens_nothing_and_zero_is_the_switch(self):
+        for band in ("probe", "sized"):
+            for value, why in (("0.81", "is outside [0, 0.8]"), ("-0.1", "is outside [0, 0.8]"),
+                               ("x", "is not a number")):
+                bad = json.loads(json.dumps(K.CONSTITUTION))
+                bad["equity_money"]["event"]["reach_bar"][band] = value
+                self.assertIn(f"equity_money.event.reach_bar.{band} = {value!r} {why}",
+                              " ".join(equity_money_problems(bad)), (band, value))
+                self.assertIs(EB.settings(bad), EB.FALLBACK, (band, value))
+            missing = json.loads(json.dumps(K.CONSTITUTION))
+            del missing["equity_money"]["event"]["reach_bar"][band]
+            self.assertIn(f"equity_money.event.reach_bar.{band} is missing", " ".join(equity_money_problems(missing)))
+            self.assertIs(EB.settings(missing), EB.FALLBACK)
+        off = json.loads(json.dumps(K.CONSTITUTION))
+        off["equity_money"]["event"]["reach_bar"] = {"probe": "0", "sized": "0"}
+        self.assertEqual(equity_money_problems(off), [], "0 is inside the bound: the tighten-only switch")
+        self.assertEqual(EB.settings(off).reach_bar("probe"), 0)
+        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_OFF, "one money-digest move")
+
+    def test_the_digests_moved_once_with_the_two_rows_and_nothing_else(self):
+        pair = X.in_force()
+        self.assertEqual((K.money_digest(), K.digest()), X.DIGESTS[pair])
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
+        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("8e63ce64", "c3026eba"))
+        before = X.before_1019h()
+        self.assertEqual((K.money_digest(before), K.digest(before)), X.DIGESTS_A86[pair], "release 1019g's pair")
+        self.assertEqual((K.money_digest(before)[:8], K.digest(before)[:8]), ("c2f0a478", "24f73f18"))
+        moved = {k for k, v in flat(K.CONSTITUTION).items() if flat(before).get(k, "absent") != v}
+        self.assertEqual(moved, {"equity_money.event.reach_bar.probe", "equity_money.event.reach_bar.sized"})
+        self.assertEqual(set(flat(before)) - set(flat(K.CONSTITUTION)), set(), "no row left out")
+        for candidate in X.CANDIDATES:
+            at = X.constitution_at(*candidate)
+            self.assertEqual((K.money_digest(at), K.digest(at)), X.DIGESTS[candidate], candidate)
+            back = X.before_1019h(at)
+            self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_A86[candidate], candidate)
+        self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_A86.values()), set())
+        off = json.loads(json.dumps(K.CONSTITUTION))
+        off["equity_money"]["event"]["enabled"] = False
+        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_ROLLBACK,
+                         "the rollback: every event buy stopped, the rows kept")
+        self.assertEqual((K.money_digest(X.before_1019h(off))[:8], K.digest(X.before_1019h(off))[:8]),
+                         X.A86_ROLLBACK, "release 1019g's rollback pair, with the rows left out")
+
+
+def flat(c, prefix: str = "") -> dict:
+    out = {}
+    for k, v in c.items():
+        if isinstance(v, dict):
+            out.update(flat(v, f"{prefix}{k}."))
+        else:
+            out[f"{prefix}{k}"] = v
+    return out
 
 
 # ======================================================================================== S2, through the real book
@@ -169,6 +264,27 @@ class AtDonesSize(TB.EventTest):
         self.assertIn("rounded up to 2 shares ($80.00) to reach Done's size bar", self.order_why(h, "FRTY"))
         self.assertEqual(rows["FFTY"]["binding"], "whole_shares", "$50: under size by whole shares, as before")
         self.assertIsNone(rows["FRTY"]["binding"], "$80 is above the target: nothing cut it")
+
+    def test_the_houses_health_line_names_the_rows(self):
+        h = self.harness(cash="1898", E="1898")
+        self.assertEqual(h.book.health()["events"]["reach_bar"], {"sized": "0.8", "probe": "0.8"},
+                         "the deploy's check reads the bar in force")
+
+    def test_a_row_of_zero_is_release_1019fs_floor_rounding(self):
+        """`equity_money.event.reach_bar.probe` 0 (the tighten-only switch): the $40 and $47 buys go at one share, as
+        release 1019f sent them, the target the band's."""
+        with mock.patch.dict(K.CONSTITUTION["equity_money"]["event"]["reach_bar"], {"probe": "0"}):
+            self.assertEqual(equity_money_problems(), [])
+            h = self.harness(cash="1898", E="1898")
+            self.probe(h, {"FRTY": (CIK, "32"), "FRSV": (CIK2, "37.6")})
+            h.tick(9, 15)
+            h.tick(9, 16)
+        self.assertEqual(self.sent(h), {"FRTY": "1", "FRSV": "1"})
+        for symbol, sized in (("FRTY", "40"), ("FRSV", "47")):
+            row = self.rows(h)[symbol]
+            self.assertEqual((D(row["target_usd"]), D(row["sized_usd"]), row["binding"]),
+                             (D("66.430"), D(sized), "whole_shares"))
+            self.assertNotIn("rounded up", self.order_why(h, symbol))
 
     def test_cash_refuses_the_round_up_and_is_named_its_binding(self):
         h = self.harness(cash="1898", E="1898")
@@ -301,6 +417,19 @@ class TheWaitingBuysAhead(TB.EventTest):
                 self.assertEqual(D(row["target_usd"]), D(70), "the target stays the band's")
                 self.assertEqual(D(row["sized_usd"]), D(40 if off else 80))
                 self.assertEqual(DN.at_size(float(D(row["target_usd"])), float(D(row["sized_usd"]))), not off)
+
+    def test_an_unread_figure_keeps_the_most_the_round_up_may_ask(self):
+        """When a sizing figure cannot be read this minute, `_event_keep_room` keeps the most the band may ask
+        (`book.most_ask`): with the round-up on, the Probe band's frozen envelope, 5% of $2,000 = $100, not the target's
+        $70 (release 1019g's keep, which a round-up can exceed: $80 here); with the row at 0, the target."""
+        for bar, kept in (("0.8", D("100.00")), ("0", D("70.000"))):
+            with self.subTest(bar=bar), mock.patch.dict(K.CONSTITUTION["equity_money"]["event"]["reach_bar"],
+                                                        {"probe": bar}):
+                self.setUp()
+                h = A85.short_of_cash(self.harness(cash="150"), "150")
+                self.to_close(h)
+                with mock.patch.object(L.EquityBook, "_read_account", lambda self: None):
+                    self.assertEqual(self.kept(h).usd, kept)
 
     def test_the_dry_sizing_of_a_round_up_writes_no_record(self):
         """Release 1019g: a dry sizing (`_event_keep_room`'s) writes nothing on the side row, the round-up's included."""

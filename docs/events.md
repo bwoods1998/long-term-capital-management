@@ -92,11 +92,12 @@ keeps it). It is money management inside the frozen envelope, not a new version:
 alpha, false-positive rate or Done rule moves (looks count shadow events, which do not depend on size), and the
 screen's cost allowance keeps its 5% notional.
 
-AT DONE'S SIZE (S2, the captain's A97, release 1019h, before any promotion; `feat/done-speed`): Done counts a Probe+
-buy only when the dollars its send asked reach 0.8 of its band target (`done.at_size`), and whole-share flooring left
-about a third of Probe buys under that bar (a $40 name at E $1,898: one share, $40, of a $66.43 target). A Probe or Sized
-buy that flooring took under the bar now buys the fewest whole shares that reach it (`book.round_up`, judged by the
-Done reader's own comparison), when those shares are at most the band's frozen PREREG-EVL-1 section 8 target (the loose
+AT DONE'S SIZE (S2, the captain's A97 and A100, release 1019h, before any promotion; `feat/done-speed`): Done counts a
+Probe+ buy only when the dollars its send asked reach 0.8 of its band target (`done.at_size`), and whole-share flooring
+left about a third of Probe buys under that bar (a $40 name at E $1,898: one share, $40, of a $66.43 target). A Probe or
+Sized buy that flooring took under the bar now buys the fewest whole shares that reach it (`book.round_up`, judged by
+the Done reader's own comparison), the bar being the band's money row `equity_money.event.reach_bar` (0.8, pinned equal
+to the Done reader's line; bound 0-0.8; 0 is release 1019f's floor rounding, the tighten-only switch), when those shares are at most the band's frozen PREREG-EVL-1 section 8 target (the loose
 end of its `position_share` bounds row: Probe 5%, Sized 10%) of the walls' equity, only when rounding (not a cap) caused
 the shortfall, and only when `size_entry` asked again for them still gives every share (the name wall, the 100% book,
 cash, the loss budget at the lot's weight). So a Probe buy is never more shares than PREREG-EVL-1 section 8's own count
@@ -104,7 +105,10 @@ at its 5% target, and a Sized buy never rounds up (its envelope is its target). 
 -> 2 ($94), $50 -> 1 (two would be $100, over 5%: under size, reported beside), $90 -> 1 (one share), $96 skipped. A cap
 that refuses the round-up is the buy's recorded binding (the report counts the cut); `target_usd` stays the band's
 target; learning never rounds up. A85's reservation stays share x E a buy, so a round-up the reservation's cash leaves
-short is refused and recorded, never a wall moved. No constitution row is added: no money or constitution digest moves.
+short is refused and recorded, never a wall moved. While a PREREG-EVL-5 Probe buy waits for the lane's close decision,
+`HeldAhead` keeps its rounded-up dollars from the buys after it ($80, not $40, at a $40 limit and E $2,000: the round-up
+sits inside the sizing its dry run reads). The two rows move both digests (money `c2f0a478` -> `8e63ce64`,
+constitution `24f73f18` -> `c3026eba`): the standing grant re-ratifies at the deploy.
 
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
 negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
@@ -942,7 +946,8 @@ after a decision), so the book reads no `ins` rows and the grammar refuses a sea
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
 paused or over the day's verdict line, made only when its worst case fits under what is left of that line, and counted
 in it). THE ONE RE-RUN OF AN EMPTY NIGHT (A95, `births.rerun_due`): every births receipt records the running
-`births.PARSE_VERSION` (2; release 1019e's receipts record none, read as 1). When the latest night's receipts accepted
+`births.PARSE_VERSION` (3 from release 1019h, whose SUP-3 rate rule and prompt lines moved the prompt's sha again,
+`8294fe77` -> `890806ff`; 2 before it; release 1019e's receipts record none, read as 1). When the latest night's receipts accepted
 none and registered none (no accepted id, no candidate row accepted, unknown or registered, no birth of the night) and
 were all written by an older version, the House runs that night's job once more, its receipt marked `rerun` (written
 when it starts, so a re-run that dies is still the one), never from 12:55Z of the session day after the night (a
