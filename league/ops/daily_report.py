@@ -61,6 +61,17 @@ THE FACTS (`facts`), each read-only (the lane's store through a read-only store,
   ...), the 95% issuer-block lower bound of the per-event after-cost return (bp) and the benchmark-net one beside it,
   the learning events beside (never counted), and whether Done holds at a checkpoint, the pivot or the $800 stop is
   read. Every figure None while no done.json is read (a release before the reader, or its first night not yet run).
+- `supply` (release 1019h, SUP-4, the captain's A97; REPORT ONLY: no money, judge or digest moves): THE DONE SUPPLY
+  LINE, one row per program at Probe or Sized now: its counted Probe+ events so far (done.json's `programs`, the same
+  count as `done`), its MEASURED real picks a session over the last `SUPPLY_SESSIONS` (5) sessions (the picks ROOM GAVE
+  it at the book's decisions of its entry auction, live.sqlite `eq_event_decisions` `planned`, over the decisions made),
+  the Probe+ buys under Done's size bar beside (the lane's `real_fills`, the judge's own `at_size`; by the cap recorded
+  as their binding), and the session at which it is PROJECTED to reach Done's 50 a program at its family's STATED
+  season multiplier (`SEASON_STATED`: earnings x0.2 and news x0.6 after Nov 20, 2026 to mid-January, the design's stated
+  calendar shape, NOT MEASURED: `stated` says so beside every projection; the projection counts every pick given, an
+  upper bound); the next checkpoint at which Done can be read (the larger of done.json's next checkpoint and 300) and
+  the session the Probe+ rows' projected total reaches it; and a FLAG when fewer than 3 rows (Done's `DONE_PROGRAMS`)
+  are projected to reach 50 by then (or within `SUPPLY_HORIZON` sessions when the total never reaches it).
 Standard library only.
 """
 from __future__ import annotations
@@ -391,6 +402,7 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
             efp = SC.expected_false_passes(store)
             holds = {key: buy_and_hold(store, [e for e in real if (e["program"], e["version"]) == key]) for key in seating}
             probe = probe_buys(store, hi)
+            under = under_size(store)
         finally:
             store.close()
     from . import evl_health as EV
@@ -457,6 +469,7 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
 
     def total(name: str, key: str = "total") -> int:
         return int((ev.get(name) or {}).get(key) or 0)
+    done = done_line(root)
     return {
         "kind": KIND, "notice_id": f"report:{day}", "day": day, "at": MT._iso(now), "lane_report": bool(lane_report),
         "profit": profit, "costs": costs,
@@ -478,7 +491,9 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
         "alarms": sorted(str(a) for a in (alarms or [])),
         "entries": entries,
         "break_even": break_even(ledger, probe, on, now),
-        "done": done_line(root),
+        "done": done,
+        "supply": supply_line(root, on, done, {key: str((statuses.get(key) or {}).get("band") or "learning")
+                                               for key in seating}, under),
     }
 
 
@@ -550,5 +565,178 @@ def break_even(ledger: Mapping[str, Any], probe: Mapping[str, Any] | None, on: d
             "why": None}
 
 
+# ---------------------------------------------------------------------------------------------- release 1019h
+#: SUP-4 (the captain's A97; the module docstring's `supply`): the sessions whose decisions measure a row's real picks,
+#: the sessions a projection looks ahead at most, and THE STATED SEASON MULTIPLIERS (the done-speed design's stated
+#: earnings-calendar shape after Nov 20, 2026 to mid-January: earnings rows x0.2, news rows x0.6 of the rate measured
+#: now; any other family, and any other session, x1.0). Stated, NOT MEASURED: the line says so beside every projection.
+SUPPLY_SESSIONS = 5
+SUPPLY_HORIZON = 250
+SEASON_STATED: tuple[tuple[dt.date, dt.date, dict[str, float]], ...] = (
+    (dt.date(2026, 11, 21), dt.date(2027, 1, 15), {"ern": 0.2, "news": 0.6}),)
+
+
+def season_of(family: str) -> str | None:
+    """The stated season a program family follows: "ern" for the earnings families (ern, ern-react, ern-drop, ...),
+    "news" for the news families (news, news-day, news-react, news-pm, news-night2), None for the rest (8-K, Form 4)."""
+    family = str(family or "")
+    return "ern" if family.startswith("ern") else "news" if family.startswith("news") else None
+
+
+def season_multiplier(family: str, day: dt.date) -> float:
+    """The stated multiplier of `family`'s measured rate on session `day` (`SEASON_STATED`; 1.0 outside it)."""
+    kind = season_of(family)
+    for first, last, by in SEASON_STATED:
+        if kind is not None and first <= day <= last:
+            return float(by.get(kind, 1.0))
+    return 1.0
+
+
+def picks_a_session(root: str | Path, day: dt.date, programs: Mapping[str, str]) -> dict[str, dict[str, Any]]:
+    """THE MEASURED REAL PICKS of each program of `programs` ({id: its entry auction, open | close}) over the last
+    `SUPPLY_SESSIONS` NYSE sessions through `day`: {id: {per_session (the picks ROOM GAVE it, `planned`, a decision of its
+    auction it was decided at, over those decisions; None with none), decisions}} from the book's `eq_event_decisions`
+    in `<root>/live.sqlite` (read-only); {} with no such table."""
+    from . import evl_health as EV
+
+    days = [s["day"].isoformat() for s in EV.sessions(day - dt.timedelta(days=14), day)][-SUPPLY_SESSIONS:]
+    path = Path(root) / EV.LIVE_DB
+    if not days or not path.exists():
+        return {}
+
+    def read(db: Any) -> list[Any] | None:
+        names = {str(r[0]) for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "eq_event_decisions" not in names:
+            return None
+        return guard.batched(db, "SELECT day, at, summary FROM eq_event_decisions WHERE status='done' AND day IN "
+                                 "({marks})", days)
+    rows = guard.read(path, read)
+    if rows is None:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for program, at in programs.items():
+        given = made = 0
+        for r in rows:
+            if str(r["at"]) != at:
+                continue
+            try:
+                summary = json.loads(r["summary"]) if isinstance(r["summary"], str) else None
+            except ValueError:
+                summary = None
+            mine = (summary.get("programs") or {}).get(program) if isinstance(summary, Mapping) else None
+            if not isinstance(mine, Mapping) or "error" in mine:
+                continue
+            made += 1
+            planned = _num(mine.get("planned"))
+            given += int(planned) if planned is not None and planned > 0 else 0
+        out[program] = {"per_session": round(given / made, 2) if made else None, "decisions": made}
+    return out
+
+
+def under_size(store: Any) -> dict[tuple[str, int], dict[str, Any]]:
+    """The lane's real Probe+ buys UNDER DONE'S SIZE BAR (`real_fills` side buy, band probe or sized, the judge's own
+    `at_size` False: a buy from before release 1019f's record reads as under), by (program, version): {n, by: {binding:
+    n}} (the cap recorded as each one's binding, "none" when none was)."""
+    from ..events import done as DN
+
+    out: dict[tuple[str, int], dict[str, Any]] = {}
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone() is None:
+        return out
+    have = {str(r[1]) for r in store.db.execute("PRAGMA table_info(real_fills)")}
+    if not {"target_usd", "sized_usd", "binding"} <= have:
+        return out
+    for r in store.db.execute("SELECT program, version, target_usd, sized_usd, binding FROM real_fills WHERE side='buy' "
+                              "AND band IN ('probe', 'sized')"):
+        if DN.at_size(r["target_usd"], r["sized_usd"]):
+            continue
+        cell = out.setdefault((str(r["program"]), int(r["version"])), {"n": 0, "by": {}})
+        cell["n"] += 1
+        name = str(r["binding"] or "none")
+        cell["by"][name] = cell["by"].get(name, 0) + 1
+    return out
+
+
+def _most(by: Any) -> str | None:
+    """The binding most often recorded (the first in name order among equals), None with none."""
+    if not isinstance(by, Mapping) or not by:
+        return None
+    return sorted(by.items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0])))[0][0]
+
+
+def _to_each(counted: int, rate: float | None, family: str, ahead: list[dt.date], each: int) -> int | None:
+    """The sessions ahead (1 the next) at which `counted` reaches `each` at `rate` a session x the stated multiplier;
+    0 when it is there already; None when it does not within `ahead`."""
+    if counted >= each:
+        return 0
+    if not rate or rate <= 0:
+        return None
+    total = float(counted)
+    for i, day in enumerate(ahead, start=1):
+        total += rate * season_multiplier(family, day)
+        if total >= each - 1e-9:
+            return i
+    return None
+
+
+def supply_line(root: str | Path, on: dt.date, done: Mapping[str, Any], bands: Mapping[tuple[str, int], str],
+                under: Mapping[tuple[str, int], Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """THE DONE SUPPLY LINE (the module docstring's `supply`): {rows: [{id, version, band, counted, picks_per_session,
+    decisions, under_size, under_bound (the cap most often recorded on them, "none" when none was), to_50 (sessions ahead, 0 there already, None not within the horizon), on_day}],
+    checkpoint, checkpoint_in (sessions ahead the rows' projected total reaches it, None not within the horizon), reach
+    (rows at 50 by then), flag, horizon, stated (True: the season multipliers are stated, not measured), why}. Report
+    only."""
+    from ..events import done as DN
+    from ..events import programs as P
+    from . import evl_health as EV
+
+    each, need = DN.DONE_PER_PROGRAM, DN.DONE_PROGRAMS
+    counted = {(str(r.get("id")), int(r.get("version") or 0)): r.get("n") for r in (done.get("by_program") or [])
+               if isinstance(r, Mapping)}
+    probe_up = [p for p in P.SEATING if bands.get((p.id, p.version)) in ("probe", "sized")]
+    out: dict[str, Any] = {"rows": [], "checkpoint": None, "checkpoint_in": None, "reach": 0, "flag": True,
+                           "horizon": SUPPLY_HORIZON, "stated": True, "why": None}
+    nxt = done.get("next_checkpoint") if isinstance(done.get("next_checkpoint"), int) else None
+    out["checkpoint"] = max(DN.DONE_EVENTS, nxt or 0)
+    if not probe_up:
+        return {**out, "why": "no Probe+ row yet"}
+    try:
+        picks = picks_a_session(root, on, {p.id: p.entry_at for p in probe_up})
+    except Exception as exc:  # noqa: BLE001 - the line goes without the measure, saying so
+        picks, out["why"] = {}, f"picks not read ({type(exc).__name__})"
+    ahead = [s["day"] for s in EV.sessions(on + dt.timedelta(days=1), on + dt.timedelta(days=SUPPLY_HORIZON * 2))]
+    ahead = ahead[:SUPPLY_HORIZON]
+    rows = []
+    for p in probe_up:
+        n = counted.get((p.id, p.version))
+        have = n if isinstance(n, int) and not isinstance(n, bool) else 0
+        rate = (picks.get(p.id) or {}).get("per_session")
+        to = _to_each(have, rate, p.family, ahead, each)
+        cut = (under or {}).get((p.id, p.version)) or {}
+        rows.append({"id": p.id, "version": p.version, "band": bands.get((p.id, p.version)),
+                     "counted": n if isinstance(n, int) and not isinstance(n, bool) else None,
+                     "picks_per_session": rate, "decisions": int((picks.get(p.id) or {}).get("decisions") or 0),
+                     "under_size": int(cut.get("n") or 0), "under_bound": _most(cut.get("by")),
+                     "to_50": to, "on_day": None if not to else ahead[to - 1].isoformat(),
+                     "_rate": rate or 0.0, "_have": have, "_family": p.family})
+    # The checkpoint at which Done can first be read: the session the rows' projected total reaches it.
+    total = float(sum(r["_have"] for r in rows))
+    at: int | None = 0 if total >= out["checkpoint"] else None
+    if at is None:
+        for i, day in enumerate(ahead, start=1):
+            total += sum(r["_rate"] * season_multiplier(r["_family"], day) for r in rows)
+            if total >= out["checkpoint"] - 1e-9:
+                at = i
+                break
+    limit = at if at is not None else len(ahead)
+    reach = sum(1 for r in rows if r["to_50"] is not None and r["to_50"] <= limit)
+    for r in rows:
+        for key in ("_rate", "_have", "_family"):
+            r.pop(key)
+    return {**out, "rows": rows, "checkpoint_in": at, "reach": reach, "flag": reach < need}
+
+
 __all__ = ["due", "facts", "done_line", "buy_and_hold", "ReadOnlyStore", "KIND", "REPORT_BY", "STALE_AFTER",
            "day_entries", "probe_buys", "break_even", "AUCTION_FIELDS", "TOTAL_FIELDS"]
+#: (release 1019h, SUP-4: the Done supply line)
+__all__ += ["supply_line", "picks_a_session", "under_size", "season_of", "season_multiplier", "SUPPLY_SESSIONS",
+            "SUPPLY_HORIZON", "SEASON_STATED"]

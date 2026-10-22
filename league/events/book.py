@@ -56,7 +56,12 @@ docs/prereg/PREREG-EVL-4.md and PREREG-EVL-5.md section 1.3 for those files' thr
   (`allocate`, release 1019b's second review), passing over a pick the book's rules skip whatever the room (no whole
   share fits by price; the name is sold at the same auction: league/equity/live.py `_event_gate`). INSIDE SIZED AND
   INSIDE PROBE ROUND-ROBIN (the captain's A85, Oct 21, 2026): one pick given a program a pass, the tables' order inside
-  a pass, at the decision (`allocate`) and at the send (`send_key`); learning keeps the tables' order.
+  a pass, at the decision (`allocate`) and at the send (`send_key`); learning keeps the tables' order. R3'S BIRTHS
+  (R3-SPEC section 4 as the captain's A97 amends it, PL-2, release 1019h): a birth AT LEARNING comes after every PREREG
+  program (`BIRTH_ROOM`); a PROMOTED birth takes its band's tier (Probe or Sized), after that band's PREREG rows and
+  before every learning row, round-robins with them, is reserved for and leaves no reservation, as a PREREG program of
+  its band (`room_key`, `reserved_for`, `leaves_room`; PREREG-EVL-5 section 1.3: "R3's births come after every file's
+  rows" within a band).
 - THE NEXT AUCTION'S RESERVATION (A85, recorded before the first Probe auction): ROOM's order holds inside one auction
   (A83 (2)(b)) and a lot sold in an auction still holds its cash there, so a LEARNING buy sizes on the cash, the
   invested room and the loss budget less what the other auction's live Probe and Sized programs will need,
@@ -69,8 +74,14 @@ docs/prereg/PREREG-EVL-4.md and PREREG-EVL-5.md section 1.3 for those files' thr
   close, at the limit, `limit_ratio` x the previous SIP close (rounded down to the cent), in whole shares; when that
   rounds to none, one share when one share fits every wall (and, at learning and at Probe, one share at the limit is at
   most the band's `one_share_max`, 5%, of E; A86 REVISED added Probe's, which went up to the name's wall before); else
-  skipped (the shadow keeps the event). The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the
-  loss budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
+  skipped (the shadow keeps the event). AT DONE'S SIZE (S2, the captain's A97 and A100, release 1019h): a Probe or Sized
+  buy that flooring to whole shares took under Done's size bar (its band's `equity_money.event.reach_bar` row of its
+  target, 0.8 in force: the judge's own `at_size`; 0 turns the round-up off) buys the fewest whole shares that reach it,
+  when they are at most the band's frozen PREREG-EVL-1 section 8 target (the loose end of its `position_share` bounds
+  row: Probe 5%, Sized 10%) of the walls' equity and `size_entry` asked again for them still gives them all (`round_up`;
+  never when a cap, not rounding, left it under the bar); the target stays the band's (`target_usd` is never the rounded
+  ask). Learning never rounds up. The book-wide 10% a name (`per_name_share`), the 100% book, the cash and the loss
+  budget are `league.equity.sizing.size_entry`'s own caps (the book calls it; nothing here re-implements it). THE
   WALLS' EQUITY (release 1019f, the reading that trades less): the 10% a name (the decision's skip and the send's caps)
   and the 100% book are judged on the LOWER of E and the account's current equity as the House last read it, since the
   gateway judges the current equity (a buy sized on a higher E met its final refusal there); the target and the
@@ -209,49 +220,140 @@ def order_of(program: str) -> int:
     return 10 ** 6
 
 
-#: R3-SPEC section 4: "when room is short, PREREG-EVL-3's order (Sized > Probe > learning; table order) holds for the
-#: PREREG programs; births come after them in registration order": a birth's ROOM tier, after every PREREG band's.
+#: R3-SPEC section 4 as the captain's A97 amends it (PL-2, release 1019h, recorded before any birth registered): "when
+#: room is short, PREREG-EVL-3's order (Sized > Probe > learning; table order) holds; a birth AT LEARNING comes after
+#: every PREREG program in registration order; a PROMOTED birth (Probe or Sized) takes its band's tier after that band's
+#: PREREG rows": the ROOM tier of a birth at learning, after every PREREG band's (PREREG-EVL-5 section 1.3's frozen
+#: ROOM text: "within a band the tables' order ... (R3's births come after every file's rows)").
 BIRTH_ROOM = 10
 
 
 def room_key(program: str, band: str | None) -> tuple[int, int]:
     """ROOM's order (PREREG-EVL-3 section 2): Sized, then Probe, then learning; then the tables' order. A registered
-    birth (R3) comes after every PREREG program, whatever the bands, in registration order (R3-SPEC section 4)."""
+    birth (R3) AT LEARNING comes after every PREREG program, in registration order (`BIRTH_ROOM`, R3-SPEC section 4); a
+    PROMOTED birth (A97, PL-2: at Probe or Sized) takes ITS BAND'S TIER, after that band's PREREG rows (the tables'
+    order: PREREG-EVL-1's rows, ..., PREREG-EVL-5's, then the births in registration order: PREREG-EVL-5 section 1.3)
+    and before every learning row."""
     found = next((p for p in seatable() if p.id == program), None)
-    if found is not None and found.spec is not None:
+    if found is not None and found.spec is not None and str(band) not in PROBE_UP:
         return (BIRTH_ROOM, order_of(program))
     return (PRIORITY.get(str(band), 9), order_of(program))
 
 
-#: A85 WITH R3'S BIRTHS (release 1019f's integration; R3-SPEC section 4, `BIRTH_ROOM`): the ROOM tiers (`room_key`'s
-#: first figure) that go ROUND-ROBIN inside an auction (`allocate`, `send_key`) and that the next auction's reservation
-#: holds room for (`reserved_for`): the PREREG programs' Sized and Probe tiers only. A birth's tier is BIRTH_ROOM
-#: whatever its band (it comes after every PREREG program), so a birth is never reserved for, never round-robins with a
-#: PREREG program, and its buys leave the reservation as a PREREG learning program's do (`leaves_room`).
+#: A85 WITH R3'S BIRTHS (release 1019f's integration; R3-SPEC section 4 as A97 amends it, `room_key`): the ROOM tiers
+#: (`room_key`'s first figure) that go ROUND-ROBIN inside an auction (`allocate`, `send_key`) and that the next auction's
+#: reservation holds room for (`reserved_for`): the Sized and Probe tiers. A birth AT LEARNING has the tier BIRTH_ROOM
+#: (after every PREREG program), so it is never reserved for, never round-robins, and its buys leave the reservation as
+#: a PREREG learning program's do (`leaves_room`); a PROMOTED birth (A97, PL-2) is in its band's tier, after that band's
+#: PREREG rows: it round-robins with them (last in each pass, the tables' order), the reservation holds room for it, and
+#: its buys never leave the reservation (they ARE what it holds room for), exactly as a PREREG program of its band.
 ROUND_ROBIN_TIERS = (PRIORITY["sized"], PRIORITY["probe"])
 
 
 def reserved_for(program: str, band: str | None) -> bool:
-    """A85: whether the next auction's reservation holds room for `program` at `band`: a PREREG program at Sized or
-    Probe (its ROOM tier one of `ROUND_ROBIN_TIERS`); never a birth, whatever its band."""
+    """A85: whether the next auction's reservation holds room for `program` at `band`: a program at Sized or Probe (its
+    ROOM tier one of `ROUND_ROBIN_TIERS`), a promoted birth's included (A97, PL-2); never one at learning, a birth's
+    neither."""
     return room_key(program, band)[0] in ROUND_ROBIN_TIERS
 
 
 def leaves_room(program: str, band: str | None) -> bool:
     """A85: whether a buy of `program` at `band` sizes less the next auction's reservation: a live band whose ROOM tier
-    comes after the PREREG Probe tier, so a PREREG learning program's buy (A85's "a learning buy") and a birth's at any
-    band (R3: after every PREREG program); never a PREREG Probe or Sized buy."""
+    comes after the Probe tier, so a PREREG learning program's buy (A85's "a learning buy") and a birth's at learning
+    (R3: after every PREREG program); never a Probe or Sized buy, a promoted birth's included (A97, PL-2: its band's
+    tier)."""
     return str(band) in LIVE_BANDS and room_key(program, band)[0] > max(ROUND_ROBIN_TIERS)
+
+
+# ------------------------------------------------------------------------------------------------- Done's size bar
+def envelope_share(band: str | None) -> Decimal | None:
+    """S2 (A97, release 1019h): THE FROZEN ENVELOPE of a Probe+ buy, as a share of the walls' equity: the LOOSE END of
+    the band's `event.position_share` bounds row (league/constitution.py `EQUITY_MONEY_BOUNDS`, never a literal here):
+    Probe 0.05 (PREREG-EVL-1 section 8's frozen 5% Probe target, which A86 REVISED's 0.035 sits inside) and Sized 0.10
+    (PREREG-EVL-1 section 8's Sized target, the name's wall); None at learning, which never rounds up."""
+    if str(band) not in PROBE_UP:
+        return None
+    from ..constitution import EQUITY_MONEY_BOUNDS
+
+    return Decimal(EQUITY_MONEY_BOUNDS[f"event.position_share.{band}"][1])
+
+
+def at_size(target: Decimal | float | str, usd: Decimal | float | str, bar: Decimal | float | str | None = None) -> bool:
+    """Whether a buy of `usd` dollars at the limit reaches `bar` x the band target `target` (`bar` None: the Done
+    reader's own `PROBE_SIZE_SHARE`). At the judge's line (None, or a row equal to it: the row in force is 0.8, a test
+    pins them equal) this IS the Done reader's own test (league/events/done.py `at_size`, the judge, read and never
+    edited: `sized_usd` >= `PROBE_SIZE_SHARE` x `target_usd` on the floats the lane's `real_fills` hold), so the House's
+    buys are judged by the very comparison that counts them (an exact-equality case is never lost to a rounding the
+    judge does not make); at a lower row (the tighten-only `event.reach_bar` rows, release 1019h) the same float
+    comparison at that share. False when the target is not above 0."""
+    from . import done as DN
+
+    t, u = float(Decimal(str(target))), float(Decimal(str(usd)))
+    share = DN.PROBE_SIZE_SHARE if bar is None else float(Decimal(str(bar)))
+    if share == DN.PROBE_SIZE_SHARE:
+        return DN.at_size(t, u)
+    return t > 0 and u >= share * t
+
+
+def round_up(band: str | None, target: Decimal, limit: Decimal, whole: Decimal, walls: Decimal, *,
+             bar: Decimal | str | None = None) -> Decimal | None:
+    """S2 (= SUP-1's sizing; the captain's A97 and A100, release 1019h, inside A86 REVISED's doctrine): THE WHOLE SHARES
+    THAT REACH DONE'S SIZE BAR, or None (the buy goes as today). `bar`: the band's `equity_money.event.reach_bar` row
+    (None: the row in force, `settings().reach_bar(band)`); 0 is release 1019f's floor rounding, NO ROUND-UP (the
+    tighten-only switch). Only at Probe or Sized (`PROBE_UP`; learning has no row), only for a buy that flooring to
+    `whole` (>= 1) shares at the limit took UNDER the bar (`at_size`: whole x limit under `bar` x `target`, the band's
+    target, position_share x E at the previous close; at the row in force, 0.8, the Done reader's own test): the fewest
+    whole shares n > whole whose dollars n x limit reach it, provided n x limit is at most `envelope_share(band)` x
+    `walls` (the walls' equity, the lower of E and the account's current equity: the reading that trades less). So n is
+    never above floor(envelope x E / limit), PREREG-EVL-1 section 8's own count at its frozen target (Probe 5%, Sized
+    10%): inside the frozen envelope. At Sized the envelope is the target itself (whole shares of 10% are already that
+    count), so no Sized buy rounds up today; the rule is one rule for both bands. The caller (league/equity/live.py
+    `_size_event`) rounds up only when ROUNDING caused the shortfall (`size_entry`'s fractional dollars reach the bar; a
+    cap that cut them under it is never rounded past) and only when `size_entry` asked again at n x limit still gives
+    n shares (the name wall, the 100% book, cash and the loss budget at the lot's weight all judge the round-up)."""
+    if str(band) not in PROBE_UP:
+        return None
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return None
+    target, limit, whole, walls = (Decimal(str(v)) for v in (target, limit, whole, walls))
+    if not (target > 0 and limit > 0 and whole >= 1) or at_size(target, whole * limit, share):
+        return None
+    cap = envelope_share(band)
+    if cap is None:
+        return None
+    top = cap * walls
+    # (the bar's own ceiling, less one so the judge's float comparison decides the edge; at most two steps)
+    n = max(whole + 1, (share * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
+    while n * limit <= top:
+        if at_size(target, n * limit, share):
+            return n
+        n += 1
+    return None
+
+
+def most_ask(s: "Settings", band: str | None, E: Decimal) -> Decimal:
+    """THE MOST A BUY OF `band` MAY ASK at equity `E` before its figures are read (league/equity/live.py
+    `_event_keep_room`'s keep when a sizing figure cannot be read this minute: the reading that keeps more): its target,
+    `share(band)` x E, or, while S2's round-up is on for the band (`reach_bar` above 0, release 1019h), the band's frozen
+    envelope, `envelope_share(band)` x E, when that is more (a round-up asks at most the envelope of the walls' equity,
+    which is never above E)."""
+    E = Decimal(str(E))
+    usd = s.share(str(band)) * E
+    cap = envelope_share(band)
+    if cap is not None and s.reach_bar(str(band)) > 0:
+        usd = max(usd, cap * E)
+    return usd
 
 
 def send_key(program: str, band: str | None, n: int) -> tuple[int, int, int]:
     """THE ORDER OF AN AUCTION'S BUYS AT THEIR SEND (league/equity/live.py `_event_send`), `n` the buy's place among its
     program's buys of the auction (0 its first): ROOM's tiers (`room_key`: Sized, then Probe, then learning, then the
-    births whatever their bands, R3); inside the PREREG Sized tier and inside the PREREG Probe tier ROUND-ROBIN
-    (`ROUND_ROBIN_TIERS`), every program's first buy before any program's second, the tables' order inside a pass (A85:
-    the cash an auction's sends take goes one buy a program a pass, so the last Probe row in the tables is not left the
-    cash the earlier rows did not take); learning, and the births, in the tables' order, each program's buys in its
-    ranking (release 1019e's `room_key` order)."""
+    births at learning, R3; a promoted birth in its band's tier after that band's PREREG rows, A97 PL-2); inside the
+    Sized tier and inside the Probe tier ROUND-ROBIN (`ROUND_ROBIN_TIERS`), every program's first buy before any
+    program's second, the tables' order inside a pass (A85: the cash an auction's sends take goes one buy a program a
+    pass, so the last Probe row in the tables is not left the cash the earlier rows did not take); learning, and the
+    births at learning, in the tables' order, each program's buys in its ranking (release 1019e's `room_key` order)."""
     tier, order = room_key(program, band)
     return (tier, max(0, int(n)) if tier in ROUND_ROBIN_TIERS else 0, order)
 
@@ -321,12 +423,20 @@ class Settings:
     #: THE EVENT KIND'S OWN DAY ORDER COUNT (`event.max_orders_day`, release 1019c): its auction orders of a day count
     #: against this line, never the old lanes' 60 (league/equity/live.py `_count_refusal`). 0 when unread: no entry.
     max_orders_day: int = 0
+    #: DONE'S SIZE BAR a Probe or Sized buy rounds up to (`event.reach_bar`, release 1019h, the captain's A97 S2 and
+    #: A100; `round_up`): a share of the band target, 0.8 in force (the Done reader's `PROBE_SIZE_SHARE`). Empty (0 for
+    #: every band) when unread: no round-up, release 1019f's floor rounding.
+    reach_bars: Mapping[str, Decimal] = dataclasses.field(default_factory=dict)
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
 
     def max_open(self, band: str) -> int:
         return int(self.max_opens.get(str(band), 0))
+
+    def reach_bar(self, band: str) -> Decimal:
+        """The band's Done size bar for S2's round-up (`reach_bars`), 0 (no round-up) at learning and when unread."""
+        return Decimal(self.reach_bars.get(str(band), ZERO))
 
     def one_share_cap(self, band: str) -> Decimal | None:
         """The band's one-share rule's own cap (a share of E: one share at the limit at most this), None for none."""
@@ -358,7 +468,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             risk_floor=Decimal(str(e["open_risk"]["floor"])), risk_z=Decimal(str(e["open_risk"]["z"])),
             sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
             offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
-            max_orders_day=int(e["max_orders_day"]))
+            max_orders_day=int(e["max_orders_day"]),
+            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP})
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
@@ -960,8 +1071,9 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
     PREREG Probe tier (`ROUND_ROBIN_TIERS`, `room_key`'s first figure) ROUND-ROBIN (the captain's A85): one pick GIVEN a
     program a pass, the tables' order inside a pass, pass after pass until every one of them is full or out of picks, so
     no Probe row is given a second name before every later Probe row has had its first; learning as before, each
-    program in turn to its room; then the births (R3's `BIRTH_ROOM`, after every PREREG program whatever their bands), in
-    registration order, each in turn to its room, as release 1019e gave them. Only a name GIVEN to a
+    program in turn to its room; then the births AT LEARNING (R3's `BIRTH_ROOM`, after every PREREG program), in
+    registration order, each in turn to its room, as release 1019e gave them; a PROMOTED birth (A97, PL-2) is in its
+    band's round-robin tier, after that band's PREREG rows (`room_key`). Only a name GIVEN to a
     program is taken: a name a program wanted but had no room for (or skipped) goes on to the next program that wants
     it, which then moves on to its next picks. Returns ({program: the picks given, in its order}, {program: {why passed
     over: how many}}), both in ROOM's order."""
@@ -997,7 +1109,7 @@ def allocate(picks_by_program: Mapping[str, Sequence[Pick]], rooms: Mapping[str,
     while i < len(order):
         rank = tier(order[i])
         group = []
-        while i < len(order) and tier(order[i]) == rank:   # (one ROOM tier: a birth's is BIRTH_ROOM, whatever its band)
+        while i < len(order) and tier(order[i]) == rank:   # (one ROOM tier: a birth's at learning is BIRTH_ROOM)
             group.append(order[i])
             i += 1
         if rank in ROUND_ROBIN_TIERS:
@@ -1322,3 +1434,5 @@ __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)
 __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_ROBIN_TIERS", "reserved_for",
             "leaves_room"]
+#: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
+__all__ += ["envelope_share", "at_size", "round_up", "most_ask"]

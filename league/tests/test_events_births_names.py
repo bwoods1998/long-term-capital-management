@@ -42,7 +42,9 @@ et = TB.et
 #: Release 1019e's prompt sha (the first births night asked under it) and this reading's: a prompt change is a new
 #: PARSE_VERSION (A95), so the pair is pinned here together.
 PROMPT_1019E = "2203fda336035feb3786317af09cee9f32b77353999a67e58c18911a41518a77"
-PROMPT_BY_VERSION = {2: "8294fe777c44b1cd06d04c48af9a60dade4f5443e9597a4f77fe853dd9affdce"}
+#: (Release 1019h, the captain's A97: SUP-3's rate rule moved the prompt's rate lines and added the Nov 6 line: version 3.)
+PROMPT_BY_VERSION = {2: "8294fe777c44b1cd06d04c48af9a60dade4f5443e9597a4f77fe853dd9affdce",
+                     3: "890806ff38f09b7e810cbbfef1159ca85f39d568105537d8eca4d7e60c022b06"}
 
 NIGHT = dt.date(2026, 10, 21)           # Wed: the first births night
 RECEIPT_AT = dt.datetime(2026, 10, 22, 2, 11, 33, tzinfo=UTC)
@@ -177,7 +179,7 @@ class ThePrompt(unittest.TestCase):
 
     def test_the_prompt_sha_moved_and_a_prompt_change_is_a_new_parse_version(self):
         self.assertNotEqual(BI.prompt_sha(), PROMPT_1019E)
-        self.assertEqual(BI.PARSE_VERSION, 2)
+        self.assertEqual(BI.PARSE_VERSION, 3, "release 1019h's SUP-3 (A97)")
         self.assertEqual(BI.prompt_sha(), PROMPT_BY_VERSION[BI.PARSE_VERSION],
                          "the prompt changed: give it a new PARSE_VERSION (A95) and pin both here")
 
@@ -187,7 +189,10 @@ class Replay(unittest.TestCase):
     """Twenty invented sessions through Wed Oct 21, 2026 (Sept 24 to Oct 21), each with: six earnings 8-Ks (four read
     -2 "lowered", two +2), four other 8-Ks (5.02 twice, 9.01, 3.01), six single-company articles (four at 06:10-06:40
     ET of the session, two at 19:00 ET the evening before) and four Form 4 buys (two by officers at $150,000, two by
-    directors at $60,000). No bar, mark or outcome: the facts never read one."""
+    directors at $60,000). No bar, mark or outcome: the facts never read one. RELEASE 1019h (the captain's A97, SUP-3): a
+    clean record pass every 10 minutes from Sept 22 to Oct 22 (every session holds a complete record pass), and a
+    seatable birth's `MIN_RATE` at release 1019e's 3, the rate these figures were worked at (league/tests/
+    test_events_births.py `SeatableRate` holds 20 over the complete-record sessions on its own sessions)."""
 
     AS_OF = NIGHT
 
@@ -198,6 +203,10 @@ class Replay(unittest.TestCase):
         self.s = TB.Synth(Path(self.tmp.name))
         self.addCleanup(self.s.st.close)
         st = self.s.st
+        rate = mock.patch.object(BI, "MIN_RATE", 3)
+        rate.start()
+        self.addCleanup(rate.stop)
+        TB.record_passes(st, et(dt.date(2026, 9, 22), 0), et(dt.date(2026, 10, 22), 23))
         self.days = [x.day for x in C.previous(st, self.AS_OF + dt.timedelta(days=1), 20)]
         self.assertEqual((self.days[0], self.days[-1], len(self.days)), (dt.date(2026, 9, 24), NIGHT, 20))
         syms = list(TB.ISSUERS.values())
@@ -247,7 +256,8 @@ class TheSixOfTheFirstNight(Replay):
         self.assertEqual(news["jaccard"]["max"], round(80 / 120, 4))
         # The ins-buy's grammar passes now ("roles": ["officer"] reads as "officer"); the validator's count judges it.
         self.assertEqual((ins["ok"], ins["id"], ins["selected"]), (False, "EVL-B-INS-BUY-OFFICER-O1", 40))
-        self.assertEqual(ins["reasons"], ["40 selected events over the last 20 sessions: under 3 a session"])
+        self.assertEqual(ins["reasons"], ["40 selected events over the 20 sessions of the last 20 with a complete record "
+                                          "pass: under 3 a session"])
         self.assertEqual(json.loads(ins["spec"])["rule"], {"roles": "officer", "value_min": 100000})
 
 
@@ -316,7 +326,8 @@ class TheRerunOfAnEmptyNight(Replay):
                          [{"from": x["spec"]["id"], "to": BI.canonical_name(x["spec"]["id"])} for x in SIX])
         # The receipt: the running reading, the re-run it was, the names.
         receipt = json.loads(st.db.execute("SELECT summary FROM receipts WHERE job='births' ORDER BY id DESC").fetchone()[0])
-        self.assertEqual((receipt["night"], receipt["parse_version"], receipt["rerun"]), ("2026-10-21", 2, due))
+        self.assertEqual((receipt["night"], receipt["parse_version"], receipt["rerun"]),
+                         ("2026-10-21", BI.PARSE_VERSION, due))
         self.assertEqual(receipt["named"]["EVL-B-INS-BUY-OFFICER-O1"], "EVL-INS-BUY-OFFICER-O1")
         # A re-run birth counts only events knowable after its registration (the morning of Oct 22, not the night).
         birth = next(p for p in P.BIRTHS if p.id == "EVL-B-ERN-NEGATIVE-O1")
@@ -419,7 +430,8 @@ class WhenTheNightIsDue(Replay):
             with self.assertRaises(KeyboardInterrupt):
                 BI.night(st, TB.FakeArchitect("{}"), today=NIGHT, now=lambda: now, rerun=due)
         [running] = [dict(r) for r in st.db.execute("SELECT status, summary FROM receipts WHERE status='running'")]
-        self.assertEqual(json.loads(running["summary"]), {"night": "2026-10-21", "parse_version": 2, "rerun": due})
+        self.assertEqual(json.loads(running["summary"]), {"night": "2026-10-21", "parse_version": BI.PARSE_VERSION,
+                                                          "rerun": due})
         self.assertIsNone(BI.rerun_due(st, now))
 
     def test_only_the_latest_night_and_only_within_reach(self):
@@ -487,7 +499,8 @@ class TheHousesRerun(TH.LaneCase):
         first, again = self.receipts("births")
         self.assertEqual(first["id"], self.first)
         summary = json.loads(again["summary"])
-        self.assertEqual((again["status"], summary["night"], summary["parse_version"]), ("ok", "2026-10-19", 2))
+        self.assertEqual((again["status"], summary["night"], summary["parse_version"]),
+                         ("ok", "2026-10-19", BI.PARSE_VERSION))
         self.assertEqual(summary["rerun"], {"night": "2026-10-19", "of": [self.first], "parse_version": 1,
                                             "until": "2026-10-20T12:55:00Z"})
         [call] = self.births_calls()
@@ -505,7 +518,7 @@ class TheHousesRerun(TH.LaneCase):
                 rid = st.start_receipt(f"decide-{kind}:2026-10-20", now=TH.et("2026-10-20", wall))
                 st.finish_receipt(rid, "ok", {}, now=TH.et("2026-10-20", wall))
         self.assertIn("births", self.turns("21:16", "21:17"))
-        self.assertEqual(json.loads(self.receipts("births")[-1]["summary"])["parse_version"], 2)
+        self.assertEqual(json.loads(self.receipts("births")[-1]["summary"])["parse_version"], BI.PARSE_VERSION)
         self.assertEqual(len(self.receipts("births")), 3)
         self.assertNotIn("births", self.turns("07:05", "08:00", day="2026-10-21"),
                          "a night the running reading wrote never runs again")

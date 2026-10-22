@@ -1,5 +1,5 @@
 {
- "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
+ "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f; `supply`, the Done supply line, since release 1019h), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
  "kind": "report",
  "notice_id": "report:2026-10-20",
  "day": "2026-10-20",
@@ -238,5 +238,40 @@
     "n": 0
    }
   ]
+ },
+ "supply": {
+  "rows": [
+   {
+    "id": "EVL-INS-BUY-O1",
+    "version": 2,
+    "band": "probe",
+    "counted": 50,
+    "picks_per_session": 1.4,
+    "decisions": 5,
+    "under_size": 2,
+    "under_bound": "cash",
+    "to_50": 0,
+    "on_day": null
+   },
+   {
+    "id": "EVL-NEWS-READ-O1",
+    "version": 2,
+    "band": "probe",
+    "counted": 0,
+    "picks_per_session": 4.2,
+    "decisions": 5,
+    "under_size": 0,
+    "under_bound": null,
+    "to_50": 14,
+    "on_day": "2026-11-09"
+   }
+  ],
+  "checkpoint": 300,
+  "checkpoint_in": 38,
+  "reach": 2,
+  "flag": true,
+  "horizon": 250,
+  "stated": true,
+  "why": null
  }
 }

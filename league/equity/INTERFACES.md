@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `c2f0a478`, full digest `24f73f18` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `7709cadb` / `5e450ade`.
+Money digest `8e63ce64`, full digest `c3026eba` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba9e6341` / `50f572ae`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1515,14 +1515,16 @@ path.
   proof. `_event_sync` reads the bands from the lane (`book.bands`) once a session (and again at the close decision when
   the lane's band mark moved: section 23); `_event_send` orders the buys by ROOM (`book.send_key(program, band, n)`, n
   the buy's place among its program's buys of the auction: `book.room_key`'s tiers, round-robin inside the PREREG
-  Sized and Probe tiers, the captain's A85; a birth's tier after them all, R3). `_size_event` calls `size_entry` with
+  Sized and Probe tiers, the captain's A85; a birth's at learning after them all, R3; a promoted birth's in its band's
+  tier after that band's PREREG rows, A97 PL-2: section 25). `_size_event` calls `size_entry` with
   `usd` = the band's `position_share` x E (E the `last_equity` of the account, never above the sizing equity), `E` and
   `sleeve_equity` = `wall_equity(E, account)` (release 1019f: the lower of E and the account's current `equity`, the
   gateway's figure, so the instrument, sleeve and invested caps trade less; `_event_gate`'s name wall reads it too),
   `position_share` = `per_name_share` (the name's book-wide value as `account_symbol_value`), `weight` = the lot's own;
   whole shares; one share by `size_entry` at `usd` = the limit, at learning only when the limit is at most
-  `one_share_max.learning` x E. A buy of a tier after the PREREG Probe tier (a PREREG learning program's, a birth's at
-  any band: `book.leaves_room`) has its `available_cash` and `sleeve_free_cash` less, its `invested_now` more, and its
+  `one_share_max.learning` x E (release 1019h: a Probe or Sized buy floored under Done's size bar rounds up inside its
+  band's frozen envelope: section 25). A buy of a tier after the Probe tier (a PREREG learning program's, a birth's at
+  learning: `book.leaves_room`) has its `available_cash` and `sleeve_free_cash` less, its `invested_now` more, and its
   `budget_room` less, by A85's reservation for the next auction (`_event_reserve(inst, day, at, s, E) -> (cash, budget,
   note)`: the other auction's live PREREG Probe and Sized programs, `book.reserved_for`, through `book.reservation`,
   their room from `_event_open_count` less `_event_selling` (their lots sold at this auction), their picks and buy
@@ -1779,3 +1781,68 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   one-share row held under the name's wall, the dollars' ceiling and the digests); league/tests/equity_design.py
   `DIGESTS` regenerated, release 1019c's kept as `DIGESTS_1019C` (`before_a86` sets the two rows back; `before_1019c`
   does too); test_events_book.py and test_events_1019c.py read the new Probe sizes.
+
+## 25. Done speed (the captain's A97 and A100, release 1019h; `feat/done-speed`; money rows and code inside the frozen envelope, report)
+
+- **S2, Probe and Sized buys at Done's size** (league/equity/live.py `_size_event`, league/events/book.py; the money
+  rows `equity_money.event.reach_bar.probe` and `.sized`, 0.8, bounds `("0", "0.8")`, the captain's A100): after
+  `size_entry` and the floor to whole shares, `book.round_up(band, target, limit, whole, walls, *, bar=None) -> n |
+  None` (Probe and Sized only; None at learning, which has no row; `bar` None reads the row in force,
+  `settings().reach_bar(band)`; `bar` 0 is release 1019f's floor rounding: None, the tighten-only switch): when `whole`
+  >= 1 shares x the limit are under `bar` x the target (`book.at_size(target, usd, bar)`: at 0.8, the Done reader's own
+  `done.at_size` on floats, `PROBE_SIZE_SHARE` 0.8, pinned equal to the row; at a lower row the same float comparison),
+  the fewest n > whole whose dollars reach it, provided n x limit <= `book.envelope_share(band)` x walls
+  (`envelope_share`: the loose end of the band's `EQUITY_MONEY_BOUNDS` `event.position_share` row, Probe 0.05 and Sized
+  0.10, never a literal; `walls` = `wall_equity(E, account)`). `book.Settings.reach_bars` / `reach_bar(band)` (0 when
+  unread; `FALLBACK` has none). `_size_event` asks it only when the row is above 0 and `size_entry`'s fractional dollars
+  (`sized.usd`) reach the bar (rounding, not a cap, caused the shortfall), then asks `size_entry` again at `usd` = n x
+  limit and sends n only when it gives qty >= n; else it sends `whole` and records the refusing cap as the buy's
+  `binding` (the order's words "N shares at <band> (<cap>)", which `evl_health.sent_binding` reads). The round-up sits
+  inside `_size_event` on `record(...)`, so a `dry` sizing gives it and writes nothing: release 1019g's `HeldAhead`
+  (`_event_keep_room`) keeps a waiting PREREG-EVL-5 Probe buy's rounded-up dollars from the buys after it, and when a
+  figure cannot be read keeps `book.most_ask(s, band, E)` (the target, or the band's envelope x E while the row is
+  above 0). `target_usd` stays `share(band)` x E; `sized_usd` is the shares sent x the limit. A85's `book.reservation`
+  stays share(band) x E a buy (a round-up it leaves short is refused and recorded). n <= floor(envelope x E / limit),
+  PREREG-EVL-1 section 8's own count; at Sized the envelope is the target, so no Sized buy rounds up. The two rows move
+  both digests.
+- **PL-2, a promoted birth in its band's tier** (book.py `room_key`): a registered birth at learning keeps (`BIRTH_ROOM`,
+  its order); at probe or sized (`PROBE_UP`) it is (`PRIORITY[band]`, its order), after that band's PREREG rows (its
+  order is after every PREREG row) and before every learning row. Through `room_key`: `send_key` and `allocate`
+  round-robin it with its band's PREREG rows, `reserved_for` is True and `leaves_room` False for it, so `_event_reserve`
+  holds room for it and never sizes its buys less a reservation. With no birth promoted every key is release 1019g's.
+- **SUP-3's rate rule** (league/events/births.py): `MIN_RATE` 20 for a seatable birth, over `Facts.recorded` =
+  `recorded_sessions(store, days)` (the window's sessions whose span, the prior session's `open_cutoff` to the session's
+  `close_decide`, holds clean `record` receipts, league/ops/evl_health.py `_failing` empty, with none of the span left
+  more than `evl_health.RECORD_MINUTES` (30) without one), at least `MIN_RECORDED` 3 (`Facts.rated`, `Facts.rate(prog)
+  -> (n, per session)`); a record keeps `RECORD_MIN_RATE` 3 over the calendar's `SESSIONS` 20 (`Facts.complete`).
+  `Facts.facts()` adds `recorded_sessions` and each family's and program's `per_recorded_session`; `candidates` adds
+  `per_recorded_session`. The proposer's USER text states both rates and "no earnings-only family (ern, ern-react)
+  after Nov 6, 2026" (its `prompt_sha` moves; no steering line).
+- **SUP-4, the Done supply line** (league/ops/daily_report.py; report only): `facts()["supply"]` =
+  `supply_line(root, on, done, bands, under)`: {rows: [{id, version, band, counted, picks_per_session, decisions,
+  under_size, under_bound, to_50, on_day}], checkpoint, checkpoint_in, reach, flag, horizon, stated, why};
+  `picks_a_session(root, day, {id: entry_at})` reads live.sqlite `eq_event_decisions` (`planned`) over the last
+  `SUPPLY_SESSIONS` 5 sessions read-only; `under_size(store)` the lane's Probe+ buys under the bar by binding;
+  `season_multiplier(family, day)` the STATED `SEASON_STATED` (ern x0.2, news x0.6, Nov 21, 2026 to Jan 15, 2027).
+  gateway/lib/email.mjs `composeReport` words it (`SUPPLY_BOUND`); an older gateway ignores the fact.
+- **Identities** (the tree's own functions, 3.14 and 3.11): money `c2f0a478` -> `8e63ce64` and constitution `24f73f18`
+  -> `c3026eba` (`PINNED_DIGEST`; S2's two rows alone: `equity_design.before_1019h` gives release 1019g's pair,
+  `DIGESTS_A86`), so the standing grant re-ratifies at the House's start (`ship_house.sh` with the new pair); the
+  rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`, the round-up's own switch (both rows
+  0) `adf52674` / `fe5d87b7`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs
+  identity `2f0083bc`, the gate contract `397b22b7` and the Done rule `54241925` do not move. The births prompt's sha
+  `8294fe77` -> `890806ff`, `births.PARSE_VERSION` 2 -> 3 (A95's rule: a prompt or validator change that could turn a
+  refused answer into an accepted one).
+- **Tests**: league/tests/test_events_1019h_done_speed.py (S2 through the real book at E $1,898: $40 -> 2, $47 -> 2,
+  $50 -> 1, $90 -> 1, $96 skipped, cash refusing the round-up, a cap never rounded past, the walls' equity, learning and
+  Sized unchanged, the judge's exact-equality case, a row of 0 sending as release 1019f; `round_up`'s envelope from the
+  bounds row and never above PREREG-EVL-1 section 8's count, the bar from the row; `TheRows`: the rows equal
+  `done.PROBE_SIZE_SHARE`, inside their bounds, `settings()` not `FALLBACK`, a row outside or missing opening nothing,
+  the digests moved once with the two rows alone and the rollback pairs; `TheWaitingBuysAhead`: `HeldAhead` keeps a
+  waiting PREREG-EVL-5 Probe buy's $80 round-up, not $40, and `most_ask` when a figure is unread);
+  test_events_a86.py (A86 REVISED's move read with the 1019h rows left out); PL-2's invented week identical while no birth is promoted, and a promoted birth after
+  its band's PREREG rows and before learning); test_events_1019f_births_a85.py and test_events_1019g.py (PL-2's tiers,
+  sends, allocation and A85 reads); test_events_births.py `SeatableRate` (the rate over complete-record sessions, an
+  outage left out, under 3 sessions, what a complete record pass is, the prompt's lines); test_daily_report.py
+  `DoneSupply` and gateway/test/report-notice.test.mjs (the line, its flag and its words); test_events_births_names.py
+  (fix/births-names' replays on SUP-3's rule with release 1019e's rate for their figures, `PARSE_VERSION` 3).

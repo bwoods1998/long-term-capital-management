@@ -17,7 +17,6 @@ constitution digests moved once, with these two rows and nothing else."""
 
 from __future__ import annotations
 
-import copy
 import json
 import unittest
 from decimal import Decimal as D
@@ -114,18 +113,23 @@ class TheRows(unittest.TestCase):
         before = X.before_a86()
         self.assertEqual((money_digest(before), digest(before)), X.DIGESTS_1019C[pair], "release 1019c's pair, exactly")
         self.assertEqual((money_digest(before)[:8], digest(before)[:8]), ("055e5313", "a8d4cbd9"))
-        moved = {k for k, v in flat(CONSTITUTION).items() if flat(before).get(k, "absent") != v}
+        # (Release 1019h's two rows moved them once more, `event.reach_bar`: A86 REVISED's table is the one in force with
+        # those rows left out, `before_1019h`; league/tests/test_events_1019h_done_speed.py holds that move.)
+        a86 = X.before_1019h()
+        moved = {k for k, v in flat(a86).items() if flat(before).get(k, "absent") != v}
         self.assertEqual(moved, {"equity_money.event.position_share.probe", "equity_money.event.one_share_max.probe"},
                          "A86 REVISED: two rows; max_open.probe stays 6")
-        self.assertEqual((money_digest()[:8], digest()[:8]), ("c2f0a478", "24f73f18"))
-        self.assertEqual(set(flat(before)) - set(flat(CONSTITUTION)), set(), "no row left out")
+        self.assertEqual((money_digest(a86)[:8], digest(a86)[:8]), ("c2f0a478", "24f73f18"))
+        self.assertEqual((money_digest(a86), digest(a86)), X.DIGESTS_A86[pair])
+        self.assertEqual(set(flat(before)) - set(flat(a86)), set(), "no row left out")
         for candidate in X.CANDIDATES:
             at = X.constitution_at(*candidate)
             self.assertEqual((money_digest(at), digest(at)), X.DIGESTS[candidate], candidate)
+            self.assertEqual((money_digest(X.before_1019h(at)), digest(X.before_1019h(at))), X.DIGESTS_A86[candidate])
             back = X.before_a86(at)
             self.assertEqual((money_digest(back), digest(back)), X.DIGESTS_1019C[candidate], candidate)
-        self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_1019C.values()), set())
-        off = copy.deepcopy(CONSTITUTION)
+        self.assertEqual(set(X.DIGESTS_A86.values()) & set(X.DIGESTS_1019C.values()), set())
+        off = X.before_1019h()
         off["equity_money"]["event"]["enabled"] = False
         self.assertEqual((money_digest(off)[:8], digest(off)[:8]), X.A86_ROLLBACK,
                          "the rollback: every event buy stopped, the rows kept")

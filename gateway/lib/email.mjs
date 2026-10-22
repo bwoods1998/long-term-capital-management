@@ -319,6 +319,12 @@ export const ENTRY_WORDS = {
   busy: 'working order', blocked: 'a gate', unreadable: 'unread figure', other: 'other',
 };
 const AUCTIONS = { open: 'open', close: 'close' };
+//: Release 1019h (league/ops/daily_report.py `supply_line`): the cap most often recorded on a row's Probe+ buys under
+//: Done's size bar (league/events/bands.py BINDINGS), in words; "none" when no cap was recorded.
+const SUPPLY_BOUND = {
+  cash: 'cash', budget: 'loss budget', invested: 'invested cap', name_wall: 'name wall', whole_shares: 'whole shares',
+  gateway: 'gateway', venue: 'venue', none: 'no cap recorded',
+};
 const reasons = value => Object.entries(plain(value))
   .filter(([name, n]) => Object.hasOwn(ENTRY_WORDS, name) && Number.isInteger(n) && n > 0)
   .map(([name, n]) => `${ENTRY_WORDS[name]} ${n}`);
@@ -515,6 +521,39 @@ export function composeReport(facts = {}) {
     if (done.pivot === true) parts.push('PIVOT: retire the lane');
     if (done.stop === true) parts.push('$800 SPENT: stop all spend');
     if (parts.length) out.push(...pack('', parts, '; ', REPORT_WIDTH, '  ').map(line => ` ${line.trimStart()}`));
+  }
+  // THE DONE SUPPLY LINE (release 1019h, SUP-4, the captain's A97; league/ops/daily_report.py `supply_line`; report
+  // only): each Probe+ row's counted events, its MEASURED real picks a session over the last 5 sessions, its Probe+
+  // buys under Done's size bar and the cap most often recorded on them, and the session its projection reaches Done's 50
+  // at the STATED season multipliers (never measured: the line says so); a FLAG when fewer than 3 rows reach 50 by the
+  // checkpoint Done is first read at. Figures and the programs' own ids only.
+  const supply = plain(facts.supply);
+  if (Object.keys(supply).length) {
+    const rows = list(supply.rows).filter(row => row && typeof row === 'object' && programOf(row.id) && versionOf(row.version))
+      .slice(0, REPORT_PROGRAMS);
+    if (!rows.length) {
+      add('Done supply: no Probe+ row yet (Done needs 3 x 50)');
+    } else {
+      const parts = rows.map(row => {
+        const picks = real(row.picks_per_session) === null ? 'n/a' : real(row.picks_per_session).toFixed(1);
+        const to = row.to_50 === 0 ? '50 reached' : Number.isInteger(row.to_50) && row.to_50 > 0
+          ? `50 in ${row.to_50}${typeof row.on_day === 'string' && DAY.test(row.on_day) ? ` (${row.on_day})` : ''}`
+          : '50 not in reach';
+        const under = Number.isInteger(row.under_size) && row.under_size > 0
+          ? `, under ${row.under_size}${Object.hasOwn(SUPPLY_BOUND, row.under_bound) ? ` (${SUPPLY_BOUND[row.under_bound]})` : ''}`
+          : '';
+        const read = Number.isInteger(row.decisions) && row.decisions < 5 ? ` (${count(row.decisions)} read)` : '';
+        return `${programOf(row.id)}${row.band === 'sized' ? ' sized' : ''} ${count(row.counted)}, ${picks}/session${read}, `
+          + `${to}${under}`;
+      });
+      const head = supply.stated === false ? 'Done supply, Probe+:' : 'Done supply, Probe+ (seasons stated, not measured):';
+      out.push(...pack(head, parts, '; ', REPORT_WIDTH, '  ')
+        .map((line, i) => (i ? ` ${line.trimStart()}` : line)));
+      const when = Number.isInteger(supply.checkpoint_in) ? `in ${count(supply.checkpoint_in)} sessions`
+        : `not within ${count(supply.horizon)} sessions`;
+      add(`${supply.flag === true ? ' FLAG: ' : ' '}${count(supply.reach)} of ${count(rows.length)} reach 50 by `
+        + `${count(supply.checkpoint)} (${when})${supply.flag === true ? '; needs 3' : ''}`, '   ');
+    }
   }
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);

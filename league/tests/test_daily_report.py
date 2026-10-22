@@ -508,5 +508,100 @@ class BuyAndHold(unittest.TestCase):
                 store.close()
 
 
+class DoneSupply(ReportCase):
+    """RELEASE 1019h, SUP-4 (the captain's A97; report only, no money, judge or digest moves): THE DONE SUPPLY LINE. Per
+    program at Probe or Sized: its counted Probe+ events (done.json), its MEASURED real picks a session over the last 5
+    sessions (the picks ROOM gave it at the book's decisions of its entry auction), its Probe+ buys under Done's size bar
+    beside, and the session its projection reaches Done's 50 at its family's STATED season multiplier (earnings x0.2 and
+    news x0.6 after Nov 20, stated, not measured); a flag when fewer than 3 rows reach 50 by the checkpoint Done is first
+    read at. The invented Tuesday: EVL-INS-BUY-O1 at Probe (an insider row: no season), one Probe buy with no size record."""
+
+    def done_json(self, counted: dict[str, int], next_checkpoint: int = 100) -> None:
+        from league.events import done as DN
+
+        doc = {"schema": DN.SCHEMA, "counted": sum(counted.values()), "next_checkpoint": next_checkpoint,
+               "programs": [{"id": k, "version": 2, "n": n} for k, n in counted.items()]}
+        (self.root / "events" / DN.FILE).write_text(json.dumps(doc))
+
+    def decisions(self, at: str, programs: dict[str, int], days: int = 5) -> None:
+        from league.ops import evl_health as EV
+
+        book = Book(self.root)
+        try:
+            for s in EV.sessions(TUE - dt.timedelta(days=14), TUE)[-days:]:
+                book.decision(s["day"], at, {k: {"picks": n + 2, "room": 6, "planned": n} for k, n in programs.items()})
+        finally:
+            book.close()
+
+    def facts(self) -> dict:
+        return DR.facts(self.ctx(), self.root, self.now_, "2026-10-20", ledger=MT.load(self.root),
+                        budget=json.loads((self.root / "budget.json").read_text()))
+
+    def test_the_line_per_probe_row_measured_picks_beside_the_projection_and_the_flag(self):
+        self.done_json({"EVL-INS-BUY-O1": 20})
+        self.decisions("open", {"EVL-INS-BUY-O1": 4, "EVL-ERN-READ-O1": 7})
+        supply = self.facts()["supply"]
+        [row] = supply["rows"]
+        self.assertEqual({k: row[k] for k in ("id", "version", "band", "counted", "picks_per_session", "decisions")},
+                         {"id": "EVL-INS-BUY-O1", "version": 2, "band": "probe", "counted": 20, "picks_per_session": 4.0,
+                          "decisions": 5}, "only the Probe+ row; its picks given over the last five sessions' opens")
+        self.assertEqual((row["to_50"], row["on_day"]), (8, "2026-10-30"), "30 to go at 4 a session: the 8th session on")
+        self.assertEqual((row["under_size"], row["under_bound"]), (1, "none"),
+                         "its Probe buy from before the size record: under Done's bar, no cap recorded")
+        self.assertEqual((supply["checkpoint"], supply["checkpoint_in"], supply["reach"], supply["flag"]),
+                         (300, 70, 1, True), "Done first read at 300: 280 to go at 4 a session; 1 row of the 3 needed")
+        self.assertIs(supply["stated"], True, "the season multipliers are stated, never measured")
+        self.assertIsNone(supply["why"])
+        for banned in ("XYZ", "12.34", "ACME"):
+            self.assertNotIn(banned, json.dumps(supply), banned)
+
+    def test_no_probe_row_and_no_book(self):
+        from league.events import done as DN
+
+        bands = {("EVL-INS-BUY-O1", 2): "learning"}
+        line = DR.supply_line(self.root, TUE, DR.done_line(self.root), bands)
+        self.assertEqual((line["rows"], line["reach"], line["flag"], line["why"]), ([], 0, True, "no Probe+ row yet"))
+        self.assertEqual(line["checkpoint"], DN.DONE_EVENTS)
+        (self.root / "live.sqlite").unlink()
+        line = DR.supply_line(self.root, TUE, {}, {("EVL-INS-BUY-O1", 2): "probe"})
+        self.assertEqual((line["rows"][0]["picks_per_session"], line["rows"][0]["to_50"]), (None, None),
+                         "no book: nothing measured, nothing projected")
+
+    def test_the_stated_seasons(self):
+        nov20, nov21, jan15, jan16 = (dt.date(2026, 11, 20), dt.date(2026, 11, 21), dt.date(2027, 1, 15),
+                                      dt.date(2027, 1, 16))
+        for family, kind in (("ern", "ern"), ("ern-react", "ern"), ("ern-drop", "ern"), ("news", "news"),
+                             ("news-pm", "news"), ("news-night2", "news"), ("8k", None), ("ins-buy", None)):
+            self.assertEqual(DR.season_of(family), kind, family)
+        self.assertEqual([DR.season_multiplier("ern", d) for d in (nov20, nov21, jan15, jan16)], [1.0, 0.2, 0.2, 1.0])
+        self.assertEqual([DR.season_multiplier("news-day", d) for d in (nov20, nov21, jan15, jan16)], [1.0, 0.6, 0.6, 1.0])
+        self.assertEqual([DR.season_multiplier("8k", d) for d in (nov20, nov21)], [1.0, 1.0])
+        ahead = [nov20 - dt.timedelta(days=2), nov20 - dt.timedelta(days=1), nov20] + \
+            [nov21 + dt.timedelta(days=i) for i in range(200)]
+        # 10 a session: 3 sessions to Nov 20 make 30; then an earnings row adds 2 a session (10 more sessions), a news
+        # row 6 (4 more), an 8-K row 10 (2 more).
+        self.assertEqual(DR._to_each(0, 10.0, "ern", ahead, 50), 13)
+        self.assertEqual(DR._to_each(0, 10.0, "news", ahead, 50), 7)
+        self.assertEqual(DR._to_each(0, 10.0, "8k", ahead, 50), 5)
+        self.assertEqual((DR._to_each(50, None, "ern", ahead, 50), DR._to_each(10, 0.0, "ern", ahead, 50)), (0, None))
+        self.assertIsNone(DR._to_each(0, 0.01, "ern", ahead, 50), "not within the horizon")
+
+    def test_a_cut_probe_buy_counts_under_its_binding_and_one_at_size_does_not(self):
+        st = ES.Store(self.root / "events")
+        try:
+            with st.tx():
+                for event, target, sized, binding in (("f4:a", 66.43, 40.0, "cash"), ("f4:b", 66.43, 80.0, None),
+                                                      ("f4:c", 66.43, 50.0, "whole_shares"), ("f4:d", 66.43, 40.0, "cash")):
+                    st.db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band, "
+                                  "target_usd, binding, sized_usd) VALUES('EVL-INS-BUY-O1', 2, ?, 'buy', 1, 1, 0, "
+                                  "'2026-10-20T13:30:00Z', 'probe', ?, ?, ?)", (event, target, binding, sized))
+            under = DR.under_size(st)
+        finally:
+            st.close()
+        self.assertEqual(under[("EVL-INS-BUY-O1", 2)], {"n": 4, "by": {"none": 1, "cash": 2, "whole_shares": 1}},
+                         "f4:b at $80 of $66.43 is at size; the old buy with no record reads as under")
+        self.assertEqual(DR._most(under[("EVL-INS-BUY-O1", 2)]["by"]), "cash")
+
+
 if __name__ == "__main__":
     unittest.main()
