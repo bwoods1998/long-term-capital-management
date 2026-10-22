@@ -70,7 +70,11 @@ run's retry (its start + DECIDE_RETRY), and the retry starts at its time in the 
    for its open decision and then its close decision;
 7. the daily-index BACKFILL of the last weekdays, for anything the live pass missed or failed (a filing whose fetch fails
    in it is tried again on the record pass's backoff, its day done after its last try with the filing named; a federal
-   holiday's missing index is done: `SEC_HOLIDAYS`).
+   holiday's missing index is done: `SEC_HOLIDAYS`);
+8. THE DECISION SCHEDULER'S TASKS (release 1019i, `SLOT_TASK`'s comment; league/events/scheduler.py): a file's LIVE
+   SLOT right after a live main decision (before every other task: real money's, inside its own window, in the same
+   turn when it follows the main receipt), its CATCH-UP after the record pass with the hourly re-decision, its
+   PRE-PASS last of all.
 A backlog (missed decisions, a long verdict queue) never holds the record pass past a second cadence: then only a live
 decision goes before it. A task ends early when a decision falls due; a decision's and a verdict task's network reads
 stop at their bound and the next turn goes on from what was stored (universe rows, cik_info, bars and verdicts are kept
@@ -116,6 +120,7 @@ from . import report as RP
 from . import run as R
 from . import score as SC
 from . import screen as SN
+from . import scheduler as X
 from . import store as S
 from . import universe as U
 from . import verdicts as V
@@ -209,6 +214,24 @@ HOLD_LEAD = dt.timedelta(seconds=150)
 LEAD_ENDS = ("ok", "pending")
 HOLD_STEP = 1.0
 HOLD_TURNS = 40
+#: THE DECISION SCHEDULER (release 1019i, A120; league/events/scheduler.py): each later file's part of an auction runs
+#: in ITS OWN RUN at its pre-registered slot of the timing table (`scheduler.TABLE`), never inside the main decision.
+#: A file's LIVE SLOT (`_slot_due`, `_slot_run`) is a task named SLOT_TASK + "<auction>-<file>" (not "decide-": so
+#: `_deadline` bounds a slot that starts before the main decision to end DECISION_MARGIN before it, as every other
+#: task), with the slot's own bound from its own start (`Slot.bound`) and its own receipt (`Slot.receipt`); a run that
+#: failed or was cut at its bound is FINAL for that auction (no retry: the file's text decides it later by itself), and
+#: a slot whose window closed (`Slot.never_past`) with no run gets a `missed` receipt and a warning (`_slot_miss`, the
+#: alarm). A due slot after the main decision runs IN THE SAME TURN (`run`: the turn goes on into a due slot as it
+#: goes on into the owed close decision), never at the next publish. The CATCH-UP (`_slot_catchup_due`,
+#: `_slot_catchup`): every session since the part's registration whose live slot was not made (`scheduler.MADE`) and
+#: whose window is closed is decided by itself once, oldest first, as a backfill after the record pass, under its own
+#: receipt (`Slot.catchup`), shadow only. PRE-PASSES (`_prepass_due`): a file's reads ahead of its decision, the
+#: plan's last task, inside their window. A slot whose part is not registered is inert (`scheduler.live_files`).
+SLOT_TASK = "slot-"
+CATCHUP_TASK = "catchup-"
+PREPASS_TASK = "prepass-"
+CATCHUP_BUDGET = 150.0
+PREPASS_BUDGET = 120.0
 VERDICT_BACKOFF = dt.timedelta(minutes=10)    # verdicts that got no answer (refused, failed, paused, over the line)
 UNIVERSE_AT = dt.time(7, 30)
 TICKERS_AT = dt.time(7, 0)
@@ -472,6 +495,9 @@ class EventLane:
         self._failed: dict[str, dt.datetime] = {}
         # accession -> (the fetches tried, when the first one failed), this process's (`_record_steps`)
         self._fetch_tries: dict[str, tuple[int, dt.datetime | None]] = {}
+        #: The decision scheduler's slots (SLOT_TASK's comment): "<auction>-<file>" -> the last live run or miss of
+        #: this process ({day, status, at, why}), for the health page.
+        self._slots: dict[str, dict[str, Any]] = {}
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -510,7 +536,9 @@ class EventLane:
                     "tasks": {k: dict(v) for k, v in sorted(self._tasks.items())},
                     "verdict_usd_today": round(float(self._usd["usd"]), 4), "verdict_usd_day": self.verdict_usd_day,
                     "verdict_line_usd": round(float(self._line["usd_day"]), 4), "verdict_line_source": self._line["source"],
-                    "warnings": self._warnings}
+                    "warnings": self._warnings,
+                    "slots": {k: dict(v) for k, v in sorted(self._slots.items())},
+                    "timing_table": X.digest()[:8]}
 
     def ready(self) -> bool:
         """The store exists (the migration, scripts/evl_migrate.py, made it, or the operator did; the lane never makes
@@ -702,9 +730,11 @@ class EventLane:
                     next_look = self.house.clock() if follow is not None else \
                         self.house.clock() + max(0.0, (at - now).total_seconds())
                     hold = self._close_hold(st, now)
-                    if hold is None and follow is not None and self._close_owed(st, now):
+                    if hold is None and follow is not None and (self._close_owed(st, now) or
+                                                                follow.name.startswith(SLOT_TASK)):
                         # (a task of the lead returned at or after the decision's time: the decision in this turn,
-                        # at once, never at the next publish)
+                        # at once, never at the next publish; release 1019i: a file's live slot that is due, after
+                        # the main decision's receipt or at its own clock start, runs in this turn the same way)
                         hold = now
                     if hold is None:
                         lead = self._hold_from(st, now)
@@ -930,7 +960,12 @@ class EventLane:
         starved = record_due and (last_record is None or now >= last_record + 2 * RECORD_EVERY) and \
             not self._quiet("record", now, [])
         decision = self._due_decision(st, now, latest, soon)
-        if decision is not None and (decision[0] == 0 or (decision[0] < 3 and not starved)):
+        if decision is not None and decision[0] == 0:
+            return self._decision_task(decision), now
+        slot = self._slot_due(st, now, session, latest, soon)    # (release 1019i: a file's live slot, real money's)
+        if slot is not None:
+            return slot, now
+        if decision is not None and decision[0] < 3 and not starved:
             return self._decision_task(decision), now
         urgent, early = self._verdict_targets(st, now, today, session, latest, soon)
         if urgent is not None and not starved:
@@ -949,6 +984,9 @@ class EventLane:
                         cut=True), now
         if decision is not None:   # the hourly re-decision, and the backfill's: after the record pass
             return self._decision_task(decision), now
+        catchup = self._slot_catchup_due(st, now, today, latest, soon)   # (release 1019i: a file's rows by themselves)
+        if catchup is not None:
+            return catchup, now
         nightly = self._nightly(st, now, today, session, soon)
         if nightly is not None:
             return nightly, now
@@ -964,6 +1002,9 @@ class EventLane:
         backfill = self._backfill_due(st, now, today, soon)
         if backfill is not None and not self._quiet("backfill", now, soon):
             return Task("backfill", lambda ctx, deadline: self._backfill(ctx, backfill, deadline), BACKFILL_BUDGET), now
+        prepass = self._prepass_due(st, now, session, latest, soon)      # (release 1019i: a file's reads ahead, last)
+        if prepass is not None:
+            return prepass, now
         return None, min(soon)
 
     def _decision_task(self, decision: tuple[int, dt.datetime, str, dt.date, bool]) -> Task:
@@ -1169,6 +1210,263 @@ class EventLane:
         if row is not None:
             st.finish_receipt(int(row["id"]), status, {"why": why})
 
+    # -- the decision scheduler (release 1019i; SLOT_TASK's comment, league/events/scheduler.py) ---------------------
+    def _slot_finished(self, st: S.Store, auction: str, day: dt.date) -> dict[str, dt.datetime | None]:
+        """file -> when its receipt of (`auction`, `day`) finished, for a follower's start (`scheduler.window`): the
+        main slot's the FIRST receipt finished `ok` or `pending` (the book's own reading of a made decision,
+        league/events/book.py `decided`; the lead's end); any other slot's its latest finished receipt, whatever its
+        status (made, failed, cut or missed: the slots after it wait for none of these); None while there is none."""
+        out: dict[str, dt.datetime | None] = {}
+        for s in X.slots(auction):
+            if s.prepass:
+                continue
+            if s.file == X.MAIN:
+                row = st.db.execute("SELECT finished_at FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status "
+                                    "IN (?, ?) ORDER BY id LIMIT 1", (s.receipt(day), *X.MADE)).fetchone()
+            else:
+                row = st.db.execute("SELECT finished_at FROM receipts WHERE job=? AND finished_at IS NOT NULL ORDER BY id "
+                                    "DESC LIMIT 1", (s.receipt(day),)).fetchone()
+            out[s.file] = None if row is None else S.parse_iso(row["finished_at"])
+        return out
+
+    def _slot_due(self, st: S.Store, now: dt.datetime, session: C.Session | None,
+                  latest: Mapping[str, tuple[str, dt.datetime]], soon: list[dt.datetime]) -> Task | None:
+        """THE FIRST LIVE SLOT DUE NOW of today's session, in table order (one task a turn): a file's slot whose start
+        has come (its clock, or the receipts it follows: `scheduler.window`) and whose window has not closed, with no
+        run of it on record. A run that failed or was cut is final for the auction (no retry); one still `running`
+        from an earlier process is closed `failed` after STALE_RETRY; a slot whose window closed with no run is
+        MISSED (`_slot_miss`). None on a day with no session, and while no part is registered."""
+        if session is None:
+            return None
+        for auction in X.AUCTIONS:
+            rows = X.live_files(auction)
+            if not rows:
+                continue
+            finished = self._slot_finished(st, auction, session.day)
+            for s in rows:
+                job = s.receipt(session.day)
+                status, last = latest.get(job, (None, None))
+                if status in X.MADE or status in X.FINAL_UNMADE:
+                    continue
+                anchor = s.start if s.start is not None else X.main_slot(auction).start
+                since = X.PARTS[s.file].since()
+                if anchor is not None and since is not None and anchor.at(session) <= since:
+                    continue        # (an auction before the part's registration: not its slot, never missed)
+                if status is not None and status != "running":
+                    continue        # (an unknown status written by another process: left alone)
+                if status == "running":
+                    if last is not None and last >= self._born and now < last + STALE_RETRY:
+                        soon.append(last + STALE_RETRY)
+                        continue
+                    self._close_running(st, job, "the run never finished (the process ended inside it)", status="failed")
+                    self._slots[f"{auction}-{s.file}"] = {"day": session.day.isoformat(), "status": "failed",
+                                                         "at": S.iso(now), "why": "a run that never finished"}
+                    continue
+                start, never = X.window(s, session, finished)
+                if never is not None and now > never:
+                    self._slot_miss(st, s, session.day, start, never, now)
+                    continue
+                if start is None:
+                    continue        # (waits for the receipts it follows: their own `soon` entries hold their times)
+                if now < start:
+                    soon.append(start)
+                    continue
+                name = f"{SLOT_TASK}{auction}-{s.file}"
+                return Task(name, lambda ctx, deadline, s=s, day=session.day: self._slot_run(ctx, s, day, deadline),
+                            float(s.bound), cut=True)
+        return None
+
+    def _slot_miss(self, st: S.Store, s: X.Slot, day: dt.date, start: dt.datetime | None, never: dt.datetime,
+                   now: dt.datetime) -> None:
+        """A slot whose window closed with no live run: a `missed` receipt of its own kind (the book plans no buy of
+        the file at that auction; the catch-up decides it later by itself) and a warning, the alarm."""
+        why = (f"its slot closed at {S.iso(never)} before the receipts it follows ({', '.join(s.after)}) finished"
+               if start is None else
+               f"its slot [{S.iso(start)}, {S.iso(never)}] closed with no run of it (the lane's turn did not reach it)")
+        rid = st.start_receipt(s.receipt(day), now=now)
+        st.finish_receipt(rid, X.MISSED, {"why": why, "slot": self._slot_meta(s, now, None)}, now=now)
+        self._slots[f"{s.auction}-{s.file}"] = {"day": day.isoformat(), "status": X.MISSED, "at": S.iso(now), "why": why}
+        self.warn(f"decision slot {s.file} {s.auction}",
+                  f"{day.isoformat()}: {why}; its rows are decided later by themselves "
+                  f"({s.catchup_job or 'no catch-up'}) and never traded at that auction (league/events/scheduler.py)")
+
+    @staticmethod
+    def _slot_meta(s: X.Slot, started: dt.datetime, deadline: float | None, mono: float | None = None) -> dict[str, Any]:
+        out = {"file": s.file, "auction": s.auction, "bound": float(s.bound), "started_at": S.iso(started),
+               "table": X.digest()[:8]}
+        if deadline is not None and mono is not None:
+            out["deadline_in"] = round(max(0.0, float(deadline) - float(mono)), 3)
+        return out
+
+    def _slot_run(self, ctx: LaneContext, s: X.Slot, day: dt.date, deadline: float | None) -> dict[str, Any]:
+        """ONE LIVE RUN OF A FILE'S SLOT: its receipt started, its part run under the task's bound (the slot's own,
+        from its own start: `Task.budget`; a slot before the main decision also ends DECISION_MARGIN before it,
+        `_deadline`), the receipt finished with the part's summary (`ok` / `pending` make the slot; the part's writes
+        are its own transaction). A read past the bound (`LaneDeadline`) or any failure finishes the receipt `cut` /
+        `failed`, final for the auction, with a warning: the catch-up decides the file's rows later by themselves."""
+        part = X.PARTS[s.file]
+        st = ctx.store
+        began = ctx.now()
+        rid = st.start_receipt(s.receipt(day), now=began)
+        meta = self._slot_meta(s, began, deadline, self._mono())
+        key = f"{s.auction}-{s.file}"
+        try:
+            out = dict(part.run(ctx, day, s.auction, s, rid) or {})
+            status = str(out.pop("_status", "ok"))
+        except (LaneDeadline, R.Deadline) as exc:
+            why = f"ran past its own bound ({s.bound:.0f} s from its start): {str(exc)[:160]}"
+            st.finish_receipt(rid, "cut", {"why": why, "slot": meta}, now=ctx.now())
+            self._slots[key] = {"day": day.isoformat(), "status": "cut", "at": S.iso(ctx.now()), "why": why}
+            self.warn(f"decision slot {s.file} {s.auction}",
+                      f"{day.isoformat()}: {why}; decided later by itself ({s.catchup_job or 'no catch-up'}), never "
+                      "traded at that auction")
+            return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": "cut"}
+        except Exception as exc:  # noqa: BLE001 - the part's failure is its own: final for the auction
+            why = f"{type(exc).__name__}: {str(exc)[:200]}"
+            st.finish_receipt(rid, "failed", {"why": why, "slot": meta}, now=ctx.now())
+            self._slots[key] = {"day": day.isoformat(), "status": "failed", "at": S.iso(ctx.now()), "why": why}
+            self.warn(f"decision slot {s.file} {s.auction}",
+                      f"{day.isoformat()}: its part failed ({why}); decided later by itself "
+                      f"({s.catchup_job or 'no catch-up'}), never traded at that auction")
+            return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": "failed"}
+        if status not in X.MADE:
+            status = "failed" if status not in ("cut",) else status
+        st.finish_receipt(rid, status, {**out, "slot": meta}, now=ctx.now())
+        self._slots[key] = {"day": day.isoformat(), "status": status, "at": S.iso(ctx.now()),
+                            "seconds": round((ctx.now() - began).total_seconds(), 3)}
+        return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": status}
+
+    def _slot_catchup_due(self, st: S.Store, now: dt.datetime, today: dt.date,
+                          latest: Mapping[str, tuple[str, dt.datetime]], soon: list[dt.datetime]) -> Task | None:
+        """THE OLDEST CATCH-UP OWED (one task a turn): for each registered file with a catch-up, every session from
+        its part's `since` (and the look-back) to today whose decision time is after `since`, whose live slot is not
+        made and whose window is closed, with no catch-up receipt `ok`; a failed one waits STALE_RETRY, a running one of
+        this process its STALE_RETRY, and a file whose catch-up failed lately waits FAIL_BACKOFF (`_quiet`)."""
+        first_day = (now - LOOKBACK).astimezone(C.NY).date()
+        best: tuple[dt.datetime, X.Slot, dt.date] | None = None
+        for auction in X.AUCTIONS:
+            for s in X.live_files(auction):
+                part = X.PARTS[s.file]
+                if part.catchup is None or s.catchup is None:
+                    continue
+                try:
+                    since = part.since()
+                except Exception:  # noqa: BLE001
+                    since = None
+                if since is None:
+                    continue
+                name = f"{CATCHUP_TASK}{auction}-{s.file}"
+                if self._quiet(name, now, soon):
+                    continue
+                start_day = max(since.astimezone(C.NY).date(), first_day)
+                anchor = s.start if s.start is not None else X.main_slot(auction).start
+                for x in C.sessions(st, start_day, today):
+                    at = anchor.at(x) if anchor is not None else x.open_decide
+                    if at <= since:
+                        continue
+                    status = latest.get(s.receipt(x.day), (None, None))[0]
+                    if status in X.MADE:
+                        continue
+                    never = s.never_past.at(x) if s.never_past is not None else at
+                    if now <= never:
+                        soon.append(never)
+                        continue        # (its live slot may still be run)
+                    cstatus, clast = latest.get(s.catchup_receipt(x.day), (None, None))
+                    if cstatus == "ok":
+                        continue
+                    if cstatus in ("failed", "running", "cut") and clast is not None and now < clast + STALE_RETRY \
+                            and (cstatus != "running" or clast >= self._born):
+                        soon.append(clast + STALE_RETRY)
+                        continue
+                    if best is None or at < best[0]:
+                        best = (at, s, x.day)
+                    break           # (oldest first within a file; the oldest across files wins)
+        if best is None:
+            return None
+        _, s, day = best
+        return Task(f"{CATCHUP_TASK}{s.auction}-{s.file}",
+                    lambda ctx, deadline, s=s, day=day: self._slot_catchup(ctx, s, day), CATCHUP_BUDGET, cut=True)
+
+    def _slot_catchup(self, ctx: LaneContext, s: X.Slot, day: dt.date) -> dict[str, Any]:
+        """A FILE'S ROWS OF ONE AUCTION DECIDED BY THEMSELVES (the catch-up): its own receipt (`Slot.catchup`), the
+        part's `catchup` under the task's bound; shadow only (the book never reads a catch-up receipt). A failure or
+        a cut finishes the receipt so and the file waits FAIL_BACKOFF before its next catch-up."""
+        part = X.PARTS[s.file]
+        st = ctx.store
+        job = s.catchup_receipt(day)
+        assert job is not None and part.catchup is not None
+        name = f"{CATCHUP_TASK}{s.auction}-{s.file}"
+        rid = st.start_receipt(job, now=ctx.now())
+        try:
+            out = dict(part.catchup(ctx, day, s.auction, s, rid) or {})
+            status = str(out.pop("_status", "ok"))
+        except (LaneDeadline, R.Deadline) as exc:
+            st.finish_receipt(rid, "cut", {"why": str(exc)[:200]}, now=ctx.now())
+            return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": "cut"}
+        except Exception as exc:  # noqa: BLE001 - its failure is its own; tried again after FAIL_BACKOFF
+            st.finish_receipt(rid, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, now=ctx.now())
+            self._failed[name] = self.now()
+            self.warn(name, exc)
+            return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": "failed"}
+        st.finish_receipt(rid, status, out, now=ctx.now())
+        return {"day": day.isoformat(), "file": s.file, "auction": s.auction, "_status": status}
+
+    def _prepass_due(self, st: S.Store, now: dt.datetime, session: C.Session | None,
+                     latest: Mapping[str, tuple[str, dt.datetime]], soon: list[dt.datetime]) -> Task | None:
+        """A FILE'S PRE-PASS due now (the plan's last task): inside its window [start, never_past] of today's session
+        with no receipt of it `ok`; one cut at its bound goes on at once from what it stored, one that failed waits
+        FAIL_BACKOFF (`_quiet`); never past `never_past`. `_deadline` ends it before any decision."""
+        if session is None:
+            return None
+        for auction in X.AUCTIONS:
+            for s in X.prepasses(auction):
+                name = f"{PREPASS_TASK}{auction}-{s.file}"
+                if self._quiet(name, now, soon):
+                    continue
+                job = s.receipt(session.day)
+                # (a pre-pass's receipt is its own kind, outside `latest`'s `decide-%`: read in the store)
+                row = st.db.execute("SELECT status, started_at FROM receipts WHERE job=? ORDER BY id DESC LIMIT 1",
+                                    (job,)).fetchone()
+                status = None if row is None else str(row["status"] or "")
+                last = None if row is None else S.parse_iso(row["started_at"])
+                if status in X.MADE:
+                    continue
+                if status == "running" and last is not None and last >= self._born and now < last + STALE_RETRY:
+                    continue
+                start, never = X.window(s, session)
+                if start is None:
+                    continue
+                if now < start:
+                    soon.append(start)
+                    continue
+                if never is not None and now > never:
+                    continue
+                return Task(name, lambda ctx, deadline, s=s, day=session.day: self._prepass_run(ctx, s, day, deadline),
+                            min(PREPASS_BUDGET, float(s.bound)), cut=True)
+        return None
+
+    def _prepass_run(self, ctx: LaneContext, s: X.Slot, day: dt.date, deadline: float | None) -> dict[str, Any]:
+        """One run of a file's pre-pass: its receipt (`Slot.kind` itself), the part's `prepass` under the task's bound;
+        its writes are the part's own (stored as read: a run cut at its bound stores what it read)."""
+        part = X.PARTS[s.file]
+        assert part.prepass is not None
+        st = ctx.store
+        name = f"{PREPASS_TASK}{s.auction}-{s.file}"
+        rid = st.start_receipt(s.receipt(day), now=ctx.now())
+        try:
+            out = dict(part.prepass(ctx, day, s.auction, s, rid) or {})
+            status = str(out.pop("_status", "ok"))
+        except (LaneDeadline, R.Deadline) as exc:
+            st.finish_receipt(rid, "cut", {"why": str(exc)[:200]}, now=ctx.now())
+            return {"day": day.isoformat(), "file": s.file, "_status": "cut"}
+        except Exception as exc:  # noqa: BLE001
+            st.finish_receipt(rid, "failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, now=ctx.now())
+            self._failed[name] = self.now()
+            self.warn(name, exc)
+            return {"day": day.isoformat(), "file": s.file, "_status": "failed"}
+        st.finish_receipt(rid, status, out, now=ctx.now())
+        return {"day": day.isoformat(), "file": s.file, "_status": status}
+
     # -- verdicts ---------------------------------------------------------------------------------------------------
     def _verdict_targets(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
                          latest: Mapping[str, tuple[str, dt.datetime]], soon: list[dt.datetime]
@@ -1198,6 +1496,8 @@ class EventLane:
             pending = sorted((dt.date.fromisoformat(job.split(":", 1)[1]), job[len("decide-"):].split(":", 1)[0])
                              for job, (status, _) in latest.items() if status == "pending")
             for day, kind in pending:
+                if kind not in ("open", "close", *BACKFILL_KINDS):
+                    continue    # (release 1019i: a file's own slot or catch-up receipt is never a verdict pass's)
                 if kind == FOUR_KIND and day not in self._four:
                     continue    # (its close was decided again whole since: that decision's own wait is the one read)
                 if kind == FIVE_KIND and day not in self._five:

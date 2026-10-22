@@ -9,6 +9,23 @@ enabled. This page describes the tree it is in; the running House release is rel
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019i, the decision scheduler (Oct 22, 2026; A120): `feat/scheduler`, base `rel/1019h`, not deployed
+
+One pre-registered slot per file at each auction ([SCHEDULER.md](SCHEDULER.md); the timing table in
+[events.md](events.md)): `league/events/scheduler.py` (new, behind the wall), house.py's slot, catch-up and pre-pass
+tasks, the book's per-file passes and send windows. NO MONEY OR CONSTITUTION ROW MOVES (money `8e63ce64`,
+constitution `c3026eba`, release 1019h's pair, on 3.14 and 3.11): the standing grant stands. The main decisions'
+timing is pinned to today's constants, so the deploy changes nothing the House does today until a file's part is
+registered (feat/evl-7, feat/evl-8, PREREG-EVL-9's code adopt it with a row and a `register` call each). Deploy with
+release 1019i's other parts in one owner deploy (the gateway first when its gateway/ moved, the House by
+ship_house.sh); verify on the box: the lane's `lane.json` shows `timing_table` `40a08163` and `slots` {} until a part
+is registered; at the next close `decide-close:<day>` starts at 15:47:00 ET as before and the book's
+`eq_event_decisions` has only `open` and `close` rows. Rollback: the whole release to the floor below (release 1019h,
+or 1019g `b374d862` while 1019h is not live); there is no row to flip, since nothing of it runs without a part.
+Alarm: a House warning `the event lane's decision slot <file> <auction> failed (...)` means a file's slot was missed,
+cut or failed at an auction: its rows are decided later by themselves and never traded at that auction; the daily
+report's missed counts say how often (owed: the report's per-file line, with the branches that register parts).
+
 ## Release 1019h (Oct 22, 2026): Done speed, release 1019g's minors, the births architect on Opus 5.5 (A97, A100, A113, A109): `rel/1019h`, not deployed
 
 Cut from `fix/1019h-minors` (`8e83ad1b`, PR 598, reviewed ship), which was cut from `feat/done-speed` (`88ecf37f`, PR
