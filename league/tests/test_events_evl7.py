@@ -1157,15 +1157,17 @@ class TheMoney(TB.EventTest):
                                                         "a news primary with no 8-K, a score 1 none and an 8-K before 09:00 "
                                                         "are bought")
 
-    def test_the_line_kept_for_the_earlier_rows_and_rooms_order(self):
-        self.assertEqual(EB.line_keep(O1), EB.LEARNER_LINE_KEEP // 2)
-        self.assertEqual(EB.line_keep("EVL-ERN-READ-O1"), 0)
+    def test_the_line_kept_for_the_earlier_rows_is_counted_on_both_lines(self):
+        """`_count_refusal`'s `keep` (a learner entry's, `_event_line_keep`): kept on the event kind's line beside the
+        buys held ahead; an exit never meets it (league/tests/test_events_evl7_fix.py holds what is kept across the
+        day's auctions)."""
         h = self.harness()
         cap = int(EB.settings().max_orders_day)
-        with mock.patch.object(L, "event_orders_today", lambda rows, day: cap - EB.LEARNER_LINE_KEEP - 1):
-            self.assertIsNone(h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, held=0))
-            why = h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, held=EB.line_keep(O1))
+        with mock.patch.object(L, "event_orders_today", lambda rows, day: cap - 40):
+            self.assertIsNone(h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, keep=38))
+            why = h.book._count_refusal(TB.DAY.isoformat(), exit_=False, event_line=cap, keep=39)
             self.assertIn("the event kind's day order count", why)
+            self.assertIsNone(h.book._count_refusal(TB.DAY.isoformat(), exit_=True, keep=10 ** 6), "an exit: never")
 
 
 # ----------------------------------------------------------------------------------------------- the House's plan
@@ -1298,7 +1300,9 @@ class TheJudgeIsNeverEdited(unittest.TestCase):
         attribute in league/events/learner.py or costs7.py (the screen is read through `judge_record` alone)."""
         import ast
 
-        for path in (Path(LR.__file__), Path(C7.__file__)):
+        from league.events import judge7 as J7
+
+        for path in (Path(LR.__file__), Path(C7.__file__), Path(J7.__file__)):
             tree = ast.parse(path.read_text())
             modules = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
                        for a in n.names}
@@ -1442,6 +1446,8 @@ class TheLedger(WorldCase):
                 self.w.universe(day, sym, cik)
                 self.w.outcome("EVL-CTRL-NEWS-ALL-O1", ev, sym, cik, day, a_g=0.01 * (k + 1), settled=et(day, 20, 30))
                 self.st.db.execute("UPDATE outcomes SET program='EVL-NEWS-READ-O1', version=3 WHERE event=?", (ev,))
+                # (its shadow intent of the same program, version and event: an attempt with none is no attempt)
+                self.st.db.execute("UPDATE intents SET program='EVL-NEWS-READ-O1', version=3 WHERE event=?", (ev,))
             self.st.db.execute("INSERT INTO real_attempts VALUES('EVL-NEWS-READ-O1', 3, ?, 'buy', 'opg', 'open', ?, 'x', ?, "
                                "?, ?, 'sent')", (ev, day.isoformat(), S.iso(et(day, 9, 16, k)), f"c{k}", resend))
             if filled:

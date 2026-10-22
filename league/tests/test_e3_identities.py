@@ -117,7 +117,7 @@ R3_PENDING = ("league/events/births.py",)
 #: The goal V2's Done judge (the Done reader, A84): league/events/done.py.
 DONE_PENDING = ("league/events/done.py",)
 #: PREREG-EVL-7's two (release 1019i): the learners' pinned rule and COST-7, behind the wall with the lane's judges.
-LEARNER_PENDING = ("league/events/learner.py", "league/events/costs7.py")
+LEARNER_PENDING = ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
 FGS_LITERAL = {
     "version": "fgs-prereg-1", "stat": "t_r over the first n counted days", "n": [20, 60, 120, 250], "then_every": 250,
