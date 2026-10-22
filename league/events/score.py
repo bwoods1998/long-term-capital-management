@@ -768,9 +768,12 @@ def latch(store: S.Store, night: dt.date, intent: Mapping[str, Any], now: dt.dat
 def unlatch(store: S.Store) -> dict[str, Any] | None:
     """THE CAPTAIN'S CLEARING OF THE PARITY LATCH (`python3 -m league.events --state DIR score-unlatch`, once the flag 0
     is explained): the latch removed, and what it held returned (None when none stood). The next pass is batched again
-    while `events.score_batch` is not false; nothing else is touched."""
+    while `events.score_batch` is not false, AND ITS NIGHT IS A PARITY NIGHT AGAIN (meta `PARITY_FIRST` cleared with the
+    latch: the path that differed is checked again before nights of it go unchecked); the flags on record stay, and
+    nothing else is touched. Nothing is cleared when no latch stood."""
     held = latched(store)
-    store.db.execute("DELETE FROM meta WHERE key=?", (PARITY_LATCH,))
+    if held is not None:
+        store.db.execute("DELETE FROM meta WHERE key IN (?, ?)", (PARITY_LATCH, PARITY_FIRST))
     return held
 
 

@@ -545,14 +545,15 @@ infrastructure**.
   per (symbol, day, label). `events.score_batch` (on; false is release 1019h's per-intent path). THE PARITY NIGHT:
   every night until the first on which a flag is written, and all of that night (meta `evl:score:batch:first_night`,
   kept with the first flag: a night whose prefetch failed or whose sample the cache served none of tested nothing
-  batched and is not the parity night), 5% of each prefetch's
-  intents (by sha256 of the key) are settled twice IN MEMORY BEFORE ANY OF THEM IS WRITTEN, by the cache and by the
+  batched and is not the parity night), 5% of each prefetch's intents (by sha256 of the key) are settled twice IN
+  MEMORY BEFORE ANY OF THEM IS WRITTEN, by the cache and by the
   per-intent path's own two requests (read, never stored), and only an equality flag is kept (`score_parity`: 1 or 0,
   never a value); an intent the cache does not serve gets no flag (it is the per-intent path itself).
   `events.score_parity` true every night, false never. A FLAG 0 FAILS CLOSED: the parity latch (meta
   `evl:score:batch:latched`, the intent's identifiers and a time) turns the batched score off for that pass and every
   later one, whatever `events.score_batch` says, until the captain clears it (`python3 -m league.events --state
-  /workspace/state/events score-unlatch`); `evl_score_parity` stands meanwhile. Each score receipt carries its requests
+  /workspace/state/events score-unlatch`; the next batched night is then a parity night again); `evl_score_parity`
+  stands meanwhile. Each score receipt carries its requests
   by kind (bars, trades), its seconds, the flags and the latch: the daily report's SETTLE-PACE LINE
   (league/events/report.py `settle_pace`; the mail's `settle`, "BATCHED SCORE OFF" while latched).
 - THE ATTEMPTS LEDGER (league/events/attempts.py; `real_attempts` beside `real_fills`): every event order the House's

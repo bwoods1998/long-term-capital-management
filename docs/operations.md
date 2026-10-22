@@ -28,12 +28,13 @@ commits (docs/events.md, **Release 1019i**; CHANGELOG.md):
    settles with no bar request of its own (about 2 requests for 200 symbols instead of 2 an intent) and writes to
    `bars` exactly the rows its own two fetches would have written, so `bars` ends each pass as under release 1019h
    (the review's first major: Done's fill gaps read those rows). Byte-identical outcome and `bars` rows (the golden
-   tape, both directions, and two nights with a split between them). THE FIRST BATCHED NIGHT is the parity night:
-   5% of each prefetch's intents are settled twice in memory, by the cache and by the per-intent path, before any of
-   them is written, and only an equality flag is kept (`score_parity`). A FLAG 0 FAILS CLOSED (the review's second
+   tape, both directions, and two nights with a split between them). THE PARITY NIGHT is the first night on which a
+   flag is written (a night whose prefetch failed or whose sample the cache served none of tests nothing and is not
+   it): 5% of each prefetch's intents are settled twice in memory, by the cache and by the per-intent path, before any
+   of them is written, and only an equality flag is kept (`score_parity`). A FLAG 0 FAILS CLOSED (the review's second
    major): the parity latch turns the batched score off for that pass and every later one, `evl_score_parity` mails
    it, and the captain clears it with `python3 -m league.events --state /workspace/state/events score-unlatch` once
-   the difference is explained.
+   the difference is explained (the next batched night is then a parity night again).
 2. H3, THE ATTEMPTS LEDGER (`real_attempts`, league/events/attempts.py; league/equity/live.py `_event_attempts`,
    league/events/book.py `attempt_rows`, `write_attempts`): every event order with the venue's own states, and every
    planned buy that ended unsent; read-only of the orders (the bodies sent are byte-identical with it on and off).

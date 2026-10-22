@@ -542,9 +542,12 @@ class TheEndDependentVendor(GoldenCase):
         self.assertNotIn("prefetch", out)
         self.assertEqual(out["settled"], 1)
         self.assertEqual(len(tape.bar_requests()), 2, "its own two fetches")
+        self.assertFalse(SC.parity_due(st, later.astimezone(NY).date()), "the latch's night was the parity night")
         held = SC.unlatch(st)
         self.assertEqual(held["event"].split("-")[0], "8k:aaa")
         self.assertIsNone(SC.latched(st))
+        self.assertTrue(SC.parity_due(st, later.astimezone(NY).date()),
+                        "cleared, the batched path is checked again on its next night")
         self.assertIsNone(SC.unlatch(st), "nothing to clear")
         self.intent(st, "AAA", "EVL-ERN-READ-O1", 2, entry=D2, exit_=D2, prev_close=50.0)
         again = SC.settle(st, tape, now=later + dt.timedelta(hours=1), batch=True, parity=False)
