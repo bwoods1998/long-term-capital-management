@@ -1076,7 +1076,9 @@ class TheMoney(TB.EventTest):
                 h = TB.Harness(Path(tmp))
                 try:
                     TB.earnings(h.lane, "a-1", TB.CIK, "ACME")                 # READ-O1 wants ACME
-                    h.lane.intent(TB.V2("EVL-ERN-READ-O1"), "8k:a-1", "ACME", TB.CIK, TB.DAY, TB.DAY)
+                    # (its seating version, whichever file registered it: version 2 here, version 3 with PREREG-EVL-6)
+                    read_o1 = next(p for p in EB.seatable() if p.id == "EVL-ERN-READ-O1")
+                    h.lane.intent(read_o1, "8k:a-1", "ACME", TB.CIK, TB.DAY, TB.DAY)
                     if with_learner:
                         self.live(h.lane, O1, TB.DAY, [(TB.CIK, "ACME", 16.0), (TB.CIK2, "BETA", 16.0),
                                                        (TB.CIK3, "GAMA", 16.0)])
