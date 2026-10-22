@@ -143,6 +143,14 @@ programs trades real money at learning size.
   the captain reads `decide-close`'s seconds in `lane.json` (read-only) before relying on these rows' real money
   (docs/operations.md, step 4). MERGING ONTO 1019f: `_size_event` and `_event_send` conflict with A85's (keep both;
   A85's `_event_sized` must not write in a `dry` sizing: docs/operations.md, step 5).
+- **Runs of the review round, on `c3a700a7`**: on 3.14 and on 3.11, the events, evl, equity, live, ci, constitution,
+  daily_report, site_lane, cost_day and event_capacity modules (96 modules, four processes each), 2,369 OK on each; the
+  full league suite on 3.14, every one of league/tests' 470 modules in four processes, 12,782 run (33 skipped), one
+  failure: test_swarm_architect_lenient's wall-clock bound (2.04 s against 1.0 s under the box's load of about 25; that
+  module alone, 31 OK; no league/swarm file changed); the gateway is unchanged (no gateway suite); `python -m league.ci
+  --base origin/main --branch feat/evl-5 --no-tests` passed; the identities, read with the tree's own functions on both
+  Pythons, are the base's (money `055e5313`, constitution `a8d4cbd9`, execution `b60410ad`, equity `78022ca6`, xs
+  `2f0083bc`, gate `397b22b7`).
 - **Runs, on `7f828831`** (the code, its tests and docs): the full league suite on 3.14, every one of league/tests' 470
   test modules in four processes of `python -m unittest <modules>` (the box's load average was about 100, other agents'
   runs, so the one `discover` process would have run past four hours), 12,770 OK (33 skipped: 2,991 + 3,202 + 3,324 +
