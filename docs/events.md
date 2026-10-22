@@ -1090,7 +1090,8 @@ REGISTERED_AT_7 to the release's first live one, E4) and `late` (a part that fai
 the learner by itself exactly as of tau under receipts `decide-open-lrn:<D>` / `decide-close-lrn:<D>`, shadow only, never
 traded, never judged; `reconstruct` (the candidate sets of the sessions from Oct 19 whose tau is at or before
 REGISTERED_AT_7, once). The House's learner task (league/events/house.py `_learner_due`, after every other task, never
-within 5 minutes of a decision) runs them oldest first, then the night's RECOMPUTE once the score is in
+within 5 minutes of a decision and NEVER INSIDE THE LEAD of today's live close decision, whatever is owed: release
+1019i's money re-review, a learner task there could use the held turn up before DECIDE_RETRY) runs them oldest first, then the night's RECOMPUTE once the score is in
 (`learner.recompute`: each live decision re-decided in memory, beta and the picks compared only where the stored inputs
 the decision read are unchanged since it, `learner.inputs_sha`, kept at the decision; a mismatch is an alarm, a change
 is said; nothing is rewritten).
@@ -1111,8 +1112,8 @@ its band's births in each pass), passing over every name the auction's own decis
 auction's own row too, so A85's reservation (`_event_recent`), the daily report and the alarms read a learner's picks
 where they read every program's. No learner that may take a name: nothing is held back. The skips: the gate's,
 EVL-LRN-O1's ERN guard (E8: no buy of an issuer with an item 2.02 8-K knowable in D's close window and stored by tau),
-EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable from 09:00 ET of D and stored by tau, whatever the primary
-event; barred on an `ok` score >= 2, an `ok` score >= 1 with guidance raised, or no answer by tau), one position per
+EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable from 09:00 ET of D and stored by tau, with no upper bound
+on its knowable time (release 1019i's money re-review), whatever the primary event; barred on an `ok` score >= 2, an `ok` score >= 1 with guidance raised, or no answer by tau), one position per
 issuer on its earlier intents and real lots, and THE LEARNER'S GATE (league/events/judge7.py `gate`, below). Sized at
 learning (2% of E, A85's reservation), sent in ROOM's order (`send_key`). THE DAY ORDER LINE: each learner entry keeps,
 on its day's event line, every order the earlier PREREG rows may still send that day after it

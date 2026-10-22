@@ -313,6 +313,10 @@ freeze (A117), each part held by tests that fail without it (league/tests/test_e
   place (after every PREREG row, before R3's births; see the review round below), their LIVE picks in rank order,
   EVL-LRN-O1's ERN guard (E8), EVL-LRN-ON's per-issuer 8-K guard (E10), one position per issuer (A72), the day line
   kept for the earlier rows.
+- **The money re-review's two majors (the captain's own round, A131):** no learner task is planned inside the lead of
+  today's live close decision (`_learner_due` reads `_lead`; release 1019h's lead tests now also run PINNED,
+  league/tests/test_events_evl7_fix.py `TheLeadAfterAFailedLiveRunPinned`), and the 8-K guard reads every 8-K of the
+  issuer knowable from 09:00 ET of D and stored by tau with no upper bound on its knowable time (section 1.9's words).
 - **COST-7** (league/events/costs7.py): E9's sigma, the penny ceiling at the fixed 0.035, the impact, the measured
   terms that only rise and the nightly `cost_basis` row; the judged record of live decisions on a7 and r7 with the POOL
   control; the one call into PREREG-EVL-6's frozen screen.

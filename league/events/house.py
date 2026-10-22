@@ -1707,6 +1707,12 @@ class EventLane:
         score is in. None while no learner is pinned (REGISTERED_AT_7 None: nothing of it ever runs)."""
         if not P.learners() or self._quiet("learner", now, soon):
             return None
+        if self._lead(st, now) is not None:
+            # (release 1019i's money re-review: inside today's live close decision's lead (`_lead`: a failed, cut or
+            # running live run keeps it) nothing of the learners' is planned, whatever is owed; a learner task there
+            # could do nothing and still use the held turn up before DECIDE_RETRY, so the retry left the turn, release
+            # 1019g's failure that 1019h fixed. The owed work waits for the lead's end.)
+            return None
         checked = getattr(self, "_learner_next", None)
         if checked is not None and now < checked:
             return None         # (the owed list is read at most once a minute when nothing was owed)

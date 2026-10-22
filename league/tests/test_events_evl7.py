@@ -1258,13 +1258,22 @@ class TheMoney(TB.EventTest):
         lane_st = h.lane.st
         s = C.session(lane_st, TB.DAY)
         cases = {TB.CIK: ("ACME", None), "0000000004": ("DOCS", (2, "none")), "0000000005": ("RAIS", (1, "raised")),
-                 "0000000006": ("UNAN", "unanswered"), "0000000007": ("LOWS", (1, "none")), "0000000008": ("EARL", "early")}
+                 "0000000006": ("UNAN", "unanswered"), "0000000007": ("LOWS", (1, "none")), "0000000008": ("EARL", "early"),
+                 "0000000009": ("LATE", "late")}
         picks = []
         for cik, (sym, how) in cases.items():
             picks.append((cik, sym, 16.0))
             if how is None:
                 continue
             knowable = s.at(dt.time(8, 30)) if how == "early" else s.at(dt.time(11, 0))
+            if how == "late":
+                # (the money re-review of release 1019i: section 1.9 reads EVERY 8-K knowable at or after 09:00 ET of D
+                # and stored before tau, with no upper bound on its knowable time: one listed before tau whose knowable
+                # time falls after it is read like any other, and unanswered by tau it bars the issuer)
+                knowable = s.close_decide + dt.timedelta(minutes=5)
+                h.lane.filing(f"f-{sym}", cik, accepted=S.iso(knowable - dt.timedelta(minutes=10)), items=("8.01",),
+                              received=S.iso(s.at(dt.time(15, 30))))
+                continue
             h.lane.filing(f"f-{sym}", cik, accepted=S.iso(knowable - dt.timedelta(minutes=10)), items=("8.01",))
             if isinstance(how, tuple):
                 h.lane.verdict(f"f-{sym}", how[0], answered=S.iso(knowable + dt.timedelta(minutes=5)), guidance=how[1])
@@ -1274,9 +1283,9 @@ class TheMoney(TB.EventTest):
         lane = EB.Lane(lane_st.root / S.DB_NAME)
         self.addCleanup(lane.close)
         got = [p.symbol for p in EB.picks(lane, learner(ON), TB.DAY, decided_at=s.close_decide)]
-        self.assertEqual(got, ["ACME", "LOWS", "EARL"], "barred: an ok score 2, an ok score 1 raised, no answer by tau; "
-                                                        "a news primary with no 8-K, a score 1 none and an 8-K before 09:00 "
-                                                        "are bought")
+        self.assertEqual(got, ["ACME", "LOWS", "EARL"], "barred: an ok score 2, an ok score 1 raised, no answer by tau, "
+                                                        "an 8-K stored before tau but knowable after it (unanswered); a news "
+                                                        "primary with no 8-K, a score 1 none and an 8-K before 09:00 are bought")
 
     def test_the_line_kept_for_the_earlier_rows_is_counted_on_both_lines(self):
         """`_count_refusal`'s `keep` (a learner entry's, `_event_line_keep`): kept on the event kind's line beside the

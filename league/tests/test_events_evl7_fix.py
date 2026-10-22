@@ -36,6 +36,8 @@ from league.events import store as S
 from league.ops import evl_learner as EL
 from league.tests import test_events_book as TB
 from league.tests import test_events_evl7 as T7
+from league.tests import test_events_house as TH
+from league.tests import test_events_1019h_minors as M19
 
 O1, ON = T7.O1, T7.ON
 et, pin, learner = T7.et, T7.pin, T7.learner
@@ -792,3 +794,33 @@ class TheScreenStep(TH.LaneCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ------------------------------------------------------------------------------------- the lead, pinned (1019i's money re-review)
+class TheLeadAfterAFailedLiveRunPinned(M19.TheLeadAfterAFailedLiveRun):
+    """Release 1019h's lead (league/tests/test_events_1019h_minors.py `TheLeadAfterAFailedLiveRun`) on the registries AS
+    PINNED (that module runs unpinned): after a failed live close run no other decision starts before the retry, every
+    other task ends before it, and the retry lands in the same turn. The money re-review of release 1019i: with the
+    learners pinned, `_learner_due` could plan the learner task inside the lead; each such task did nothing and the turn
+    used HOLD_TURNS up before DECIDE_RETRY's 60 s were over, so the retry left the turn (release 1019g's failure). Now
+    no learner task is planned while `_lead` holds, whatever is owed."""
+
+    def test_inside_the_lead_no_learner_task_is_planned_whatever_is_owed(self):
+        with self.store() as st:
+            at = TH.et("2026-10-20", "15:47")
+            rid = st.start_receipt("decide-close:2026-10-20", now=at)
+            st.finish_receipt(rid, "failed", {"why": "OSError: invented"}, now=at + dt.timedelta(seconds=2))
+            now = at + dt.timedelta(seconds=10)
+            self.at(now)
+            session = C.session(st, M19.TUE)
+            owed = [{"job": "decide-close-lrn:2026-10-19", "kind": "catchup"}]
+            with mock.patch.object(LR, "due", lambda st_, now_: owed):
+                self.lane._learner_next = None
+                self.assertIsNotNone(self.lane._lead(st, now), "a failed run keeps the lead")
+                self.assertIsNone(self.lane._learner_due(st, now, M19.TUE, session, []), "inside the lead: never planned")
+                rid = st.start_receipt("decide-close:2026-10-20", now=now)
+                st.finish_receipt(rid, "ok", {}, now=now)
+                self.lane._learner_next = None
+                self.assertIsNone(self.lane._lead(st, now), "an ok run ends the lead")
+                self.assertIsNotNone(self.lane._learner_due(st, now, M19.TUE, session, []),
+                                     "the lead over, the owed work is planned")

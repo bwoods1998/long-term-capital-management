@@ -1392,9 +1392,11 @@ def issuer_8k_guard(lane: Lane, cik: str, session: C.Session | None, decided_at:
     if session is None:
         return True
     try:
+        # (section 1.9's words: knowable at or after 09:00 ET of D and stored before the decision; NO upper bound on
+        # the knowable time (release 1019i's money re-review): a filing listed and stored before tau whose knowable
+        # time falls after it is read like any other)
         rows = lane.db.execute("SELECT * FROM filings WHERE form='8-K' AND status='fetched' AND cik=? AND knowable_at>=? "
-                               "AND knowable_at<=? ORDER BY knowable_at, accession",
-                               (str(cik), S.iso(session.open_cutoff), S.iso(decided_at))).fetchall()
+                               "ORDER BY knowable_at, accession", (str(cik), S.iso(session.open_cutoff))).fetchall()
         for r in rows:
             row = dict(r)
             if not _stored_before(row, decided_at, lane):
