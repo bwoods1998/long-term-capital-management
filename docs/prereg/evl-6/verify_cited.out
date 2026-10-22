@@ -1,0 +1,113 @@
+(c) check2/run1.jsonl ('A|N3|both|AR10', 8, 0.15, 0.1): draft rule lag 0 0.1215 (se 0.0052, R 4000)
+(c) check2/run1.jsonl ('A|N3|both|AR20', 8, 0.15, 0.1): draft rule lag 0 0.1298 (se 0.0053, R 4000)
+(c) check2/run1.jsonl ('A|N3|both|AR20', 13, 0.15, 0.1): draft rule lag 0 0.1182 (se 0.0051, R 4000)
+(c) check2/run1.jsonl ('A|N3|both|AR20', 30, 0.15, 0.1): draft rule lag 0 0.1215 (se 0.0052, R 4000)
+(c) check2/run1.jsonl ('A|N3|both|AR20', 85, 0.15, 0.1): draft rule lag 0 0.1300 (se 0.0053, R 4000)
+(c) check2/run1.jsonl ('A|N3|dayskew|AR20', 30, 0.15, 0.1): draft rule lag 0 0.1185 (se 0.0051, R 4000) | (b) PREREG-EVL-3 alone 0.1435 (se 0.0055)
+(c) check2/run1.jsonl ('A|N3|dayskew|AR20', 85, 0.15, 0.1): draft rule lag 0 0.1300 (se 0.0053, R 4000)
+(c) check2/run1.jsonl ('B|N3|both|AR20|kappa0.01', 3, 0.15, 0.1): draft rule lag 0 0.1460 (se 0.0079, R 2000)
+(c) check2/run1.jsonl ('B|N3|both|AR20|kappa0.01', 8, 0.15, 0.1): draft rule lag 0 0.2300 (se 0.0094, R 2000)
+(c) check2/run1.jsonl ('B|N3|both|AR20|kappa0.01', 13, 0.15, 0.1): draft rule lag 0 0.2240 (se 0.0093, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.005|rho.05', 3, 0.05, 0.1): draft rule lag 0 0.0645 (se 0.0055, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.005|rho.05', 8, 0.05, 0.1): draft rule lag 0 0.0830 (se 0.0062, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.005|rho.05', 13, 0.05, 0.1): draft rule lag 0 0.0925 (se 0.0065, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.01', 3, 0.15, 0.1): draft rule lag 0 0.0915 (se 0.0064, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.01', 8, 0.15, 0.1): draft rule lag 0 0.1465 (se 0.0079, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.01', 13, 0.15, 0.1): draft rule lag 0 0.1505 (se 0.0080, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.015', 3, 0.15, 0.1): draft rule lag 0 0.1045 (se 0.0068, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.015', 8, 0.15, 0.1): draft rule lag 0 0.1845 (se 0.0087, R 2000)
+(c) check2/run1.jsonl ('B|N3|sym|nodrift|kappa0.015', 13, 0.15, 0.1): draft rule lag 0 0.2290 (se 0.0094, R 2000)
+(c) check2/run1.jsonl ('C|N3|both|AR20|phi.25', 8, 0.15, 0.25): draft rule lag 0 0.1575 (se 0.0081, R 2000)
+(c) check2/run1.jsonl ('C|N3|both|AR20|phi.25', 30, 0.15, 0.25): draft rule lag 0 0.1700 (se 0.0084, R 2000)
+(c) check2/run1.jsonl ('C|N3|both|AR20|phi.25', 85, 0.15, 0.25): draft rule lag 0 0.1805 (se 0.0086, R 2000)
+(c) check2/run1.jsonl ('D|N3|both|AR20r.99', 30, 0.15, 0.1): draft rule lag 0 0.1335 (se 0.0076, R 2000)
+(c) check2/run1.jsonl ('D|N3|both|AR20r.99', 85, 0.15, 0.1): draft rule lag 0 0.1440 (se 0.0079, R 2000)
+(c) check2/run1.jsonl ('E|N3|both|AR20|lam.005', 30, 0.15, 0.1): draft rule lag 0 0.1420 (se 0.0078, R 2000)
+(c) check2/run1.jsonl ('E|N3|both|AR20|lam.005', 85, 0.15, 0.1): draft rule lag 0 0.1550 (se 0.0081, R 2000)
+(c) check2/run1.jsonl ('E|N3|sym|nodrift|lam.005|rho.05', 85, 0.05, 0.1): draft rule lag 0 0.0635 (se 0.0055, R 2000)
+(c) check2/run1.jsonl ('F|N3|crash10+evskew|AR20', 8, 0.15, 0.1): draft rule lag 0 0.1545 (se 0.0081, R 2000)
+(c) check2/run1.jsonl ('F|N3|crash10+evskew|AR20', 30, 0.15, 0.1): draft rule lag 0 0.1595 (se 0.0082, R 2000)
+(c) check2/run1.jsonl ('F|N3|crash10+evskew|AR20', 85, 0.15, 0.1): draft rule lag 0 0.2085 (se 0.0091, R 2000)
+(c) check2/run1.jsonl ('F|N3|crash10|nodrift', 85, 0.15, 0.1): draft rule lag 0 0.1875 (se 0.0087, R 2000)
+(c) check2/run3.jsonl ('H|N3|both|AR20|phi.25', 30, 0.15, 0.25): draft rule lag 0 0.1665 (se 0.0083, R 2000) | (b) PREREG-EVL-3 alone 0.1990 (se 0.0089)
+(c) check2/run3.jsonl ('H|N3|both|AR20|phi.25|rho.05', 85, 0.05, 0.25): draft rule lag 0 0.1420 (se 0.0078, R 2000)
+(c) check2/run3.jsonl ('H|N3|both|AR20|phi0.15', 85, 0.15, 0.15): draft rule lag 0 0.1325 (se 0.0076, R 2000)
+(c) check2/run3.jsonl ('H|N3|both|AR20|phi0.2', 85, 0.15, 0.2): draft rule lag 0 0.1595 (se 0.0082, R 2000)
+(c) check2/run3.jsonl ('H|N3|dayskew|AR20r.99', 85, 0.15, 0.1): draft rule lag 0 0.1315 (se 0.0076, R 2000)
+(c) check2/run3.jsonl ('H|N3|dayskew|nodrift|phi.25', 85, 0.15, 0.25): draft rule lag 0 0.1655 (se 0.0083, R 2000)
+(c) check2/run3.jsonl ('H|N3|sym|AR20r.99', 85, 0.15, 0.1): draft rule lag 0 0.0780 (se 0.0060, R 2000)
+(c) check2/run3.jsonl ('H|N3|sym|AR20|phi.25', 85, 0.15, 0.25): draft rule lag 0 0.1190 (se 0.0072, R 2000)
+(c) check2/run3.jsonl ('H|N3|sym|nodrift|phi.25', 85, 0.15, 0.25): draft rule lag 0 0.0995 (se 0.0067, R 2000)
+(c) check2/run3.jsonl ('I|N3|both|AR20', 85, 0.15, 0.1): draft rule lag 0 0.1355 (se 0.0077, R 2000)
+(c) check2/run3.jsonl ('I|N3|both|AR20|lam.005', 85, 0.15, 0.1): draft rule lag 0 0.1595 (se 0.0082, R 2000)
+(c) check2/run3.jsonl ('I|N3|both|AR20|phi.25', 8, 0.15, 0.25): draft rule lag 0 0.1475 (se 0.0079, R 2000)
+(c) check2/run3.jsonl ('I|N3|both|AR20|phi.25', 85, 0.15, 0.25): draft rule lag 0 0.1685 (se 0.0084, R 2000)
+(c) check2/run3.jsonl ('I|N3|crash10|nodrift', 85, 0.15, 0.1): draft rule lag 0 0.1860 (se 0.0087, R 2000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi.10', 85, 0.15, 0.1) R0: 0.1257 (se 0.0061, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi.10', 85, 0.15, 0.1) R4_strict: 0.1010 (se 0.0055, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi.10', 85, 0.15, 0.1) R9_tri: 0.1070 (se 0.0056, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 30, 0.15, 0.2) R0: 0.1593 (se 0.0067, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 30, 0.15, 0.2) R4_strict: 0.1260 (se 0.0061, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 30, 0.15, 0.2) R9_tri: 0.1313 (se 0.0062, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 85, 0.15, 0.2) R0: 0.1660 (se 0.0068, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 85, 0.15, 0.2) R4_strict: 0.1397 (se 0.0063, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.2', 85, 0.15, 0.2) R9_tri: 0.1447 (se 0.0064, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 30, 0.15, 0.25) R0: 0.1597 (se 0.0067, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 30, 0.15, 0.25) R4_strict: 0.1323 (se 0.0062, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 30, 0.15, 0.25) R9_tri: 0.1373 (se 0.0063, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 85, 0.15, 0.25) R0: 0.1843 (se 0.0071, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 85, 0.15, 0.25) R4_strict: 0.1577 (se 0.0067, R 3000)
+(c) check2/run7.jsonl ('M|N3|both|AR20|phi0.25', 85, 0.15, 0.25) R9_tri: 0.1597 (se 0.0067, R 3000)
+(c) check1/c1all.index.jsonl ('A|N3|both|AR20', 8): draft rule lag 0 0.1150 (se 0.0071, R 2000)
+(c) check1/c1all.index.jsonl ('A|N3|both|AR20', 13): draft rule lag 0 0.1305 (se 0.0075, R 2000)
+(c) check1/c1all.index.jsonl ('A|N3|both|AR20', 30): draft rule lag 0 0.1235 (se 0.0074, R 2000)
+(c) check1/c1all.index.jsonl ('A|N3|both|AR20', 85): draft rule lag 0 0.1405 (se 0.0078, R 2000)
+(c) check1/c1all.index.jsonl ('C|N3|both|AR20|phi.20', 85): draft rule lag 0 0.1560 (se 0.0081, R 2000)
+(c) check1/c1E.index.jsonl ('A2|N3|both|AR20', 85): draft rule lag 0 0.1400 (se 0.0078, R 2000)
+(a) judge's arrays: PREREG-EVL-3 alone, worst plausible 0.1525 (se 0.0080) [N3|dayskew|AR20        n 30 rho0.15 T120]
+(a) judge's arrays: the union with the draft rule (lag 3), worst plausible 0.1990 [N3|dayskew|AR20        n 30 rho0.15 T120]
+(d) 60 bp rho 0.00 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.454/0.525/0.726/0.835/0.953/0.953 E60 14.7 | draft E60 15.3
+(d) 60 bp rho 0.00 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.229/0.294/0.457/0.580/0.819/0.925 E60 23.5 | draft E60 27.5
+(d) 60 bp rho 0.00 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.131/0.166/0.263/0.358/0.563/0.701 E60 35.5 | draft E60 37.2
+(d) 60 bp rho 0.00 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.065/0.127/0.193/0.246/0.420/0.556 E60 42.0 | draft E60 41.9
+(d) 60 bp rho 0.00 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.010/0.077/0.213/0.297 E60 51.5 | draft E60 48.0
+(d) 60 bp rho 0.00 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.176/0.222/0.330/0.419/0.594/0.686 E60 33.45 | the judge's draft E60 33.96
+(d) 60 bp rho 0.05 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.225/0.274/0.418/0.518/0.693/0.693 E60 29.0 | draft E60 31.5
+(d) 60 bp rho 0.05 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.154/0.188/0.306/0.392/0.641/0.787 E60 31.9 | draft E60 37.2
+(d) 60 bp rho 0.05 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.096/0.127/0.222/0.276/0.485/0.612 E60 39.2 | draft E60 42.0
+(d) 60 bp rho 0.05 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.050/0.087/0.148/0.208/0.367/0.494 E60 44.6 | draft E60 45.7
+(d) 60 bp rho 0.05 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.008/0.055/0.186/0.271 E60 52.6 | draft E60 50.5
+(d) 60 bp rho 0.05 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.105/0.135/0.220/0.290/0.474/0.571 E60 39.46 | the judge's draft E60 41.36
+(d) 60 bp rho 0.15 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.150/0.189/0.269/0.328/0.465/0.465 E60 39.4 | draft E60 40.7
+(d) 60 bp rho 0.15 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.118/0.138/0.219/0.265/0.440/0.549 E60 40.7 | draft E60 44.5
+(d) 60 bp rho 0.15 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.087/0.112/0.159/0.204/0.352/0.471 E60 44.6 | draft E60 46.4
+(d) 60 bp rho 0.15 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.036/0.074/0.136/0.181/0.315/0.396 E60 46.8 | draft E60 48.2
+(d) 60 bp rho 0.15 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.012/0.055/0.175/0.222 E60 53.3 | draft E60 51.0
+(d) 60 bp rho 0.15 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.078/0.103/0.159/0.207/0.349/0.421 E60 44.97 | the judge's draft E60 46.17
+(d) 100 bp rho 0.00 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.803/0.850/0.949/0.975/1.000/1.000 E60 9.2 | draft E60 7.8
+(d) 100 bp rho 0.00 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.559/0.632/0.796/0.877/0.982/0.997 E60 12.4 | draft E60 11.9
+(d) 100 bp rho 0.00 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.317/0.413/0.575/0.692/0.897/0.957 E60 19.2 | draft E60 19.1
+(d) 100 bp rho 0.00 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.155/0.277/0.437/0.534/0.763/0.892 E60 26.2 | draft E60 26.2
+(d) 100 bp rho 0.00 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.019/0.153/0.468/0.611 E60 41.8 | draft E60 36.5
+(d) 100 bp rho 0.00 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.367/0.434/0.555/0.646/0.822/0.891 E60 21.75 | the judge's draft E60 20.30
+(d) 100 bp rho 0.05 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.494/0.559/0.721/0.824/0.933/0.933 E60 15.3 | draft E60 14.2
+(d) 100 bp rho 0.05 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.374/0.445/0.618/0.707/0.908/0.967 E60 18.1 | draft E60 18.3
+(d) 100 bp rho 0.05 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.251/0.323/0.475/0.577/0.835/0.914 E60 23.0 | draft E60 24.4
+(d) 100 bp rho 0.05 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.110/0.194/0.359/0.454/0.690/0.837 E60 29.8 | draft E60 30.8
+(d) 100 bp rho 0.05 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.023/0.122/0.410/0.543 E60 44.1 | draft E60 41.1
+(d) 100 bp rho 0.05 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.246/0.304/0.439/0.537/0.755/0.839 E60 26.05 | the judge's draft E60 25.76
+(d) 100 bp rho 0.15 n 85: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.268/0.311/0.473/0.579/0.747/0.747 E60 26.1 | draft E60 25.7
+(d) 100 bp rho 0.15 n 30: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.219/0.260/0.404/0.488/0.736/0.872 E60 27.2 | draft E60 29.7
+(d) 100 bp rho 0.15 n 13: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.176/0.228/0.344/0.422/0.652/0.785 E60 31.4 | draft E60 34.1
+(d) 100 bp rho 0.15 n 8: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.081/0.154/0.272/0.355/0.598/0.732 E60 34.5 | draft E60 35.2
+(d) 100 bp rho 0.15 n 3: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.000/0.000/0.009/0.094/0.364/0.495 E60 46.0 | draft E60 43.7
+(d) 100 bp rho 0.15 MEAN OVER THE FIVE RATES: PREREG-EVL-3 alone by 8/10/15/20/40/60 0.149/0.191/0.300/0.388/0.619/0.726 E60 33.02 | the judge's draft E60 33.68
+(e) WSP-IUT absolute part, cS:0.09, no margin: worst plausible 0.1830 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.359
+(e) WSP-IUT absolute part, cS:0.1, no margin: worst plausible 0.1965 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.390
+(e) WSP-IUT absolute part, cS:0.125, no margin: worst plausible 0.2115 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.426
+(e) WSP-IUT absolute part, cS:0.03, no margin: worst plausible 0.1315 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.219
+(e) WSP-IUT absolute part, cS:0.04, no margin: worst plausible 0.1465 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.258
+(e) WSP-IUT absolute part, cS:0.05, no margin: worst plausible 0.1545 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.281
+(e) WSP-IUT absolute part, cS:0.06, no margin: worst plausible 0.1670 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.309
+(e) WSP-IUT absolute part, cS:0.07, no margin: worst plausible 0.1740 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.329
+(e) WSP-IUT absolute part, cS:0.08, no margin: worst plausible 0.1790 [N3|both|AR20           n 85 rho0.00 T120], 60 bp by session 20 0.345

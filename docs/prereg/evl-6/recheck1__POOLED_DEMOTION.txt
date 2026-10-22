@@ -1,0 +1,9 @@
+crash days, 20 bp, rho .15, phi .20, n85     pooled 0.1475 +- 0.0035 over 10000 | fixer 0.1420 (2000); rep 0.1520 (4000); alt 0.1457 (4000)
+worst (crash+skew+20bp), n85                 pooled 0.1388 +- 0.0027 over 17000 | fixer 0.1293 (4000); rep 0.1447 (6000); alt 0.1403 (4000); long 0.1380 (3000)
+worst (crash+skew+20bp), n30                 pooled 0.1385 +- 0.0026 over 17000 | fixer 0.1417 (4000); rep 0.1345 (6000); alt 0.1412 (4000); long 0.1387 (3000)
+crash days, 20 bp, rho .15, phi .20, n30 (rep) pooled 0.1425 +- 0.0055 over 4000 | rep 0.1425 (4000)
+by the 2,000th (alt, reads 0.20): crash days n85 0.1482, worst n85 0.1442, worst n30 0.1442
+by the 3,000th (long): worst n85 0.1453, worst n30 0.1443
+reads at 0.15 instead (alt), by 1,000th / 2,000th: crash days n85 0.1123 / 0.1170; worst n85 0.0993 / 0.1022; worst n30 0.0998 / 0.1027
+a false pass's stay (knife edge, worst, n85) demoted by 300th / 1,000th: reads 0.20 0.340 / 0.500; reads 0.15 0.259 / 0.397
+t(3)-body crash days (rep): worst n85 0.1395, n30 0.1268

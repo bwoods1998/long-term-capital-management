@@ -1,0 +1,125 @@
+{
+ "cells": [
+  {
+   "lab": "K|N3|sym|nodrift|kappa0.01",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 95000000,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|sym|nodrift|kappa0.02",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.02
+   },
+   "R": 2000,
+   "seed0": 95000100,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|sym|nodrift|kappa0.01",
+   "gen": {
+    "nbar": 5,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 95000200,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|sym|nodrift|kappa0.02",
+   "gen": {
+    "nbar": 5,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.02
+   },
+   "R": 2000,
+   "seed0": 95000300,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|sym|nodrift|kappa0.01|rho.05",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 95000400,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|both|AR20",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 95000500,
+   "T": 120
+  },
+  {
+   "lab": "K|N3|both|AR20",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 95000600,
+   "T": 120
+  },
+  {
+   "lab": "KP|P60|sym|nodrift",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.05,
+    "skill": 0.006
+   },
+   "R": 1000,
+   "seed0": 95000700,
+   "T": 60
+  },
+  {
+   "lab": "KP|P60|sym|nodrift",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.05,
+    "skill": 0.006
+   },
+   "R": 1000,
+   "seed0": 95000800,
+   "T": 60
+  }
+ ]
+}

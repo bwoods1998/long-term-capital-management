@@ -1,0 +1,16 @@
+  N3|bothTC|AR10|phi0.20|cnt n3 rho0.15 T120                       selection 0.1295
+  N3|bothTC|AR20|phi0.10|cnt n3 rho0.15 T120                       selection 0.1278
+  N3|bothTC|AR20|phi0.20|cnt n3 rho0.15 T120                       selection 0.1275
+  N3|bothTC|nodrift|phi0.20|cnt n3 rho0.15 T120                    selection 0.1273
+  N3|bothTC|AR10|phi0.15|cnt n3 rho0.15 T120                       selection 0.1255
+  N3|bothTC|nodrift|phi0.15|cnt n3 rho0.15 T120                    selection 0.1255
+  N3|bothTC|AR20|phi0.15|cnt n3 rho0.15 T120                       selection 0.1247
+  N3|bothTC|AR20|phi0.20 n85 rho0.15 T120                          selection 0.1235
+  N3|bothTC|AR20|phi0.15|cnt n5 rho0.15 T120                       selection 0.1210
+  N3|bothTC|AR10|phi0.10|cnt n3 rho0.15 T120                       selection 0.1210
+  N3|bothTC|nodrift|phi0.20 n85 rho0.15 T120                       selection 0.1182
+  N3|bothTC|AR20|phi0.20|cnt n8 rho0.15 T120                       selection 0.1180
+  N3|bothC|nodrift|phi0.20|cnt n3 rho0.15 T120                     selection 0.1177
+  N3|bothTC|AR20|phi0.15 n85 rho0.15 T120                          selection 0.1175
+  N3|bothT|AR10|phi0.20|cnt n3 rho0.15 T120                        selection 0.1175
+  N3|bothT|nodrift|phi0.20|cnt n3 rho0.15 T120                     selection 0.1175

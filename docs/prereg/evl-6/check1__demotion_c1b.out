@@ -1,0 +1,30 @@
+rho 0.00 edge   60 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.118, 200: 0.137, 300: 0.142, 500: 0.145, 1000: 0.146}
+rho 0.00 edge   60 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.129, 200: 0.153, 300: 0.161, 500: 0.165, 1000: 0.167}
+rho 0.00 edge  100 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.03, 200: 0.033, 300: 0.033, 500: 0.033, 1000: 0.033}
+rho 0.00 edge  100 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.035, 200: 0.039, 300: 0.04, 500: 0.04, 1000: 0.04}
+rho 0.00 edge    0 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.471, 200: 0.592, 300: 0.648, 500: 0.709, 1000: 0.778}
+rho 0.00 edge    0 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.469, 200: 0.588, 300: 0.643, 500: 0.703, 1000: 0.768}
+rho 0.05 edge   60 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.153, 200: 0.179, 300: 0.189, 500: 0.194, 1000: 0.195}
+rho 0.05 edge   60 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.161, 200: 0.193, 300: 0.204, 500: 0.211, 1000: 0.214}
+rho 0.05 edge  100 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.049, 200: 0.054, 300: 0.055, 500: 0.055, 1000: 0.055}
+rho 0.05 edge  100 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.056, 200: 0.062, 300: 0.064, 500: 0.065, 1000: 0.065}
+rho 0.05 edge    0 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.475, 200: 0.595, 300: 0.652, 500: 0.717, 1000: 0.782}
+rho 0.05 edge    0 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.472, 200: 0.588, 300: 0.644, 500: 0.708, 1000: 0.775}
+rho 0.15 edge   60 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.202, 200: 0.244, 300: 0.26, 500: 0.27, 1000: 0.276}
+rho 0.15 edge   60 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.208, 200: 0.251, 300: 0.27, 500: 0.282, 1000: 0.29}
+rho 0.15 edge  100 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.09, 200: 0.102, 300: 0.105, 500: 0.107, 1000: 0.107}
+rho 0.15 edge  100 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.095, 200: 0.109, 300: 0.113, 500: 0.116, 1000: 0.116}
+rho 0.15 edge    0 bp drift  0 bp: P(demoted by the k-th Probe event) {100: 0.481, 200: 0.601, 300: 0.662, 500: 0.726, 1000: 0.792}
+rho 0.15 edge    0 bp drift 20 bp: P(demoted by the k-th Probe event) {100: 0.481, 200: 0.596, 300: 0.653, 500: 0.72, 1000: 0.786}
+alpha 0.1 rho 0.05 edge   60 bp: P(demoted by k) {100: 0.012, 300: 0.015, 500: 0.015, 1000: 0.015}
+alpha 0.1 rho 0.05 edge    0 bp: P(demoted by k) {100: 0.099, 300: 0.179, 500: 0.216, 1000: 0.264}
+alpha 0.1 rho 0.05 edge  -15 bp: P(demoted by k) {100: 0.15, 300: 0.289, 500: 0.364, 1000: 0.477}
+alpha 0.1 rho 0.15 edge   60 bp: P(demoted by k) {100: 0.02, 300: 0.027, 500: 0.029, 1000: 0.029}
+alpha 0.1 rho 0.15 edge    0 bp: P(demoted by k) {100: 0.105, 300: 0.195, 500: 0.235, 1000: 0.287}
+alpha 0.1 rho 0.15 edge  -15 bp: P(demoted by k) {100: 0.149, 300: 0.283, 500: 0.354, 1000: 0.458}
+alpha 0.2 rho 0.05 edge   60 bp: P(demoted by k) {100: 0.036, 300: 0.046, 500: 0.047, 1000: 0.047}
+alpha 0.2 rho 0.05 edge    0 bp: P(demoted by k) {100: 0.201, 300: 0.33, 500: 0.384, 1000: 0.451}
+alpha 0.2 rho 0.05 edge  -15 bp: P(demoted by k) {100: 0.276, 300: 0.467, 500: 0.552, 1000: 0.67}
+alpha 0.2 rho 0.15 edge   60 bp: P(demoted by k) {100: 0.056, 300: 0.073, 500: 0.076, 1000: 0.077}
+alpha 0.2 rho 0.15 edge    0 bp: P(demoted by k) {100: 0.211, 300: 0.343, 500: 0.401, 1000: 0.47}
+alpha 0.2 rho 0.15 edge  -15 bp: P(demoted by k) {100: 0.275, 300: 0.458, 500: 0.541, 1000: 0.651}

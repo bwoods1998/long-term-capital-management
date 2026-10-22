@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `8e63ce64`, full digest `c3026eba` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba9e6341` / `50f572ae`.
+Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1868,3 +1868,35 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   waiting Probe PREREG-EVL-5 row goes at the 15:48:40 minute with the cash; a birth behind a waiting learning row still
   waits and its alert stays info; a PREREG row that waited and ended unsent, no book minute in the overdue minute, is a
   warning the first time; the rows freed are files 1 to 4 alone).
+
+## 27. PREREG-EVL-6's seats in the book (release 1019i, `feat/evl-6`; PREREG-EVL-6 sections 1.1 and 6, A116; money and book, as built; after section 26)
+
+- **The seats** (league/events/programs.py `Program.regfile` 6, `can_seat`, `superseded_of`, `successor_of`): from
+  release 1019i the seating version of each seatable id is its PREREG-EVL-6 version (version 3 of files 1 and 2's nine,
+  version 2 of files 4 and 5's three, version 2 of a seatable birth registered before REGISTERED_AT_6, 2026-10-22T12:24:50Z);
+  the superseded version never seats. ROOM's order (`book.room_key`) is the ids' order, unchanged: a new version keeps its
+  file (`Program.prereg`) and its place. The band sync (league/equity/live.py `_event_sync`) retires an alive instance
+  of a superseded version ("superseded: its new version holds the seat (PREREG-EVL-6 section 1.1)"); its open lots exit
+  by their own plans.
+- **One seat's room and issuers** (live.py `_event_seat_keys`, `_event_seat_count`, `_event_held`): the seat's count
+  of held and ordered positions, its one position per issuer and its cooldown read the new version's lots AND the
+  superseded version's still open, so a seat never holds twice its room across the release. D12 in the book
+  (league/events/book.py `held_recently`, `programs.superseded_held`): the issuer cooldown counts the superseded
+  version's intents of the sessions decided before THE RELEASE (the store's meta `evl6:release`), never one it writes
+  from the release on.
+- **The Probe slots** (league/constitution.py `equity_money.event.max_open_v6.probe` 14, bound ('0', '14'), its own
+  commit; `book.Settings.max_opens_v6`, `Settings.max_open(band, program)`): a PREREG-EVL-6 version (`Program.evl6`) at
+  Probe holds up to 14; every other version's Probe and every Sized and learning row read `event.max_open` as before
+  (`max_open.probe` stays 6). At "0" no PREREG-EVL-6 version buys at Probe (the tighten-only switch, `51625225` /
+  `f288d8ec`).
+- **At-size buys** (`book.under_bar(band, target, limit, walls, *, bar)`; live.py `_event_gate`): a Probe or Sized pick
+  of a PREREG-EVL-6 version that no whole-share count brings to Done's size bar (`reach_bar` x its band target) inside
+  the band's frozen envelope of the walls' equity is skipped `under_bar` before it takes a slot; release 1019h's S2
+  round-up sizes the picks that remain (unchanged).
+- **Identities**: the money digest `8e63ce64` -> `d52a5af5` and the constitution `c3026eba` -> `9c8b2221` (the one
+  row); the options execution fingerprint, the equity identity, the xs identity and the gate contract do not move
+  (live.py and book.py are the book's plumbing, outside the equity identity).
+- **Tests**: league/tests/test_events_evl6.py `TheMoney`, `TheMoneyInTheBook` (14 slots for a PREREG-EVL-6 version at
+  Probe, 6 for an earlier one; a Probe pick under the bar skipped before its slot; the superseded lots counted in the
+  seat), `TheIssuerRule` (D12 in the shadow and the book), `TheProof` (an invented week's real-money picks identical with
+  and without the change while no version is promoted, the release before the week and inside it).

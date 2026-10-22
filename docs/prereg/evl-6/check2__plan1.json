@@ -1,0 +1,494 @@
+{
+ "cells": [
+  {
+   "lab": "A|N3|both|AR20",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000000,
+   "old": false
+  },
+  {
+   "lab": "A|N3|both|AR20",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000100,
+   "old": false
+  },
+  {
+   "lab": "A|N3|both|AR20",
+   "gen": {
+    "nbar": 13,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000200,
+   "old": false
+  },
+  {
+   "lab": "A|N3|both|AR20",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000300,
+   "old": false
+  },
+  {
+   "lab": "A|N3|dayskew|AR20",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000400,
+   "old": false
+  },
+  {
+   "lab": "A|N3|dayskew|AR20",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "drift_sd": 0.002
+   },
+   "R": 4000,
+   "seed0": 91000500,
+   "old": true
+  },
+  {
+   "lab": "A|N3|both|AR10",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.001
+   },
+   "R": 4000,
+   "seed0": 91000600,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.01",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91000700,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.01",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91000800,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.01",
+   "gen": {
+    "nbar": 13,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91000900,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.015",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.015
+   },
+   "R": 2000,
+   "seed0": 91001000,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.015",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.015
+   },
+   "R": 2000,
+   "seed0": 91001100,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.015",
+   "gen": {
+    "nbar": 13,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.015
+   },
+   "R": 2000,
+   "seed0": 91001200,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.005|rho.05",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.005
+   },
+   "R": 2000,
+   "seed0": 91001300,
+   "old": false
+  },
+  {
+   "lab": "B|N3|both|AR20|kappa0.01",
+   "gen": {
+    "nbar": 3,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91001400,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.005|rho.05",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.005
+   },
+   "R": 2000,
+   "seed0": 91001500,
+   "old": false
+  },
+  {
+   "lab": "B|N3|both|AR20|kappa0.01",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91001600,
+   "old": false
+  },
+  {
+   "lab": "B|N3|sym|nodrift|kappa0.005|rho.05",
+   "gen": {
+    "nbar": 13,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "kappa": 0.005
+   },
+   "R": 2000,
+   "seed0": 91001700,
+   "old": false
+  },
+  {
+   "lab": "B|N3|both|AR20|kappa0.01",
+   "gen": {
+    "nbar": 13,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "kappa": 0.01
+   },
+   "R": 2000,
+   "seed0": 91001800,
+   "old": false
+  },
+  {
+   "lab": "C|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 91001900,
+   "old": false
+  },
+  {
+   "lab": "C|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 91002000,
+   "old": false
+  },
+  {
+   "lab": "C|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 91002100,
+   "old": false
+  },
+  {
+   "lab": "D|N3|both|AR20r.99",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "drift_rho": 0.99
+   },
+   "R": 2000,
+   "seed0": 91002200,
+   "old": false
+  },
+  {
+   "lab": "E|N3|both|AR20|lam.005",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "lam": 0.005
+   },
+   "R": 2000,
+   "seed0": 91002300,
+   "old": false
+  },
+  {
+   "lab": "D|N3|both|AR20r.99",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "drift_rho": 0.99
+   },
+   "R": 2000,
+   "seed0": 91002400,
+   "old": false
+  },
+  {
+   "lab": "E|N3|both|AR20|lam.005",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "lam": 0.005
+   },
+   "R": 2000,
+   "seed0": 91002500,
+   "old": false
+  },
+  {
+   "lab": "E|N3|sym|nodrift|lam.005|rho.05",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "lam": 0.005
+   },
+   "R": 2000,
+   "seed0": 91002600,
+   "old": false
+  },
+  {
+   "lab": "F|N3|crash10+evskew|AR20",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 91002700,
+   "old": false
+  },
+  {
+   "lab": "F|N3|crash10+evskew|AR20",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 91002800,
+   "old": false
+  },
+  {
+   "lab": "F|N3|crash10+evskew|AR20",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 91002900,
+   "old": false
+  },
+  {
+   "lab": "F|N3|crash10|nodrift",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "jump_left": 0.5
+   },
+   "R": 2000,
+   "seed0": 91003000,
+   "old": false
+  }
+ ]
+}
