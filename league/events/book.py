@@ -1419,34 +1419,46 @@ def learner_gate(lane: Lane, program: P.Program) -> str | None:
 
 def learner_cut(learners: Iterable[tuple[str, str]]) -> tuple[int, int] | None:
     """PREREG-EVL-7 SECTION 1.9's ROOM WITH ITS LEARNERS AT ONE AUCTION ((family, band) of each learner there that may
-    take a name): the first ROOM key (`room_key`) whose program's names DEPEND ON A LEARNER'S PICKS, so the book gives
-    the names before it at the auction's own decision and every name from it on only once the learners' parts are on
-    record or waited out (league/equity/live.py `_event_decide_lrn`): at LEARNING the learner's own key (after every
-    PREREG-EVL-1 to -6 row of the tier, which never waits; R3's births at learning, `BIRTH_ROOM`, come after it); in a
-    ROUND-ROBIN tier (Probe, Sized: A85) the whole tier, the learner being the LAST program of each pass (its picks
-    move the earlier rows' second and later passes), and every tier after it. None with no learner."""
-    cuts = []
-    for family, band in learners:
-        tier, order = room_key(family, band)
-        cuts.append((tier, -1) if tier in ROUND_ROBIN_TIERS else (tier, order))
-    return min(cuts) if cuts else None
+    take a name): the earliest learner's ROOM key (`room_key`), None with no learner. Every PREREG-EVL-1 to -6 row is
+    given its names by the auction's own decision WHATEVER ITS BAND (the learner's pick waits for its own live receipt
+    and keeps no room from any earlier row: the final text's section 1.9); only R3's BIRTHS AFTER THAT KEY in ROOM
+    (`after_learners`: at learning every birth at learning; with a Probe learner its band's births, last of each pass
+    after it, and every birth at learning) wait for the learners' decision of the auction (league/equity/live.py
+    `_event_decide_lrn`), as a birth waits behind a waiting PREREG-EVL-5 buy (A113)."""
+    keys = [tuple(room_key(family, band)) for family, band in learners]
+    return min(keys) if keys else None
+
+
+def after_learners(program: str, band: str | None, cut: Sequence[int] | None) -> bool:
+    """Whether `program` at `band` waits for the learners' decision of the auction (`learner_cut`): an R3 birth whose
+    ROOM key comes after the cut; never a PREREG row (they never wait on a learner) nor a learner."""
+    if cut is None or P.is_learner(program):
+        return False
+    found = next((p for p in seatable() if p.id == program), None)
+    return found is not None and found.spec is not None and tuple(room_key(program, band)) > tuple(cut)
 
 
 def learner_pending(lane: Lane, program: P.Program, day: dt.date) -> bool:
-    """Whether the learner's LIVE PART of `day` may still write (PREREG-EVL-7 section 1.7): no decision on record and
-    no failure or expiry recorded for it (league/events/learner.py `PART_KEY`). The book's learner decision of the
-    auction waits on it within its bound (league/equity/live.py `_event_decide_lrn`)."""
+    """Whether the learner's LIVE RECEIPT of `day`'s auction may still name it (PREREG-EVL-7 section 1.9): none of
+    `learner.live_job` has finished, no other decision of the session is on record and no part failure is recorded
+    (league/events/learner.py `live_state`, `PART_KEY`). The learners' decision of the auction waits on it each minute
+    of the window, with no other bound (league/equity/live.py `_event_decide_lrn`)."""
     from . import learner as LR
 
-    if LR.decided(lane, program, day) is not None:
+    if LR.live_state(lane, program, day)["state"] != "waiting":
+        return False
+    rec = LR.decided(lane, program, day)
+    if rec is not None and str(rec.get("kind")) != "live":
         return False
     return lane.meta(LR.PART_KEY.format(program=program.id, version=program.version, day=day.isoformat())) is None
 
 
 def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
                   held: Callable[[str], bool] | None = None) -> list[Pick]:
-    """THE REAL-MONEY PICKS OF A PREREG-EVL-7 LEARNER (section 1.9): its intents of the House's LIVE decision of `day`
-    (league/events/learner.py `live_picks`; none for an auction its part did not decide live, nor before the release)
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-7 LEARNER (section 1.9): its intents of its LIVE decision of `day`, only once
+    its own live receipt of the auction has finished `ok` naming it (league/events/learner.py `live_picks`,
+    `live_state`; none for an auction its part did not decide live, a receipt still running or not naming it, nor
+    before the release), only while its gate is open (`learner_gate`)
     in its rank order, less the book's own skips: EVL-LRN-O1's ERN guard (E8, `ern_issuer`), EVL-LRN-ON's 8-K guard
     (E10, `issuer_8k_guard`), one position per issuer on the learner's earlier intents (`held_recently`) and on real
     lots (`held`). Each pick's `rank` is its place counted down from K (the first pick K), so the list's order is the
@@ -1614,5 +1626,6 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
 #: (PREREG-EVL-7, release 1019i: the learners' real money, their gate and their place in ROOM's order)
-__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "learner_pending",
+__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
+            "learner_pending",
             "learner_picks", "pick_record", "pick_of"]

@@ -4,7 +4,8 @@ E1-E11 fix (the frozen text, when it exists, wins):
 
 - THE ROWS (section 1.2): none anywhere while REGISTERED_AT_7 is None, nor when it is not after REGISTERED_AT_6 (E3);
   pinned, both after every earlier file's row and before R3's births, at learning, their own registration time;
-- THE FEATURES (section 1.4): 57 and 63 columns, the reader lens's frozen KEYWORDS / STOP / words / jaccard, every
+- THE FEATURES (section 1.4): 52 and 58 columns (none built from the issuer's own past returns or prices but sig20 and
+  dmove), the reader lens's frozen KEYWORDS / STOP / words / jaccard, every
   input stored before tau, the knowable-hour buckets (E11), the '1530' mark by its bar time (E6);
 - THE CANDIDATES (section 1.3): the pool programs' real-money reading, one per CIK, KEPT and ELIGIBLE TO BE PICKED,
   eligibility TIME-BOUND by the House's own decision (E5);
@@ -88,6 +89,21 @@ def learner(pid: str) -> P.Program:
     got = P.BY_KEY.get((pid, 1))
     assert got is not None, pid
     return got
+
+
+def name_live(st: S.Store, pid: str, day: dt.date, *, status: str = "ok", named: bool = True,
+              finished: dt.datetime | None = None) -> int:
+    """The learner's OWN LIVE RECEIPT of `day`'s auction as league/events/learner.py `live_part` finishes it (`ok`
+    naming the learner, by default), linked to its live decision's fits row when one is on record."""
+    prog = learner(pid)
+    s = C.session(st, day)
+    start = (s.open_decide if prog.entry_at == "open" else s.close_decide) + dt.timedelta(seconds=40)
+    rid = st.start_receipt(LR.live_job(prog, day), now=start)
+    summary = {LR.live_key(prog): {"kind": "live", "status": "ok"}} if named else {"error": "invented"}
+    st.finish_receipt(rid, status, summary, now=finished or start + dt.timedelta(seconds=20))
+    st.db.execute("UPDATE learner_fits SET receipt=?, receipt_id=? WHERE program=? AND version=1 AND day=? AND kind='live'",
+                  (LR.live_job(prog, day), rid, pid, day.isoformat()))
+    return rid
 
 
 # ------------------------------------------------------------------------------------------------- an invented lane
@@ -333,9 +349,16 @@ class TheRows(unittest.TestCase):
         if getattr(P, "REGISTERED_AT_6", None) is not None:
             self.assertEqual(P.REGISTERED_AT_6_FOR_7, P.REGISTERED_AT_6, "the merged tree's own PREREG-EVL-6 time")
 
-    def test_the_features_are_57_and_63_columns_in_section_14s_order(self):
-        self.assertEqual(len(LR.FEATURES[O1]), 57)
-        self.assertEqual(len(LR.FEATURES[ON]), 63)
+    def test_the_features_are_52_and_58_columns_in_section_14s_order(self):
+        self.assertEqual(len(LR.FEATURES[O1]), 52)
+        self.assertEqual(len(LR.FEATURES[ON]), 58)
+        i = LR.FEATURES[O1].index("ln_sig20")
+        self.assertEqual(LR.FEATURES[O1][i - 6:i + 8], ("src_benzinga", "n_art", "n_att20", "first20", "mon", "fri",
+                                                        "ln_sig20", "bench_iwm", "sic_bio", "sic_tech", "sic_fin",
+                                                        "sic_energy", "hist_missing", "kw_upgrade"),
+                         "items 7-9, then items 10 and 12, then item 13")
+        for gone in ("ln_adv20", "ln_prev_close", "r1", "r5", "r20"):
+            self.assertNotIn(gone, LR.FEATURES[O1] + LR.FEATURES[ON], "item 11 and item 10's two levels are deleted")
         self.assertEqual(LR.FEATURES[O1][:3], tuple(f"pool_{p}" for p in LR.POOLS[O1][1:]))
         self.assertEqual(LR.FEATURES[ON][-6:], ("morning", "before", "dmove", "dmove_missing", "abs_dmove", "s_x_dmove"))
         self.assertEqual(LR.FEATURES[O1][-4:], ("overnight", "pre", "late", "ln_ins"))
@@ -349,6 +372,7 @@ class TheRows(unittest.TestCase):
         self.assertEqual((LR.CHARGE7_HUNDREDTHS, LR.BASE7_HUNDREDTHS, LR.STRESS7_HUNDREDTHS, LR.RUNS_MAX), (13, 3, 13, 3),
                          "section 4: c7 = max(0.13, W7 0.087 rounded up) = 0.13 a run, three runs an id at most")
         self.assertEqual(LR.RECEIPT, {"open": "decide-open-lrn", "close": "decide-close-lrn"})
+        self.assertEqual(LR.LIVE_RECEIPT, {"open": "decide-open-lrnlive", "close": "decide-close-lrnlive"})
 
     def test_the_headline_features_are_the_reader_lens_frozen_spec_verbatim(self):
         self.assertEqual(len(LR.KEYWORDS), 16)
@@ -610,12 +634,50 @@ class TheFeatures(WorldCase):
         self.assertEqual((f["sic_bio"], f["sic_tech"], f["bench_iwm"]), (1.0, 0.0, 1.0))
         self.assertEqual(f["overnight"], 1.0, "21:00 ET of P: overnight")
         self.assertEqual(f["first20"], 1.0)
-        self.assertAlmostEqual(f["ln_adv20"], math.log(5e6 / 1e7))
         closes = [20.0 + 0.1 * k for k in range(25)][::-1][:20]
-        self.assertAlmostEqual(f["r1"], math.log(closes[0] / closes[1]))
-        self.assertAlmostEqual(f["r20"], math.log(closes[0] / closes[19]))
         self.assertEqual(f["hist_missing"], 0.0)
+        self.assertAlmostEqual(f["ln_sig20"], math.log(max(0.005, LR.sig20_of(closes)) / 0.03))
         self.assertAlmostEqual(c.sig20, max(0.005, LR.sig20_of(closes)))
+
+    def test_no_column_is_built_from_the_issuers_own_past_returns_or_prices_but_sig20_and_dmove(self):
+        """Section 10 (the final text's item 11): the same 19 daily log changes in the reverse order at three times the
+        price level, another ADV and another previous close leave every column of EVL-LRN-O1 where it was (sig20 reads
+        only the changes' spread); EVL-LRN-ON's prices enter only through dmove (its '1530' mark over the previous
+        close)."""
+        day = dt.date(2026, 10, 27)
+        p = self.w.prior(day)
+        cik, sym = self.w.issuer()
+        moves = [0.03, -0.01, 0.02, -0.04, 0.05, -0.02, 0.01, 0.0, -0.03, 0.04, -0.05, 0.02, 0.03, -0.01, 0.01, -0.02,
+                 0.06, -0.04, 0.02]
+
+        def closes(level: float, changes: list[float]) -> list[float]:
+            out = [level]
+            for m in changes:
+                out.append(out[-1] * math.exp(m))
+            return out
+        a_closes = closes(20.0, moves)
+        self.w.bars(sym, day, a_closes)
+        self.w.universe(day, sym, cik, prev_close=a_closes[-1], adv20=5e6)
+        self.w.article("own-1", sym, knowable=et(p, 21, 0))
+        self.w.receipt(day, "open", finished=et(day, 9, 16))
+
+        def x() -> dict[str, float]:
+            [c] = LR.compute(self.st, learner(O1), day, kind="live")["cands"]
+            return dict(zip(LR.FEATURES[O1], c.x))
+        before = x()
+        b_closes = closes(60.0, moves[::-1])
+        self.w.bars(sym, day, b_closes)
+        self.st.db.execute("UPDATE universe SET prev_close=?, adv20=? WHERE day=? AND symbol=?",
+                           (b_closes[-1], 9e7, day.isoformat(), sym))
+        after = x()
+        self.assertEqual(set(before), set(after))
+        for name in before:
+            self.assertAlmostEqual(before[name], after[name], places=12, msg=name)
+        self.assertNotEqual(before["ln_sig20"], 0.0, "sig20 is read (the changes' spread)")
+        own = {"ln_sig20", "hist_missing", "dmove", "dmove_missing", "abs_dmove", "s_x_dmove"}
+        priced = {n for n in LR.FEATURES[ON] if any(k in n for k in ("sig20", "dmove", "hist", "adv", "prev", "r1", "r5",
+                                                                     "r20", "close", "price"))}
+        self.assertEqual(priced, own, "EVL-LRN-ON's columns read from prices: sig20's and dmove's only")
 
     def test_hours_buckets_a_weekend_is_overnight_and_the_insider_value(self):
         day = dt.date(2026, 11, 2)            # a Monday: its window opens on Friday's close
@@ -635,8 +697,7 @@ class TheFeatures(WorldCase):
         self.assertEqual((got[ciks["pre"]]["pre"], got[ciks["late"]]["late"]), (1.0, 1.0))
         self.assertEqual([got[ciks["base"]][k] for k in ("overnight", "pre", "late")], [0.0, 0.0, 0.0])
         self.assertEqual(got[ciks["base"]]["mon"], 1.0)
-        self.assertEqual((got[ciks["base"]]["hist_missing"], got[ciks["base"]]["r1"], got[ciks["base"]]["ln_sig20"]),
-                         (1.0, 0.0, 0.0))
+        self.assertEqual((got[ciks["base"]]["hist_missing"], got[ciks["base"]]["ln_sig20"]), (1.0, 0.0))
 
     def test_on_dmove_reads_the_1530_mark_by_its_bar_time_whatever_its_fetch_time(self):
         day = dt.date(2026, 10, 27)
@@ -678,7 +739,7 @@ class TheTraining(WorldCase):
             self.st.db.execute("INSERT INTO learner_cands(program, version, day, cik, event, symbol, families, kept, "
                                "eligible, features, sig20, picked, kind) VALUES(?, 1, ?, ?, ?, ?, '[]', 1, 0, ?, 0.03, 0, "
                                "'catchup')", (O1, s1.isoformat(), c, e, sy,
-                                              json.dumps({"x": [0.0] * 57, "hist": 0})))
+                                              json.dumps({"x": [0.0] * len(LR.FEATURES[O1]), "hist": 0})))
             self.w.universe(s1, sy, c)
             self.w.outcome("EVL-CTRL-NEWS-ALL-O1", e, sy, c, s1, a_g=0.5, settled=settled, tradable=trad, raw_entry=raw)
             extra.append(c)
@@ -736,7 +797,7 @@ class TheLookAhead(WorldCase):
             self.st.db.execute("INSERT INTO learner_cands(program, version, day, cik, event, symbol, families, kept, "
                                "eligible, features, sig20, picked, kind) VALUES(?, 1, ?, ?, 'news:fut', ?, '[]', 1, 0, ?, "
                                "0.03, 0, 'catchup')", (O1, days[3].isoformat(), fut_cik, fut_sym,
-                                                      json.dumps({"x": [9.0] * 57, "hist": 0})))
+                                                      json.dumps({"x": [9.0] * len(LR.FEATURES[O1]), "hist": 0})))
             self.w.universe(days[3], fut_sym, fut_cik)
             self.w.outcome("EVL-CTRL-NEWS-ALL-O1", "news:fut", fut_sym, fut_cik, days[3], a_g=9.0, settled=later)
             after = snapshot(LR.compute(self.st, learner(O1), day, kind="live", write_cache=False))
@@ -813,7 +874,7 @@ class TheDecision(WorldCase):
         c, sy = self.w.issuer()
         self.st.db.execute("INSERT INTO learner_cands(program, version, day, cik, event, symbol, families, kept, eligible, "
                            "features, sig20, picked, kind) VALUES(?, 1, ?, ?, 'news:more', ?, '[]', 1, 0, ?, 0.03, 0, "
-                           "'catchup')", (O1, days[0].isoformat(), c, sy, json.dumps({"x": [0.5] * 57, "hist": 0})))
+                           "'catchup')", (O1, days[0].isoformat(), c, sy, json.dumps({"x": [0.5] * len(LR.FEATURES[O1]), "hist": 0})))
         self.w.universe(days[0], sy, c)
         self.w.outcome("EVL-CTRL-NEWS-ALL-O1", "news:more", sy, c, days[0], a_g=0.01, settled=et(days[0], 21, 0))
         second = LR.training(self.st, learner(O1), days[3], tau)
@@ -841,25 +902,37 @@ class TheParts(WorldCase):
         ctx = R.Context(self.st, FakeGateway(), lambda url: b"", now=lambda: now)
         return ctx
 
-    def test_the_live_part_runs_after_the_receipt_names_no_learner_and_records_its_id(self):
+    def live_receipts(self, day: dt.date) -> list[dict]:
+        return [dict(r) for r in self.st.db.execute("SELECT * FROM receipts WHERE job=? ORDER BY id",
+                                                    (LR.live_job(learner(O1), day),))]
+
+    def test_the_live_part_is_its_own_receipt_after_the_houses_naming_the_learner(self):
         days = self.days(2)
         self.history(days[:1], 5)
         day = days[1]
         self.w.open_session(day, 5)
-        [rid] = [r[0] for r in self.st.db.execute("SELECT id FROM receipts WHERE job=?", (f"decide-open:{day}",))]
-        summary = self.st.db.execute("SELECT summary FROM receipts WHERE id=?", (rid,)).fetchone()[0]
+        [house] = [dict(r) for r in self.st.db.execute("SELECT * FROM receipts WHERE job=?", (f"decide-open:{day}",))]
+        rid = house["id"]
         out = R.learner_part(self.ctx(et(day, 9, 16, 5)), day, "open", rid, backfill_run=False)
         self.assertIn(f"{O1}", out)
+        [own] = self.live_receipts(day)
+        self.assertEqual(own["job"], f"decide-open-lrnlive:{day}")
+        self.assertEqual(own["status"], "ok")
+        self.assertIn(O1, json.loads(own["summary"]), "its own receipt names the learner")
+        self.assertGreaterEqual(own["started_at"], house["finished_at"], "started once the House's had finished")
         fits = self.st.db.execute("SELECT kind, receipt, receipt_id FROM learner_fits WHERE program=? AND day=?",
                                   (O1, day.isoformat())).fetchone()
-        self.assertEqual(tuple(fits), ("live", f"decide-open:{day}", rid))
-        self.assertEqual(self.st.db.execute("SELECT summary FROM receipts WHERE id=?", (rid,)).fetchone()[0], summary,
+        self.assertEqual(tuple(fits), ("live", f"decide-open-lrnlive:{day}", own["id"]))
+        self.assertEqual(LR.live_state(self.st, learner(O1), day)["state"], "named")
+        self.assertEqual(dict(self.st.db.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()), house,
                          "the House's receipt is never touched: it names no learner")
         self.assertEqual(R.learner_part(self.ctx(et(day, 9, 16)), day, "open", rid, backfill_run=True), {},
                          "a backfill run decides no learner")
-        # a re-decision's receipt is not the first: its part does nothing
+        # a re-decision's receipt is not the first: its part does nothing; nor a second part of the same auction
         later = self.w.receipt(day, "open", started=et(day, 10, 15), finished=et(day, 10, 16))
-        self.assertIn("skipped", LR.live_part(self.ctx(et(day, 10, 16)), learner(O1), day, receipt_id=later))
+        self.assertIn("skipped", LR.live_part(self.ctx(et(day, 10, 16)), learner(O1), day, house_receipt_id=later))
+        self.assertEqual(LR.live_part(self.ctx(et(day, 10, 16)), learner(O1), day, house_receipt_id=rid), {"known": True})
+        self.assertEqual(len(self.live_receipts(day)), 1)
 
     def test_a_failed_or_expired_part_writes_nothing_and_is_decided_later_by_itself_never_traded(self):
         days = self.days(3)
@@ -867,22 +940,29 @@ class TheParts(WorldCase):
         self.w.open_session(day, 4)
         [rid] = [r[0] for r in self.st.db.execute("SELECT id FROM receipts WHERE job=?", (f"decide-open:{day}",))]
         with mock.patch.object(LR, "compute", side_effect=RuntimeError("invented")):
-            got = LR.live_part(self.ctx(et(day, 9, 16, 5)), learner(O1), day, receipt_id=rid)
+            got = LR.live_part(self.ctx(et(day, 9, 16, 5)), learner(O1), day, house_receipt_id=rid)
         self.assertIn("failed", got)
         self.assertIsNone(LR.decided(self.st, learner(O1), day))
+        self.assertEqual(self.st.db.execute("SELECT COUNT(*) FROM intents WHERE program=?", (O1,)).fetchone()[0], 0)
         part = json.loads(self.st.meta(LR.PART_KEY.format(program=O1, version=1, day=day.isoformat())))
         self.assertEqual(part["status"], "failed")
+        [own] = self.live_receipts(day)
+        self.assertEqual(own["status"], "error", "its own receipt says why")
+        self.assertIn("invented", own["summary"])
+        self.assertEqual(LR.live_state(self.st, learner(O1), day)["state"], "not_named")
         self.assertTrue(EB.learner_pending(EB.Lane(self.st.root / S.DB_NAME), learner(O1), day) is False,
-                        "the book waits no more for it")
+                        "the book waits no more for it: never bought at that auction")
         day2 = days[2]
         self.w.open_session(day2, 4)
         [rid2] = [r[0] for r in self.st.db.execute("SELECT id FROM receipts WHERE job=?", (f"decide-open:{day2}",))]
-        got = LR.live_part(self.ctx(et(day2, 9, 16, 5)), learner(O1), day2, receipt_id=rid2, budget=0.0)
+        got = LR.live_part(self.ctx(et(day2, 9, 16, 5)), learner(O1), day2, house_receipt_id=rid2, budget=0.0)
         self.assertIn("expired", got)
         self.assertIsNone(LR.decided(self.st, learner(O1), day2))
+        self.assertEqual([r["status"] for r in self.live_receipts(day2)], ["error"])
         # a live decision of an earlier session makes the release's first live decision: these two are LATE
         self.w.open_session(days[0], 3)
         LR.decide(self.st, learner(O1), days[0], kind="live", now=lambda: et(days[0], 9, 16, 30))
+        name_live(self.st, O1, days[0])
         owed = LR.due(self.st, et(day2, 12, 0))
         self.assertIn(("late", O1, day), [(k, p.id, d) for k, p, d in owed])
         self.assertIn(("late", O1, day2), [(k, p.id, d) for k, p, d in owed])
@@ -1045,9 +1125,10 @@ class TheMoney(TB.EventTest):
         pin(self)
 
     def live(self, lane: TB.Lane, pid: str, day: dt.date, picks: list[tuple[str, str, float]], *,
-             kind: str = "live") -> None:
+             kind: str = "live", named: bool | None = True) -> None:
         """A learner's decision of `day` on the lane's store as league/events/learner.py writes it: its fits row, its
-        picked candidates (rank order) and their intents; each pick's issuer a live universe row."""
+        picked candidates (rank order) and their intents; each pick's issuer a live universe row; for a live decision
+        its own live receipt finished naming it (`named` False: finished `error`; None: still running)."""
         prog = learner(pid)
         st = lane.st
         LR.ensure(st.db)
@@ -1067,8 +1148,11 @@ class TheMoney(TB.EventTest):
                           "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'shadow', "
                           "'planned', NULL)", (pid, event, symbol, cik, S.iso(tau), day.isoformat(), prog.entry_at,
                                                exit_day.isoformat(), prog.exit_at, 0.05 - 0.001 * rank))
-        st.db.execute("INSERT INTO learner_fits(program, version, day, tau, kind, status, n_picks, finished_at) VALUES(?, 1, "
-                      "?, ?, ?, 'ok', ?, ?)", (pid, day.isoformat(), S.iso(tau), kind, len(picks), S.iso(tau)))
+        st.db.execute("INSERT INTO learner_fits(program, version, day, tau, kind, status, n_picks, finished_at, e_prev) "
+                      "VALUES(?, 1, ?, ?, ?, 'ok', ?, ?, 2000.0)", (pid, day.isoformat(), S.iso(tau), kind, len(picks),
+                                                                   S.iso(tau)))
+        if kind == "live" and named is not None:
+            name_live(st, pid, day, named=named, status="ok" if named else "error")
 
     def test_the_learner_buys_its_live_picks_after_every_earlier_row_whose_buys_are_unchanged(self):
         def run(with_learner: bool) -> list[tuple]:
@@ -1099,7 +1183,7 @@ class TheMoney(TB.EventTest):
                                                                                           "20.00")],
                          "then the learner's, in its rank order, passing over ACME (given to READ-O1 at this auction)")
 
-    def test_no_live_decision_no_real_money_and_a_running_part_is_waited_for_within_its_bound(self):
+    def test_no_live_decision_no_real_money_and_a_pick_waits_for_its_own_live_receipt_with_no_other_bound(self):
         h = self.harness()
         self.live(h.lane, O1, TB.DAY, [(TB.CIK2, "BETA", 16.0)], kind="catchup")
         self.ready(h)
@@ -1107,18 +1191,31 @@ class TheMoney(TB.EventTest):
         h.tick(9, 15)
         h.tick(9, 16)
         self.assertEqual(h.event_intents("buy"), [], "a catch-up's picks are never traded")
-        h2 = TB.Harness(self.root / "two")
-        self.addCleanup(h2.state.close)
-        self.addCleanup(h2.lane.st.close)
-        self.addCleanup(lambda: h2.book._event_lane is not None and h2.book._event_lane.close())
-        LR.ensure(h2.lane.st.db)
-        self.ready(h2)
+
+        def second(name: str) -> TB.Harness:
+            h2 = TB.Harness(self.root / name)
+            self.addCleanup(h2.state.close)
+            self.addCleanup(h2.lane.st.close)
+            self.addCleanup(lambda: h2.book._event_lane is not None and h2.book._event_lane.close())
+            LR.ensure(h2.lane.st.db)
+            self.ready(h2)
+            h2.symbol("BETA", last=17.0)
+            return h2
+        h2 = second("two")
+        self.live(h2.lane, O1, TB.DAY, [(TB.CIK2, "BETA", 16.0)], named=None)   # its receipt still running
         out = h2.tick(9, 15)
-        self.assertIn("waiting for the learner part", str(out.get("event_decide_lrn")))
-        self.live(h2.lane, O1, TB.DAY, [(TB.CIK2, "BETA", 16.0)])
-        h2.symbol("BETA", last=17.0)
-        h2.tick(9, 16)
-        self.assertEqual([r["symbol"] for r in h2.event_intents("buy")], ["BETA"])
+        self.assertIn("waiting for the live receipt", str(out.get("event_decide_lrn")))
+        h2.tick(9, 22)      # (past the 240 s of the earlier build: no other bound than the window)
+        self.assertEqual(h2.event_intents("buy"), [], "never bought before its own live receipt has named it")
+        name_live(h2.lane.st, O1, TB.DAY)
+        h2.tick(9, 23)
+        self.assertEqual([r["symbol"] for r in h2.event_intents("buy")], ["BETA"], "named: bought, inside the window")
+        h3 = second("three")
+        self.live(h3.lane, O1, TB.DAY, [(TB.CIK2, "BETA", 16.0)], named=False)   # finished, not naming it
+        h3.tick(9, 15)
+        h3.tick(9, 16)
+        self.assertEqual(h3.event_intents("buy"), [], "a first live receipt that does not name it: never bought")
+        self.assertEqual(h3.book._event_summary(TB.DAY.isoformat(), "open-lrn")["programs"][O1]["picks"], 0)
 
     def test_o1s_ern_guard_bars_an_ern_d_issuer_in_real_money_only(self):
         h = self.harness()
@@ -1249,16 +1346,21 @@ class TheProof(unittest.TestCase):
                 learners = {p.id for p in P.LEARNER_ROWS}
                 intents = [r for r in w.intents() if r[0] not in learners]
                 receipts = [(r["job"], r["status"], r["summary"]) for r in w.st.db.execute(
-                    "SELECT job, status, summary FROM receipts WHERE job LIKE 'decide-%' ORDER BY id")]
+                    "SELECT job, status, summary FROM receipts WHERE job LIKE 'decide-%' AND job NOT LIKE '%-lrnlive:%' "
+                    "AND job NOT LIKE '%-lrn:%' ORDER BY id")]
                 picks = W5.picks(w, lambda p: not P.is_learner(p))
                 mine = 0
                 if pinned:
                     mine = w.st.db.execute("SELECT COUNT(*) FROM intents WHERE program IN (?, ?)",
                                            tuple(sorted(learners))).fetchone()[0]
                 parts = [str(r[0]) for r in w.st.db.execute("SELECT key FROM meta WHERE key LIKE 'evl7:part:%'")]
-                timing = [(str(r["kind"]), str(r["started_at"]), str(r["finished"]), str(r["summary"])) for r in w.st.db.execute(
-                    "SELECT f.kind, f.started_at, r.finished_at AS finished, r.summary FROM learner_fits f JOIN receipts r "
-                    "ON r.id=f.receipt_id WHERE f.kind='live'")] if pinned and not raising else []
+                timing = []
+                for r in (w.st.db.execute("SELECT f.kind, r.started_at, r.summary AS own FROM learner_fits f JOIN receipts "
+                                          "r ON r.id=f.receipt_id WHERE f.kind='live'").fetchall()
+                          if pinned and not raising else []):
+                    house = w.st.db.execute("SELECT finished_at, summary FROM receipts WHERE id=?",
+                                            (json.loads(r["own"])["house_receipt"],)).fetchone()
+                    timing.append((str(r["kind"]), str(r["started_at"]), str(house["finished_at"]), str(house["summary"])))
                 return {"intents": intents, "receipts": receipts, "picks": picks, "learner_intents": mine,
                         "fits": [tuple(r) for r in w.st.db.execute("SELECT program, day, kind FROM learner_fits")]
                         if pinned else [], "parts": parts, "timing": timing}
@@ -1279,8 +1381,8 @@ class TheProof(unittest.TestCase):
         self.assertEqual(with_["receipts"], without["receipts"], "the House's receipts: the same, naming no learner")
         self.assertTrue(with_["timing"])
         for kind, started, finished, summary in with_["timing"]:
-            self.assertGreaterEqual(started, finished, "each live part starts once the House's receipt is finished")
-            self.assertNotIn("EVL-LRN", summary, "and that receipt names no learner")
+            self.assertGreaterEqual(started, finished, "each live part's own receipt starts once the House's has finished")
+            self.assertNotIn("EVL-LRN", summary, "and the House's receipt names no learner")
 
     def test_a_raising_learner_leaves_every_earlier_rows_intents_and_receipts_byte_identical(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1475,8 +1577,10 @@ class TheRecord(WorldCase):
             with mock.patch.object(LR, "WARM_ROWS", 0), mock.patch.object(LR, "WARM_SESSIONS", 0), \
                     mock.patch.object(LR, "training", lambda *a, **k: {"stats": [], "rows": 1, "sessions": 1,
                                                                         "keys_sha": "x", "by_day": {}}), \
-                    mock.patch.object(LR, "fit", lambda stats, width: {"beta": [1.0] * width, "d": [1.0] * width}):
+                    mock.patch.object(LR, "fit", lambda stats, width: {"beta": [5.0] * width, "d": [1.0] * width}):
                 LR.decide(self.st, learner(O1), day, kind=kind, now=lambda day=day: et(day, 9, 16, 30))
+        self.assertEqual(C7.record7(self.st, learner(O1)) or [], [], "no basis yet")
+        name_live(self.st, O1, days[1])     # (its own live receipt finished naming it: section 3.1's record)
         for r in self.st.db.execute("SELECT event, symbol, cik, entry_day FROM intents WHERE program=?", (O1,)).fetchall():
             self.w.outcome(O1, r["event"], r["symbol"], r["cik"], dt.date.fromisoformat(r["entry_day"]), a_g=0.01,
                            settled=et(days[2], 20, 30))
@@ -1487,6 +1591,16 @@ class TheRecord(WorldCase):
         self.assertEqual({r["entry_day"] for r in rows}, {days[1]}, "the catch-up's picks are never in the record")
         self.assertTrue(all(r["tradable"] == 1 and r["a"] is not None for r in rows))
         self.assertTrue(all(r["a"] < 0.01 for r in rows), "valued on a7: COST-7's costs taken off the gross")
+        # section 2.1's FIXED AT ENTRY: a bar or an equity row stored after the decision never moves an event's a7
+        self.st.db.execute("DELETE FROM costs7")
+        before = [(r["event"], r["a"]) for r in C7.record7(self.st, learner(O1))]
+        self.st.db.execute("UPDATE bars SET c=c*CASE WHEN rowid % 2 THEN 1.4 ELSE 0.7 END")
+        self.st.db.execute("UPDATE meta SET value='99.0' WHERE key LIKE 'equity:%'")
+        self.st.db.execute("UPDATE universe SET adv20=1e5")
+        self.assertEqual([(r["event"], r["a"]) for r in C7.record7(self.st, learner(O1))], before)
+        # and a live decision whose own live receipt did not finish `ok` is no part of the record
+        self.st.db.execute("UPDATE receipts SET status='error' WHERE job LIKE 'decide-open-lrnlive:%'")
+        self.assertEqual(C7.record7(self.st, learner(O1)), [])
 
 
 if __name__ == "__main__":

@@ -1168,14 +1168,15 @@ def five_programs() -> list[P.Program]:
 
 # ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
 def learner_part(ctx: Context, day: dt.date, at: str, rid: int, *, backfill_run: bool) -> dict[str, Any]:
-    """PREREG-EVL-7 SECTION 1.7'S ISOLATED LEARNER PART of the House's `at` decision of `day`: run AFTER that decision's
-    receipt is finished (so no earlier file's row, and no real money of one, ever waits on it: league/events/book.py
-    `decided` reads the receipt), only by a LIVE decision (a backfill run decides no learner: its auction is decided
-    later by the learner by itself), for each learner of the auction pinned (league/events/programs.py `learners`;
-    none while REGISTERED_AT_7 is None), under the learner's own bound (league/events/learner.py `live_part`: 90 s at
-    the open, 120 s at the close, never past the task's bound less its finish). It never raises: a failure or an
-    expiry is recorded beside and that auction is decided for the learner by itself later, shadow only. The receipt's
-    summary is never touched: it names no learner. Returns {learner key: what its part did}."""
+    """PREREG-EVL-7 SECTION 1.7'S LEARNER PART AS ITS OWN LIVE RECEIPT: run in the House's turn AFTER its own `at`
+    decision of `day` has finished (so no earlier file's row, its receipt, a `part_hold` wait or the book's
+    `EVENT_DECIDE_WAIT_S` wait ever includes it: league/events/book.py `decided` reads that receipt), only by a LIVE
+    decision (a backfill run decides no learner: its auction is decided later by the learner by itself), for each
+    learner of the auction pinned (league/events/programs.py `learners`; none while REGISTERED_AT_7 is None), each
+    under its own receipt `decide-<at>-lrnlive:<D>` and bound (league/events/learner.py `live_part`: 90 s at the open,
+    120 s at the close, never past the task's bound less EVL5_FINISH). It never raises: a failure or an expiry finishes
+    that receipt `error` and that auction is decided for the learner by itself later, shadow only. The House's own
+    receipt is never touched: it names no learner. Returns {learner key: what its part did}."""
     out: dict[str, Any] = {}
     if backfill_run:
         return out
@@ -1188,7 +1189,7 @@ def learner_part(ctx: Context, day: dt.date, at: str, rid: int, *, backfill_run:
     from . import learner as LR
 
     for prog in learners:
-        out[_key(prog)] = LR.live_part(ctx, prog, day, receipt_id=rid)
+        out[_key(prog)] = LR.live_part(ctx, prog, day, house_receipt_id=rid)
     return out
 
 

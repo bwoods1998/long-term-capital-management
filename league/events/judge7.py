@@ -9,8 +9,9 @@ and PREREG-EVL-6's start of its waiting runs, for each learner version AT LEARNI
 1. THE NIGHT'S COST BASIS. With no `cost_basis` row for the night, or one that cannot be read, EVERY LOOK OF THESE
    VERSIONS WAITS, and the run's end with it (section 2.2 (d); A66: late data delays a look, never its as-of close).
 2. ITS RUN RECORD (section 3.1; PREREG-EVL-6 section 1.2): `costs7.record7` with `before` the look's compute time (the
-   latest `cost_basis` row written before it: section 2.1), the forward picks of the decisions the House made LIVE
-   only, each valued on a7 and r7; run n >= 2 only the blocks after its start record's `after_day` and the entries
+   latest `cost_basis` row written before it: section 2.1), the forward picks of the decisions made LIVE only (each
+   under the learner's own live receipt `decide-<at>-lrnlive:<D>` finished `ok`), each valued on a7 and r7 with its
+   sigma, ADV20 and E_prev as the decision stored them; run n >= 2 only the blocks after its start record's `after_day` and the entries
    decided after its `after` (PREREG-EVL-6 section 3). Its control: `costs7.control7`, the POOL record of the same live
    decisions (section 6), read only when a look falls due.
 3. ITS LOOKS (PREREG-EVL-6 section 2, `schedule`): look k at the first session close X at which the run's record

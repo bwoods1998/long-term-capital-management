@@ -5378,11 +5378,11 @@ class EquityBook:
             rooms: dict[str, int] = {}
             insts = {}
             # PREREG-EVL-7 SECTION 1.9's ROOM: the learners of this auction that may take a name (live, with room, their
-            # real-money gate open) and the ROOM key from which the names wait for their parts (`book.learner_cut`): a
-            # program at or after it has its picks read now, as of this decision, and its names given only by the
-            # learners' own decision of the auction (`_event_decide_lrn`), the learners in ROOM's place among them, so
-            # a birth at learning comes after the learners and a Probe learner is the last of each Probe pass. Every
-            # name before the cut is given here, exactly as without the learners. No learner: no cut, as before.
+            # real-money gate open) and their ROOM key (`book.learner_cut`). Every PREREG-EVL-1 to -6 row is given its
+            # names here, whatever its band (a learner's pick waits for its own live receipt and keeps no room from an
+            # earlier row); an R3 BIRTH AFTER THAT KEY (`book.after_learners`) has its picks read now, as of this
+            # decision, and its names given only by the learners' own decision of the auction (`_event_decide_lrn`),
+            # after the learners in ROOM's place (A113's birth behind a waiting buy). No learner: no cut, as before.
             cut = self._event_learner_cut(at, s, adapter, lane)
             deferred: dict[str, dict[str, Any]] = {}
             for inst in self._instances(alive=True):
@@ -5406,7 +5406,7 @@ class EquityBook:
                     self._error(f"event picks {inst.family}", exc, out)
                     summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
                     continue
-                if cut is not None and tuple(adapter.room_key(inst.family, inst.band)) >= cut:
+                if cut is not None and adapter.after_learners(inst.family, inst.band, cut):
                     deferred[inst.family] = {"version": int(inst.version), "band": inst.band, "room": room,
                                              "picks": [adapter.pick_record(p) for p in got]}
                     summary["programs"][inst.family] = {"picks": len(got), "room": room, "after": "learners"}
@@ -5507,12 +5507,6 @@ class EquityBook:
             "decided_at": _iso(em.open_decide if at == "open" else em.close_decide), "why": None, "created_at": now},
             "iid")
 
-    #: PREREG-EVL-7: how long after the auction's decision time the learners' own decision of the auction waits for a
-    #: learner part still running (league/events/book.py `learner_pending`): the open's 240 s as the auction's own wait;
-    #: at the close until 15:48:30 ET on a full day (150 s), so its buys can go before the window's cut-off; then it is
-    #: decided on what is on record (a learner with no live decision of the session takes nothing at it).
-    EVENT_LRN_WAIT_S = {"open": 240.0, "close": 150.0}
-
     def _event_learners(self, at: str, adapter: Any) -> list[tuple[Instance, Any]]:
         """The live PREREG-EVL-7 learner instances whose entry is this auction, with their program rows."""
         is_learner = getattr(adapter, "is_learner", None)
@@ -5600,21 +5594,21 @@ class EquityBook:
 
     def _event_decide_lrn(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
         """PREREG-EVL-7 SECTION 1.9: THE LEARNERS' DECISION OF THE AUCTION (`eq_event_decisions` row (day, "<at>-lrn")),
-        once a session and auction, AFTER the auction's own decision (`_event_decide`), IN ROOM'S ORDER WITH THE NAMES
-        THAT DECISION HELD BACK FOR THEM: the auction's own decision gave every name before the learners' ROOM place
-        (`book.learner_cut`: at learning every PREREG-EVL-1 to -6 row, in a round-robin tier every earlier tier) and
-        read, as of its own decision time, the picks of every program from that place on (its summary's
-        `learners.deferred`: R3's births at learning, and with a Probe or Sized learner its whole tier and every tier
-        after it); here each live learner of this auction's entries is asked for its picks (`book.picks`: its LIVE
-        decision's intents in its rank order, less its real-money gate, the ERN and 8-K guards and one position per
-        issuer; none for a session its part did not decide live), and those programs and the learners are given their
-        names together by `book.allocate` (ROOM's order: a learner after every PREREG row of its band, before R3's
-        births; the last program of each pass inside Probe and Sized, A85), passing over every name the auction's own
-        decision gave and the picks `_event_gate` skips; then planned as buys with their side rows and sent in ROOM's
-        order (`send_key`). Their summaries go into the auction's own decision row too (`programs`, `sale_to_later`), so
+        once a session and auction, AFTER the auction's own decision (`_event_decide`, which gave every PREREG-EVL-1 to
+        -6 row its names whatever its band, so none ever waits on a learner) and ONLY ONCE EACH LEARNER'S OWN LIVE
+        RECEIPT OF THE AUCTION HAS FINISHED (`book.learner_pending`; league/events/learner.py `live_state`): while one
+        has not, this is tried again each minute of the window, with no other bound, and the births held back for the
+        learners (`learners.deferred` of the auction's summary, read as of its decision time: R3's births after the
+        learners in ROOM, `book.after_learners`) wait with it (A113's reading: a waiting pick keeps room from the
+        births only). A learner whose first finished live receipt names it is asked for its picks (`book.picks`: its
+        LIVE decision's intents in its rank order, less its real-money gate, the ERN and 8-K guards and one position per
+        issuer); one whose receipt does not name it takes nothing at the auction. Those births and the learners are
+        given their names together by `book.allocate` in ROOM's order (a learner before R3's births; in Probe and Sized
+        the learner before its band's births in each pass, A85), passing over every name the auction's own decision
+        gave and the picks `_event_gate` skips; then planned as buys with their side rows and sent in ROOM's order
+        (`send_key`). Their summaries go into the auction's own decision row too (`programs`, `sale_to_later`), so
         A85's reservation (`_event_recent`), the daily report and the alarms read them where they read every program's.
-        It waits for a learner part still running up to `EVENT_LRN_WAIT_S`; nothing while the lane holds no learner
-        and the auction held nothing back."""
+        Nothing while the lane holds no learner and the auction held nothing back."""
         day = em.day.isoformat()
         key = f"{at}-lrn"
         if getattr(adapter, "is_learner", None) is None or not self._event_decided(day, at) or \
@@ -5631,13 +5625,13 @@ class EquityBook:
             return
         decided_at = em.open_decide if at == "open" else em.close_decide
         waiting = [p.id for _, p in learners if adapter.learner_pending(lane, p, em.day)]
-        if waiting and now < decided_at + self.EVENT_LRN_WAIT_S[at]:
-            out["event_decide_lrn"] = f"waiting for the learner part of {', '.join(waiting)} ({at} {day})"
+        if waiting:
+            out["event_decide_lrn"] = f"waiting for the live receipt of {', '.join(waiting)} ({at} {day})"
             return
         moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
         given_names = {str(r["symbol"]).upper() for r in self.state.rows(
             "SELECT symbol FROM eq_event_intents WHERE side='buy' AND day=? AND at=?", (day, at))}
-        summary: dict[str, Any] = {"programs": {}, "after": at, "waited_out": waiting}
+        summary: dict[str, Any] = {"programs": {}, "after": at}
         wanted: dict[str, list[Any]] = {}
         rooms: dict[str, int] = {}
         bands: dict[str, str] = {}
@@ -5711,7 +5705,7 @@ class EquityBook:
             for family, row in taken.items():
                 later[family] = dict(later.get(family) or {}) | row
             merged["sale_to_later"] = later
-        merged["learners"] = dict(held_back) | {"decided": True, "waited_out": waiting}
+        merged["learners"] = dict(held_back) | {"decided": True}
         with self.state.transaction():
             for inst, program, pick in planned:
                 self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)

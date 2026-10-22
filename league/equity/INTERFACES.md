@@ -1875,25 +1875,28 @@ The two learners (league/events/learner.py; nothing of them exists while league/
 is None) trade through the event kind's own path with these additions, each additive:
 
 - `book.picks(lane, program, ...)` for a learner returns `book.learner_picks`: the intents of its LIVE decision of the
-  session (`learner.live_picks`; none for a catch-up, a late decision or an auction its part did not decide) in its
+  session ONLY ONCE ITS OWN LIVE RECEIPT `decide-<at>-lrnlive:<D>` HAS FINISHED `ok` NAMING IT (`learner.live_picks`,
+  `learner.live_state`; none for a catch-up, a late decision, a receipt running or not naming it) in its
   rank order, less EVL-LRN-O1's ERN guard (`book.ern_issuer`), EVL-LRN-ON's per-issuer 8-K guard
   (`book.issuer_8k_guard`), one position per issuer (`held_recently` and `held`). Each `Pick.rank` is the pick's place
   counted down from 8: no fitted figure reaches live.sqlite.
-- `book.is_learner`, `book.learner_pending` (no decision and no recorded failure yet), `book.learner_gate` (the
+- `book.is_learner`, `book.learner_pending` (its own live receipt of the auction not finished, no other decision and
+  no recorded failure), `book.learner_gate` (the
   learner's real-money gate, league/events/judge7.py `gate`: a reason, or None when it may buy; unreadable is a
-  reason), `book.learner_cut` (the ROOM key from which an auction's names wait for its learners: a learner at learning
-  its own key, one in a round-robin tier the whole tier), `book.pick_record` / `book.pick_of` (a `Pick` as JSON and
-  back, exactly).
+  reason), `book.learner_cut` (the learners' earliest ROOM key at the auction), `book.after_learners` (an R3 birth after
+  that key: the only programs whose names wait for the learners), `book.pick_record` / `book.pick_of` (a `Pick` as JSON
+  and back, exactly).
 - `book.universe_rows(lane, day)` reads, for a lane view carrying `eligible_by` (the learner's own `learner.AsOf`), only
   the live results decided at or before it (E5); every other caller's reading is unchanged.
 - `EquityBook._event_decide` passes over a learner's instance (`live._learner`) and, when a learner of the auction may
-  take a name (`_event_learner_cut`: live, with room, its gate open), gives the names of every program BEFORE
-  `book.learner_cut` at once and keeps the picks of every program from it on, read as of its decision time, in its
-  summary (`learners.deferred`: `book.pick_record`s, the program's room and band), naming them `"after": "learners"`.
-  With no such learner nothing is held back and the decision is exactly release 1019h's. `EquityBook._event_decide_lrn`
-  decides once, after it (row `"<at>-lrn"` in `eq_event_decisions`), waiting for a running part up to
-  `EVENT_LRN_WAIT_S` (`open` 240 s, `close` 150 s after the decision time): the learners' picks and the held-back
-  programs' (`book.pick_of`) given their names together by `book.allocate` in ROOM's order, passing over every name the
+  take a name (`_event_learner_cut`: live, with room, its gate open), gives every PREREG-EVL-1 to -6 row its names at
+  once whatever its band and keeps the picks of each R3 birth after the learners (`book.after_learners`), read as of its
+  decision time, in its summary (`learners.deferred`: `book.pick_record`s, the program's room and band), naming them
+  `"after": "learners"`. With no such learner nothing is held back and the decision is exactly release 1019h's.
+  `EquityBook._event_decide_lrn` decides once, after it (row `"<at>-lrn"` in `eq_event_decisions`), tried each minute of
+  the window until each learner's own live receipt has finished (`book.learner_pending`, no other bound): the learners'
+  picks (a learner its receipt does not name takes nothing) and the held-back births' (`book.pick_of`) given their names
+  together by `book.allocate` in ROOM's order, passing over every name the
   auction's decision gave; the buys planned with their side rows as any event buy's and sent by `_event_send` in
   `send_key`'s order; the summaries merged into the auction's own row (`programs`, `sale_to_later`, `learners.decided`),
   so `_event_recent` (A85), the daily report and the alarms read them as every program's. `_event_work_entry` passes a

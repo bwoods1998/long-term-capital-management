@@ -79,18 +79,22 @@ def live_sessions(case: T7.WorldCase, days: list[dt.date], *, per: int = 2, a_g:
     for day in days:
         s = w.session(day)
         tau = s.open_decide if prog.entry_at == "open" else s.close_decide
-        st.db.execute("INSERT INTO learner_fits(program, version, day, tau, kind, status, n_picks, finished_at) VALUES(?, 1, "
-                      "?, ?, ?, 'ok', ?, ?)", (pid, day.isoformat(), S.iso(tau), kind, per, S.iso(tau)))
+        st.db.execute("INSERT INTO learner_fits(program, version, day, tau, kind, status, n_picks, finished_at, e_prev) "
+                      "VALUES(?, 1, ?, ?, ?, 'ok', ?, ?, 10000.0)", (pid, day.isoformat(), S.iso(tau), kind, per,
+                                                                    S.iso(tau)))
+        feats = json.dumps({"x": [0.0] * len(LR.FEATURES[pid]), "hist": 0})
         for rank in range(1, per + 1):
             cik, sym = w.issuer()
             w.universe(day, sym, cik)
             ev = w.article(f"lrn-{pid}-{day.isoformat()}-{rank}", sym, knowable=et(w.prior(day), 18, rank))
             st.db.execute("INSERT INTO learner_cands(program, version, day, cik, event, symbol, families, kept, eligible, "
-                          "sig20, adv20, prev_close, knowable_at, picked, rank, kind) VALUES(?, 1, ?, ?, ?, ?, '[]', 1, 1, "
-                          "0.03, 2e7, 20.0, ?, 1, ?, ?)", (pid, day.isoformat(), cik, ev, sym,
-                                                          S.iso(et(w.prior(day), 18, rank)), rank, kind))
+                          "features, sig20, adv20, prev_close, knowable_at, picked, rank, kind) VALUES(?, 1, ?, ?, ?, ?, '[]', "
+                          "1, 1, ?, 0.03, 2e7, 20.0, ?, 1, ?, ?)", (pid, day.isoformat(), cik, ev, sym, feats,
+                                                                   S.iso(et(w.prior(day), 18, rank)), rank, kind))
             w.outcome(pid, ev, sym, cik, day, a_g=a_g, settled=et(day, 20, 30))
             st.db.execute("UPDATE intents SET rank_key=? WHERE program=? AND event=?", (0.05 - 0.001 * rank, pid, ev))
+        if kind == "live":
+            T7.name_live(st, pid, day)
 
 
 class FakeScreen:
@@ -469,8 +473,8 @@ class TheRoom(TB.EventTest):
              "2026-11-03T01:00:00Z", "c" * 40))
         self.birth = P.load_births(self.h.lane.st)[0]
 
-    def live(self, pid: str, picks: list[tuple[str, str, float]]) -> None:
-        T7.TheMoney.live(self, self.h.lane, pid, TB.DAY, picks)
+    def live(self, pid: str, picks: list[tuple[str, str, float]], *, named: bool | None = True) -> None:
+        T7.TheMoney.live(self, self.h.lane, pid, TB.DAY, picks, named=named)
 
     def wants_brth(self) -> None:
         """BRTH: an 8-K with item 5.02 (no PREREG program reads it) that the birth takes."""
@@ -508,28 +512,68 @@ class TheRoom(TB.EventTest):
         self.assertEqual(self.buys(), [(BIRTH, "BRTH")])
         self.assertNotIn("learners", self.h.book._event_summary(TB.DAY.isoformat(), "open"))
 
-    def test_a_learner_at_probe_is_the_last_program_of_each_probe_pass(self):
+    def test_at_probe_every_prereg_row_takes_its_names_first_and_the_learner_comes_before_the_bands_births(self):
+        """The final text's section 1.9: a learner pick waits for its own live receipt and keeps no room from any
+        earlier row, IN EVERY BAND, so a Probe PREREG row is given its names at the auction's own decision (both of
+        them, whatever the round-robin would have given the learner), and the learner comes before its band's R3
+        birth, which waits for it."""
         read = next(p for p in EB.seatable() if p.id == "EVL-8K-READ-O1")
         for acc, cik, sym in (("o-1", TB.CIK, "ACME"), ("o-2", TB.CIK2, "BETA")):     # (8.01, score 2: no ERN(D))
             self.h.lane.filing(acc, cik, accepted=TB.iso(TB.PRIOR, 17, 0), items=("8.01",))
             self.h.lane.verdict(acc, 2, answered=TB.iso(TB.PRIOR, 17, 5))
             self.h.lane.universe(TB.DAY, sym, cik, 16.0)
             self.h.lane.intent(read, f"8k:{acc}", sym, cik, TB.DAY, TB.DAY)
+        TB.earnings(self.h.lane, "b-1", TB.CIK3, "GAMA", items=("5.02",))           # the birth's: GAMA
+        self.h.lane.intent(self.birth, "8k:b-1", "GAMA", TB.CIK3, TB.DAY, TB.DAY)
         for sym in ("ACME", "BETA", "GAMA"):
             self.h.symbol(sym, last=17.0, sd=0.02)
         self.h.lane.band(read.id, "probe", version=read.version)
         self.h.lane.band(O1, "probe", version=1)
+        self.h.lane.band(BIRTH, "probe", version=1)
         self.live(O1, [(TB.CIK2, "BETA", 16.0), (TB.CIK3, "GAMA", 16.0)])
         self.ready(self.h)
         with mock.patch.object(J7, "STAYS_JUDGED", True):
             self.h.tick(9, 15)
             self.h.tick(9, 16)
-        got = self.buys()
-        self.assertEqual(sorted(got), sorted([(read.id, "ACME"), (O1, "BETA"), (O1, "GAMA")]),
-                         "pass 1: the PREREG Probe row ACME, the learner BETA; pass 2: BETA is given, the learner GAMA")
+        got = sorted(self.buys())
+        self.assertEqual(got, sorted([(read.id, "ACME"), (read.id, "BETA"), (O1, "GAMA")]),
+                         "the PREREG Probe row's two names; the learner GAMA before the Probe birth")
+        main = self.h.book._event_summary(TB.DAY.isoformat(), "open")
+        self.assertEqual(list(main["learners"]["deferred"]), [BIRTH], "only the birth waited for the learner")
+        self.assertEqual(main["programs"][BIRTH].get("skipped"), {"name_given": 1})
         inst = self.h.book._instance(L.instance_key(O1, 1))
         counts, _ = self.h.book._event_recent(inst, "open", 5)
-        self.assertEqual(counts, [2], "A85's reservation reads the learner's picks in the auction's own row")
+        self.assertEqual(counts, [2], "A85's reservation reads the learner's real-money picks in the auction's own row")
+
+    def test_no_earlier_rows_wait_includes_the_learners_live_receipt(self):
+        """Section 10: the book's wait for the lane's own decision (`EVENT_DECIDE_WAIT_S`, `book.decided`) reads the
+        House's receipt only: finished, the auction is decided for every earlier row while the learner's own live
+        receipt still runs."""
+        st = self.h.lane.st
+        self.h.lane.decided(TB.DAY, "open")
+        st.start_receipt(LR.live_job(learner(O1), TB.DAY))        # (running: never finished)
+        lane = EB.Lane(st.root / S.DB_NAME)
+        self.addCleanup(lane.close)
+        self.assertTrue(EB.decided(lane, TB.DAY, "open"))
+        self.assertEqual(LR.live_state(lane, learner(O1), TB.DAY)["state"], "waiting")
+        self.assertTrue(EB.learner_pending(lane, learner(O1), TB.DAY))
+
+    def test_a_waiting_learner_keeps_no_room_from_an_earlier_row(self):
+        """While the learner's own live receipt runs, every PREREG row's buy is planned and SENT; only the birth waits."""
+        TB.earnings(self.h.lane, "a-1", TB.CIK, "ACME")
+        read = next(p for p in EB.seatable() if p.id == "EVL-ERN-READ-O1")
+        self.h.lane.intent(read, "8k:a-1", "ACME", TB.CIK, TB.DAY, TB.DAY)
+        self.h.symbol("ACME", last=17.0, sd=0.02)
+        self.wants_brth()
+        self.live(O1, [(TB.CIK2, "BRTH", 16.0)], named=None)        # its live receipt still running
+        self.ready(self.h)
+        self.h.tick(9, 15)
+        self.h.tick(9, 16)
+        self.assertEqual(self.buys(), [(read.id, "ACME")])
+        self.assertEqual([b["symbol"] for b in self.h.bodies() if b.get("side") == "buy"], ["ACME"], "sent, not held")
+        T7.name_live(self.h.lane.st, O1, TB.DAY)
+        self.h.tick(9, 17)
+        self.assertEqual(self.buys(), [(read.id, "ACME"), (O1, "BRTH")], "then the learner, then nothing for the birth")
 
 
 class TheLine(TB.EventTest):

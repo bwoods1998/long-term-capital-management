@@ -16,7 +16,10 @@ THE PER-EVENT COST (section 2.1). For an event with entry session D:
   N_in when the exit print is 0; FEE_in = 1e4 x $0.01 / N_in; FEE_out = 1e4 x ($0.01 + ceilcent($27.80e-6 x N_out) +
   ceilcent(min($0.000166 x n_ref, $8.30))) / N_out) and THE MEASURED RATE 1.25 x Fbar_side.
 - M_in, M_out, G and Fbar: THE LATEST `cost_basis` ROW WRITTEN BEFORE THE LOOK IS COMPUTED (E11). M, G and Fbar only
-  rise; the penny ceiling and the impact of an event are fixed at its own entry (`costs7`, written once).
+  rise; the penny ceiling and the impact of an event are fixed at its own entry (`costs7`, written once), and so are
+  its sigma, ADV20 and E_prev: AS THE LEARNER'S DECISION STORED THEM AT TAU (re-check 2; `stored_for`: the
+  `learner_cands` row of the pick, or of the POOL candidate, and its decision's E_prev), never a bar or an equity row
+  stored later.
 
 THE MEASURED TERMS (section 2.2), one `cost_basis` row a night after the score and before the screen (`nightly`):
 (a) SLIPPAGE: the real event fills' gaps as league/events/done.py measures them (entry (fill / raw shadow print - 1)
@@ -36,7 +39,8 @@ THE MEASURED TERMS (section 2.2), one `cost_basis` row a night after the score a
 (d) NO ROW FOR THE NIGHT, or one that cannot be read: every look of these versions WAITS (`basis_for`).
 
 THE JUDGED RECORD (section 3.1; `record7`, `control7`): a learner's settled TRADABLE intents OF DECISIONS MADE LIVE BY
-THE HOUSE (league/events/learner.py kind `live`, never a catch-up's nor a late decision's), knowable after its
+THE HOUSE (league/events/learner.py kind `live` under its own live receipt `decide-open-lrnlive:<D>` /
+`decide-close-lrnlive:<D>` finished `ok`, `LIVE_FITS`; never a catch-up's nor a late decision's), knowable after its
 registration, each with a = a7 and r = r7; its control, the POOL record of those same live decisions (section 6),
 valued on a7. `judge_record` hands them to PREREG-EVL-6's screen as frozen (league/events/screen.py `v6_judge` over
 `blocks6`, PREREG-EVL-6's code), its ranking for the top-CAP guard the intents' rank_key (ahat). With no PREREG-EVL-6
@@ -158,9 +162,54 @@ def _print(store: Any, symbol: str, day: str, label: str) -> float | None:
     return px if math.isfinite(px) else None
 
 
-def fixed_parts(store: Any, program: str, version: int, event: str) -> dict[str, Any] | None:
+def stored_inputs(store: Any, learner: str, version: int, day: Any, cik: Any) -> dict[str, Any] | None:
+    """SECTION 2.1's FIXED AT ENTRY (re-check 2): an event's sigma, ADV20 and E_prev for IMP and FEE are the values the
+    learner's decision stored at its tau (`learner_cands`: sig20 and whether its history was missing, adv20,
+    prev_close; `learner_fits`: E_prev), for this file's events and their POOL candidates alike: E9's sigma is 0.04 with
+    the history missing, else the stored sig20 floored at 0.02 and capped at 0.25. None when no such candidate (kept,
+    with its features) or no decision is on record."""
+    try:
+        c = store.db.execute("SELECT sig20, adv20, prev_close, features FROM learner_cands WHERE program=? AND version=? AND "
+                             "day=? AND cik=? AND kept=1", (str(learner), int(version), str(day), str(cik))).fetchone()
+        f = store.db.execute("SELECT e_prev FROM learner_fits WHERE program=? AND version=? AND day=?",
+                             (str(learner), int(version), str(day))).fetchone()
+    except Exception:  # noqa: BLE001 - no learner table: nothing stored
+        return None
+    if c is None or f is None or c["features"] is None:
+        return None
+    try:
+        hist = bool(json.loads(c["features"]).get("hist"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    sig = c["sig20"]
+    sigma = SIG_MISSING if hist else (None if sig is None else min(SIG_CAP, max(SIG_FLOOR, float(sig))))
+    return {"sigma": sigma, "adv20": c["adv20"], "prev_close": c["prev_close"], "e_prev": f["e_prev"]}
+
+
+def stored_for(store: Any, program: str, version: int, event: str) -> dict[str, Any] | None:
+    """The decision-time inputs of an event's cost (`stored_inputs`): a learner's own pick's (its candidate row of its
+    entry session), or a POOL program's event's (the candidate row of the learner whose pool holds the program, for the
+    event's issuer and entry session); None for any other event (COST-7 values only these versions and their controls)."""
+    from .learner import POOLS
+
+    i = store.db.execute("SELECT entry_day, cik FROM intents WHERE program=? AND version=? AND event=?",
+                         (program, int(version), event)).fetchone()
+    if i is None:
+        return None
+    if applies(program, version):
+        return stored_inputs(store, program, int(version), i["entry_day"], i["cik"])
+    for learner, pool in POOLS.items():
+        if int(version) == 1 and program in pool:
+            return stored_inputs(store, learner, 1, i["entry_day"], i["cik"])
+    return None
+
+
+def fixed_parts(store: Any, program: str, version: int, event: str, *,
+                stored: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     """THE PARTS OF AN EVENT'S COST FIXED AT ITS OWN ENTRY (section 2.1): sigma, ADV20, E_prev, prev_close, n_ref, the raw
-    prints, the penny ceiling and the impact, from stored fields only; None while the event has no settled outcome."""
+    prints, the penny ceiling and the impact; sigma, ADV20, E_prev and prev_close AS THE LEARNER'S DECISION STORED THEM
+    AT TAU (`stored`, `stored_for`: section 2.1's FIXED AT ENTRY, so no bar or equity row stored after the decision
+    moves an event's a7), else read from the store; None while the event has no settled outcome."""
     o = store.db.execute("SELECT * FROM outcomes WHERE program=? AND version=? AND event=? AND status='settled'",
                          (program, int(version), event)).fetchone()
     i = store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND event=?",
@@ -168,11 +217,14 @@ def fixed_parts(store: Any, program: str, version: int, event: str) -> dict[str,
     if o is None or i is None:
         return None
     symbol, entry_day = str(i["symbol"]).upper(), dt.date.fromisoformat(str(i["entry_day"]))
-    uni = store.db.execute("SELECT prev_close, adv20 FROM universe WHERE day=? AND symbol=?",
-                           (entry_day.isoformat(), symbol)).fetchone()
-    equity = _equity(store, entry_day)
-    prev = None if uni is None else uni["prev_close"]
-    adv = None if uni is None else uni["adv20"]
+    if stored is not None:
+        equity, prev, adv = stored.get("e_prev"), stored.get("prev_close"), stored.get("adv20")
+    else:
+        uni = store.db.execute("SELECT prev_close, adv20 FROM universe WHERE day=? AND symbol=?",
+                               (entry_day.isoformat(), symbol)).fetchone()
+        equity = _equity(store, entry_day)
+        prev = None if uni is None else uni["prev_close"]
+        adv = None if uni is None else uni["adv20"]
     label_in = "close" if str(i["entry_at"]) == "close" else "open"
     raw_in = _print(store, symbol, entry_day.isoformat(), label_in)
     exit_day, exit_kind = str(i["exit_day"]), str(i["exit_at"])
@@ -184,9 +236,9 @@ def fixed_parts(store: Any, program: str, version: int, event: str) -> dict[str,
         except (ValueError, KeyError, TypeError):
             pass
     raw_out = 0.0 if exit_kind == "zero" else _print(store, symbol, exit_day, exit_kind)
-    sigma = sigma7(_closes(store, symbol, entry_day))
+    sigma = sigma7(_closes(store, symbol, entry_day)) if stored is None else stored.get("sigma")
     ok = equity is not None and equity > 0 and adv is not None and float(adv) > 0 and prev is not None and \
-        float(prev) > 0 and raw_in is not None and raw_in > 0
+        float(prev) > 0 and raw_in is not None and raw_in > 0 and sigma is not None
     out: dict[str, Any] = {"program": program, "version": int(version), "event": event, "sigma": sigma,
                            "adv20": None if adv is None else float(adv), "e_prev": equity,
                            "prev_close": None if prev is None else float(prev), "n_ref": None, "raw_in": raw_in,
@@ -502,7 +554,10 @@ def nightly(store: Any, night: dt.date, now: dt.datetime) -> dict[str, Any]:
         db.execute(f"INSERT OR IGNORE INTO cost_basis({', '.join(row)}) VALUES({', '.join('?' * len(row))})",
                    tuple(row.values()))
         for program, version, event in to_cost(store):
-            parts = fixed_parts(store, program, version, event)
+            stored = stored_for(store, program, version, event)
+            if stored is None:
+                continue        # (no learner candidate of it: no record or control of this file reads it)
+            parts = fixed_parts(store, program, version, event, stored=stored)
             if parts is not None:
                 written += write_fixed(store, parts, now)
     return row | {"costs7_written": written}
@@ -530,9 +585,20 @@ def to_cost(store: Any) -> list[tuple[str, int, str]]:
 
 # ------------------------------------------------------------------------------------------------ the judged record
 def _parts(store: Any, program: str, version: int, event: str) -> dict[str, Any] | None:
+    """An event's fixed parts: its `costs7` row, else computed from the learner's decision-time inputs (`stored_for`);
+    None (not TRADABLE under COST-7) with no such inputs."""
     row = store.db.execute("SELECT * FROM costs7 WHERE program=? AND version=? AND event=?",
                            (program, int(version), event)).fetchone() if _has(store, "costs7") else None
-    return dict(row) if row is not None else fixed_parts(store, program, version, event)
+    if row is not None:
+        return dict(row)
+    stored = stored_for(store, program, version, event)
+    return None if stored is None else fixed_parts(store, program, version, event, stored=stored)
+
+
+#: The judged record's decisions: kind `live` whose own live receipt (league/events/learner.py `LIVE_RECEIPT`) finished
+#: `ok` (section 3.1), never a catch-up's nor a failed part's later decision.
+LIVE_FITS = ("JOIN receipts rc ON rc.id=f.receipt_id AND rc.status='ok' AND rc.finished_at IS NOT NULL AND "
+             "rc.job LIKE 'decide-%-lrnlive:%'")
 
 
 def record7(store: Any, learner: P.Program, *, before: dt.datetime | None = None) -> list[dict[str, Any]] | None:
@@ -550,9 +616,9 @@ def record7(store: Any, learner: P.Program, *, before: dt.datetime | None = None
     out = []
     for r in store.db.execute("SELECT i.event, i.cik, i.entry_day, i.exit_day, i.rank_key, i.decided_at, o.* FROM intents i "
                               "JOIN learner_fits f ON f.program=i.program AND f.version=i.version AND f.day=i.entry_day "
-                              "JOIN outcomes o ON o.program=i.program AND o.version=i.version AND o.event=i.event WHERE "
-                              "i.program=? AND i.version=? AND f.kind='live' AND o.status='settled' ORDER BY i.entry_day, "
-                              "i.event", (learner.id, learner.version)).fetchall():
+                              f"{LIVE_FITS} JOIN outcomes o ON o.program=i.program AND o.version=i.version AND "
+                              "o.event=i.event WHERE i.program=? AND i.version=? AND f.kind='live' AND o.status='settled' "
+                              "ORDER BY i.entry_day, i.event", (learner.id, learner.version)).fetchall():
         known = knowable(store, str(r["event"]))
         if known is None or known <= reg:
             continue
@@ -596,7 +662,7 @@ def control7(store: Any, learner: P.Program, *, before: dt.datetime | None = Non
     now = S.utc_now() if before is None else before
     out = []
     days = [dt.date.fromisoformat(str(r[0])) for r in store.db.execute(
-        "SELECT day FROM learner_fits WHERE program=? AND version=? AND kind='live' ORDER BY day",
+        f"SELECT f.day FROM learner_fits f {LIVE_FITS} WHERE f.program=? AND f.version=? AND f.kind='live' ORDER BY f.day",
         (learner.id, learner.version))]
     for day in days:
         outs = LR.pool_outcomes(store, learner, day, now)
@@ -646,4 +712,4 @@ __all__ = ["VERSIONS", "PS", "applies", "ceilcent", "sigma7", "n_ref", "penny", 
            "write_fixed", "costed", "basis_for", "incomplete_sessions", "gaps", "ucb", "selection", "attempts",
            "checkpoints", "fbar", "nightly", "to_cost", "record7", "control7", "judge_record", "SCHEMA", "TABLES", "knowable",
            "ensure", "SIG_FLOOR", "SIG_CAP", "SIG_MISSING", "M_FLOOR", "night_row", "ATTEMPT_STATES_NOT_SENT",
-           "SHADOW_WAITING"]
+           "SHADOW_WAITING", "stored_inputs", "stored_for", "LIVE_FITS"]

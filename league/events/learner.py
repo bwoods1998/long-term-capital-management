@@ -15,8 +15,10 @@ minutes for EVL-LRN-ON), reads ONLY THE STORE, every cut-off from stored times a
    PICKED when kept, its primary event knowable after REGISTERED_AT_7, and the learner holds no intent of the issuer
    inside PREREG-EVL-1 section 5's five sessions either way (programs.py `_held_recently`, A72; every written,
    non-skipped intent of the id and version, the catch-up's included).
-2. FEATURES (section 1.4; `FEATURES`): 57 columns for EVL-LRN-O1, 63 for EVL-LRN-ON, each from rows stored before tau,
-   written once with the candidate (`learner_cands`), never recomputed. The 16 headline flags and `dup72` are the
+2. FEATURES (section 1.4; `FEATURES`): 52 columns for EVL-LRN-O1, 58 for EVL-LRN-ON, each from rows stored before tau,
+   written once with the candidate (`learner_cands`), never recomputed. NO COLUMN IS BUILT FROM THE ISSUER'S OWN PAST
+   RETURNS OR PRICES but sig20 and EVL-LRN-ON's dmove (the final text's item 11: r1, r5, r20 and the levels of ADV and
+   price are deleted). The 16 headline flags and `dup72` are the
    reader lens's frozen `KEYWORDS`, `words`, `STOP` and `jaccard` (goal-2026-10-19/evl7/reader/features_spec.py,
    sha256 `SPEC_SHA`), copied here verbatim. EVL-LRN-ON's `dmove` reads D's '1530' mark by its own bar time before tau,
    whatever its fetch time (E6); the live close decision fetches the candidates' marks in its batched requests first.
@@ -39,8 +41,11 @@ minutes for EVL-LRN-ON), reads ONLY THE STORE, every cut-off from stored times a
    is not finite or a Cholesky that fails picks nothing, its fits row says why.
 
 ONE DECISION, WRITTEN ONCE: the candidates, the fit and the picks in one transaction; a decision on record is never
-decided again. Its KIND: `live` (the House's own decision of the auction, run right after that decision's receipt
-finished, under its own time bound: `BOUND_S`; league/events/run.py `learner_part`), `catchup` (THE DECISIONS BEFORE
+decided again. Its KIND: `live` (the learner's OWN LIVE RECEIPT of the auction, `decide-open-lrnlive:<D>` /
+`decide-close-lrnlive:<D>` (`LIVE_RECEIPT`), which the House starts in the same turn once its own decision of the
+auction has finished, under its own time bound, `BOUND_S` from its start and never past the task's bound less run.py's
+`EVL5_FINISH`; league/events/run.py `learner_part`; the receipt finishes `ok` naming the learner once its one write
+committed, else `error` with why), `catchup` (THE DECISIONS BEFORE
 THE RELEASE, E4) and `late` (a live part that failed or ran past its bound), both decided later by themselves exactly
 as of tau under receipts `decide-open-lrn:<D>` / `decide-close-lrn:<D>` (`RECEIPT`), shadow only, never traded and never
 judged; `reconstruct` (the candidate sets of the sessions before REGISTERED_AT_7, once, as of each session's own tau,
@@ -90,15 +95,17 @@ SIG_FLOOR, SIG_CAP, SIG_MISSING = 0.005, 0.25, 0.03     # section 1.4 items 10 a
 CLOSES = 20                 # section 1.4 item 10: the 20 latest stored raw closes of sessions before D
 LIMIT_MULTIPLE = 1.25       # TRADABLE and the pool outcome's limit at entry (PREREG-EVL-1 section 5, PREREG-EVL-2)
 TRADABLE_SHARE = 0.10
-ADV_SCALE, PRICE_SCALE, SIG_SCALE, INS_SCALE = 1e7, 20.0, 0.03, 50_000.0
+SIG_SCALE, INS_SCALE = 0.03, 50_000.0
 DUP_WINDOW = dt.timedelta(hours=72)     # section 1.4 item 13
 BACK_SESSIONS = 20          # section 1.4 item 8: n_att20 and first20
 #: Section 1.7 / 1.11 item 8: the learner part's own time bound (seconds from its start), and never past the task's
 #: own bound less FINISH_S (the part never holds the House's task to its end).
 BOUND_S = {"open": 90.0, "close": 120.0}
 FINISH_S = 15.0
-#: Section 1.11 item 9: the receipts of a decision made by the learners by themselves (the catch-up, a failed part's).
+#: Section 1.11 item 9: the receipts of a decision made by the learners by themselves (the catch-up, a failed part's),
+#: and THE LEARNER'S OWN LIVE RECEIPT of an auction (sections 1.7, 3.1: its record and its real money read it).
 RECEIPT = {"open": "decide-open-lrn", "close": "decide-close-lrn"}
+LIVE_RECEIPT = {"open": "decide-open-lrnlive", "close": "decide-close-lrnlive"}
 KINDS = ("live", "catchup", "late", "reconstruct")
 #: Section 4 (E1, E2): each learner RUN is charged c7 = max(PREREG-EVL-6's 0.13, W7 rounded up) = 0.13 when it starts (W7
 #: measured 0.0870 at the worst plausible cell on fresh seeds), at most THREE runs an id over its life (so this file
@@ -155,14 +162,16 @@ def jaccard(a: set[str], b: set[str]) -> float:
 
 # ------------------------------------------------------------------------------------------------------ the features
 def feature_names(program: str) -> tuple[str, ...]:
-    """Section 1.4's columns of `program`, in their order (57 for EVL-LRN-O1, 63 for EVL-LRN-ON)."""
+    """Section 1.4's columns of `program`, in their order (52 for EVL-LRN-O1, 58 for EVL-LRN-ON: the final text's item
+    11 deletes the issuer's own trailing returns r1, r5, r20 and the two levels ln(adv20 / 1e7), ln(prev_close / 20); no
+    column is built from the issuer's own past returns or prices but sig20 and EVL-LRN-ON's dmove)."""
     pool = POOLS[program]
     dummies = tuple(f"pool_{p}" for p in pool[1:])
     out = dummies + ("multi", "s_num", "s_ge2", "s_eq3", "s_le_m1", "no_score") + tuple(f"s_x_{d}" for d in dummies)
     out += ("guide_raised", "guide_lowered") + tuple(f"item_{i}" for i in ITEMS) + ("src_benzinga", "n_art", "n_att20",
                                                                                       "first20", "mon", "fri")
-    out += ("ln_adv20", "ln_prev_close", "ln_sig20", "bench_iwm") + tuple(f"sic_{g}" for g, _ in SIC_GROUPS)
-    out += ("r1", "r5", "r20", "hist_missing") + tuple(KEYWORDS) + ("dup72",)
+    out += ("ln_sig20", "bench_iwm") + tuple(f"sic_{g}" for g, _ in SIC_GROUPS)
+    out += ("hist_missing",) + tuple(KEYWORDS) + ("dup72",)
     if program == "EVL-LRN-O1":
         out += ("overnight", "pre", "late", "ln_ins")
     else:
@@ -189,7 +198,7 @@ CREATE TABLE IF NOT EXISTS learner_fits(program TEXT NOT NULL, version INTEGER N
   tau TEXT NOT NULL, kind TEXT NOT NULL, receipt TEXT, receipt_id INTEGER, status TEXT NOT NULL, why TEXT,
   n_cands INTEGER, n_kept INTEGER, n_rows INTEGER, n_sessions INTEGER, n_picks INTEGER, keys_sha TEXT, code_sha TEXT,
   beta TEXT, d TEXT, xbar TEXT, eligible_by TEXT, train_last TEXT, started_at TEXT, finished_at TEXT NOT NULL,
-  PRIMARY KEY(program, version, day));
+  e_prev REAL, PRIMARY KEY(program, version, day));
 CREATE TABLE IF NOT EXISTS learner_cands(program TEXT NOT NULL, version INTEGER NOT NULL, day TEXT NOT NULL,
   cik TEXT NOT NULL, event TEXT NOT NULL, symbol TEXT, families TEXT NOT NULL, kept INTEGER NOT NULL,
   eligible INTEGER NOT NULL, features TEXT, sig20 REAL, adv20 REAL, prev_close REAL, knowable_at TEXT, e REAL, z REAL,
@@ -203,8 +212,19 @@ TABLES = ("learner_fits", "learner_cands", "learner_stats")
 
 
 def ensure(db: Any) -> None:
-    """The learner's tables on a store (additive, idempotent)."""
+    """The learner's tables on a store (additive, idempotent; a `learner_fits` from before E_prev was kept gains it)."""
     db.executescript(SCHEMA)
+    _migrate(db)
+
+
+def _migrate(db: Any) -> None:
+    have = {str(r[1]) for r in db.execute("PRAGMA table_info(learner_fits)")}
+    if "e_prev" not in have:
+        try:
+            db.execute("ALTER TABLE learner_fits ADD COLUMN e_prev REAL")
+        except Exception as exc:  # noqa: BLE001 - another process added it first
+            if "duplicate column" not in str(exc):
+                raise
 
 
 class Expired(Exception):
@@ -594,11 +614,8 @@ def features(reads: Reads, cand: Cand) -> tuple[list[float], float, bool]:
         v["n_att20"] = math.log1p(reads.single_counts(lo20, win[0]).get(symbol, 0))
     v["first20"] = float(cand.cik not in reads.recent)
     v["mon"], v["fri"] = float(reads.mon), float(reads.fri)
-    # items 10-12: the issuer
-    adv = cand.adv20
+    # items 10 and 12: the issuer (item 11 and item 10's two levels are deleted: no own past return or price level)
     prev = float(cand.uni.get("prev_close") or 0.0)
-    v["ln_adv20"] = math.log(adv / ADV_SCALE) if adv > 0 else 0.0
-    v["ln_prev_close"] = math.log(prev / PRICE_SCALE) if prev > 0 else 0.0
     v["bench_iwm"] = float(str(cand.uni.get("bench") or "").upper() == "IWM")
     sic = _sic(st, cand.cik)
     for group, spans in SIC_GROUPS:
@@ -612,9 +629,6 @@ def features(reads: Reads, cand: Cand) -> tuple[list[float], float, bool]:
     else:
         sig20 = min(SIG_CAP, max(SIG_FLOOR, raw))
         v["ln_sig20"] = math.log(sig20 / SIG_SCALE)
-        v["r1"] = _clip(math.log(closes[0] / closes[1]), 0.5)
-        v["r5"] = _clip(math.log(closes[0] / closes[5]), 1.0)
-        v["r20"] = _clip(math.log(closes[0] / closes[19]), 1.5)
     # item 13: the free headline features of an article primary
     if news_primary:
         headline = str(row.get("headline") or "")
@@ -1016,6 +1030,7 @@ def _write(store: Any, learner: P.Program, day: dt.date, got: Mapping[str, Any],
         f"{kind} (PREREG-EVL-7 section 1.7: training state and a reported shadow, never judged, never traded)")
     with store.tx() as db:
         ensure_in_tx(db)
+        _migrate(db)
         if db.execute("SELECT 1 FROM learner_fits WHERE program=? AND version=? AND day=?",
                       (learner.id, learner.version, day.isoformat())).fetchone() is not None:
             return {"known": True}
@@ -1034,7 +1049,8 @@ def _write(store: Any, learner: P.Program, day: dt.date, got: Mapping[str, Any],
         written = P.write_intents(store, learner, day, cands, decided_at=tau, why=why_intent) if cands else {}
         db.execute("INSERT INTO learner_fits(program, version, day, tau, kind, receipt, receipt_id, status, why, n_cands, "
                    "n_kept, n_rows, n_sessions, n_picks, keys_sha, code_sha, beta, d, xbar, eligible_by, train_last, "
-                   "started_at, finished_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   "started_at, finished_at, e_prev) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                   "?, ?)",
                    (learner.id, learner.version, day.isoformat(), S.iso(tau), kind, receipt, receipt_id, got["status"],
                     str(got.get("why") or "")[:400], len(got.get("cands") or []),
                     sum(1 for c in got.get("cands") or [] if c.kept), train.get("rows"), train.get("sessions"),
@@ -1042,7 +1058,7 @@ def _write(store: Any, learner: P.Program, day: dt.date, got: Mapping[str, Any],
                     None if not fitted else json.dumps(fitted["beta"]), None if not fitted else json.dumps(fitted["d"]),
                     None if not fitted else json.dumps(fitted.get("xbar")),
                     None if got.get("bound") is None else S.iso(got["bound"]),
-                    max(train.get("by_day") or {}, default=None), S.iso(started), S.iso(now)))
+                    max(train.get("by_day") or {}, default=None), S.iso(started), S.iso(now), _float(got.get("equity"))))
     return {"kind": kind, "status": got["status"], "picks": len(picks), "candidates": len(got.get("cands") or []),
             "rows": train.get("rows"), "intents": written}
 
@@ -1091,15 +1107,50 @@ def decide(store: Any, learner: P.Program, day: dt.date, *, kind: str, now: Call
 
 
 # ------------------------------------------------------------------------------------------- the live part (run.py)
-def live_part(ctx: Any, learner: P.Program, day: dt.date, *, receipt_id: int | None, budget: float | None = None
-              ) -> dict[str, Any]:
-    """THE LEARNER'S PART OF THE HOUSE'S DECISION (section 1.7's ISOLATION), run by league/events/run.py right after the
-    House's decision receipt of the auction finished (so no earlier row waits on it), only for the FIRST such receipt
-    of the session (E5's bound is its finish) and only when that decision was live: the decision under its own bound
-    (`BOUND_S`, from now, never past the task's bound less FINISH_S), kind `live`, recorded under that receipt's id.
-    EVL-LRN-ON's candidates' '1530' marks are read first, in the close decision's batched requests (run.py
-    `_marks_1530`, E6). NEVER RAISES: a failure or an expiry writes nothing but meta `PART_KEY` ({status, why, at}),
-    and that auction is decided later by itself (`catchup`, kind `late`), in shadow only."""
+def live_job(learner: P.Program, day: dt.date) -> str:
+    """The learner's own live receipt of the auction (section 1.11 item 9): `decide-open-lrnlive:<D>` /
+    `decide-close-lrnlive:<D>`."""
+    return f"{LIVE_RECEIPT[learner.entry_at]}:{day.isoformat()}"
+
+
+def live_key(learner: P.Program) -> str:
+    """The key the live receipt's summary names the learner by (league/events/screen.py `program_key`)."""
+    return str(learner.id) if int(learner.version) == 1 else f"{learner.id}@v{int(learner.version)}"
+
+
+def live_state(store: Any, learner: P.Program, day: dt.date) -> dict[str, Any]:
+    """THE LEARNER'S OWN LIVE RECEIPT OF THE AUCTION AS REAL MONEY AND THE RECORD READ IT (sections 1.9, 3.1): its
+    FIRST receipt of `live_job` that has finished: {state: "waiting" (none finished yet) | "named" (finished `ok` and
+    naming the learner) | "not_named" (finished otherwise: the auction is never traded for it), id}."""
+    try:
+        rows = store.db.execute("SELECT id, status, summary, finished_at FROM receipts WHERE job=? AND finished_at IS NOT "
+                                "NULL ORDER BY id LIMIT 1", (live_job(learner, day),)).fetchall()
+    except Exception:  # noqa: BLE001 - unreadable: not named (the reading that trades less)
+        return {"state": "not_named", "id": None, "why": "the receipts cannot be read"}
+    if not rows:
+        return {"state": "waiting", "id": None}
+    row = rows[0]
+    try:
+        body = json.loads(row["summary"] or "{}")
+    except (TypeError, ValueError):
+        body = {}
+    named = str(row["status"]) == "ok" and isinstance(body, dict) and live_key(learner) in body
+    return {"state": "named" if named else "not_named", "id": int(row["id"]), "status": str(row["status"])}
+
+
+def live_part(ctx: Any, learner: P.Program, day: dt.date, *, house_receipt_id: int | None,
+              budget: float | None = None) -> dict[str, Any]:
+    """THE LEARNER'S LIVE PART OF AN AUCTION AS ITS OWN RECEIPT (sections 1.7 and 1.11 items 8-9), run by
+    league/events/run.py in the House's turn right after its own decision of the auction finished (`decide-open:<D>` /
+    `decide-close:<D>`, so no earlier row's receipt, `part_hold` wait or `EVENT_DECIDE_WAIT_S` wait includes it), only
+    for the FIRST such receipt of the session (E5's bound is its finish) and only once (no live receipt of the auction on
+    record): `live_job`'s receipt started, then the decision under its own bound (`BOUND_S` from its start, never past
+    the task's bound less run.py's `EVL5_FINISH`), kind `live`, its one write (intents, `learner_cands`, `learner_fits`)
+    committed only when it completes; the receipt then finishes `ok` NAMING the learner (`live_key`: its kind, status,
+    picks planned, candidates, training rows, the House's receipt id). EVL-LRN-ON's candidates' '1530' marks not yet
+    stored are its own first read (run.py `_marks_1530`, batched, E6). NEVER RAISES: a failure or an expiry writes none
+    of the decision, finishes the receipt `error` with why (and meta `PART_KEY`), and that auction is decided later by
+    itself (`catchup`, kind `late`), in shadow only."""
     from . import run as R
 
     st = ctx.store
@@ -1108,7 +1159,7 @@ def live_part(ctx: Any, learner: P.Program, day: dt.date, *, receipt_id: int | N
     until = mono() + secs
     deadline = getattr(ctx, "deadline", None)
     if deadline is not None:
-        until = min(until, float(deadline) - FINISH_S)
+        until = min(until, float(deadline) - R.EVL5_FINISH)
     key = PART_KEY.format(program=learner.id, version=learner.version, day=day.isoformat())
 
     def check(where: str) -> None:
@@ -1116,11 +1167,28 @@ def live_part(ctx: Any, learner: P.Program, day: dt.date, *, receipt_id: int | N
             raise Expired(f"the learner part ran past its own time bound before {where}")
     try:
         first = house_receipt(st, learner, day)
-        if first is None or receipt_id is None or int(first["id"]) != int(receipt_id):
+        if first is None or house_receipt_id is None or int(first["id"]) != int(house_receipt_id):
             return {"skipped": "not the first finished House decision of the auction"}
         ensure(st.db)
         if decided(st, learner, day) is not None:
             return {"known": True}
+        job = live_job(learner, day)
+        if st.db.execute("SELECT 1 FROM receipts WHERE job=? LIMIT 1", (job,)).fetchone() is not None:
+            return {"skipped": "the learner's live receipt of the auction is on record already"}
+        rid = st.start_receipt(job, now=ctx.now())
+    except Exception as exc:  # noqa: BLE001 - no receipt could start: decided later by itself
+        return {"failed": f"{type(exc).__name__}: {str(exc)[:240]}"}
+
+    def closed(status: str, why: str) -> dict[str, Any]:
+        try:
+            st.set_meta(key, json.dumps({"status": status, "why": why[:300], "at": S.iso(ctx.now()), "receipt": rid},
+                                        sort_keys=True))
+            st.finish_receipt(rid, "error", {"error": why[:300], "part": status, "house_receipt": int(house_receipt_id)},
+                              now=ctx.now())
+        except Exception:  # noqa: BLE001 - the record of a failure never fails the decision
+            pass
+        return {status: why[:300], "receipt_id": rid}
+    try:
         check("its reads")
         if learner.entry_at == "close":
             tau = tau_of(st, learner, day)
@@ -1129,20 +1197,22 @@ def live_part(ctx: Any, learner: P.Program, day: dt.date, *, receipt_id: int | N
             symbols = sorted({str(c.uni.get("symbol") or "").upper() for c in cands if c.uni.get("symbol")})
             if symbols:
                 R._marks_1530(R.bounded(ctx, until), symbols, day)
-        out = decide(st, learner, day, kind="live", now=ctx.now, receipt=f"decide-{learner.entry_at}:{day.isoformat()}",
-                     receipt_id=int(receipt_id), check=check, before_write=lambda: check("its write"))
-        return out
+        out = decide(st, learner, day, kind="live", now=ctx.now, receipt=job, receipt_id=rid, check=check,
+                     before_write=lambda: check("its write"))
     except (Expired, R.PartDeadline) as exc:
-        st.set_meta(key, json.dumps({"status": "expired", "why": str(exc)[:300], "at": S.iso(ctx.now())},
-                                    sort_keys=True))
-        return {"expired": str(exc)[:300]}
+        return closed("expired", str(exc))
     except Exception as exc:  # noqa: BLE001 - the part's failure is its own (section 1.7's ISOLATION)
-        try:
-            st.set_meta(key, json.dumps({"status": "failed", "why": f"{type(exc).__name__}: {str(exc)[:240]}",
-                                         "at": S.iso(ctx.now())}, sort_keys=True))
-        except Exception:  # noqa: BLE001 - the record of a failure never fails the decision
-            pass
-        return {"failed": f"{type(exc).__name__}: {str(exc)[:240]}"}
+        return closed("failed", f"{type(exc).__name__}: {str(exc)[:240]}")
+    if out.get("known") or out.get("skipped") or "kind" not in out:
+        return closed("failed", str(out.get("skipped") or "the decision was not written by this part"))
+    try:
+        st.finish_receipt(rid, "ok", {live_key(learner): {"kind": "live", "status": out.get("status"),
+                                                          "planned": out.get("picks"), "candidates": out.get("candidates"),
+                                                          "rows": out.get("rows")},
+                                      "house_receipt": int(house_receipt_id)}, now=ctx.now())
+    except Exception:  # noqa: BLE001 - unfinished: never named, so never traded; its record holds no unnamed decision
+        pass
+    return out | {"receipt_id": rid}
 
 
 # ------------------------------------------------------------------------------------------ the catch-up (house.py)
@@ -1381,9 +1451,10 @@ def recompute(store: Any, day: dt.date, now: Callable[[], dt.datetime] = S.utc_n
 
 # --------------------------------------------------------------------------------------------- the real money read
 def live_picks(lane: Any, learner: P.Program, day: dt.date) -> list[dict[str, Any]] | None:
-    """THE LEARNER'S LIVE PICKS OF `day` for real money (section 1.9): its decision of kind `live` (the House's own,
-    under its bound), its picked candidates in rank order with what the book needs; None when no live decision of
-    `day` is on record (the auction is not traded for it: a part that did not finish, or before the release)."""
+    """THE LEARNER'S LIVE PICKS OF `day` for real money (section 1.9): its decision of kind `live`, ONLY ONCE ITS OWN
+    LIVE RECEIPT OF THE AUCTION HAS FINISHED `ok` NAMING IT (`live_state`), its picked candidates in rank order with what
+    the book needs; None otherwise (the auction is not traded for it: a part that did not finish or failed, a receipt
+    still running, or before the release)."""
     try:
         rec = lane.db.execute("SELECT kind, status FROM learner_fits WHERE program=? AND version=? AND day=?",
                               (learner.id, learner.version, day.isoformat())).fetchone()
@@ -1391,6 +1462,8 @@ def live_picks(lane: Any, learner: P.Program, day: dt.date) -> list[dict[str, An
         return None
     if rec is None or str(rec["kind"]) != "live":
         return None
+    if live_state(lane, learner, day)["state"] != "named":
+        return None     # (section 1.9: never bought before its own live receipt has finished and named it)
     rows = lane.db.execute("SELECT c.cik, c.event, c.symbol, c.adv20, c.prev_close, c.knowable_at, c.rank, i.status FROM "
                            "learner_cands c JOIN intents i ON i.program=c.program AND i.version=c.version AND "
                            "i.event=c.event WHERE c.program=? AND c.version=? AND c.day=? AND c.picked=1 ORDER BY c.rank",
@@ -1442,6 +1515,6 @@ __all__ = ["POOLS", "K", "LAMBDA", "HALF_LIFE", "LOOKBACK", "WARM_ROWS", "WARM_S
            "TABLES", "ensure", "Expired", "Cand", "AsOf", "tau_of", "house_receipt", "eligible_by", "equity_prev",
            "tradable", "pool_programs", "candidates", "sig20_of", "features", "held_7", "pool_outcomes", "gross", "label",
            "training", "session_stats", "cholesky", "solve", "fit", "replay_cost", "predict", "choose", "decided",
-           "compute", "decide", "live_part", "due", "catchup", "first_live", "recompute", "inputs_sha",
+           "compute", "decide", "live_part", "live_job", "live_key", "live_state", "LIVE_RECEIPT", "due", "catchup", "first_live", "recompute", "inputs_sha",
            "remember_inputs", "live_picks", "report_lines", "render_lines", "PART_KEY", "RECOMPUTE_KEY", "INPUTS_KEY",
            "CHARGE7_HUNDREDTHS", "BASE7_HUNDREDTHS", "STRESS7_HUNDREDTHS", "RUNS_MAX"]
