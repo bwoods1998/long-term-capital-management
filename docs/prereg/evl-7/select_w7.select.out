@@ -1,0 +1,26 @@
+search: 146 cells; maximum per-run rate 0.1000 (N1-crasht3-skew-rho05-phi20-dr20-tau1-n300-lag1-D57); band 0.03; selected 8
+ * 0.1000 (se 0.0134) N1-crasht3-skew-rho05-phi20-dr20-tau1-n300-lag1-D57
+ * 0.0980 (se 0.0133) N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57
+ * 0.0960 (se 0.0132) N1-crasht3-skew-rho15-phi15-dr20-tau1-n300-lag2-D57
+ * 0.0960 (se 0.0132) N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57
+ * 0.0960 (se 0.0132) N1-crashcl-skew-rho15-phi20-dr20-tau0-n300-lag1-D57
+ * 0.0960 (se 0.0132) N1-crashcl-skew-rho15-phi20-dr20-tau0-n300-lag2-D57
+ * 0.0940 (se 0.0131) N1-crashcl-skew-rho15-phi15-dr00-tau1-n300-lag2-D57
+ * 0.0940 (se 0.0131) N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D57
+   0.0920 (se 0.0129) N1-crasht3-skew-rho15-phi20-dr20-tau1-n300-lag1-cnt-D57
+   0.0880 (se 0.0127) N1-crashcl-skew-rho15-phi20-dr00-tau1-n300-lag2-D57
+   0.0880 (se 0.0127) N1-crasht3cl-skew-rho15-phi10-dr20-tau1-n300-lag1-D57
+   0.0880 (se 0.0127) N1-crasht3-skew-rho15-phi15-dr20-tau1-n300-lag2-cnt-D57
+   0.0860 (se 0.0125) N1-crashcl-skew-rho15-phi10-dr10-tau1-n300-lag2-D57
+   0.0860 (se 0.0125) N1-crashcl-skew-rho15-phi15-dr20-tau1-n300-lag1-D57
+   0.0840 (se 0.0124) N1-crasht3cl-skew-rho15-phi10-dr00-tau1-n300-lag2-D57
+   0.0840 (se 0.0124) N1-crasht3-skew-rho15-phi20-dr20-tau0-n300-lag1-D57
+   0.0840 (se 0.0124) N1-crash-skew-rho15-phi20-dr20-tau0-n300-lag2-D57
+   0.0840 (se 0.0124) N1-crasht3cl-sym-rho15-phi20-dr20-tau1-n300-lag2-D57
+   0.0820 (se 0.0087) N1-crash-skew-rho15-phi20-dr10-tau1-n300-lag1-D57
+   0.0820 (se 0.0123) N1-crasht3-skew-rho15-phi10-dr20-tau1-n300-lag1-D57
+   0.0820 (se 0.0123) N1-crasht3-skew-rho15-phi20-dr10-tau1-n300-lag1-D57
+   0.0820 (se 0.0123) N1-crashcl-skew-rho15-phi20-dr10-tau1-n300-lag2-D57
+   0.0820 (se 0.0123) N1-crasht3cl-skew-rho15-phi10-dr00-tau1-n300-lag1-D57
+   0.0820 (se 0.0123) N1-crasht3-skew-rho15-phi20-dr20-tau1-n800-lag2-D57
+   0.0800 (se 0.0121) N1-crashcl-skew-rho15-phi15-dr00-tau1-n300-lag1-D57

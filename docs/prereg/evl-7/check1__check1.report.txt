@@ -1,0 +1,134 @@
+== check1.base.jsonl
+N1-base-n300                           R=1000  T=120  ev/s=7.48 mean_a=-0.4bp mean_true_cm=0.0bp sig_picks=0.065 top10_issuer_share=0.095
+   ev6d    run 1: pass=0.0430 (se 0.0064)  [true cm<=0: 0.0430; <=10bp: 0.0430] | all runs: pass=0.0790 by60=0.043 by120=0.079 | runs started (mean) 1.88
+   ev6d_w  run 1: pass=0.0420 (se 0.0063)  [true cm<=0: 0.0420; <=10bp: 0.0420] | all runs: pass=0.0790 by60=0.042 by120=0.079 | runs started (mean) 1.88
+   F8      run 1: pass=0.0330 (se 0.0056)  [true cm<=0: 0.0330; <=10bp: 0.0330] | all runs: pass=0.0620 by60=0.033 by120=0.062 | runs started (mean) 1.90
+   F9a     run 1: pass=0.0290 (se 0.0053)  [true cm<=0: 0.0290; <=10bp: 0.0290] | all runs: pass=0.0470 by60=0.029 by120=0.047 | runs started (mean) 1.91
+   F9b     run 1: pass=0.0260 (se 0.0050)  [true cm<=0: 0.0260; <=10bp: 0.0260] | all runs: pass=0.0410 by60=0.026 by120=0.041 | runs started (mean) 1.92
+   F10     run 1: pass=0.0230 (se 0.0047)  [true cm<=0: 0.0230; <=10bp: 0.0230] | all runs: pass=0.0350 by60=0.023 by120=0.035 | runs started (mean) 1.93
+   F12     run 1: pass=0.0190 (se 0.0043)  [true cm<=0: 0.0190; <=10bp: 0.0190] | all runs: pass=0.0310 by60=0.019 by120=0.031 | runs started (mean) 1.94
+N1-base-phi20-n300                     R=1000  T=120  ev/s=7.47 mean_a=0.2bp mean_true_cm=0.0bp sig_picks=0.064 top10_issuer_share=0.094
+   ev6d    run 1: pass=0.0420 (se 0.0063)  [true cm<=0: 0.0420; <=10bp: 0.0420] | all runs: pass=0.0940 by60=0.040 by120=0.094 | runs started (mean) 1.87
+   ev6d_w  run 1: pass=0.0430 (se 0.0064)  [true cm<=0: 0.0430; <=10bp: 0.0430] | all runs: pass=0.0930 by60=0.040 by120=0.093 | runs started (mean) 1.87
+   F8      run 1: pass=0.0310 (se 0.0055)  [true cm<=0: 0.0310; <=10bp: 0.0310] | all runs: pass=0.0690 by60=0.028 by120=0.069 | runs started (mean) 1.90
+   F9a     run 1: pass=0.0280 (se 0.0052)  [true cm<=0: 0.0280; <=10bp: 0.0280] | all runs: pass=0.0570 by60=0.025 by120=0.057 | runs started (mean) 1.92
+   F9b     run 1: pass=0.0280 (se 0.0052)  [true cm<=0: 0.0280; <=10bp: 0.0280] | all runs: pass=0.0560 by60=0.025 by120=0.056 | runs started (mean) 1.92
+   F10     run 1: pass=0.0250 (se 0.0049)  [true cm<=0: 0.0250; <=10bp: 0.0250] | all runs: pass=0.0500 by60=0.022 by120=0.050 | runs started (mean) 1.93
+   F12     run 1: pass=0.0220 (se 0.0046)  [true cm<=0: 0.0220; <=10bp: 0.0220] | all runs: pass=0.0450 by60=0.019 by120=0.045 | runs started (mean) 1.94
+== check1.drifts.jsonl
+N3-secdrift20-phi10-lag1-n300          R=1000  T=120  ev/s=7.63 mean_a=7.6bp mean_true_cm=5.8bp sig_picks=0.053 top10_issuer_share=0.096
+   ev6d    run 1: pass=0.1250 (se 0.0105)  [true cm<=0: 0.0230; <=10bp: 0.0410] | all runs: pass=0.2180 by60=0.123 by120=0.218 | runs started (mean) 1.83
+   ev6d_w  run 1: pass=0.1250 (se 0.0105)  [true cm<=0: 0.0220; <=10bp: 0.0400] | all runs: pass=0.2180 by60=0.123 by120=0.218 | runs started (mean) 1.83
+   F8      run 1: pass=0.1050 (se 0.0097)  [true cm<=0: 0.0150; <=10bp: 0.0320] | all runs: pass=0.1880 by60=0.103 by120=0.188 | runs started (mean) 1.86
+   F9a     run 1: pass=0.0940 (se 0.0092)  [true cm<=0: 0.0140; <=10bp: 0.0300] | all runs: pass=0.1610 by60=0.092 by120=0.161 | runs started (mean) 1.89
+   F9b     run 1: pass=0.0890 (se 0.0090)  [true cm<=0: 0.0130; <=10bp: 0.0280] | all runs: pass=0.1530 by60=0.087 by120=0.153 | runs started (mean) 1.89
+   F10     run 1: pass=0.0860 (se 0.0089)  [true cm<=0: 0.0120; <=10bp: 0.0250] | all runs: pass=0.1480 by60=0.083 by120=0.148 | runs started (mean) 1.90
+   F12     run 1: pass=0.0840 (se 0.0088)  [true cm<=0: 0.0120; <=10bp: 0.0210] | all runs: pass=0.1430 by60=0.081 by120=0.143 | runs started (mean) 1.90
+N3-famdrift20-phi10-lag1-n300          R=1000  T=120  ev/s=7.66 mean_a=11.9bp mean_true_cm=10.2bp sig_picks=0.054 top10_issuer_share=0.087
+   ev6d    run 1: pass=0.1650 (se 0.0117)  [true cm<=0: 0.0350; <=10bp: 0.0690] | all runs: pass=0.2810 by60=0.158 by120=0.281 | runs started (mean) 1.79
+   ev6d_w  run 1: pass=0.1670 (se 0.0118)  [true cm<=0: 0.0350; <=10bp: 0.0690] | all runs: pass=0.2840 by60=0.160 by120=0.284 | runs started (mean) 1.78
+   F8      run 1: pass=0.1360 (se 0.0108)  [true cm<=0: 0.0210; <=10bp: 0.0480] | all runs: pass=0.2400 by60=0.129 by120=0.240 | runs started (mean) 1.83
+   F9a     run 1: pass=0.1210 (se 0.0103)  [true cm<=0: 0.0170; <=10bp: 0.0410] | all runs: pass=0.2190 by60=0.114 by120=0.219 | runs started (mean) 1.85
+   F9b     run 1: pass=0.1180 (se 0.0102)  [true cm<=0: 0.0160; <=10bp: 0.0390] | all runs: pass=0.2130 by60=0.111 by120=0.213 | runs started (mean) 1.85
+   F10     run 1: pass=0.1130 (se 0.0100)  [true cm<=0: 0.0130; <=10bp: 0.0350] | all runs: pass=0.2020 by60=0.106 by120=0.202 | runs started (mean) 1.86
+   F12     run 1: pass=0.1080 (se 0.0098)  [true cm<=0: 0.0110; <=10bp: 0.0340] | all runs: pass=0.1950 by60=0.100 by120=0.195 | runs started (mean) 1.87
+N3-secdrift20-phi20-lag1-n300          R=1000  T=120  ev/s=7.65 mean_a=7.5bp mean_true_cm=6.5bp sig_picks=0.053 top10_issuer_share=0.096
+   ev6d    run 1: pass=0.1600 (se 0.0116)  [true cm<=0: 0.0360; <=10bp: 0.0540] | all runs: pass=0.2730 by60=0.157 by120=0.273 | runs started (mean) 1.78
+   ev6d_w  run 1: pass=0.1590 (se 0.0116)  [true cm<=0: 0.0360; <=10bp: 0.0540] | all runs: pass=0.2720 by60=0.156 by120=0.272 | runs started (mean) 1.78
+   F8      run 1: pass=0.1380 (se 0.0109)  [true cm<=0: 0.0280; <=10bp: 0.0450] | all runs: pass=0.2470 by60=0.135 by120=0.247 | runs started (mean) 1.81
+   F9a     run 1: pass=0.1270 (se 0.0105)  [true cm<=0: 0.0230; <=10bp: 0.0390] | all runs: pass=0.2240 by60=0.124 by120=0.224 | runs started (mean) 1.83
+   F9b     run 1: pass=0.1230 (se 0.0104)  [true cm<=0: 0.0210; <=10bp: 0.0370] | all runs: pass=0.2200 by60=0.120 by120=0.220 | runs started (mean) 1.84
+   F10     run 1: pass=0.1120 (se 0.0100)  [true cm<=0: 0.0150; <=10bp: 0.0300] | all runs: pass=0.2030 by60=0.109 by120=0.203 | runs started (mean) 1.85
+   F12     run 1: pass=0.1030 (se 0.0096)  [true cm<=0: 0.0130; <=10bp: 0.0260] | all runs: pass=0.1890 by60=0.100 by120=0.189 | runs started (mean) 1.87
+== check1.life.jsonl
+N1-worst-notau-phi20-n300-T300         R=400   T=300  ev/s=7.68 mean_a=1.0bp mean_true_cm=0.6bp sig_picks=0.049 top10_issuer_share=0.076
+   ev6d    run 1: pass=0.1125 (se 0.0158)  [true cm<=0: 0.0375; <=10bp: 0.0650] | all runs: pass=0.4425 by60=0.110 by120=0.200 by180=0.285 by240=0.370 by300=0.443 | runs started (mean) 3.51
+   ev6d_w  run 1: pass=0.1100 (se 0.0156)  [true cm<=0: 0.0350; <=10bp: 0.0625] | all runs: pass=0.4450 by60=0.107 by120=0.203 by180=0.285 by240=0.370 by300=0.445 | runs started (mean) 3.52
+   F8      run 1: pass=0.0950 (se 0.0147)  [true cm<=0: 0.0275; <=10bp: 0.0550] | all runs: pass=0.4100 by60=0.092 by120=0.180 by180=0.268 by240=0.343 by300=0.410 | runs started (mean) 3.75
+   F9a     run 1: pass=0.0850 (se 0.0139)  [true cm<=0: 0.0200; <=10bp: 0.0450] | all runs: pass=0.3775 by60=0.083 by120=0.155 by180=0.237 by240=0.310 by300=0.378 | runs started (mean) 3.87
+   F9b     run 1: pass=0.0825 (se 0.0138)  [true cm<=0: 0.0175; <=10bp: 0.0425] | all runs: pass=0.3700 by60=0.080 by120=0.147 by180=0.233 by240=0.307 by300=0.370 | runs started (mean) 3.90
+   F10     run 1: pass=0.0725 (se 0.0130)  [true cm<=0: 0.0175; <=10bp: 0.0375] | all runs: pass=0.3500 by60=0.070 by120=0.138 by180=0.220 by240=0.295 by300=0.350 | runs started (mean) 3.96
+   F12     run 1: pass=0.0675 (se 0.0125)  [true cm<=0: 0.0175; <=10bp: 0.0350] | all runs: pass=0.3350 by60=0.065 by120=0.133 by180=0.207 by240=0.278 by300=0.335 | runs started (mean) 4.03
+N1-worst-notau-phi10-n300-T300         R=400   T=300  ev/s=7.68 mean_a=-0.3bp mean_true_cm=0.3bp sig_picks=0.050 top10_issuer_share=0.075
+   ev6d    run 1: pass=0.1125 (se 0.0158)  [true cm<=0: 0.0300; <=10bp: 0.0575] | all runs: pass=0.4100 by60=0.113 by120=0.205 by180=0.292 by240=0.343 by300=0.410 | runs started (mean) 3.61
+   ev6d_w  run 1: pass=0.1150 (se 0.0160)  [true cm<=0: 0.0325; <=10bp: 0.0600] | all runs: pass=0.4025 by60=0.115 by120=0.205 by180=0.292 by240=0.335 by300=0.403 | runs started (mean) 3.62
+   F8      run 1: pass=0.0975 (se 0.0148)  [true cm<=0: 0.0275; <=10bp: 0.0525] | all runs: pass=0.3400 by60=0.098 by120=0.168 by180=0.250 by240=0.285 by300=0.340 | runs started (mean) 3.83
+   F9a     run 1: pass=0.0850 (se 0.0139)  [true cm<=0: 0.0250; <=10bp: 0.0450] | all runs: pass=0.3175 by60=0.085 by120=0.142 by180=0.220 by240=0.260 by300=0.318 | runs started (mean) 3.99
+   F9b     run 1: pass=0.0775 (se 0.0134)  [true cm<=0: 0.0225; <=10bp: 0.0400] | all runs: pass=0.3100 by60=0.077 by120=0.138 by180=0.212 by240=0.253 by300=0.310 | runs started (mean) 4.04
+   F10     run 1: pass=0.0700 (se 0.0128)  [true cm<=0: 0.0200; <=10bp: 0.0375] | all runs: pass=0.2975 by60=0.070 by120=0.130 by180=0.203 by240=0.240 by300=0.297 | runs started (mean) 4.11
+   F12     run 1: pass=0.0700 (se 0.0128)  [true cm<=0: 0.0200; <=10bp: 0.0375] | all runs: pass=0.2675 by60=0.070 by120=0.122 by180=0.185 by240=0.217 by300=0.268 | runs started (mean) 4.18
+== check1.phi.jsonl
+N1-worst-phi15-n300                    R=1000  T=120  ev/s=7.58 mean_a=3.7bp mean_true_cm=1.7bp sig_picks=0.054 top10_issuer_share=0.096
+   ev6d    run 1: pass=0.1270 (se 0.0105)  [true cm<=0: 0.0270; <=10bp: 0.0520] | all runs: pass=0.2220 by60=0.123 by120=0.222 | runs started (mean) 1.83
+   ev6d_w  run 1: pass=0.1250 (se 0.0105)  [true cm<=0: 0.0260; <=10bp: 0.0510] | all runs: pass=0.2220 by60=0.121 by120=0.222 | runs started (mean) 1.83
+   F8      run 1: pass=0.1120 (se 0.0100)  [true cm<=0: 0.0230; <=10bp: 0.0460] | all runs: pass=0.1900 by60=0.108 by120=0.190 | runs started (mean) 1.86
+   F9a     run 1: pass=0.1010 (se 0.0095)  [true cm<=0: 0.0210; <=10bp: 0.0410] | all runs: pass=0.1710 by60=0.097 by120=0.171 | runs started (mean) 1.87
+   F9b     run 1: pass=0.0970 (se 0.0094)  [true cm<=0: 0.0210; <=10bp: 0.0380] | all runs: pass=0.1650 by60=0.093 by120=0.165 | runs started (mean) 1.88
+   F10     run 1: pass=0.0920 (se 0.0091)  [true cm<=0: 0.0180; <=10bp: 0.0350] | all runs: pass=0.1570 by60=0.088 by120=0.157 | runs started (mean) 1.88
+   F12     run 1: pass=0.0810 (se 0.0086)  [true cm<=0: 0.0120; <=10bp: 0.0290] | all runs: pass=0.1440 by60=0.077 by120=0.144 | runs started (mean) 1.90
+N1-worst-phi20-n300                    R=1000  T=120  ev/s=7.57 mean_a=0.5bp mean_true_cm=1.7bp sig_picks=0.053 top10_issuer_share=0.095
+   ev6d    run 1: pass=0.1440 (se 0.0111)  [true cm<=0: 0.0470; <=10bp: 0.0650] | all runs: pass=0.2570 by60=0.142 by120=0.257 | runs started (mean) 1.80
+   ev6d_w  run 1: pass=0.1430 (se 0.0111)  [true cm<=0: 0.0460; <=10bp: 0.0640] | all runs: pass=0.2560 by60=0.141 by120=0.256 | runs started (mean) 1.80
+   F8      run 1: pass=0.1210 (se 0.0103)  [true cm<=0: 0.0330; <=10bp: 0.0550] | all runs: pass=0.2150 by60=0.119 by120=0.215 | runs started (mean) 1.83
+   F9a     run 1: pass=0.1060 (se 0.0097)  [true cm<=0: 0.0220; <=10bp: 0.0410] | all runs: pass=0.1950 by60=0.104 by120=0.195 | runs started (mean) 1.85
+   F9b     run 1: pass=0.1020 (se 0.0096)  [true cm<=0: 0.0180; <=10bp: 0.0370] | all runs: pass=0.1860 by60=0.100 by120=0.186 | runs started (mean) 1.86
+   F10     run 1: pass=0.0940 (se 0.0092)  [true cm<=0: 0.0160; <=10bp: 0.0360] | all runs: pass=0.1730 by60=0.092 by120=0.173 | runs started (mean) 1.87
+   F12     run 1: pass=0.0890 (se 0.0090)  [true cm<=0: 0.0170; <=10bp: 0.0340] | all runs: pass=0.1590 by60=0.087 by120=0.159 | runs started (mean) 1.88
+N1-worst-phi20-lag1-n300               R=1000  T=120  ev/s=7.65 mean_a=1.4bp mean_true_cm=1.7bp sig_picks=0.054 top10_issuer_share=0.095
+   ev6d    run 1: pass=0.1090 (se 0.0099)  [true cm<=0: 0.0230; <=10bp: 0.0450] | all runs: pass=0.2040 by60=0.108 by120=0.204 | runs started (mean) 1.82
+   ev6d_w  run 1: pass=0.1070 (se 0.0098)  [true cm<=0: 0.0210; <=10bp: 0.0430] | all runs: pass=0.2030 by60=0.106 by120=0.203 | runs started (mean) 1.83
+   F8      run 1: pass=0.0950 (se 0.0093)  [true cm<=0: 0.0160; <=10bp: 0.0360] | all runs: pass=0.1710 by60=0.093 by120=0.171 | runs started (mean) 1.86
+   F9a     run 1: pass=0.0850 (se 0.0088)  [true cm<=0: 0.0120; <=10bp: 0.0290] | all runs: pass=0.1570 by60=0.083 by120=0.157 | runs started (mean) 1.88
+   F9b     run 1: pass=0.0810 (se 0.0086)  [true cm<=0: 0.0120; <=10bp: 0.0270] | all runs: pass=0.1500 by60=0.079 by120=0.150 | runs started (mean) 1.89
+   F10     run 1: pass=0.0750 (se 0.0083)  [true cm<=0: 0.0110; <=10bp: 0.0250] | all runs: pass=0.1390 by60=0.073 by120=0.139 | runs started (mean) 1.90
+   F12     run 1: pass=0.0680 (se 0.0080)  [true cm<=0: 0.0080; <=10bp: 0.0220] | all runs: pass=0.1290 by60=0.066 by120=0.129 | runs started (mean) 1.91
+N1-worst-phi10-lag1-n300               R=1000  T=120  ev/s=7.64 mean_a=4.3bp mean_true_cm=2.1bp sig_picks=0.053 top10_issuer_share=0.094
+   ev6d    run 1: pass=0.1140 (se 0.0101)  [true cm<=0: 0.0310; <=10bp: 0.0610] | all runs: pass=0.2200 by60=0.110 by120=0.220 | runs started (mean) 1.84
+   ev6d_w  run 1: pass=0.1140 (se 0.0101)  [true cm<=0: 0.0310; <=10bp: 0.0610] | all runs: pass=0.2200 by60=0.110 by120=0.220 | runs started (mean) 1.84
+   F8      run 1: pass=0.0910 (se 0.0091)  [true cm<=0: 0.0250; <=10bp: 0.0450] | all runs: pass=0.1840 by60=0.087 by120=0.184 | runs started (mean) 1.88
+   F9a     run 1: pass=0.0750 (se 0.0083)  [true cm<=0: 0.0190; <=10bp: 0.0350] | all runs: pass=0.1600 by60=0.071 by120=0.160 | runs started (mean) 1.90
+   F9b     run 1: pass=0.0720 (se 0.0082)  [true cm<=0: 0.0200; <=10bp: 0.0330] | all runs: pass=0.1520 by60=0.068 by120=0.152 | runs started (mean) 1.91
+   F10     run 1: pass=0.0700 (se 0.0081)  [true cm<=0: 0.0200; <=10bp: 0.0320] | all runs: pass=0.1460 by60=0.066 by120=0.146 | runs started (mean) 1.91
+   F12     run 1: pass=0.0640 (se 0.0077)  [true cm<=0: 0.0170; <=10bp: 0.0300] | all runs: pass=0.1370 by60=0.060 by120=0.137 | runs started (mean) 1.92
+N1-worst-phi20-n800                    R=1000  T=120  ev/s=7.90 mean_a=3.0bp mean_true_cm=1.2bp sig_picks=0.056 top10_issuer_share=0.100
+   ev6d    run 1: pass=0.1160 (se 0.0101)  [true cm<=0: 0.0350; <=10bp: 0.0520] | all runs: pass=0.2280 by60=0.114 by120=0.228 | runs started (mean) 1.82
+   ev6d_w  run 1: pass=0.1160 (se 0.0101)  [true cm<=0: 0.0350; <=10bp: 0.0520] | all runs: pass=0.2280 by60=0.114 by120=0.228 | runs started (mean) 1.82
+   F8      run 1: pass=0.0980 (se 0.0094)  [true cm<=0: 0.0260; <=10bp: 0.0440] | all runs: pass=0.1890 by60=0.096 by120=0.189 | runs started (mean) 1.85
+   F9a     run 1: pass=0.0860 (se 0.0089)  [true cm<=0: 0.0220; <=10bp: 0.0380] | all runs: pass=0.1710 by60=0.084 by120=0.171 | runs started (mean) 1.87
+   F9b     run 1: pass=0.0830 (se 0.0087)  [true cm<=0: 0.0210; <=10bp: 0.0370] | all runs: pass=0.1660 by60=0.081 by120=0.166 | runs started (mean) 1.88
+   F10     run 1: pass=0.0790 (se 0.0085)  [true cm<=0: 0.0180; <=10bp: 0.0370] | all runs: pass=0.1570 by60=0.077 by120=0.157 | runs started (mean) 1.88
+   F12     run 1: pass=0.0730 (se 0.0082)  [true cm<=0: 0.0150; <=10bp: 0.0300] | all runs: pass=0.1440 by60=0.071 by120=0.144 | runs started (mean) 1.89
+== check1.repro.jsonl
+R-N1-worst-n300                        R=2000  T=120  ev/s=7.57 mean_a=2.7bp mean_true_cm=0.0bp sig_picks=nan top10_issuer_share=0.095
+   ev6d    run 1: pass=0.1180 (se 0.0072)  [true cm<=0: 0.1180; <=10bp: 0.1180] | all runs: pass=0.2235 by60=0.116 by120=0.224 | runs started (mean) 1.83
+   ev6d_w  run 1: pass=0.1185 (se 0.0072)  [true cm<=0: 0.1185; <=10bp: 0.1185] | all runs: pass=0.2230 by60=0.116 by120=0.223 | runs started (mean) 1.83
+   F8      run 1: pass=0.0990 (se 0.0067)  [true cm<=0: 0.0990; <=10bp: 0.0990] | all runs: pass=0.1855 by60=0.096 by120=0.185 | runs started (mean) 1.86
+   F9a     run 1: pass=0.0825 (se 0.0062)  [true cm<=0: 0.0825; <=10bp: 0.0825] | all runs: pass=0.1605 by60=0.080 by120=0.161 | runs started (mean) 1.88
+   F9b     run 1: pass=0.0790 (se 0.0060)  [true cm<=0: 0.0790; <=10bp: 0.0790] | all runs: pass=0.1530 by60=0.076 by120=0.153 | runs started (mean) 1.89
+   F10     run 1: pass=0.0750 (se 0.0059)  [true cm<=0: 0.0750; <=10bp: 0.0750] | all runs: pass=0.1425 by60=0.072 by120=0.142 | runs started (mean) 1.89
+   F12     run 1: pass=0.0695 (se 0.0057)  [true cm<=0: 0.0695; <=10bp: 0.0695] | all runs: pass=0.1335 by60=0.067 by120=0.134 | runs started (mean) 1.90
+== check1.tails.jsonl
+N1-worst-phi20-jumpsig-n300            R=1000  T=120  ev/s=7.59 mean_a=1.4bp mean_true_cm=1.3bp sig_picks=0.056 top10_issuer_share=0.095
+   ev6d    run 1: pass=0.1080 (se 0.0098)  [true cm<=0: 0.0350; <=10bp: 0.0520] | all runs: pass=0.2150 by60=0.106 by120=0.215 | runs started (mean) 1.84
+   ev6d_w  run 1: pass=0.1090 (se 0.0099)  [true cm<=0: 0.0360; <=10bp: 0.0510] | all runs: pass=0.2160 by60=0.107 by120=0.216 | runs started (mean) 1.84
+   F8      run 1: pass=0.0990 (se 0.0094)  [true cm<=0: 0.0330; <=10bp: 0.0440] | all runs: pass=0.1920 by60=0.097 by120=0.192 | runs started (mean) 1.85
+   F9a     run 1: pass=0.0870 (se 0.0089)  [true cm<=0: 0.0300; <=10bp: 0.0410] | all runs: pass=0.1680 by60=0.085 by120=0.168 | runs started (mean) 1.87
+   F9b     run 1: pass=0.0860 (se 0.0089)  [true cm<=0: 0.0300; <=10bp: 0.0410] | all runs: pass=0.1650 by60=0.084 by120=0.165 | runs started (mean) 1.87
+   F10     run 1: pass=0.0810 (se 0.0086)  [true cm<=0: 0.0260; <=10bp: 0.0360] | all runs: pass=0.1580 by60=0.079 by120=0.158 | runs started (mean) 1.88
+   F12     run 1: pass=0.0720 (se 0.0082)  [true cm<=0: 0.0240; <=10bp: 0.0330] | all runs: pass=0.1400 by60=0.070 by120=0.140 | runs started (mean) 1.89
+N1-worst-phi20-sig20-n300              R=1000  T=120  ev/s=7.61 mean_a=6.5bp mean_true_cm=1.2bp sig_picks=0.104 top10_issuer_share=0.095
+   ev6d    run 1: pass=0.1200 (se 0.0103)  [true cm<=0: 0.0380; <=10bp: 0.0510] | all runs: pass=0.2190 by60=0.117 by120=0.219 | runs started (mean) 1.83
+   ev6d_w  run 1: pass=0.1190 (se 0.0102)  [true cm<=0: 0.0380; <=10bp: 0.0510] | all runs: pass=0.2180 by60=0.116 by120=0.218 | runs started (mean) 1.83
+   F8      run 1: pass=0.0950 (se 0.0093)  [true cm<=0: 0.0250; <=10bp: 0.0360] | all runs: pass=0.1770 by60=0.092 by120=0.177 | runs started (mean) 1.87
+   F9a     run 1: pass=0.0850 (se 0.0088)  [true cm<=0: 0.0200; <=10bp: 0.0310] | all runs: pass=0.1550 by60=0.082 by120=0.155 | runs started (mean) 1.88
+   F9b     run 1: pass=0.0800 (se 0.0086)  [true cm<=0: 0.0180; <=10bp: 0.0300] | all runs: pass=0.1490 by60=0.077 by120=0.149 | runs started (mean) 1.89
+   F10     run 1: pass=0.0750 (se 0.0083)  [true cm<=0: 0.0170; <=10bp: 0.0260] | all runs: pass=0.1360 by60=0.072 by120=0.136 | runs started (mean) 1.90
+   F12     run 1: pass=0.0720 (se 0.0082)  [true cm<=0: 0.0150; <=10bp: 0.0220] | all runs: pass=0.1230 by60=0.068 by120=0.123 | runs started (mean) 1.91
+N1-worst-phi20-tausig-zipf1-n300       R=1000  T=120  ev/s=7.55 mean_a=2.0bp mean_true_cm=2.7bp sig_picks=0.052 top10_issuer_share=0.103
+   ev6d    run 1: pass=0.1080 (se 0.0098)  [true cm<=0: 0.0240; <=10bp: 0.0370] | all runs: pass=0.2280 by60=0.107 by120=0.228 | runs started (mean) 1.83
+   ev6d_w  run 1: pass=0.1080 (se 0.0098)  [true cm<=0: 0.0250; <=10bp: 0.0380] | all runs: pass=0.2240 by60=0.107 by120=0.224 | runs started (mean) 1.83
+   F8      run 1: pass=0.0840 (se 0.0088)  [true cm<=0: 0.0170; <=10bp: 0.0270] | all runs: pass=0.1890 by60=0.083 by120=0.189 | runs started (mean) 1.87
+   F9a     run 1: pass=0.0720 (se 0.0082)  [true cm<=0: 0.0130; <=10bp: 0.0200] | all runs: pass=0.1730 by60=0.071 by120=0.173 | runs started (mean) 1.88
+   F9b     run 1: pass=0.0710 (se 0.0081)  [true cm<=0: 0.0120; <=10bp: 0.0190] | all runs: pass=0.1690 by60=0.070 by120=0.169 | runs started (mean) 1.89
+   F10     run 1: pass=0.0660 (se 0.0079)  [true cm<=0: 0.0100; <=10bp: 0.0190] | all runs: pass=0.1550 by60=0.065 by120=0.155 | runs started (mean) 1.90
+   F12     run 1: pass=0.0620 (se 0.0076)  [true cm<=0: 0.0100; <=10bp: 0.0200] | all runs: pass=0.1440 by60=0.061 by120=0.144 | runs started (mean) 1.90

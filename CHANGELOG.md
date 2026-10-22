@@ -367,6 +367,92 @@ functions on 3.14 and 3.11, are the release's: money `8e63ce64`, constitution `c
 S2's instant rollback, the `reach_bar` rows to "0", one money-digest move the grant re-ratifies; the full rollback,
 the House to release 1019g's deployed head `b374d862`, then the gateway).
 
+### PREREG-EVL-7's two online learners and COST-7, on `feat/evl-7` (unreleased; cut from `rel/1019h` `59663f06`; joins release 1019i with `feat/evl-6` and `feat/infra-1019i`; an owner deploy, THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_learner`'s words; an older gateway refuses a notice naming it, which only a pinned learner's stall can send), then the House: league/events/learner.py and costs7.py join league/ci.py's wall beside the lane's other judges, `league/equity/` is protected; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES, pinned or not: the money digest `8e63ce64` and the constitution `c3026eba` are release 1019h's, read with the tree's own functions on 3.14 and 3.11; no money row, no setting; FROZEN 20:14:13Z Oct 22 (A125): `programs.REGISTERED_AT_7` IS PINNED, SO THIS RELEASE STARTS THE LEARNERS)
+
+PREREG-EVL-7's design (the draft as the captain's decisions E1-E11 change it; the frozen text wins) built ahead of its
+freeze (A117), each part held by tests that fail without it (league/tests/test_events_evl7.py, invented data only):
+
+- **The learners** (league/events/learner.py): EVL-LRN-O1 (open to close, a pool of four controls and INS-BUY) and
+  EVL-LRN-ON (close to next open, a pool of six), version 1 at learning from birth. Candidates through each pool
+  program's real-money reading with live eligibility TIME-BOUND by the House's own decision (E5); one a CIK; KEPT and
+  ELIGIBLE TO BE PICKED; section 1.4's 52 and 58 features (the final text's: none built from the issuer's own past
+  returns or prices but sig20 and dmove) with the reader lens's frozen headline spec; pool outcomes
+  settled before tau, the GROSS label (E7); weights 2^(-age/40), within-session demeaning, ridge lambda 8,000 on
+  standardized columns by a float64 Cholesky (standard library), nested fsums; the top 8 by ahat above the replay
+  hurdle; the per-session sums cached by the training keys' sha256 and the code sha; a nightly recompute that compares
+  beta and the picks only where the inputs are unchanged.
+- **Isolation and the record** (league/events/run.py, house.py): the learner part runs as ITS OWN live receipt
+  (`decide-open-lrnlive:<D>` / `decide-close-lrnlive:<D>`) once the House's receipt is finished, under 90 s / 120 s,
+  its write one transaction, and never raises (a failure finishes that receipt `error`); a failed or expired part and the decisions before the release are
+  decided later by themselves (`decide-open-lrn:<D>`, `decide-close-lrn:<D>`; shadow only, never traded, never
+  judged); the reconstruction once; the code sha on every fits row.
+- **Real money** (league/events/book.py, league/equity/live.py): the learners' decision of each auction in ROOM's
+  place (after every PREREG row, before R3's births; see the review round below), their LIVE picks in rank order,
+  EVL-LRN-O1's ERN guard (E8), EVL-LRN-ON's per-issuer 8-K guard (E10), one position per issuer (A72), the day line
+  kept for the earlier rows.
+- **The money re-review's two majors (the captain's own round, A131):** no learner task is planned inside the lead of
+  today's live close decision (`_learner_due` reads `_lead`; release 1019h's lead tests now also run PINNED,
+  league/tests/test_events_evl7_fix.py `TheLeadAfterAFailedLiveRunPinned`), and the 8-K guard reads every 8-K of the
+  issuer knowable from 09:00 ET of D and stored by tau with no upper bound on its knowable time (section 1.9's words).
+- **COST-7** (league/events/costs7.py): E9's sigma, the penny ceiling at the fixed 0.035, the impact, the measured
+  terms that only rise and the nightly `cost_basis` row; the judged record of live decisions on a7 and r7 with the POOL
+  control; the one call into PREREG-EVL-6's frozen screen.
+- **Alarms, report, facts**: the stall job's `evl_learner` (H5), worded in the gateway's stall notice; the lane report's learner lines (counts only), its learners' next look PREREG-EVL-6's; R3's
+  `FACTS_DENY` gains `learner_fits`, `learner_cands`, `learner_stats`, `costs7`, `cost_basis` and `intents`.
+- **THE PROOF**: on PREREG-EVL-5's invented week (two births among its programs), decided by the House's own code with
+  the learners pinned and picking and without them, every earlier program's shadow intents, real-money picks and the
+  House's decision receipts are the same; the real book's earlier rows' buys are the same with a learner's live picks on
+  the store; a learner fed noise picks noise; rows planted after tau leave a decision unchanged.
+
+Charge: c7 = max(0.13, W7 rounded up) = 0.13 a learner run on PREREG-EVL-6's basis (the fix round's W7 at most 0.100):
+the two learners' run 1 is 0.26 of the lane's 3.9.
+
+The review round (PR 602's judges and money reviews; league/tests/test_events_evl7_fix.py, each test failing without its
+fix):
+
+- **The learners' judge** (league/events/judge7.py, the blocker): the nightly screen step runs each learner's looks
+  (PREREG-EVL-6's 22-60 block schedule and minimums, final once its pool programs' closes are, its intents and its
+  pool's settled) through `costs7.judge_record` on `record7` / `control7` as of the latest basis before the look,
+  written once with the band move in the look's transaction (RETIRE, PASS); every look waits without the night's
+  `cost_basis` row; the run ends at its 60th block; its next run starts only when the lane's count holds 0.13, at most
+  three, else refused for good; PREREG-EVL-6's stored forms (`evl6:run:`, `evl6:end:`, look keys), so its count counts
+  them. With no PREREG-EVL-6 screen in the tree nothing is written. THE GATE fails closed: no real money for a learner
+  retired, at Probe or Sized (no stay judge for COST-7's versions yet), between or refused runs, or whose next look or
+  run's end is due and not written; the `evl_learner` alarm says so; the report's next look reads the runs.
+- **COST-7's selection population**: the first SEND of a buy only (release 1019i's `sent`: `unsent:<iid>` picks and
+  refused orders are no attempt), its shadow intent on record and not skipped (a shadow skip no longer stops G at its
+  checkpoints forever).
+- **ROOM** (section 1.9 of the final text): every PREREG-EVL-1 to -6 row is given its names at the auction's own
+  decision whatever its band; R3's births after the learners in ROOM are held for the learners' decision of the
+  auction and given with theirs in ROOM's order (a learner before the births), the summaries in the auction's own row
+  (A85's reservation reads a learner's picks); with no learner able to take a name, nothing changes.
+- **The final text's rewrite (its 17:26Z final fix round), followed where newer**: a learner pick is bought only once
+  the learner's own live receipt has finished `ok` naming it, tried each minute of the window with no other bound,
+  keeping no room from any earlier row; COST-7's sigma, ADV20 and E_prev are the decision's stored values (fixed at
+  entry; `learner_fits.e_prev`); the judged record and the POOL control read only decisions under an `ok` live
+  receipt; the features lose r1, r5, r20 and the ADV and price levels (52 and 58 columns).
+- **The day order line**: a learner entry keeps every order the earlier PREREG rows may still send that day, across the
+  day's auctions (the fixed 32 slots held inside one auction only); the reading that trades less (section 1.11 (10)).
+  Its stated effect, for the captain's amendment: with the ten close-entry rows at learning the keep is 161 of 150 on an
+  empty day, so EVL-LRN-O1 buys nothing in real money; `book.LINE_ACROSS_AUCTIONS` False (one constant) is the
+  in-auction reading. The refusal now names the learner's keep apart from the held buys' (it read "161 for the 0 buys
+  ahead of it").
+- **THE FREEZE (A125)**: `docs/prereg/PREREG-EVL-7.md` (sha256 ced186aa) and `docs/prereg/evl-7/` (211 files) byte for
+  byte from the tag `prereg-evl-7` (commit 367a2970); `REGISTERED_AT_7 = 2026-10-22T20:14:13Z`. The frozen sections
+  1-3, 6, 7 and 10 are word for word the text this code was built to; sections 0, 4, 5, 8 and 9 restate the
+  calibration on the registered columns (W7 0.0890, so c7 stays 0.13; base 0.03, stresses' worst 0.13). Every report's
+  learner lines carry their expected false passes three ways with the per-version and per-id figures beside
+  (`judge7.false_passes`); the tests that read the unpinned registries unpin themselves.
+- **Found by the pin** (the suite run with the learners registered): the House's `cost-basis` task preempted the
+  morning's early verdicts when a night's row was owed (it now waits outside a decision's lead, as the screen does,
+  and is owed only while that night's screen is); the site listed both learners as "Event rule" with a PREREG-EVL-3
+  next look (each now has its name, `NAMES`, and no look, as PREREG-EVL-6's versions). The tests of earlier
+  mechanisms that read the registries without the learners run so (league/tests/evl7_fakes.py, as `evl6_fakes.py`'s
+  `on_1019h`); the rest of the suite runs pinned, as the House does.
+- **Merges with release 1019i's other branches**: the learners' `__all__` line in book.py and their line check in
+  live.py moved off feat/evl-6's lines (its merge now conflicts in INTERFACES.md alone: keep section 27, then 28); two
+  ledger tests drop feat/infra-1019i's `real_attempts` before making their own.
+
 ### Release 1019g: release 1019f + PREREG-EVL-5 + the births fix (the pre-open deploy, A94), on `rel/1019g` (DEPLOYED 05:36Z Oct 22 in PR 595, the gateway first at 05:34Z; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594), then origin/main `eb5bedac` (the House's scoreboard of Oct 21, so main fast-forwards to it), then release 1019f's fix round `b262a85f` merged in, then (the fix round) `feat/evl-5`'s review round to its head `ef6832bb` (the judges' and the money majors, the lane's held turn `HOLD_LEAD`), the first build's own `ahead` dropped for its `HeldAhead`, then (the final round) `fix/births-names`' head `4b565668` (PR 596, A95) and the fix of the open major of PREREG-EVL-5's money re-review (the lane's held turn: no other decision inside the lead, the live close decision in the same turn when a task returns late); on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`; the births prompt's sha `8294fe77` (release 1019e's `2203fda3`), `PARSE_VERSION` 2)
 
 - **Deployed 05:36Z Oct 22, 2026** (PR 595): House `20261022T053527Z-05c3dc2f4422`, main `b374d862`; gateway `354aeab2`.

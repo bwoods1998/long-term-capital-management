@@ -439,6 +439,11 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
     now = now or S.utc_now()
     left = kept_out(store, day)
     programs = [program_status(store, p, v, day, left=left) for p, v in _programs(store)]
+    from .programs import is_learner
+
+    for p in programs:      # (PREREG-EVL-7: its learners' looks are PREREG-EVL-6's on COST-7, never PREREG-EVL-3's)
+        if is_learner(p["program"]):
+            p["next_look"] = _learner_next(store, p["program"], p["version"])
     with_rows = {p["program"] for p in programs}
     return {
         "day": day.isoformat(), "generated_at": S.iso(now), "session": C.session(store, day) is not None,
@@ -446,7 +451,36 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
+        "learners": _learners(store, day),
     }
+
+
+def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
+    """A learner's next look as the report reads it (league/events/judge7.py `next_look`): its current run, the next
+    look's threshold in blocks (PREREG-EVL-6's 22, 25, 30, 35, 40, 50, 60), the run's settled blocks over its LIVE
+    decisions' picks only (never a catch-up's), and what holds its real money when something does (the gate's why).
+    Counts only."""
+    from . import judge7 as J7
+    from .programs import BY_KEY
+
+    prog = BY_KEY.get((program, int(version)))
+    try:
+        if prog is None:
+            raise LookupError(f"{program} v{version} is in no registry")
+        return J7.next_look(store, prog)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"k": None, "at_sessions": None, "sessions": 0, "status": f"unreadable ({type(exc).__name__})"}
+
+
+def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:
+    """PREREG-EVL-7's learner lines (league/events/learner.py `report_lines`): each learner's decision of the day, its
+    candidates, picks and training rows (counts only: no fitted figure reaches the report); [] while none is pinned."""
+    from . import learner as LR
+
+    try:
+        return LR.report_lines(store, day)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return [{"error": f"{type(exc).__name__}: {str(exc)[:120]}"}]
 
 
 def _births(store: S.Store) -> dict[str, Any]:
@@ -473,6 +507,10 @@ def render(report: Mapping[str, Any]) -> str:
     fam.append(f"news {ev['news']['total']} (live {ev['news']['live']})")
     lines.append("Events: " + " | ".join(fam) + f"; recorded today {ev['recorded_today']}")
     lines.append("Verdicts: " + " | ".join(f"{s} {v['n']} ${v['usd']:.2f}" for s, v in vd.items()))
+    for x in report.get("learners") or []:     # (PREREG-EVL-7: counts only)
+        from . import learner as LR
+
+        lines.extend(LR.render_lines([x]) if "error" not in x else [f"Learners: {x['error']}"])
     for p in report["programs"]:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)

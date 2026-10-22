@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/final/calib_w7.py", line 711, in <module>
+    run(a.grid, a.reps, a.chunk, min(8, a.workers), a.seed, a.tag, a.resume)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/final/calib_w7.py", line 580, in run
+    cells, seed0 = grid(gridname)
+                   ~~~~^^^^^^^^^^
+  File "/home/bwoods1998/Work/.ltcm-main/goal-2026-10-19/evl7/final/calib_w7.py", line 506, in grid
+    cells.append(corner(**c))
+                 ~~~~~~^^^^^
+TypeError: __main__.corner() argument after ** must be a mapping, not NoneType

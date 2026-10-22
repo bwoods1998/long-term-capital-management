@@ -7,7 +7,8 @@ rows of every close a release without them decided or whose part for them failed
 older decision a release without them made) | births [--day D] [--specs
 FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own specs from FILE, a JSON list of
 {spec, why}, with no call; validated and registered through the gateway's docs route, `--dry-run` validated only) |
-facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts). Prints one JSON summary.
+facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts) | learners (PREREG-EVL-7's
+owed decisions, nothing while REGISTERED_AT_7 is None). Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -124,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("score")
     sub.add_parser("screen")
     sub.add_parser("bands")
+    sub.add_parser("learners", help="PREREG-EVL-7's owed decisions (the reconstruction, the catch-up, late decisions), "
+                                    "oldest first, as the House's learner task makes them")
     rp = sub.add_parser("report")
     rp.add_argument("--day", type=_day, default=None)
     bi = sub.add_parser("births")
@@ -165,6 +168,10 @@ def main(argv: list[str] | None = None) -> int:
 
             out = {"bands": {f"{p}@v{v}": b for (p, v), b in sorted(BA.bands(st).items())},
                    "review": BA.review(st, now=ctx.now())}
+        elif args.cmd == "learners":
+            from . import learner as LR
+
+            out = {"catchup": LR.catchup(st, ctx.now), "still_owed": len(LR.due(st, ctx.now()))}
         elif args.cmd in ("births", "facts"):
             from . import births as BI
 

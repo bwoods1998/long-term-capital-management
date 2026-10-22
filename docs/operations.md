@@ -538,6 +538,85 @@ order in flight; CI green on the exact head; before Oct 26 13:00Z, when the firs
 first wording again (looks wait A66's sessions; a look written meanwhile stands: looks are never rewritten) and
 `evl_final` is no longer raised; the gateway's extra word can stay (it is only a word), or roll it back after the House.
 
+## PREREG-EVL-7's two learners and COST-7: `feat/evl-7`, for release 1019i, not deployed (FROZEN, A125: `REGISTERED_AT_7` is pinned, so the release starts them)
+
+Cut from `rel/1019h` (`59663f06`); release 1019i joins it with `feat/evl-6` (PREREG-EVL-6's code) and `feat/infra-1019i`
+(the batched score, the price-lane data, the attempt ledger). IDENTITIES (the tree's own functions, 3.14 and 3.11):
+NONE MOVES, pinned or not: the money digest `8e63ce64` and the constitution `c3026eba` are release 1019h's; no money
+row, no setting, no wall weakened. ONE GATEWAY FILE, DEPLOYED FIRST: `gateway/lib/email.mjs` words the stall cause
+`evl_learner` (an older gateway refuses a stall notice naming a cause it does not word, which only a pinned learner's
+stall can send). The rules and the code are in [events.md](events.md), **PREREG-EVL-7**.
+
+**Switching it on is the freeze, not a deploy step.** The captain's amendment that registers PREREG-EVL-7 (A92's three
+times) sets `league/events/programs.py` `REGISTERED_AT_7`: A125's 2026-10-22T20:14:13Z, pinned on this branch, so the
+first House release that carries it decides, trades at learning and charges the learners (to keep them off, a commit
+on the release branch sets it back to None; nothing else changes). While it is None, no
+learner is in `PROGRAMS`, `BY_KEY` or `SEATING`: no decision, no trade, no charge, no table read by any earlier path
+(the House plans no learner or cost-basis task; the book's learner pass finds no learner). With it pinned AFTER
+PREREG-EVL-6's registration (`REGISTERED_AT_6_FOR_7`, A116's 12:24:50Z; E3), the two learners seat at learning after
+every earlier file's row and before R3's births.
+
+**What the House does with it pinned** (league/events/run.py, house.py, league/equity/live.py):
+
+1. After the House's own `decide-open:<D>` / `decide-close:<D>` receipt is FINISHED (so no earlier row's shadow or real
+   money waits), in the same turn, the learner part of that auction AS ITS OWN RECEIPT `decide-open-lrnlive:<D>` /
+   `decide-close-lrnlive:<D>` (`run.learner_part` -> `learner.live_part`): only the session's first finished House
+   receipt, only a live run; 90 s at the open, 120 s at the close, never past the task's bound less `EVL5_FINISH`
+   (15 s). Its one write is committed only when it completes, and the receipt then finishes `ok` naming the learner. A
+   failure or an expiry writes none of it, finishes the receipt `error` with why and meta `evl7:part:<id>:<version>:<day>`:
+   that auction is decided later by the learner by itself (kind `late`), never traded.
+2. The learner task (`learner`, after every other task of the plan, never within 5 minutes of a decision, bound 120 s):
+   the reconstruction of the sessions before `REGISTERED_AT_7` (once), the catch-up of the decisions from it to the
+   release's first live one (kind `catchup`), the late decisions, each under its receipt `decide-open-lrn:<D>` /
+   `decide-close-lrn:<D>`; then, once the night's score is in, the recompute (meta `evl7:recompute:<day>`).
+3. The nightly `cost-basis` step after the score and before the screen (`costs7.nightly`: one `cost_basis` row a night,
+   the `costs7` rows of newly settled outcomes); one that fails waits its back-off and never holds the screen. It is
+   owed only while that night's screen is (a night a release before the learners screened owes none: the first morning
+   after the deploy computes nothing), and like the screen it never starts within `SCREEN_CLEAR` of a decision, so a
+   row owed in the morning never holds that morning's verdicts or decisions.
+4. The book's learner decision of each auction (`EquityBook._event_decide_lrn`, row `"<at>-lrn"` of
+   `eq_event_decisions`), after the auction's own decision, which gives every PREREG-EVL-1 to -6 row its names at once
+   whatever its band and holds back only R3's births after the learners in ROOM: it is tried each minute of the window
+   until the learner's own live receipt has finished (no other bound), then gives the learner's LIVE picks (only when
+   that receipt names it; its gate, the ERN and 8-K guards) and the held-back births' picks their names together in
+   ROOM's order, the summaries written into the auction's own row too. A learner entry keeps the day line's room for
+   every earlier row's later orders that day (`_event_line_keep`; with `book.LINE_ACROSS_AUCTIONS` True, as built,
+   EVL-LRN-O1's open entries never fit while the ten close-entry rows at learning hold room: its buys stay `planned`
+   with "161 for the earlier PREREG rows' orders still to come today" in their why and end unsent at the window's end,
+   one `unsent` row each in release 1019i's attempts ledger; not an alarm).
+5. The screen's learner step (`judge7.run`, inside the nightly `screen` task after every earlier file's looks; its
+   receipt's `learners`): with the night's `cost_basis` row, each learner's looks (22 ... 60 blocks, PREREG-EVL-6's
+   schedule, through `costs7.judge_record`), its band move with the look (PASS probe, RETIRE retired), its run's end at
+   the 60th block and its next run when the lane's count holds 0.13 (else refused for good, meta `evl7:norun:...`).
+   Release 1019i without `feat/evl-6`'s screen: nothing is written and the learners' gate refuses their real money once
+   a look is due.
+
+**Timing** (one decision, invented data, this machine; the PR body has the table): the part's work is its candidates
+(each pool program's real-money reading), its features, the training sums (cached per session: only a session settled
+since is summed again) and a 52- or 58-column Cholesky. Its own bound is what holds it, never the earlier rows' shadow
+decision. In the book, no PREREG-EVL-1 to -6 row's names or room ever wait on a learner; R3's births after the learners
+in ROOM wait for the learner's own live receipt (the open's: the House decision from 09:15 ET plus at most 90 s; the
+close's: from 15:46 ET at most 150 s for the House decision plus 120 s for ON's part, so at the close ON's picks and the
+births behind them can miss the 15:49 ET cut-off, a stated effect).
+
+**The gate and what it says**: a learner's real money stops (its shadow goes on) when it is retired, at Probe or Sized
+(no stay judge for COST-7's versions in this tree), between runs or refused a run, or when its run's next look (or the
+run's end) is due and not written: the `evl_learner` stall says which (`look_overdue`, `end_overdue`, `no_stay_judge`).
+A look that waits on its final close or an unsettled intent shuts the gate for those few sessions; a release without
+PREREG-EVL-6's screen shuts it for good from the 22nd live block.
+
+**Watch**: the stall job's `evl_learner` (a failed or expired part, a decision owed over 2 h, a lagging training, a
+recompute mismatch, a warm-up unmet after 5 live decisions, the gate shut for a look overdue or no stay judge);
+`learner_fits` (kind, status, receipt, code sha), the screen receipt's `learners` and the report's learner lines and
+next look (counts only). The learner and COST-7 tables are outcome-derived: R3's facts refuse them.
+
+**Rollback**: the release before (release 1019h) never reads the new tables (`learner_fits`, `learner_cands`,
+`learner_stats`, `costs7`, `cost_basis`: additive, `SCHEMA_VERSION` stays 1), the learners' looks or the meta keys
+`evl6:run:`, `evl6:end:`, `evl7:*` beyond what any program's rows are, nor the learners' intents' rows beyond settling
+them as any program's; a learner's open lots exit at their scheduled auctions by the book's own exit path. An
+`eq_event_decisions` row `"<at>-lrn"` is read by nothing of release 1019h; a held-back birth of an auction whose
+learners' decision did not run before the rollback is not traded at that auction.
+
 ## PREREG-EVL-5's three event programs and one control: `feat/evl-5`, in release 1019g, deployed 05:36Z Oct 22
 
 Cut from `rel/1019e` (`c485dcfe`); it ships as release 1019g on top of release 1019f (A92: "release 1019g, or 1019f if

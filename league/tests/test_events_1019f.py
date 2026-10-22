@@ -578,5 +578,10 @@ class TheIndexAfterAnSecHoliday(unittest.TestCase):
         self.assertEqual(horizon, dt.date(2026, 11, 10), why)
 
 
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
+
 if __name__ == "__main__":
     unittest.main()
