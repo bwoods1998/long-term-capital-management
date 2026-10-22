@@ -11,7 +11,8 @@ says how).
    reservation; and (THE INTEGRATION'S CHANGE, league/equity/live.py `_event_send` `ahead`) while a PREREG-EVL-5 buy
    waits for the lane's own close decision to name its program (`book.part_hold`), the buys after it in ROOM's order
    leave it its cash, invested room, loss budget and day orders, and one left no whole share waits for it.
-2. The final record: PREREG-EVL-5 section 2's span (from P''s close decision) is judged by A84's per-feed clean reads.
+2. The final record: PREREG-EVL-5 section 2's span (from P''s close decision) is judged by A84's per-feed clean reads,
+   and its backfill runs through the index that holds X's filings when X is an SEC holiday (1019f's fix round).
 3. The alarms: evl_score waits for the next pass on a `decide-close-evl5` catch-up's intents; evl_final judges the three
    rows and reads a close decided without them until their own decision names them; evl_entries names a buy
    `part_hold` held as held by a gate of real opens.
@@ -413,6 +414,32 @@ class FinalRecord(unittest.TestCase):
         self.assertIn("cut its news read short", why)
         self.assertIn("(3 passes missed it)", why)
         self.assertIsNone(self.block(FOUR_ON, dt.date(2026, 10, 19)))
+
+
+    def test_an_sec_holiday_close_is_final_for_them_only_after_the_index_that_holds_its_eve(self):
+        """Release 1019f's fix round (an SEC holiday's close is final only after the index that holds its eve,
+        `screen.index_through`) on PREREG-EVL-5's span: X = Wed Nov 11, 2026 (Veterans Day: NYSE trades, EDGAR is
+        closed), P' = Mon Nov 9. Its backfill through X is done but Thu Nov 12's (which holds Nov 10's evening 8-Ks)
+        is not: the new rows wait for it, as every program does; once it is done the close is final for them. (With
+        feat/evl-5's own loop, through X alone, the first assertion fails.)"""
+        x, after = C.session(self.st, dt.date(2026, 11, 11)), C.nth(self.st, dt.date(2026, 11, 11), 2)
+        self.assertEqual(after.day, dt.date(2026, 11, 12))
+        rid = self.st.start_receipt(f"decide-open:{after.day}", now=after.open_decide)
+        self.st.finish_receipt(rid, "ok", {}, now=after.open_decide)
+        for day in (dt.date(2026, 11, 9), dt.date(2026, 11, 10), dt.date(2026, 11, 11)):
+            self.st.set_meta(f"evl:backfill:{day.isoformat()}", "done")
+        clean = {"8-K": {"new": 0}, "4": {"new": 0}, "news": {"stored": 0}}
+        t = C.session(self.st, dt.date(2026, 11, 9)).close_decide - dt.timedelta(minutes=10)
+        while t <= after.open_decide + dt.timedelta(minutes=5):
+            rid = self.st.start_receipt("record", now=t)
+            self.st.finish_receipt(rid, "ok", clean, now=t)
+            t += dt.timedelta(minutes=5)
+        now = W.et(dt.date(2026, 11, 12), 12, 0)
+        why = SC._fast_block(self.st, P.BY_ID[DROP], REGISTERED_5.date(), x, None, now, {})
+        self.assertEqual(why, "the daily-index backfill of 2026-11-12 has not run (its index holds the 8-Ks of "
+                              "2026-11-10's evening: 2026-11-11 is an SEC holiday)")
+        self.st.set_meta("evl:backfill:2026-11-12", "done")
+        self.assertIsNone(SC._fast_block(self.st, P.BY_ID[DROP], REGISTERED_5.date(), x, None, now, {}))
 
 
 # ================================================================================================= 3. the alarms

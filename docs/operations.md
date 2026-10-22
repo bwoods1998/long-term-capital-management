@@ -12,7 +12,8 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
 **PREREG-EVL-5's three event programs**, below) merged in, then origin/main `eb5bedac` (the House's scoreboard of Oct 21)
-so that main fast-forwards to the release; `--no-ff`, rerere off, each merge committed before the next; the five
+so that main fast-forwards to the release, then release 1019f's fix round `b262a85f` (its three review majors; the SEC
+holiday's index rule applies to PREREG-EVL-5's span too); `--no-ff`, rerere off, each merge committed before the next; the five
 conflicts kept both sides. Both parts were cut from release 1019e (`c485dcfe`, live since 21:17Z Oct 21: A93). THE
 INTEGRATION'S ONE CHANGE (league/equity/live.py): ROOM's order holds while a PREREG-EVL-5 buy waits for the lane's own
 close decision to name its program (`book.part_hold`; the book's close decision waits only 60 s for the lane's): every
