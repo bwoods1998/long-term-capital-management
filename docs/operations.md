@@ -8,6 +8,45 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019h (Oct 22, 2026): Done speed (the captain's A97): `feat/done-speed`, not deployed
+
+Cut from `rel/1019g` (`5e2bd57b`); four items of the done-speed brief (`goal-2026-10-19/speed/KEPT-1019h.md`), each
+held by tests that fail without it (CHANGELOG.md, **Release 1019h**): (1) S2, PROBE AND SIZED BUYS AT DONE'S SIZE
+(league/equity/live.py `_size_event`, league/events/book.py `round_up`, `at_size`, `envelope_share`): a Probe or Sized
+buy that flooring to whole shares took under Done's size bar (0.8 of its band target, the Done reader's own `at_size`)
+buys the fewest whole shares that reach it when they are at most the band's frozen PREREG-EVL-1 section 8 target (the
+loose end of its `position_share` bounds row: Probe 5%, Sized 10%) of the walls' equity, only when rounding (not a cap)
+caused the shortfall and `size_entry` asked again for them gives every share; a cap that refuses the round-up is the
+buy's recorded binding; `target_usd` stays the band target; learning never rounds up (at E $1,898: $40 -> 2 shares,
+$47 -> 2, $50 -> 1, $90 -> 1, $96 skipped); (2) PL-2, A PROMOTED BIRTH IN ITS BAND'S TIER (book.py `room_key`): a birth
+at Probe or Sized after that band's PREREG rows and before every learning row, reserved for by A85 and leaving no
+reservation; a birth at learning stays last (`BIRTH_ROOM`); (3) SUP-3'S RATE RULE (league/events/births.py): a seatable
+birth must select >= 20 events a session over the sessions of the last 20 holding a complete record pass (an outage
+session left out, at least 3), records as before (3 a session over 20, free), the proposer told "no earnings-only family
+after Nov 6"; (4) SUP-4, THE DONE SUPPLY LINE in the daily report (league/ops/daily_report.py `supply_line`,
+gateway/lib/email.mjs `composeReport`; report only). IDENTITIES (the tree's own functions, 3.14 and 3.11, equal on
+`rel/1019g` and this branch): money `c2f0a478`, constitution `24f73f18`, the options execution fingerprint `b60410ad`,
+the equity identity `78022ca6`: NO CONSTITUTION ROW IS ADDED (S2's bar is the judge's own, its envelope the bounds
+row's loose end), so the standing grant does not re-ratify for it. The births proposer's prompt sha moves `2203fda3`
+-> `6f062f1f` (R3 records it per night).
+
+**Deploy, in order** (after release 1019g is live; from 20:05Z Oct 22 or the weekend; never 12:55-20:05Z on a trading
+day, 12:55-21:05Z from Nov 2; never with an order in flight; CI green on the exact head; merge origin/main first when it
+moved; before the first possible promotion, A97):
+1. THE GATEWAY from this head (`gateway/lib/email.mjs`: the Done supply line's words): `cd gateway && npm run check &&
+   npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces. An older gateway ignores the
+   new `supply` fact (the report goes without the line), so the order only decides when the line first shows.
+2. THE HOUSE by the captain's ship script with the unchanged pair: `ship_house.sh <head> <PR> r1019h c2f0a478
+   24f73f18`. Verify (read-only): promoted, `real_money` true, failures []; the ids unchanged; at the first Probe buy
+   whose whole shares fall under 0.8 of its target, its order's words "rounded up to N shares ... to reach Done's size
+   bar" (or "not rounded up ... (cash)" with `binding` cash), and `target_usd` still 0.035 x E; the night's births job
+   `birth_calls.prompt_sha` the new one; the next daily report's "Done supply" line ("no Probe+ row yet" before any
+   promotion).
+
+**Rollback**: the House to release 1019g's deployed head by `floor_box.py rollback` (no identity moves, so no grant
+step; the Probe lots bought rounded up exit by their own plans and count as they were sent); the gateway by `wrangler
+rollback` to the version recorded, or never (the House's older facts carry no `supply`).
+
 ## Release 1019g (Oct 22, 2026): release 1019f + PREREG-EVL-5, the pre-open deploy (A94): `rel/1019g`, not deployed
 
 Release 1019f's head `a62b6cf2` (PR 593, **Release 1019f**, below) with `feat/evl-5`'s head `dac5b9f4` (PR 594,
@@ -6981,6 +7020,15 @@ phone (no line over 60 characters):
   market-direction share and benchmark mean (the shadow's, PREREG-EVL-1 section 7's "beside every look") and its
   same-risk buy-and-hold (its events' benchmark held continuously from its first real entry to its last real exit at
   its average invested dollars, PREREG-EVL-1 section 9);
+- THE DONE SUPPLY LINE (release 1019h, SUP-4, the captain's A97; report only), after the Done line: each program at
+  Probe or Sized now, its counted Probe+ events (done.json), its MEASURED real picks a session over the last 5 sessions
+  (the picks ROOM gave it at the book's decisions of its entry auction, `eq_event_decisions` `planned`; "(N read)" when
+  fewer than 5 decisions were), its Probe+ buys under Done's size bar and the cap most often recorded on them, and the
+  session its projection reaches Done's 50 at the STATED season multipliers (earnings x0.2 and news x0.6 after Nov 20,
+  2026 to mid-January: stated, not measured, and the line says so; every pick given counted, an upper bound); then how
+  many rows reach 50 by the checkpoint Done is first read at (the larger of the next checkpoint and 300) and in how
+  many sessions the rows' projected total reaches it, "FLAG" when fewer than 3 do ("no Probe+ row yet" before any
+  promotion);
 - the records and controls in one line, the same-risk buy-and-hold of the lane, the expected false passes and the
   alarms open.
 Figures only: the House sends counts, dollars, basis points, shares, days and the programs' own `EVL-...` ids, and the

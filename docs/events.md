@@ -72,7 +72,7 @@ PREREG-EVL-5's three. Version 1 of the earlier files' programs, every record and
 | band | size | how a program gets there |
 |---|---|---|
 | learning | 2% of equity a position (whole shares; one share up to 5%), at most 8 open | from its first event |
-| probe | 3.5% (whole shares; one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before) | the first decision after a passed look |
+| probe | 3.5% (whole shares, rounded up to Done's size bar inside 5% (A97, release 1019h); one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before) | the first decision after a passed look |
 | sized | 10%, at most 8 open | >= 150 settled real-money events at Probe size or above, 80% session-block lower bound > 0 |
 | retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
 
@@ -91,6 +91,20 @@ whose one share at the limit is above 5% of equity is skipped at Probe, where PR
 keeps it). It is money management inside the frozen envelope, not a new version: no program's rule, judge, look,
 alpha, false-positive rate or Done rule moves (looks count shadow events, which do not depend on size), and the
 screen's cost allowance keeps its 5% notional.
+
+AT DONE'S SIZE (S2, the captain's A97, release 1019h, before any promotion; `feat/done-speed`): Done counts a Probe+
+buy only when the dollars its send asked reach 0.8 of its band target (`done.at_size`), and whole-share flooring left
+about a third of Probe buys under that bar (a $40 name at E $1,898: one share, $40, of a $66.43 target). A Probe or Sized
+buy that flooring took under the bar now buys the fewest whole shares that reach it (`book.round_up`, judged by the
+Done reader's own comparison), when those shares are at most the band's frozen PREREG-EVL-1 section 8 target (the loose
+end of its `position_share` bounds row: Probe 5%, Sized 10%) of the walls' equity, only when rounding (not a cap) caused
+the shortfall, and only when `size_entry` asked again for them still gives every share (the name wall, the 100% book,
+cash, the loss budget at the lot's weight). So a Probe buy is never more shares than PREREG-EVL-1 section 8's own count
+at its 5% target, and a Sized buy never rounds up (its envelope is its target). At E $1,898: $40 -> 2 shares ($80), $47
+-> 2 ($94), $50 -> 1 (two would be $100, over 5%: under size, reported beside), $90 -> 1 (one share), $96 skipped. A cap
+that refuses the round-up is the buy's recorded binding (the report counts the cut); `target_usd` stays the band's
+target; learning never rounds up. A85's reservation stays share x E a buy, so a round-up the reservation's cash leaves
+short is refused and recorded, never a wall moved. No constitution row is added: no money or constitution digest moves.
 
 Back to learning from probe or sized: the last 50 Probe+ events lost more than $150 net, or the last 100 have a
 negative mean, both counted over the program's CURRENT Probe stay (its events bought after its latest move to Probe in
@@ -564,6 +578,12 @@ causes alone that names the owner causes still waiting. The daily report carries
 filled, the venue's cancels and A80's re-sends, the never-sent by reason, the room cut, and per auction the constraint
 that bound it: the captain's A80 (2)) and, once a Probe buy exists, THE BREAK-EVEN EDGE of Done's compute clause: the
 metered compute per session since the first Probe buy over the Probe dollars bought per session, in basis points.
+Since release 1019h (SUP-4, the captain's A97; report only) it carries THE DONE SUPPLY LINE after the Done line: each
+program at Probe or Sized, its counted Probe+ events, its MEASURED real picks a session over the last 5 sessions (the
+picks ROOM gave it at the book's decisions), its Probe+ buys under Done's size bar with the cap most often recorded on
+them, and the session its projection reaches Done's 50 at the STATED season multipliers (earnings x0.2 and news x0.6
+after Nov 20, 2026, stated and never measured: the line says so beside every projection); and a FLAG when fewer than 3
+rows reach 50 by the checkpoint Done is first read at (the larger of the next checkpoint and 300).
 
 THE DAILY ONE-SCREEN REPORT goes to the owner by mail once a New York day, after the lane's own nightly report job
 (league/ops/daily_report.py, the gateway's `report` notice): account-shown profit first and Net after the measured
@@ -674,9 +694,15 @@ auction): inside each of those two bands the picks are given one a program a pas
 until every program is full or out of picks, and the auction's buys are SENT in the same passes (`book.send_key`: every
 Probe program's first buy before any Probe program's second), so when the cash runs short inside one auction the last
 Probe row in the tables is not left only what the earlier rows did not take; learning keeps the tables' order. With
-R3's births (release 1019f's integration): the round-robin is the PREREG programs' Sized and Probe tiers only
-(`book.ROUND_ROBIN_TIERS`); a birth keeps its own tier after every PREREG program whatever its band (`BIRTH_ROOM`,
-R3-SPEC section 4), in registration order, as release 1019e gave it. THE NEXT AUCTION'S RESERVATION (A85): the book is
+R3's births (release 1019f's integration; R3-SPEC section 4 as the captain's A97 amends it, PL-2, release 1019h): the
+round-robin is the Sized and Probe tiers (`book.ROUND_ROBIN_TIERS`); a birth AT LEARNING keeps its own tier after
+every PREREG program (`BIRTH_ROOM`), in registration order, as release 1019e gave it; a PROMOTED birth (Probe or Sized)
+takes its band's tier after that band's PREREG rows and before every learning row (PREREG-EVL-5 section 1.3: within a
+band the tables' order, R3's births after every file's rows), round-robins with them (last in each pass), A85 reserves
+for it and its buys leave no reservation, as a PREREG program of its band. Before it, a promoted birth's Probe buys
+came after every PREREG learning buy and sized less A85's reservation, so they rarely reached Done's size; while no
+birth is promoted nothing changes (league/tests/test_events_1019h_done_speed.py decides an invented week both ways and
+finds every PREREG program's picks, sends, passes and A85 reads identical). THE NEXT AUCTION'S RESERVATION (A85): the book is
 1x cash, every buy holds its limit, and a lot sold in an auction still holds its cash in that auction, so a learning lot
 bought at one auction (the overnight rows' close buys) holds cash at the next one; ROOM's order alone held only inside
 one auction (A83 (2)(b)). A LEARNING buy is therefore sized on the cash, the invested room and the loss budget less R:
@@ -685,8 +711,9 @@ holds and has on order, its lots sold at this auction not counted; the median of
 decisions of that auction, its whole room with none yet) x its band's share x E, and that x the median open-risk weight
 of its buys there (0.40 with none) for the budget; less what this auction's event sales give back by then (each lot
 sold here: its value, and its value x its weight), never below 0 (league/equity/live.py `_event_reserve`,
-`book.reservation`). A birth is never reserved for (`book.reserved_for`), and a birth's buy at any band leaves R as a
-PREREG learning buy does (`book.leaves_room`: its tier comes after the PREREG Probe tier); A80's one re-send is sized
+`book.reservation`). A birth at learning is never reserved for (`book.reserved_for`), and its buy leaves R as a PREREG
+learning buy does (`book.leaves_room`: its tier comes after the Probe tier); a promoted birth is reserved for and its
+buys leave none (A97, PL-2); A80's one re-send is sized
 again, R included, like any entry. A buy it cuts says so ("A85 holds $X ...") and the shadow keeps a skipped event. R
 is 0 while no PREREG program of the other auction is at Probe or Sized: learning sizes as it did. No wall moves and no
 money row changes: the reservation only makes such a buy smaller. SIZE BEFORE SLOTS: before a pick takes a slot, the
@@ -813,8 +840,13 @@ On the House the call is INSIDE THE LANE'S LINE (release 1019e's review): its wo
 left of the lane's line that UTC day, and its stored cost counts in that line (the next verdict is refused once births
 and verdicts reach it), in the budget rule's measure of the lane (`budget.lane_spend`: its window, its heaviest day and
 today) and in the site's Claude bill (`site_lane.verdict_usd`).
-The validator is code (`births.validate`): the grammar; a new id and sha; at least 3 selected events a session over the
-last 20 sessions by selection count; Jaccard < 0.8 of the last 20 sessions' selected events against every registered
+The validator is code (`births.validate`): the grammar; a new id and sha; THE RATE: a SEATABLE birth at least 20
+selected events a session over the sessions of the last 20 that hold a COMPLETE RECORD PASS (SUP-3's rate rule, the
+captain's A97, release 1019h: `births.recorded_sessions`, the session's whole event span from the prior session's 09:00
+ET to its close decision recorded by clean record passes, `evl_record`'s reading, with no gap over 30 minutes; an
+outage session is left out, never counted at a low count; at least 3 such sessions), so a seatable birth can fill a
+Probe row's slots after the real-money funnel through the season (a react family's count is an upper bound, so the
+floor barely binds it); a RECORD at least 3 a session over the last 20 sessions by selection count, as before; Jaccard < 0.8 of the last 20 sessions' selected events against every registered
 program (records, controls and births included: stricter than "every live program", and it reads no band) and against
 every birth accepted before it that night; and THE FALSE-PASS BUDGET, stated: each seatable birth adds 0.10 expected
 false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the stated charge), at
@@ -845,8 +877,10 @@ with and without births and finds every PREREG program's intents identical). The
 (events counted, alpha 0.018, >= 40 issuers and 8 session blocks; a record or a control is never screened), its band
 moves by PREREG-EVL-3's rules, and the House's event book (which reads `SEATING` and `BY_KEY`) trades a seated birth at
 learning size from its first event at its own version 1, like any version 2 program. When room is short, every PREREG
-program goes first (Sized, Probe, learning, then the tables' order) and the births after them, in registration order
-(R3-SPEC section 4). Expected false passes in the report count every seatable birth. A birth's failure is its own: a
+program goes first (Sized, Probe, learning, then the tables' order) and the births at learning after them, in
+registration order (R3-SPEC section 4); a promoted birth takes its band's tier after that band's PREREG rows (A97, PL-2,
+release 1019h: **Real money**, below). The proposer is told the rate rule and to propose no earnings-only family (ern,
+ern-react) after Nov 6, 2026 (A97; no steering toward any family otherwise). Expected false passes in the report count every seatable birth. A birth's failure is its own: a
 birth whose part of a decision raises is kept in the decision's `births_failed` (the decision is made for every other
 program, as before) and the screen holds that birth's looks until a later pass decides it; a READ birth's look waits
 the same way when its control's part raised or is pending (the look compares the two records). A DECISION MADE WITHOUT

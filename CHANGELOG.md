@@ -38,6 +38,67 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### Release 1019h: Done speed (the captain's A97): Probe+ buys at Done's size, promoted births in their band, the births' supply floor, the Done supply line, on `feat/done-speed` (unreleased; cut from `rel/1019g` `5e2bd57b`; a draft PR with base `rel/1019g`; an owner deploy after release 1019g is live: THE GATEWAY (`gateway/lib/email.mjs`: the supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with the UNCHANGED pair; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: money `c2f0a478`, constitution `24f73f18`, the options execution fingerprint `b60410ad` and the equity identity `78022ca6` are release 1019g's, read with the tree's own functions on 3.14 and 3.11 before and after: no constitution row is added, so the standing grant does not re-ratify for it; the births proposer's prompt sha moves `2203fda3` -> `6f062f1f`; the Done rule `54241925` is untouched)
+
+The brief is `goal-2026-10-19/speed/KEPT-1019h.md` (the done-speed designs and their adversarial checks, whose
+conditions bind); the captain records it as A97. Four items, each with tests that fail without it:
+
+- **S2 (= SUP-1's sizing, one mechanism): PROBE AND SIZED BUYS AT DONE'S SIZE.** Done counts a Probe+ buy only when the
+  dollars its send asked reach 0.8 of its band target (`done.at_size`); whole-share flooring left about a third of
+  Probe buys under it. A Probe or Sized buy that flooring took under the bar buys the fewest whole shares that reach it
+  (league/events/book.py `round_up`, judged by the Done reader's own float comparison, `book.at_size`, so an exact
+  equality the judge counts under is rounded up too), only when those shares are at most the band's frozen
+  PREREG-EVL-1 section 8 target of the walls' equity (`book.envelope_share`: the loose end of the band's
+  `EQUITY_MONEY_BOUNDS` `event.position_share` row, Probe 0.05 and Sized 0.10, never a literal; on `wall_equity`, the
+  lower of E and the current equity), only when rounding caused the shortfall (`size_entry`'s fractional dollars reach
+  the bar: a cap that cut them under it is never rounded past), and only when `size_entry` asked again at those
+  dollars still gives every share (the name wall, the 100% book, cash and the loss budget at the lot's weight); else
+  the buy goes as today, with the refusing cap recorded as its `binding` and named in its order's words (the report's
+  `sent_binding` counts the cut). `target_usd` stays the band target. n x limit <= 5% x E means n <= floor(5% E /
+  limit), PREREG-EVL-1 section 8's own count, so the buys stay inside the frozen envelope (A86 REVISED's doctrine: no
+  program rule, selection, look, judge or Done rule moves; done.py is read, never edited); at Sized the envelope is the
+  target itself, so no Sized buy rounds up. Learning never rounds up. `_event_ahead` (release 1019g) leaves a waiting
+  PREREG-EVL-5 Probe buy its round-up. A85's reservation stays share x E a buy (SUP-1's check: "or accept and report
+  the cuts": a round-up it leaves short is refused and recorded as cash). The check's worked cases at E $1,898 (target
+  $66.43, bar $53.144, envelope $94.90) through the real book: $40 -> 2 shares, $47 -> 2 ($94), $50 -> 1 (under size,
+  beside: two would be $100), $90 -> 1, $96 skipped; cash ($70 available) refuses the round-up and is the binding; a
+  $50 cash cap is never rounded past; the walls' equity at $1,850 keeps $47 at one share. NO DIGEST MOVES: the bar is
+  the judge's own and the envelope the bounds row's loose end, so no row is added (the design's `at_size.probe` row was
+  not needed).
+- **PL-2: A PROMOTED BIRTH TAKES ITS BAND'S TIER** (book.py `room_key`; R3-SPEC section 4 as A97 amends it, before any
+  birth registered): a birth at Probe or Sized comes after that band's PREREG rows and before every learning row
+  (PREREG-EVL-5 section 1.3's frozen ROOM text: within a band the tables' order, R3's births after every file's rows),
+  round-robins with them (last in each pass, `send_key`, `allocate`), A85 reserves for it (`reserved_for`) and its buys
+  leave no reservation (`leaves_room`); a birth at learning stays at `BIRTH_ROOM`. An invented week decided both ways
+  (league/tests/test_events_1019h_done_speed.py) finds every PREREG program's picks, sends, passed-over picks and A85
+  reads identical while no birth is promoted. test_events_1019f_births_a85.py and test_events_1019g.py hold the new
+  order; the docstrings of book.py and live.py say it.
+- **SUP-3's RATE RULE ONLY** (league/events/births.py): a seatable birth must select >= `MIN_RATE` 20 events a session
+  over the sessions of the last 20 that hold a COMPLETE RECORD PASS (`recorded_sessions`: the session's span, the
+  prior session's 09:00 ET to its close decision, covered by clean `record` receipts, evl_health's own `_failing`
+  reading, with no gap over `RECORD_MINUTES` 30; an outage session left out, never counted at a low count; at least
+  `MIN_RECORDED` 3); a record keeps release 1019e's 3 a session over the calendar's 20, free. The facts and each
+  candidate carry `per_recorded_session` and `recorded_sessions`; the proposer is told both rates, that react counts
+  are upper bounds (so the floor barely binds them), and "propose no earnings-only family (ern, ern-react) after Nov 6,
+  2026"; the design's steering lines (close-entry, overnight attention) are dropped, as its check said.
+- **SUP-4: THE DONE SUPPLY LINE** (league/ops/daily_report.py `supply_line`, gateway/lib/email.mjs; report only): per
+  program at Probe or Sized, its counted Probe+ events (done.json), its MEASURED real picks a session over the last 5
+  sessions (the picks ROOM gave it at the book's decisions, live.sqlite `eq_event_decisions` `planned`, read-only), its
+  Probe+ buys under Done's bar with the cap most often recorded on them, and the session its projection reaches Done's
+  50 at the STATED season multipliers (earnings x0.2, news x0.6, Nov 21, 2026 to Jan 15, 2027: stated, not measured,
+  said beside every projection); how many rows reach 50 by the checkpoint Done is first read at (the larger of the next
+  checkpoint and 300) and a FLAG when fewer than 3 do. The House's fixture (league/tests/fixtures/daily_report.json)
+  gains `supply`; the gateway's test reads every key of it.
+
+Tests: the full suite on Python 3.14 in six shards, 12,979 tests OK (skipped 33); the events, equity, live, ci,
+constitution and ops modules (with the daily report and the evl alarms) on Python 3.11 in four shards, 2,947 tests OK;
+the gateway's 507 tests and `npm run check`; `python -m league.ci --base origin/main --branch feat/done-speed
+--no-tests` passed. Every new test fails on `rel/1019g`'s code (37 of them: 23 failures, 14 errors, and the gateway's
+three). New: league/tests/test_events_1019h_done_speed.py; updated: test_events_1019f_births_a85.py,
+test_events_1019g.py, test_events_births.py (`SeatableRate`; `Validation` sets a seatable birth's rate to release
+1019e's 3 for the figures it holds, and its sessions hold clean record passes), test_daily_report.py (`DoneSupply`),
+league/tests/fixtures/daily_report.json (`supply`) and gateway/test/report-notice.test.mjs.
+
 ### Release 1019g: release 1019f + PREREG-EVL-5 (the pre-open deploy, A94), on `rel/1019g` (unreleased; release 1019f's head `a62b6cf2` (PR 593) with `feat/evl-5`'s head `dac5b9f4` (PR 594) and then origin/main `eb5bedac` (the House's scoreboard of Oct 21) merged in, so main fast-forwards to it; on top of release 1019e, which is live (House `20261021T211621Z-0ee98209e903`, main `c485dcfe`, gateway `68363043`: A93); an owner deploy: THE GATEWAY FIRST (`gateway/` is release 1019f's: `gateway/lib/email.mjs`), THEN THE HOUSE by the captain's ship script with release 1019f's pair; A94: before 12:55Z Thu Oct 22 when CI is green on the exact head and the reviews' blockers and majors are closed by 12:15Z, else from 20:05Z with nothing weakened; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight; THE MONEY DIGEST MOVES FROM THE LIVE `055e5313` TO RELEASE 1019f's `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows; PREREG-EVL-5 moves none: `rel/1019f` and `rel/1019g` give the same digests with the tree's own functions on 3.14 and 3.11), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule `54241925`)
 
 - **What it carries**: release 1019f (its entry below: A84's per-feed fast path and `evl_final`, A85's Probe cash
