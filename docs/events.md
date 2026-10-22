@@ -349,7 +349,7 @@ turn, the most urgent due first.
 | 3 | the record pass: EDGAR's current feeds, the news, then today's verdicts with the time left | every 2 min, 24/7 | 90 s, resumable |
 | - | the hourly re-decision of the last three sessions (late events) | hourly, after the record pass | 150 s |
 | - | PREREG-EVL-4's rows decided by themselves (`decide-close-evl4`) for each older close a release without them decided | from the first turn after the record pass, once each | 150 s |
-| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once | the score 120 s, resumable; births 240 s |
+| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once, and once more for a night an older reading of the grammar left empty, before 12:55Z of the session day after it (A95) | the score 120 s, resumable; births 240 s |
 | - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
@@ -658,14 +658,19 @@ with the judges untouched.
 (1), `family` (one the lane already reads: `ern`, `ern-react`, `8k` with an item set, `ins`, `ins-buy` with value and
 role filters, `news`, `news-day`, `news-react`), `rule` (the family's own fields only: `items`; `score_min` /
 `score_max` on the STORED PROMPT-DOC or PROMPT-NEWS score and `guidance` on the stored PROMPT-DOC guidance, never a new
-prompt; `react_min` / `react_max`; `value_min` (>= $50,000) and `roles` (director | officer); `sources` and `hours`, the
-news windows), `entry` (the family's: open or close), `exit` (close of session h, or a close entry's next open), `hold`
-(1..5; ONE for a seatable birth, whose screen blocks are one-session blocks, as every seatable PREREG program's), `rank`
+prompt; `react_min` / `react_max`; `value_min` (>= $50,000) and `roles` (director | officer; a one-role list such as
+`["officer"]` reads as its role, any other list is refused); `sources` and `hours`, the news windows), `entry` (the
+family's: open or close), `exit` (close of session h, or a close entry's next open), `hold` (1..5; ONE for a seatable
+birth, whose screen blocks are one-session blocks, as every seatable PREREG program's), `rank`
 (score, reaction, value or none) and `seatable`. Anything else is refused. Its canonical form (sorted keys, no spaces)
 and that form's sha256 name it. A READ birth (a verdict threshold, a guidance filter or a score ranking) carries a
 CONTROL derived from it, `<id>-CTRL` (its rule with every verdict condition removed, a record), registered with it, so
 PREREG-EVL-1 section 7's "a READ program beats its control" holds for births too. A READ birth of the `8k` family names
 only items whose verdicts the lane asks (1.01, 2.01, 7.01, 8.01), so its verdicts are stored before its decision.
+A NAME IS NOT PART OF THE RULE (A95): an id that lacks the `EVL-B-` prefix is named canonically by the House
+(`births.canonical_name`: a leading `EVL-` becomes `EVL-B-`, any other id takes `EVL-B-` in front), every check of an id
+(the pattern, 40 characters, never ending `-CTRL`, never registered) applies to that name, the canonical line and sha
+carry it, and the candidate row keeps the proposed id beside it (`figures.named` {from, to}; the receipt's `named`).
 
 **Born from outcome-free facts.** Each night the lane builds the facts of the last 20 sessions (`births.Facts`): event
 counts by family, 8-K item, news source and knowable hour; the stored verdict scores and guidance; which families and
@@ -677,7 +682,13 @@ architect. A react family's reaction is a price after the event: never read, so 
 
 **The architect and the validator.** One gateway call a night (`births.propose`): claude-haiku-4-5-20251001, temperature
 0, max_tokens 3,000, its prompt's sha256 and its answer stored in `birth_calls` like a verdict (a night's answer is read
-again, never asked again), at most 6 specs a night, under a cost cap of $0.25 a night (the call's worst case must fit).
+again, never asked again, under the same prompt sha), at most 6 specs a night, under a cost cap of $0.25 a night (the
+call's worst case must fit). The prompt shows two valid specs (`births.EXAMPLES`: an 8k spec over items outside the four
+READ items with no score or guidance field, and a news spec) and says that an 8k spec may carry `score_min`,
+`score_max` or `guidance` only when every item is among the four, and that `guidance` is a list (A95: the first night's
+6 specs were all refused, for ids without the prefix, `"guidance": {"verdict": "none"}`, READ fields on other items and
+`"roles": ["officer"]`). That moved the prompt's sha (release 1019e's `2203fda3` to `8294fe77`): an answer stored under
+the old sha is never read by this code (it stays stored and counted), and a night this code runs asks under the new one.
 On the House the call is INSIDE THE LANE'S LINE (release 1019e's review): its worst case must also fit under what is
 left of the lane's line that UTC day, and its stored cost counts in that line (the next verdict is refused once births
 and verdicts reach it), in the budget rule's measure of the lane (`budget.lane_spend`: its window, its heaviest day and
@@ -734,7 +745,20 @@ after a decision), so the book reads no `ins` rows and the grammar refuses a sea
 **On the House.** `league/config.json` `events.births` true runs the job on a session night at 21:15 ET after the
 report (league/events/house.py), once a night, its Claude call through the lane's gateway (refused while the House is
 paused or over the day's verdict line, made only when its worst case fits under what is left of that line, and counted
-in it). It ships false: switching it on needs the gateway release with the births
+in it). THE ONE RE-RUN OF AN EMPTY NIGHT (A95, `births.rerun_due`): every births receipt records the running
+`births.PARSE_VERSION` (2; release 1019e's receipts record none, read as 1). When the latest night's receipts accepted
+none and registered none (no accepted id, no candidate row accepted, unknown or registered, no birth of the night) and
+were all written by an older version, the House runs that night's job once more, its receipt marked `rerun` (written
+when it starts, so a re-run that dies is still the one), never from 12:55Z of the session day after the night (a
+Friday night's until Monday's 12:55Z). The re-run reads the night's stored answer again when its prompt sha is the
+running one (no call), else makes the night's call inside the night's $0.25 (its first call counts) and the lane's line.
+Its births register like any, at the later of GitHub's commit time and the House's receipt, so they count only events
+knowable after the re-run, are charged to the budget and to that night's three; the line goes to the night's own file.
+Before 12:55Z the re-run starts at least 5 minutes (65 in standard time) before the session's 09:00 ET cut-off and 20
+(80) before its 09:15 ET open decision; from then the session's decisions run until its close (the deploy-blocked
+window), and a birth registered among them would begin part-way through a session it cannot fairly count, so the
+night stays empty and the next night's job proposes again: either way no event before a birth's registration is
+counted. It ships false: switching it on needs the gateway release with the births
 route. The switch stops new births only; registered births trade whatever it says. Not built here: R3-SPEC's Sonnet
 fallback after two failing nights of Haiku proposals, and a ranking of learning room by look statistics (a later,
 pre-registered version).

@@ -38,6 +38,85 @@ Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PR
 Oct 19 and stays on the captain's workstation as the backup, its timers stopped), and version 2 of its nine seatable
 programs trades real money at learning size.
 
+### R3 births: canonical names, one-role lists, two examples, one re-run of an empty night (A95), on `fix/births-names` (unreleased; cut from `rel/1019f` `b262a85f`; for release 1019g, on top of release 1019f; an owner deploy of the House alone: league/events/births.py and house.py are behind league/ci.py's wall; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money digest `c2f0a478`, the constitution `24f73f18` (release 1019f's), the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` are the base's, read with the tree's own functions on 3.14 and 3.11; THE BIRTHS PROMPT'S SHA MOVES `2203fda3` -> `8294fe77`; no setting, no money row, no judge, no gateway change)
+
+- **Why** (A95, the captain's, 02:25Z Oct 22, 2026). R3's first births night (2026-10-21, births receipt 02:11:44Z Oct
+  22) accepted none: one Haiku call ($0.0084), six specs, all six refused by the grammar. Every id lacked `EVL-B-` (the
+  prompt stated it; the model wrote ids such as `EVL-ERN-NEGATIVE-O1`); three 8k specs put a score and `"guidance":
+  {"verdict": "none"}` on items whose verdicts the lane does not ask (5.02/5.03/5.07, 9.01, 3.01-3.03; release 1019e's
+  prompt said "guidance (with a verdict field, ...)"); one ins-buy wrote `"roles": ["officer"]`. The ern and the news
+  spec were refused for the id alone. The budget did not move.
+- **(1) A name is not part of the rule** (league/events/births.py `canonical_name`, `renamed`, `parse`): an id that
+  lacks the `EVL-B-` prefix is named canonically by the House, a leading `EVL-` becoming `EVL-B-` and any other id
+  taking `EVL-B-` in front; every check of an id (`ID_RE`, `ID_MAX`, never ending `-CTRL`, never registered) applies to
+  the new name, and a refusal names both ("the House's name X of Y"). The canonical line and the sha carry the name; the
+  candidate row keeps the proposed id and the renaming (`figures.named` {from, to}), the receipt lists them (`named`
+  {name: proposed}) and the CLI's `facts --specs` says `named_from`. No stored birth changes: a registered spec's id has
+  the prefix already.
+- **(2) A one-role list reads as its role**: `"roles": ["director"]` or `["officer"]` parses as the string (the same
+  canonical line and sha); any other list (two roles, empty, nested, unknown) is refused as before.
+- **(3) The prompt** (`USER`, `EXAMPLES`): two VALID specs shown whole (an 8k spec over item 5.02 with no score or
+  guidance field, rank `none`; a news spec over hours 6-8 with `score_min` 1), every id said to start with `EVL-B-`,
+  roles one string, and one explicit line: an 8k spec may carry `score_min`, `score_max` or `guidance` (or rank `score`)
+  only when every item is among 1.01, 2.01, 7.01, 8.01, and `guidance` is a list, never an object. The prompt's sha
+  moves `2203fda3...` -> `8294fe77...`: `birth_calls` is keyed by night, prompt sha and model, so the Oct 21 answer
+  (stored under the old sha) is never read by this code; it stays stored and its $0.0084 stays counted in that night's
+  $0.25 and in its UTC day's line; every night this code runs asks under the new sha.
+- **(4) The one re-run of an empty night** (`PARSE_VERSION` 2 in every births receipt, release 1019e's read as 1;
+  `rerun_due`; league/events/house.py `_nightly`, `_births(night, rerun)`): when the latest night a births receipt names
+  (within 10 days) accepted none and registered none (no accepted id in a receipt; no candidate row `accepted`,
+  `unknown` or `registered`; no `births` row of the night), every receipt of it was written by an older version, and
+  none of them is a re-run, the House runs that night's job ONCE more (the same Task name and bound, after the night's
+  report), its receipt marked `rerun` {night, of, parse_version, until}, written with `parse_version` when the receipt
+  STARTS (so a re-run that dies running is still the night's one); never from 12:55Z of the session day after the night
+  (Thursday's 12:55Z for Wednesday's night; Monday's for a Friday's; no calendar row after it: never). It reads the
+  night's stored answer again when its prompt sha is the running one (a parser change alone: no call), else makes the
+  night's call inside `NIGHT_USD` (the night's first call counts) and the lane's line, as `propose` always does. Its
+  births register as any birth, at the later of GitHub's commit time and the House's receipt, to the night's own file
+  `docs/births/<night>.jsonl`, charged to the budget and to that night's three, so they count only events knowable after
+  the re-run. A read error of the re-run check is a warning, never the plan's.
+- **Why 12:55Z is safe either way.** Whenever a birth lands it counts only events knowable after its registration.
+  Before 12:55Z the re-run starts at least 5 minutes (65 in standard time) before the session's 09:00 ET cut-off and 20
+  (80) before its 09:15 ET open decision, so in the normal case (the first night's job took 11 s) the birth is
+  registered before that session's first decision and its first session is whole. From 12:55Z the session's decisions,
+  sends and fills run to its close (the deploy-blocked window keeps the program set fixed as it keeps the code): a birth
+  registered among them would begin part-way through a session it cannot fairly count, so the night stays empty and the
+  next session night's job (21:15 ET, at the running reading) proposes again; the only cost is that night's births. For
+  tonight: release 1019g live by about 12:40Z gives the Oct 21 night its re-run before the open's last verdicts (the
+  plan puts a decision's verdicts within 30 minutes of it before the nightly jobs); later, Thursday's own night is the
+  first under this code.
+- **Tests** (league/tests/test_events_births_names.py, 18 on invented data only; each part has a test that fails with
+  that part alone reverted: the naming, the one-role list, the head written at the start, the accepted and candidate
+  checks, the once-a-night check, the 12:55Z cut-off and the House's re-run task): `TheHouseNamesAnId` (the naming rule,
+  the line and sha of the name, every check of the new name: 42 characters, a control's name, lower case, nothing after
+  the prefix, six groups; a named id registered already refused, its row keeping both), `AOneRoleList`, `ThePrompt` (the
+  two examples parse, the 8k one outside the READ items with items alone, the 8k line and roles line rendered, release
+  1019e's object-shaped line gone; the prompt sha pinned with `PARSE_VERSION` 2: a prompt change needs a new version),
+  `TheSixOfTheFirstNight` (A REPLAY of the six refused specs, reconstructed from the captain's read: the four ids and
+  the refused fields as written, the other two 8k ids and the other values invented; on 20 invented sessions every id is
+  renamed, the ern spec (score_max -2) and the news spec (hours 5-8) are accepted at 80 selected events and Jaccard
+  0.67, the ins-buy parses with "officer" and is judged by the validator's count alone (40, under 3 a session), the
+  three 8k score/guidance specs are still refused for exactly their guidance and READ-items reasons),
+  `TheRerunOfAnEmptyNight` (the Oct 21 night as release 1019e left it: one new call under the new prompt, the night's
+  cap holding both calls, the two specs registered at the later of GitHub's 11:30:09Z and the receipt's 11:30:05Z to
+  `docs/births/2026-10-21.jsonl` with the names only, candidate rows 6-11 with `named`, an 11:10Z earnings 8-K not taken
+  by the birth and a 12:10Z one taken, and never again; a stored answer at the running sha read again with no call; the
+  cap and the lane's line holding the re-run's call), `WhenTheNightIsDue` (12:54:59Z yes, 12:55:00Z no, a Friday night
+  until Monday's 12:55Z, no session after it never; an accepted id, an accepted, unknown or registered candidate row or
+  a registered birth: never; the running version, a re-run already, a re-run that died running: never; the latest night
+  only, within reach) and `TheHousesRerun` (the House's lane on Tue Oct 20 with Monday's receipt as release 1019e wrote
+  it: the re-run at 07:05 ET, once, under the new prompt; Tuesday's own night at 21:16 ET at version 2 and no re-run of
+  it on Wednesday; none from 08:55 ET (12:55Z); a stored answer at the running sha read with no call; none for a night
+  with an accepted id or at the running version; none with births off). league/tests/test_events_births.py's grammar
+  case for the id moves to an id that fails as named.
+- **Runs** (on 3.14 and 3.11 alike): the event lane's 38 modules (test_events_*, test_evl_*, test_cost_day,
+  test_site_lane, test_daily_report) with test_ci and the CHANGELOG and docs readers (test_e3_identities, test_done_a50,
+  test_equity_rehearsal, test_elane_health, test_gen_universe), 944 OK each; `python -m league.ci --base origin/main
+  --branch fix/births-names --no-tests` passed; the identities by the tree's own functions, as in the heading.
+- **Rollback**: the House to release 1019f's head (`b262a85f`): it reads no `parse_version`, `rerun` or `named` and
+  never re-runs; a birth a re-run registered stays registered (its stored spec has the canonical id and a string role,
+  which release 1019f's grammar parses), and release 1019f's prompt asks under its own sha again.
+
 ### Release 1019f: the path-to-Done fixes (A84-A86), the alarms, the Done reader, on `rel/1019f` (unreleased; release 1019e's head `c485dcfe` (#583) and nine merges; an owner deploy: THE GATEWAY FIRST (`gateway/lib/email.mjs`: four new stall causes' words, the INFO notice's `waiting_owner`, the report's real buys, break-even edge and Done line), THEN THE HOUSE by the captain's ship script with the new pair; on top of release 1019e, Thu Oct 22 from 20:05Z or the weekend, A84 before Oct 26 13:00Z and A85 before the Oct 29 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `055e5313` -> `c2f0a478` and the constitution `a8d4cbd9` -> `24f73f18` (A86 REVISED's two Probe rows), the standing grant re-ratifies at the House's start, the rollback pair with `equity_money.event.enabled` False `fd9e90c0` / `005745e9`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move; the Done rule re-pinned `8eb743e5` -> `54241925`)
 
 - **What it carries** (each branch's own entry below, as its branch wrote it; docs/operations.md **Release 1019f** for
