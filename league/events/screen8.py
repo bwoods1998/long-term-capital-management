@@ -990,6 +990,61 @@ def audit(store: S.Store, today: dt.date, *, now: dt.datetime | None = None, dra
     return out
 
 
+#: Section 10's ONE-MECHANISM COUNT beside Done's ">= 3 programs" line: promotions within this many sessions of each
+#: other count as one mechanism.
+ONE_MECHANISM_SESSIONS = 20
+#: The PX rows whose intents of the same (D, X) make a meta-learner's pick PX-SOURCED (read from intents only).
+PX_SOURCED = {"EVL-META-ON": ("PX-DROP-ON", "PX-SURGE-ON", "CTRL-PX-ALL-ON"), "EVL-META-O1": ("PX-GAP-O1", "CTRL-PX-ALL-O1")}
+#: The PX seats each meta-learner is paired with.
+PAIRED = {"EVL-META-ON": ("PX-DROP-ON", "PX-SURGE-ON"), "EVL-META-O1": ("PX-GAP-O1",)}
+
+
+def one_mechanism(store: Any) -> dict[str, Any]:
+    """SECTION 10'S ONE-MECHANISM COUNT (check 1's minor 7, re-check 1's minor 3), beside Done's ">= 3 programs" line
+    (Done itself unchanged): two PX seats promoted within 20 sessions of each other; EVL-META-ON with a PX ON seat
+    promoted within 20 sessions of it when more than half of EVL-META-ON's picks of its run up to its promotion are
+    PX-SOURCED (the issuer has an intent of PX-DROP-ON, PX-SURGE-ON or CTRL-PX-ALL-ON of the same (D, ON): read from
+    intents only, never from an mrl_* table); EVL-META-O1 with PX-GAP-O1 the same way. {pairs: [[id, id]], count}: ids
+    and counts only."""
+    from . import done as DN
+
+    when: dict[str, dt.datetime] = {}
+    for prog in seating8():
+        at = DN.promoted_at(store, prog.id, prog.version)
+        if at is not None:
+            when[prog.id] = at
+
+    def apart(a: dt.datetime, b: dt.datetime) -> int:
+        lo, hi = sorted((a, b))
+        return len(C.sessions(store, lo.astimezone(C.NY).date() + dt.timedelta(days=1), hi.astimezone(C.NY).date()))
+    pairs: list[list[str]] = []
+    seats = [pid for pid in ("PX-DROP-ON", "PX-SURGE-ON", "PX-GAP-O1") if pid in when]
+    for i, a in enumerate(seats):
+        for b in seats[i + 1:]:
+            if apart(when[a], when[b]) <= ONE_MECHANISM_SESSIONS:
+                pairs.append([a, b])
+    for meta, paired in PAIRED.items():
+        if meta not in when:
+            continue
+        picks = [dict(r) for r in store.db.execute(
+            "SELECT cik, entry_day, entry_at FROM intents WHERE program=? AND version=1 AND entry_day<=? AND status NOT "
+            "LIKE 'skipped%'", (meta, when[meta].astimezone(C.NY).date().isoformat()))]
+        if not picks:
+            continue
+        sourced = 0
+        for r in picks:
+            marks = ", ".join("?" for _ in PX_SOURCED[meta])
+            got = store.db.execute(f"SELECT 1 FROM intents WHERE program IN ({marks}) AND cik=? AND entry_day=? AND "
+                                   f"entry_at=? LIMIT 1", (*PX_SOURCED[meta], r["cik"], r["entry_day"], r["entry_at"]))
+            sourced += int(got.fetchone() is not None)
+        if 2 * sourced <= len(picks):
+            continue
+        for seat in paired:
+            if seat in when and apart(when[meta], when[seat]) <= ONE_MECHANISM_SESSIONS:
+                pairs.append([meta, seat])
+    return {"pairs": pairs, "count": len(pairs)}
+
+
 __all__ = ["LOOKS", "ALPHAS", "MARGIN", "MIN_EVENTS", "MIN_ISSUERS", "MIN_BLOCKS", "ISSUER_P", "EXACT", "RUN_BLOCKS",
            "CAP", "CHARGE_HUNDREDTHS", "BUDGET_HUNDREDTHS", "BASE_HUNDREDTHS", "STRESS_HUNDREDTHS", "PER_VERSION",
            "READ_EVERY", "READ_P", "STOP_SHARE", "SIZED_MIN", "FILL_BP", "STUCK_AFTER", "RUN_KEY", "END_KEY",
@@ -997,4 +1052,5 @@ __all__ = ["LOOKS", "ALPHAS", "MARGIN", "MIN_EVENTS", "MIN_ISSUERS", "MIN_BLOCKS
            "count_p", "Block8", "rank_order", "blocks", "values", "lower", "judge_blocks", "minimums", "part_of",
            "cap_of", "record_rows", "control_rows", "runs", "run_record", "written", "schedule", "look_row", "on_look",
            "run_looks", "budget", "waiting_runs", "start_runs", "charges", "stays", "stay_events", "read_p",
-           "money_stop", "sized_conditions", "review8", "next_look", "seating8", "run", "review", "audit"]
+           "money_stop", "sized_conditions", "review8", "next_look", "seating8", "run", "review", "audit",
+           "ONE_MECHANISM_SESSIONS", "PX_SOURCED", "PAIRED", "one_mechanism"]

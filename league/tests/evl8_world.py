@@ -3,8 +3,8 @@ test_events_evl8_proof.py): release 1019e's and PREREG-EVL-5's invented week (le
 of PREREG-EVL-1, -2, -4 and -5 and two registered births), with the PRICE LANE's invented issuers beside them (PXA..PXZ
 and their benchmarks' daily bars, minute bars and premarket bars from `Gateway8`), decided the way the House decides
 them: the lane's decisions at their times, PREREG-EVL-8's runs by themselves at section 4.6's times (`decide_week8`),
-the cutoff's record of every run (league/events/meta.py `note_run`), the hourly re-decisions as backfills. No figure
-here is a market's: every price is a deterministic function of the symbol and the day (`daily`).
+the hourly re-decisions as backfills. No figure here is a market's: every price is a deterministic function of the
+symbol and the day (`daily`).
 
 `pinned()` pins REGISTERED_AT_8 (before the week: Fri Oct 23, 2026, 12:00Z) and refreshes the registries;
 `unpinned()` sets it back to None (the tree as it ships). The week with PREREG-EVL-8 off and on, the same rows and the
@@ -231,33 +231,13 @@ class World8(W5.World):
             px.put_result(day, PX_CIK[t], "live", row, why=None, run="seed-universe", now=et(day, 7, 40))
 
     # -- the House's runs of PREREG-EVL-8 ---------------------------------------------------------------------------
-    def noted(self, fn: Callable[[], Any]) -> Any:
-        """Run a decision and keep THE CUTOFF'S RECORD of it (league/events/meta.py `note_run`, as the House's lane does)."""
-        from league.events import meta as MT
-        from league.events import store as S
-
-        lo = MT.max_rowid(self.st)
-        before = int(self.st.db.execute("SELECT COALESCE(MAX(id), 0) FROM receipts").fetchone()[0])
-        out = fn()
-        hi = MT.max_rowid(self.st)
-        for r in self.st.db.execute("SELECT id, job, started_at, finished_at, status FROM receipts WHERE id>? AND job LIKE "
-                                    "'decide-%'", (before,)).fetchall():
-            MT.note_run(self.st, int(r["id"]), str(r["job"]), lo, hi, started=S.parse_iso(r["started_at"]),
-                        finished=S.parse_iso(r["finished_at"]) if r["finished_at"] else None, status=r["status"])
-        return out
-
-    def decide(self, kind: str, day: dt.date, *, live: bool = True, ask_only: bool = False) -> dict[str, Any]:
-        if ask_only or not self.eight:
-            return super().decide(kind, day, live=live, ask_only=ask_only)
-        return self.noted(lambda: W5.World.decide(self, kind, day, live=live, ask_only=ask_only))
-
     def morning(self, day: dt.date) -> dict[str, Any]:
         from league.events import px as PXL
 
         px = self.px()
         try:
             return PXL.morning(px, self.st, self.gw, day, now=self.now, run=f"px8-am:{day}",
-                               tickers=self.ctx.tickers_for(day), assets=self.ctx.assets(True))
+                               tickers=self.ctx.tickers_for(day), assets=self.ctx.assets(True), clock=lambda: self.now)
         finally:
             px.close()
 
@@ -276,15 +256,22 @@ class World8(W5.World):
 
         px = self.px()
         try:
-            return self.noted(lambda: PXL.decide(px, self.st, self.gw, day, auction, now=lambda: self.now, kind=kind,
-                                                 tickers=self.ctx.tickers_for(day), late=late))
+            return PXL.decide(px, self.st, self.gw, day, auction, now=lambda: self.now, kind=kind,
+                              tickers=self.ctx.tickers_for(day), late=late)
         finally:
             px.close()
 
     def meta_decide(self, day: dt.date, auction: str, *, kind: str = "live") -> dict[str, Any]:
         from league.events import meta as MT
 
-        return self.noted(lambda: MT.decide(self.st, day, auction, now=lambda: self.now, kind=kind))
+        return MT.decide(self.st, day, auction, now=lambda: self.now, kind=kind)
+
+    def ran(self, key: str, day: dt.date) -> None:
+        """The House's mark that a run behind a late pass of the book finished (league/events/px.py `RAN_KEY`)."""
+        from league.events import px as PXL
+        from league.events import store as S
+
+        self.st.set_meta(PXL.RAN_KEY.format(key=key, day=day.isoformat()), json.dumps({"at": S.iso(self.now)}))
 
     def redecide(self, day: dt.date, auction: str) -> dict[str, Any]:
         from league.events import px as PXL
@@ -311,6 +298,7 @@ def decide_week8(w: World8, *, late: bool = True) -> None:
         if w.eight:
             w.at(et(day, 9, 16, 0)).px_decide(day, "o1")
             w.at(et(day, 9, 16, 20)).meta_decide(day, "o1")
+            w.ran("open", day)
             w.at(et(day, 10, 0)).mid(day)
         w.at(et(day, 12, 30)).decide("close", day, ask_only=True)
         w.at(et(day, 15, 17)).decide("close", day, ask_only=True)
@@ -319,6 +307,7 @@ def decide_week8(w: World8, *, late: bool = True) -> None:
         w.at(et(day, 15, 47)).decide("close", day)
         if w.eight:
             w.at(et(day, 15, 48, 10)).meta_decide(day, "on")
+            w.ran("close-meta", day)
         if day == D_DAY and late:
             w.filing("0000000008-26-000002", "HHH", accepted=et(D_DAY, 14, 0), items=("2.02",), stored=et(D_DAY, 16, 30))
             w.article("n-aac-2", "AAC", knowable=et(D_DAY, 14, 0), stored=et(D_DAY, 16, 30))
@@ -364,10 +353,29 @@ def run_week(root: str | Path, *, eight: bool) -> dict[str, Any]:
         try:
             the_week8(world)
             return {"intents": [list(r) for r in world.intents()],
-                    "picks": W5.picks(world, lambda p: earlier(p.id, p.version)), "world": None}
+                    "picks": W5.picks(world, lambda p: earlier(p.id, p.version)), "births": births_view(world),
+                    "world": None}
         finally:
             world.close()
 
 
+#: A births proposal the validator judges in the proof (an open-entry 8-K rule; its Jaccard against every registered
+#: program is what the proof compares).
+PROPOSAL = {"spec": {"id": "EVL-B-8K-801", "version": 1, "family": "8k", "rule": {"items": ["8.01"]}, "entry": "open",
+                     "exit": "close", "hold": 1, "rank": "none", "seatable": False}, "why": "invented", "by": "test"}
+
+
+def births_view(world: World8) -> dict[str, Any]:
+    """R3's births job's FACTS of the week's last session and its validator's verdict on `PROPOSAL` (its Jaccard against
+    every registered program), as the births job reads them (league/events/births.py `Facts`, `validate`)."""
+    from league.events import births as BI
+
+    facts = BI.Facts(world.st, N_DAY)
+    sheet = facts.facts()
+    checked = BI.validate(world.st, facts, [PROPOSAL], night=N_DAY)
+    return {"facts": json.loads(json.dumps(sheet, sort_keys=True, default=str)),
+            "validate": [{k: c.get(k) for k in ("ok", "reasons", "selected", "per_session", "jaccard")} for c in checked]}
+
+
 __all__ = ["PIN", "RELEASE", "PX_NAMES", "PX_CIK", "X1530", "VOLUME", "PM", "unit", "daily", "Gateway8", "sec8",
-           "pinned", "World8", "decide_week8", "the_week8", "earlier", "run_week"]
+           "pinned", "World8", "decide_week8", "the_week8", "earlier", "run_week", "PROPOSAL", "births_view"]

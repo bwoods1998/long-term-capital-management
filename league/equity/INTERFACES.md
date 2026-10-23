@@ -1885,3 +1885,40 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   waiting Probe PREREG-EVL-5 row goes at the 15:48:40 minute with the cash; a birth behind a waiting learning row still
   waits and its alert stays info; a PREREG row that waited and ended unsent, no book minute in the overdue minute, is a
   warning the first time; the rows freed are files 1 to 4 alone).
+
+## 27. PREREG-EVL-8's late passes, by time (release 1019j, `feat/evl-8`; PREREG-EVL-8 sections 4.1-4.6; money row and book, as built; after section 26)
+
+- **The rule** (league/equity/live.py `EIGHT_PASSES`, `_event_decide_8`, `_event_decide_8_pass`, `_event_made`;
+  league/events/book.py `ready_8`, `picks_8`, `max_open_8`, `line_keep_8`, `EIGHT_ROOM`): the auction's main pass
+  (`_event_decide`) plans every earlier file's row exactly as without PREREG-EVL-8 (it skips that file's instances);
+  then, in the same minute and every later minute of the auction's window, each of that file's LATE PASSES ("open-px8":
+  PX-GAP-O1 and EVL-META-O1; "close-px8": PX-DROP-ON and PX-SURGE-ON; "close-meta8": EVL-META-ON) is planned once, at
+  the FIRST TICK at which it is READY (`ready_8`: the House's open run of D finished, the lane's meta
+  `evl8:ran:open:<D>`; the lane's close receipt of D in, `book.decided`; that and EVL-META-ON's part finished,
+  `evl8:ran:close-meta:<D>`), after PREREG-EVL-7's "<at>-lrn" pass is `done` or `failed` where the tree has learners
+  (`adapter.is_learner`), each pass after the one before it. NO PASS WAITS AND NONE KEEPS ROOM: a pass not ready by
+  the window's last tick (the 15:48 tick at the close; nothing at or after 09:27:00 at the open) is never planned and
+  its buys are not sent (the shadow keeps every event). Inside a pass: each live seat's picks (`book.picks_8`: a PX
+  seat's names of its LIVE run, `px_decisions`, with px_universe's row; a meta-learner's live intents, less EVL-META-ON's
+  8-K guard and EVL-META-O1's ERN guard), every name the main pass gave skipped (`name_given`), `_event_gate`'s skips,
+  the room `book.max_open_8` less what the instance holds, `book.allocate` in ROOM's tiers (`EIGHT_ROOM`: Sized 6,
+  Probe 7, learning 8, after every earlier file's tiers and before the births at learning; round-robin inside Sized and
+  Probe), planned with `_event_plan_buy` and sent after every earlier buy (`send_key`); its row
+  `eq_event_decisions(day, key)`. `_event_work_entry` keeps `line_keep_8` (32 buys' worth) of the day line for the
+  earlier rows and refuses an entry over `max_open_8`.
+- **The money row**: `equity_money.event.max_open_v8.learning` 4 (EQUITY_MONEY_BOUNDS (0, 4)), read only for the PX
+  seats at learning (`max_open_8`); a missing or unreadable row opens nothing. Probe: `event.max_open_v6.probe` (14)
+  where the table carries it (PREREG-EVL-6's release), else `event.max_open.probe`; Sized `event.max_open.sized`; the
+  meta-learners PREREG-EVL-3's bands.
+- **A85** (book.py `reserved_for`, `leaves_room`; `_event_recent` reads the late passes' rows too): AT THE OTHER
+  AUCTION a promoted version of the file (Probe or Sized) is among the live Probe and Sized programs the next-auction
+  reservation keeps room for, and its buys never leave the reservation; at learning it is neither, as a PREREG learning
+  row.
+- **Identities**: money `8e63ce64` -> `05fc8d09`, constitution `c3026eba` -> `84dc7041` (the one row); the row at 0 is
+  `f296820e` / `be76e760`; `event.enabled` False under this table `9a5eb2c2` / `186c755f`; the options execution
+  fingerprint, the equity identity, the xs identity, the gate contract and the Done rule do not move. With
+  `REGISTERED_AT_8` None (as it ships) no pass is ever ready and nothing is planned.
+- **Tests**: league/tests/test_events_evl8_proof.py `TheBookWithAndWithout` (the earlier row's buys byte-identical with
+  and without the file, PX's four after them, ACME given to the earlier row), `TheLatePasses` (the close receipt in by
+  the 15:48 tick: planned; after it: never; after a learners' pass failed; the open pass after the open run); and
+  league/tests/test_events_evl8.py `TheMoneyRow`, `TheRoom`.

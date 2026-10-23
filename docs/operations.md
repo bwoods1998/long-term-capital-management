@@ -10,6 +10,65 @@ is built and not deployed); the running House release is release 1019g (live sin
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## PREREG-EVL-8 (release 1019j, Oct 22, 2026): the price lane and the meta-learners: `feat/evl-8`, not deployed
+
+Cut from `feat/infra-1019i` (`069c0f54`: its px.sqlite store and recorders, the batched score); a draft PR with base
+`rel/1019h`; it joins the release with `feat/evl-6` (PREREG-EVL-6's code) and `feat/evl-7` (PREREG-EVL-7's learners),
+other branches: its code lives in its own modules (league/events/px.py, px_grid8.json, meta.py, screen8.py,
+league/ops/evl_price.py, league/tests/evl8_world.py, test_events_evl8.py, test_events_evl8_proof.py) and in short,
+marked hunks of book.py, run.py, house.py, score.py, births.py, report.py, bands.py, programs.py, league/equity/live.py
+and constitution.py. The rules: docs/events.md, **PREREG-EVL-8**; the text `goal-2026-10-19/evl8/PREREG-EVL-8.md`
+until it is frozen.
+
+IT SHIPS REGISTERING NOTHING: league/events/programs.py `REGISTERED_AT_8 = None`. With None no row of the file is in a
+registry, no task of it is due on the House, no buy is planned, no look is written and nothing is charged; px.sqlite
+and the mrl_* tables are not read by anything that decides. The freeze is the captain's amendment (A92's method: the
+latest of the commit time, the client's clock after the tag push and GitHub's push time), then ONE line,
+`REGISTERED_AT_8 = "<time>"`, shipped as an owner deploy like any money change.
+
+IDENTITIES (the tree's own functions, 3.14 and 3.11): money `8e63ce64` -> `05fc8d09` and constitution `c3026eba` ->
+`84dc7041`, ONE ROW: `equity_money.event.max_open_v8.learning` 4 (EQUITY_MONEY_BOUNDS (0, 4), read only for PX
+versions: book.py `max_open_8`); the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs
+identity `2f0083bc`, the gate contract `397b22b7`, the Done rule `54241925`, the births prompt `0cae215b` at
+`PARSE_VERSION` 4 and `equity_money_problems()` [] do not move. The row at 0 is the pair `f296820e` / `be76e760` (PX
+buys nothing at learning); `event.enabled` False under this table is `9a5eb2c2` / `186c755f`
+(league/tests/equity_design.py `V8_SLOTS_OFF`, `ROLLBACK_1019J`). THE STANDING GRANT IS RE-RATIFIED for `05fc8d09`.
+
+THE FLAGS: `events.px_data` (release 1019i's, off) must be on for part A: the recorders warm px.sqlite and, once
+REGISTERED_AT_8 is pinned, the House runs the morning pass, the PX close and open runs, the 09:30 opens, the catch-ups
+and the night's panel. With it off the meta-learners still decide (their PX members and `x:` experts empty).
+
+THE RUNS ON THE HOUSE (once pinned; league/events/house.py's PREREG-EVL-8 comment, section 4.6 of the text): the state
+pre-passes `prepass-meta:open:<D>` from 09:00 ET and `prepass-meta:close:<D>` from the close - 30 minutes; the morning
+pass `px-am:<D>` from 09:05 ET (yields, runs until 15:30); `decide-open-px8:<D>` then `decide-open-meta8:<D>` on the
+lane's open receipt (60 s, never past 09:19:30); `decide-close-px8:<D>` from the close decision time (no read after
+tau + 45 s, ended by tau + 55 s); `decide-close-meta8:<D>` on the lane's close receipt (15 s, never past the close -
+11:20); the catch-ups `decide-px:<open|close>:<D>` and `decide-meta:<open|close>:<D>` (never judged, never traded); the
+panel after 21:00 ET. The lead holds for the live close decision whether or not PREREG-EVL-5 has programs, and inside
+it a record or verdict task started before tau ends by tau.
+
+**Deploy, in order** (an owner deploy with the release that carries it; never 12:55-20:05Z on a trading day
+(12:55-21:05Z from Nov 2), never with an order in flight, CI green on the exact head; rerere off):
+1. THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_price`'s words): `cd gateway && npm run check && npm
+   test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces (an older gateway refuses a stall
+   notice naming `evl_price`).
+2. THE HOUSE by the captain's ship script with the release's pair (this branch alone: `05fc8d09 84dc7041`), then the
+   grant re-ratified for the new money digest. Verify (read-only): promoted, `real_money` true, failures [], the stall
+   job's `evl_price` "Not judged" (REGISTERED_AT_8 None).
+3. AT THE FREEZE (a later owner deploy of the one line): `evl8:release` written in the lane's meta at the House's first
+   turn; then, as each first happens: `px8:am:<D>` in px.sqlite's meta by 09:15 ET (its `serves` "both"),
+   `decide-open-px8:<D>` and `decide-open-meta8:<D>` receipts finished by 09:19:30, `decide-close-px8:<D>` finished
+   by tau + 55 s and the lane's `decide-close:<D>` started at tau + 60 s as before, `decide-close-meta8:<D>` after it,
+   the book's `eq_event_decisions` rows `open-px8`, `close-px8`, `close-meta8`, and the daily report's PX, META and
+   late-pass lines. Before the first live decision: the meta catch-ups of every session from Oct 20 (oldest first).
+
+**Rollback**: PX's real money alone: the row `event.max_open_v8.learning` 0 (a money deploy, pair `f296820e` /
+`be76e760`, grant re-ratified): the PX seats buy nothing at learning, the shadow and the records go on. Everything of
+the file: `REGISTERED_AT_8` back to None (a code deploy): nothing of it runs or trades; its open lots still exit at
+their own planned exits (each lot's `evl_exit`, league/equity/live.py `_event_exits`, whatever the registry); px.sqlite
+and the mrl_* tables stay, read by nothing. The whole release: the House to the
+release before it by `floor_box.py rollback` with that release's pair, then the gateway by `wrangler rollback`.
+
 ## Release 1019i infrastructure (Oct 22, 2026): the batched score, the price lane's data layer, the attempts ledger: `feat/infra-1019i`, not deployed
 
 Cut from `rel/1019h` (`59663f06`, deploying from 20:05Z Oct 22); release 1019i also carries PREREG-EVL-6's code

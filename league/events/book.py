@@ -256,8 +256,11 @@ ROUND_ROBIN_TIERS = (PRIORITY["sized"], PRIORITY["probe"])
 def reserved_for(program: str, band: str | None) -> bool:
     """A85: whether the next auction's reservation holds room for `program` at `band`: a program at Sized or Probe (its
     ROOM tier one of `ROUND_ROBIN_TIERS`), a promoted birth's included (A97, PL-2); never one at learning, a birth's
-    neither."""
-    return room_key(program, band)[0] in ROUND_ROBIN_TIERS
+    neither. A PROMOTED version of PREREG-EVL-8 (Probe or Sized: its tiers `EIGHT_ROUND_ROBIN`) is among "the other
+    auction's live Probe and Sized programs" A85's reservation keeps room for, as every promoted PREREG row (its section
+    4.2's last bullet); never one at learning."""
+    tier = room_key(program, band)[0]
+    return tier in ROUND_ROBIN_TIERS or (tier in EIGHT_ROUND_ROBIN and str(band) in PROBE_UP)
 
 
 def leaves_room(program: str, band: str | None) -> bool:
@@ -265,6 +268,8 @@ def leaves_room(program: str, band: str | None) -> bool:
     comes after the Probe tier, so a PREREG learning program's buy (A85's "a learning buy") and a birth's at learning
     (R3: after every PREREG program); never a Probe or Sized buy, a promoted birth's included (A97, PL-2: its band's
     tier)."""
+    if str(band) in PROBE_UP and room_key(program, band)[0] in EIGHT_ROUND_ROBIN:
+        return False        # (PREREG-EVL-8 section 4.2: a promoted version's buy is what the reservation holds room for)
     return str(band) in LIVE_BANDS and room_key(program, band)[0] > max(ROUND_ROBIN_TIERS)
 
 
@@ -562,9 +567,13 @@ def eligible(lane: Lane, day: dt.date) -> list[str]:
 
 def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:
     """{cik: the live rule's eligible universe row of entry session `day`} (`LIVE_ROWS`; the highest ADV when a CIK has
-    two)."""
+    two). PREREG-EVL-7's E5 (league/events/learner.py `AsOf`): a view carrying `eligible_by` reads only the live results
+    DECIDED AT OR BEFORE that time; every other caller's reading is unchanged."""
     out: dict[str, dict[str, Any]] = {}
-    for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),)):
+    bound = getattr(lane, "eligible_by", None)
+    sql, args = (LIVE_ROWS, (day.isoformat(),)) if bound is None else \
+        (LIVE_ROWS + " AND e.decided_at<=?", (day.isoformat(), S.iso(bound)))
+    for r in lane.db.execute(sql, args):
         row = dict(r)
         have = out.get(str(row["cik"]))
         if have is None or float(row.get("adv20") or 0) > float(have.get("adv20") or 0):
@@ -1506,9 +1515,11 @@ __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
 #: PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON); round-robin inside this file's Sized and Probe tiers
 #: (`EIGHT_ROUND_ROBIN`, A85's rule among them). So the book plans and sends every earlier row of an auction exactly as
 #: without this file (the reading of section 4.2 under which its "keep no room" and its band order both hold: this
-#: file's rows are planned in their own late passes, league/equity/live.py `_event_decide_8`, and sent after every
-#: earlier buy), A85's reservation never holds room for them (`reserved_for`: their tiers are not the PREREG tiers) and
-#: each of their buys sizes less the reservation of the earlier Probe and Sized rows (`leaves_room`).
+#: file's rows are planned in their own late passes BY TIME, league/equity/live.py `_event_decide_8`, and sent after every
+#: earlier buy). AT THE OTHER AUCTION (its section 4.2's last bullet) a PROMOTED version (Probe or Sized) is, as every
+#: promoted PREREG row, among the live Probe and Sized programs A85's next-auction reservation keeps room for
+#: (`reserved_for`) and its buys never leave that reservation (`leaves_room`); at learning it is neither reserved for and
+#: each of its buys sizes less the reservation, as a PREREG learning row's.
 EIGHT_ROOM = {"sized": 6, "probe": 7, "learning": 8}
 EIGHT_ROUND_ROBIN = (EIGHT_ROOM["sized"], EIGHT_ROOM["probe"])
 #: PREREG-EVL-8 section 4.3's 150-ORDER LINE: a buy of this file leaves this many slots of the event kind's day line to
@@ -1688,34 +1699,28 @@ def eligible_8(lane: Lane, day: dt.date) -> set[str]:
     return names
 
 
-def decided_8(lane: Any, day: dt.date, pass_: str) -> bool:
-    """Whether this file's run behind a late pass of the book has decided (D, X) LIVE (league/events/px.py `decided`
-    kind live; league/events/meta.py `decided` kind live): "open-px8" PX-GAP-O1's and EVL-META-O1's, "close-px8"
-    PX-DROP-ON's and PX-SURGE-ON's, "close-meta8" EVL-META-ON's. A pass is planned only once its run has finished; a run
-    that did not finish is never traded at that auction (section 4.6)."""
-    from . import meta as MT
+def ready_8(lane: Any, day: dt.date, pass_: str) -> bool:
+    """WHETHER A LATE PASS OF PREREG-EVL-8 IS READY at this book tick (its section 4.6, BY TIME; league/equity/live.py
+    `_event_decide_8`): "open-px8" once the House's open run of D (`decide-open-px8:<D>`, its PX-GAP-O1 part then its
+    EVL-META-O1 part) has FINISHED, whatever each part's end (league/events/px.py `RAN_KEY`); "close-px8" once the
+    lane's close receipt of D is in (`decided`: finished `ok` or `pending`); "close-meta8" once that receipt is in AND
+    EVL-META-ON's part `decide-close-meta8:<D>` has FINISHED (`RAN_KEY`). A part that did not decide live gives its pass
+    no pick (`picks_8`); a pass never ready inside the window is never planned."""
     from . import px as PXL
 
+    def ran(key: str) -> bool:
+        try:
+            return lane.meta(PXL.RAN_KEY.format(key=key, day=day.isoformat())) is not None
+        except sqlite3.Error:
+            return False
+    if pass_ == "open-px8":
+        return ran("open")
+    if pass_ == "close-px8":
+        return decided(lane, day, "close")
     if pass_ == "close-meta8":
-        prog = next((p for p in P.rows_8() if p.id == "EVL-META-ON"), None)
-        got = MT.decided(lane.db, prog, day) if prog is not None else None
-        return got is not None
-    db = px_store(lane)
-    if db is None:
-        return False
-    try:
-        return PXL.decided(db, day, "o1" if pass_ == "open-px8" else "on") is not None
-    finally:
-        db.close()
-
-
-def meta_o1_done(lane: Any, day: dt.date) -> bool:
-    """Whether EVL-META-O1's decision of D is on record (live or not), so the open's late pass reads it."""
-    from . import meta as MT
-
-    prog = next((p for p in P.rows_8() if p.id == "EVL-META-O1"), None)
-    return prog is not None and MT.has_tables(lane.db) and MT.decided(lane.db, prog, day) is not None
+        return decided(lane, day, "close") and ran("close-meta")
+    return False
 
 
 __all__ += ["EIGHT_ROOM", "EIGHT_ROUND_ROBIN", "EIGHT_LINE_KEEP", "MAX_OPEN_V8", "line_keep_8", "max_open_8", "px_store",
-            "meta_on_guard", "meta_o1_guard", "picks_8", "eligible_8", "decided_8", "meta_o1_done"]
+            "meta_on_guard", "meta_o1_guard", "picks_8", "eligible_8", "ready_8"]

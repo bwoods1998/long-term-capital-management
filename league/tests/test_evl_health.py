@@ -113,7 +113,7 @@ class WhenJudged(Lane):
         self.assertEqual(EV.checks({}, self.root, now)["evl_record"]["judged"], False, "no config: the lane is off")
         self.assertEqual(ST.CAUSES[-16:-4], EV.CAUSES, "the twelve (release 1019f: A84's evl_final after evl_fills, then "
                          "evl_entries, evl_backfill and evl_handback; release 1019i: the attempts ledger's evl_fill_rate "
-                         "and evl_attempts; release 1019j: PREREG-EVL-8's evl_px8), before the equity lanes' own four")
+                         "and evl_attempts; release 1019j: PREREG-EVL-8's evl_price), before the equity lanes' own four")
 
     def test_a_lane_switched_on_with_no_store_has_recorded_nothing(self):
         empty = Path(self.tmp.name) / "bare"

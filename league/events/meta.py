@@ -1,27 +1,32 @@
 """PREREG-EVL-8 PART B: THE META-LEARNERS EVL-META-O1 AND EVL-META-ON (docs/prereg/PREREG-EVL-8.md section 7 once
-frozen; until then goal-2026-10-19/evl8/PREREG-EVL-8.md, the draft as the captain's decisions F1-F13 change it), a port
-of the META designer's reference spec (goal-2026-10-19/evl8/meta/meta_spec.py: `grid_rules`, `features`, `rules_of`,
+frozen; until then goal-2026-10-19/evl8/PREREG-EVL-8.md, the final text of the fix round), a port of the META
+designer's reference spec (goal-2026-10-19/evl8/meta/meta_spec.py: `grid_rules`, `features`, `rules_of`,
 `session_stats`, `state`, `posterior`, `walk`, word for word). Standard library only. NOTHING HERE DECIDES, WRITES OR
 IS CHARGED while league/events/programs.py `REGISTERED_AT_8` is None.
 
 MRL-EB, THE EMPIRICAL-BAYES LOWER-CONFIDENCE RULE WALK (section 7.4-7.6): each decision of (D, X) at its tau
 (09:15 ET for EVL-META-O1, the close decision time for EVL-META-ON)
-1. reads its MEMBERS (section 7.2): one per issuer of the non-skipped intents of its SOURCES of entry session D at X
-   (every program version registered before the decision with hold 1 and X's entry and exit auctions but
-   EVL-META-*, PX's placebos and the POOL records) WRITTEN BY THE RUNS OF THE ONE CUTOFF: the lane's FIRST decision run
-   of D's X auction and every by-itself run of that auction (`BY_ITSELF`) that FINISHED BEFORE THIS DECISION STARTED,
-   never a row the hourly re-decision wrote (`cutoff`, by the intents' write order: `mrl_runs` keeps every such run's
-   interval of the intents' rowids, `note_run`; a run with none on record is read by its receipt's counts,
-   `_counted`); its event the earliest knowable (ties: the lowest id), its tags the sources holding one;
-2. writes each member ONCE (`mrl_pool`): its event, tags, binary FEATURES (section 7.3, from rows stored before tau),
-   its PX record rules (`x:<record>`: part A's O1 or ON records that select the issuer on D, from the values of the
-   run that decided D's X auction, league/events/px.py `features`), and whether it is ELIGIBLE TO PICK (a live
-   universe row, knowable after REGISTERED_AT_8, TRADABLE, not held within 5 sessions: A72);
+1. reads its MEMBERS BY THE MEMBERS RULE (section 7.2), FIXED BY STORED TIMES ALONE, so the live decision and every
+   catch-up read the same members whenever they run (`source_picks`): each SOURCE (every program version registered
+   before the decision with hold 1 and X's entry and exit auctions but EVL-META-*, PX's placebos and the POOL records)
+   gives members only through ITS LIVE DECISION of (D, X): a source decided in the lane's runs only when THE LANE'S
+   FIRST FINISHED DECISION of (D, X) names it, by its REAL-MONEY READING of D at tau (league/events/book.py `picks`
+   over ELIGIBLE TO PICK's rows, with the REACT rows' reaction and the gap read from THE MARKS: `AsOf`); a
+   PREREG-EVL-7 learner by its live decision's intents; this file's PX seats and controls by the names THE LIVE PX RUN
+   of (D, X) selected (league/events/px.py `live_selections`). Never an hourly re-decision's intents, never a
+   by-itself later decision's, never a `decide-px` catch-up's. One member an issuer: its event the earliest knowable
+   (ties: the lowest id), its tags the sources giving one;
+2. writes each member ONCE (`mrl_pool`): its event, tags, binary FEATURES (section 7.3, from rows stored before tau
+   and THE MARKS), its PX record rules (`x:<record>`: part A's O1 or ON records that select the issuer on D, from the
+   px_features rows of THE LIVE PX RUN of (D, X) only, `px.live_features`; none without one), and whether it is
+   ELIGIBLE TO PICK (the lane's live result decided at or before the lane's first finish and never after the entry
+   auction, or px_universe's live row for a member whose only sources are PX rows; knowable after REGISTERED_AT_8;
+   TRADABLE; not held within 5 sessions: A72);
 3. reads THE STATE as of its state time sigma (09:00 ET, or the close - 30 minutes): every entered session from Oct
-   20, 2026, its members as written at its own decision and their OUTCOMES (F9: the settled outcome of the event under
-   the first of its tags in programs.py's order that holds one, PREREG-EVL-2's LIMIT AT ENTRY applied to every member,
-   TRADABLE only) settled before sigma; a session enters once every member is settled or terminal, or 3 sessions after
-   its exit (a member still unsettled then counts a = -0.30);
+   20, 2026, its members as written at its own decision and their OUTCOMES (F9: the settled outcome, under the first
+   of its tags in programs.py's order that holds one, of that tag's intent of the issuer at the member's auctions,
+   PREREG-EVL-2's LIMIT AT ENTRY applied to every member, TRADABLE only) settled before sigma; a session enters once
+   every member is settled or terminal, or 3 sessions after its exit (a member still unsettled then counts a = -0.30);
 4. walks the qualified sub-rules (NB >= MINB, -cbar + LCB > 0) in descending LCB (ties: the larger NB, then the id),
    each giving its eligible members by adv20 then event id, until K = 16 are taken; nothing before the state holds more
    than WARM = 10 entered sessions (the port calls the walk with session_index = the entered sessions), none before the
@@ -34,10 +39,11 @@ is in `mrl_walk` only, the state in `mrl_stats` and `mrl_state`, the members in 
 table on births' FACTS_DENY and the report's deny list (`TABLES`).
 
 ONE DECISION, WRITTEN ONCE (`mrl_decisions`): its kind `live` (the House's own, in its own run at section 4.6's
-time: `decide-open-meta8:<D>` after `decide-open-px8:<D>`, `decide-close-meta8:<D>` on the lane's close receipt) or
-`catchup` (`decide-meta:<X>:<D>`: a session before the release, or a live part that did not run or finish, decided
-later by itself exactly as of its own tau and sigma), never decided again. Only a live decision is traded or judged;
-every receipt records the code's sha (`CODE_SHA`)."""
+time: EVL-META-O1's part of the open run after PX-GAP-O1's, receipt `decide-open-meta8:<D>`; EVL-META-ON's
+`decide-close-meta8:<D>`, the first task on the lane's close receipt) or `catchup` (`decide-meta:<open|close>:<D>`: a
+session before the release, or a live part that did not run or finish, decided later by itself exactly as of its own
+tau and sigma, oldest first), never decided again. Only a live decision is traded or judged; every receipt records
+the code's sha (`CODE_SHA`)."""
 
 from __future__ import annotations
 
@@ -77,11 +83,6 @@ CLOSES = 20
 #: The two meta-learners and their auctions.
 PROGRAM_OF = {"o1": "EVL-META-O1", "on": "EVL-META-ON"}
 POOL_OF = {"EVL-META-O1": "EVL-META-O1-POOL", "EVL-META-ON": "EVL-META-ON-POOL"}
-#: Section 7.2's cutoff: the by-itself kinds of an auction whose finished runs' intents are members (the lane's first
-#: decision run of the auction too), each a decision of (D, X) as of tau.
-BY_ITSELF = {"open": ("decide-open-births", "decide-open-lrn", "decide-open-px8", "decide-px:o1"),
-             "close": ("decide-close-evl4", "decide-close-evl5", "decide-close-births", "decide-close-lrn",
-                       "decide-close-px8", "decide-px:on")}
 #: Receipts: the live parts and a catch-up.
 JOB_LIVE = {"o1": "decide-open-meta8", "on": "decide-close-meta8"}
 JOB_CATCHUP = "decide-meta"
@@ -90,7 +91,6 @@ JOB_PREPASS = "prepass-meta"
 SIGMA_OPEN = dt.time(9, 0)
 SIGMA_CLOSE_BEFORE = dt.timedelta(minutes=30)
 PREPASS_BUDGET = 120.0
-META_CLOSE_RECEIPT_BY = dt.timedelta(minutes=11, seconds=35)     # the lane's close receipt by close - 11:35 (15:48:25)
 META_CLOSE_BOUND = 15.0
 META_CLOSE_UNTIL = dt.timedelta(minutes=11, seconds=20)          # never past close - 11:20 (15:48:40)
 WHY = "mrl"
@@ -98,8 +98,6 @@ WHY = "mrl"
 CODE_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS mrl_runs(receipt INTEGER PRIMARY KEY, job TEXT NOT NULL, started_at TEXT, finished_at TEXT,
-  lo INTEGER NOT NULL, hi INTEGER NOT NULL, status TEXT);
 CREATE TABLE IF NOT EXISTS mrl_decisions(program TEXT NOT NULL, version INTEGER NOT NULL, day TEXT NOT NULL,
   kind TEXT NOT NULL, receipt INTEGER, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, code_sha TEXT,
   members INTEGER, eligible INTEGER, picks INTEGER, PRIMARY KEY(program, version, day));
@@ -118,7 +116,7 @@ CREATE TABLE IF NOT EXISTS mrl_walk(program TEXT NOT NULL, version INTEGER NOT N
 """
 #: Every mrl_* table (league/events/births.py `FACTS_DENY` refuses each; the report reads none but `mrl_decisions`'
 #: counts).
-TABLES = frozenset({"mrl_runs", "mrl_decisions", "mrl_pool", "mrl_state", "mrl_stats", "mrl_walk"})
+TABLES = frozenset({"mrl_decisions", "mrl_pool", "mrl_state", "mrl_stats", "mrl_walk"})
 
 # ---------------------------------------------------------------------------------------------- the vocabulary
 GROUPS_O1: dict[str, tuple[str, ...]] = {
@@ -373,24 +371,6 @@ def has_tables(db: Any) -> bool:
         return False
 
 
-def max_rowid(store: Any) -> int:
-    row = store.db.execute("SELECT MAX(rowid) FROM intents").fetchone()
-    return int(row[0] or 0)
-
-
-def note_run(store: Any, receipt: int, job: str, lo: int, hi: int, *, started: dt.datetime | None,
-             finished: dt.datetime | None, status: str | None) -> None:
-    """THE CUTOFF'S RECORD OF A RUN (section 7.2): the receipt of a decision run of the lane or of this file and the
-    interval (lo, hi] of the intents' rowids written while it ran (the House's lane runs one task at a time). Written
-    once a receipt, while this file registers anything."""
-    if not P.registers_8():
-        return
-    ensure(store)
-    store.db.execute("INSERT OR IGNORE INTO mrl_runs(receipt, job, started_at, finished_at, lo, hi, status) VALUES(?, ?, ?, "
-                     "?, ?, ?, ?)", (int(receipt), str(job), None if started is None else S.iso(started),
-                                     None if finished is None else S.iso(finished), int(lo), int(hi), status))
-
-
 def sources(auction: str, at: dt.datetime) -> list[P.Program]:
     """SOURCES(X) at a decision (section 7.2): every program version registered before `at`, other than EVL-META-* (and
     the placebos and POOL records, which are no rows), with hold 1 and X's entry and exit auctions (O1: D's open to D's
@@ -412,89 +392,182 @@ def sources(auction: str, at: dt.datetime) -> list[P.Program]:
     return out
 
 
-def _first_receipt(store: Any, job: str) -> Mapping[str, Any] | None:
-    row = store.db.execute("SELECT * FROM receipts WHERE job=? ORDER BY id LIMIT 1", (job,)).fetchone()
+def first_decision(store: Any, day: dt.date, auction: str) -> dict[str, Any] | None:
+    """THE LANE'S FIRST FINISHED DECISION of (D, X) (section 7.2): the earliest receipt `decide-open:<D>` (X = O1) or
+    `decide-close:<D>` (X = ON) finished with status `ok` or `pending` (league/events/book.py `decided`'s reading); None
+    while there is none."""
+    job = f"decide-{'open' if auction == 'o1' else 'close'}:{day.isoformat()}"
+    row = store.db.execute("SELECT * FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', 'pending') "
+                           "ORDER BY id LIMIT 1", (job,)).fetchone()
     return None if row is None else dict(row)
 
 
-def _receipts(store: Any, job: str) -> list[dict[str, Any]]:
-    return [dict(r) for r in store.db.execute("SELECT * FROM receipts WHERE job=? ORDER BY id", (job,))]
+def entry_at(session: C.Session, auction: str) -> dt.datetime:
+    """The meta-learner's ENTRY AUCTION of D: 09:30 ET of D (EVL-META-O1), D's close (EVL-META-ON)."""
+    return session.open_at if auction == "o1" else session.close_at
 
 
-def cutoff_runs(store: Any, day: dt.date, auction: str, started: dt.datetime) -> list[dict[str, Any]]:
-    """THE ONE CUTOFF'S RUNS of (D, X) (section 7.2): the lane's FIRST decision run of D's X auction (its first receipt,
-    when it finished before `started`) and every receipt of a by-itself kind of that auction (`BY_ITSELF`) that
-    finished before `started`, in receipt order."""
-    at = "open" if auction == "o1" else "close"
-    out = []
-    first = _first_receipt(store, f"decide-{at}:{day.isoformat()}")
-    if first is not None and first.get("finished_at") and S.parse_iso(str(first["finished_at"])) < started:
-        out.append(first)
-    for kind in BY_ITSELF[at]:
-        for r in _receipts(store, f"{kind}:{day.isoformat()}"):
-            if r.get("finished_at") and S.parse_iso(str(r["finished_at"])) < started and \
-                    str(r.get("status") or "") in ("ok", "pending"):
-                out.append(r)
-    return sorted(out, key=lambda r: int(r["id"]))
+def _bar_end(row: Mapping[str, Any], session: C.Session) -> dt.datetime | None:
+    """The end of a lane mark's bar: its stored bar start `t` + 1 minute, else the label's own minute (the 09:30 bar's,
+    the T29 bar's)."""
+    try:
+        if row.get("t"):
+            return S.parse_iso(str(row["t"])) + dt.timedelta(minutes=1)
+    except (TypeError, ValueError):
+        return None
+    label = str(row.get("label"))
+    if label == "0930":
+        return session.open_at + dt.timedelta(minutes=1)
+    if label == "1530":
+        return session.close_at - P.T29_BEFORE_CLOSE + dt.timedelta(minutes=1)
+    return None
 
 
-def _counted(store: Any, receipt: Mapping[str, Any], progs: Sequence[P.Program], day: dt.date, at: str,
-             taken: dict[tuple[str, int], int]) -> set[tuple[str, int, str]]:
-    """A run with no `mrl_runs` interval (a run of a release before this file, or one made by the CLI): its intents read
-    by its receipt's counts: for each program key of its summary, the next planned + skipped intents of that version
-    for (D, X) in the intents' write order (rowid) after those the earlier runs of the cutoff took."""
+class AsOf:
+    """THE LANE'S STORE AS A META DECISION OF (D, X) READS IT (section 7.2), whenever it runs: a READ-ONLY connection of
+    its own (league/events/book.py `Lane`: `mode=ro`, the book's cache and the documents) on which
+    - `marks` is THE MARKS of the decision and nothing else (a TEMP table that shadows the lane's for this connection
+      only): D's `1530` and `0930` marks whose bar ends before tau and that were stored (`fetched_at`) at or before the
+      finish of the lane's first finished decision of (D, X); every other mark is missing (a REACT row or
+      EVL-NEWS-NIGHT2-ON's gap with none takes no pick, as the book's readers say);
+    - `eligible_by` is ELIGIBLE TO PICK's cut-off (book.py `universe_rows`, PREREG-EVL-7's E5 reading): the lane's live
+      results decided at or before that finish and never later than the meta-learner's entry auction of D.
+    Its inputs are stored times alone, so the live decision and every catch-up read the same rows."""
+
+    def __init__(self, store: Any, session: C.Session, auction: str, tau_: dt.datetime, finish: dt.datetime):
+        from . import book as EB
+
+        self._lane = EB.Lane(Path(store.root) / S.DB_NAME)
+        self.db = self._lane.db
+        self.root = self._lane.root
+        self.path = self._lane.path
+        self.cache: dict[str, Any] = {}
+        self.finish = finish
+        self.eligible_by = min(finish, entry_at(session, auction))
+        self.db.execute("CREATE TEMP TABLE marks AS SELECT * FROM main.marks WHERE 0")
+        keep = []
+        for r in self.db.execute("SELECT * FROM main.marks WHERE day=? AND label IN ('1530', '0930')",
+                                 (session.day.isoformat(),)).fetchall():
+            row = dict(r)
+            end = _bar_end(row, session)
+            try:
+                fetched = S.parse_iso(str(row["fetched_at"]))
+            except (TypeError, ValueError):
+                continue
+            if end is not None and end < tau_ and fetched <= finish:
+                keep.append(row)
+        if keep:
+            cols = list(keep[0])
+            self.db.executemany(f"INSERT INTO temp.marks({', '.join(cols)}) VALUES({', '.join('?' for _ in cols)})",
+                                [tuple(r[c] for c in cols) for r in keep])
+
+    def meta(self, key: str) -> str | None:
+        return self._lane.meta(key)
+
+    def get_document(self, digest: str) -> bytes:
+        return self._lane.get_document(digest)
+
+    def close(self) -> None:
+        self._lane.close()
+
+    def mark(self, symbol: str, label: str) -> float | None:
+        row = self.db.execute("SELECT px FROM marks WHERE symbol=? AND label=?", (str(symbol).upper(), label)).fetchone()
+        return None if row is None or row[0] is None or not float(row[0]) > 0 else float(row[0])
+
+
+def _readers(view: AsOf, day: dt.date) -> tuple[Callable[..., float | None], Callable[..., float | None]]:
+    """The book's REACT reaction and EVL-NEWS-NIGHT2-ON gap over THE MARKS only (league/events/book.py
+    `reaction_reader`, `gap_reader` with no read of their own: a name with no such mark has no price)."""
+    from . import book as EB
+
+    return (EB.reaction_reader(view, day, daily=lambda symbol, d: None, minutes=lambda symbol, session: None),
+            EB.gap_reader(view, day, opens=lambda symbol, session: None))
+
+
+def _is_learner(prog: Any) -> bool:
+    test = getattr(P, "is_learner", None)
+    return bool(test is not None and test(prog))
+
+
+def source_picks(store: Any, view: AsOf | None, px_db: Any, session: C.Session, auction: str, t: dt.datetime,
+                 first: Mapping[str, Any] | None, srcs: Sequence[P.Program]) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    """EACH SOURCE'S PICKS of (D, X) BY THE MEMBERS RULE (section 7.2), fixed by stored times alone: {(id, version):
+    [{event, cik, symbol, knowable_at}]}.
+    - THIS FILE'S PX SEATS AND CONTROLS: the names THE LIVE PX RUN OF (D, X) selected (league/events/px.py
+      `live_selections`: its K 40 and its 200 as that run wrote them, never the hourly re-decision's); none with no
+      live PX run.
+    - A PREREG-EVL-7 LEARNER: its intents of (D, X) its live decision wrote (league/events/learner.py `live_picks`,
+      where the tree has it).
+    - EVERY OTHER SOURCE, only when the lane's first finished decision of (D, X) NAMES it (league/events/screen.py
+      `names`: a part that failed or ran past its bound gives none): its REAL-MONEY READING of D at tau,
+      league/events/book.py `picks(view, s, D, decided_at=tau)` over ELIGIBLE TO PICK's rows with the REACT reaction
+      and the gap read from THE MARKS (`AsOf`); a source the book reads no rows for gives none.
+    Never an hourly re-decision's intents, a by-itself later decision's or a `decide-px` catch-up's."""
+    from . import book as EB
+    from . import px as PXL
     from . import screen as SN
 
-    try:
-        summary = json.loads(receipt.get("summary") or "{}")
-    except (TypeError, ValueError):
-        return set()
-    out: set[tuple[str, int, str]] = set()
-    for p in progs:
-        got = summary.get(SN.program_key(p.id, p.version)) if isinstance(summary, dict) else None
-        if not isinstance(got, dict):
+    out: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    day = session.day
+    chosen = PXL.live_selections(px_db, day, auction) if px_db is not None else {}
+    known = PXL.knowable(session, auction)
+    reaction = gap = None
+    if view is not None and auction == "on":
+        reaction, gap = _readers(view, day)
+    for s in srcs:
+        key = (s.id, s.version)
+        if P.is_px8(s):
+            out[key] = [{"event": str(r["event"]), "cik": str(r["cik"]), "symbol": str(r["symbol"]).upper(),
+                         "knowable_at": known} for r in chosen.get(s.id, [])]
             continue
-        n = int(got.get("planned") or 0) + int(got.get("skipped") or 0)
-        if n <= 0:
+        if _is_learner(s):
+            try:
+                from . import learner as LR     # (PREREG-EVL-7, where the tree carries it)
+
+                rows = LR.live_picks(store, s, day) or []
+            except (ImportError, AttributeError, sqlite3.Error, LookupError, ValueError, TypeError):
+                rows = []
+            got = []
+            for r in rows:
+                try:
+                    at = S.parse_iso(str(r["knowable_at"])) if r.get("knowable_at") else None
+                except (TypeError, ValueError):
+                    at = None
+                got.append({"event": str(r["event"]), "cik": str(r["cik"]), "symbol": str(r["symbol"]).upper(),
+                            "knowable_at": at})
+            out[key] = got
             continue
-        rows = store.db.execute("SELECT rowid, event FROM intents WHERE program=? AND version=? AND entry_day=? AND "
-                                "entry_at=? ORDER BY rowid", (p.id, p.version, day.isoformat(), at)).fetchall()
-        start = taken.get((p.id, p.version), 0)
-        for r in rows[start:start + n]:
-            out.add((p.id, p.version, str(r["event"])))
-        taken[(p.id, p.version)] = start + n
+        if view is None or first is None or not SN.names(first.get("summary"), SN.program_key(s.id, s.version)):
+            continue
+        try:
+            picks = EB.picks(view, s, day, decided_at=t, reaction=reaction, gap=gap)
+        except (LookupError, sqlite3.Error, ValueError, KeyError, TypeError, RuntimeError):
+            continue
+        out[key] = [{"event": str(c.event), "cik": str(c.cik), "symbol": str(c.symbol).upper(),
+                     "knowable_at": S.parse_iso(str(c.knowable_at)) if c.knowable_at else None} for c in picks]
     return out
 
 
-def cutoff(store: Any, day: dt.date, auction: str, started: dt.datetime, progs: Sequence[P.Program]
-           ) -> list[dict[str, Any]]:
-    """THE SOURCE INTENTS OF (D, X) THE ONE CUTOFF READS (section 7.2): those of `progs` for entry session D at X that
-    the cutoff's runs (`cutoff_runs`) wrote, by each run's rowid interval (`mrl_runs`), or by its counts when it has
-    none (`_counted`). Never a row a later run of the lane's decision (the hourly re-decision) wrote."""
-    at = "open" if auction == "o1" else "close"
-    ensure(store)
-    runs = cutoff_runs(store, day, auction, started)
-    keys = {(p.id, p.version) for p in progs}
-    chosen: set[tuple[str, int, str]] = set()
-    taken: dict[tuple[str, int], int] = {}
-    for r in runs:
-        mark = store.db.execute("SELECT lo, hi FROM mrl_runs WHERE receipt=?", (int(r["id"]),)).fetchone()
-        if mark is not None:
-            for row in store.db.execute("SELECT program, version, event FROM intents WHERE rowid>? AND rowid<=? AND "
-                                        "entry_day=? AND entry_at=?", (int(mark["lo"]), int(mark["hi"]), day.isoformat(),
-                                                                       at)):
-                key = (str(row["program"]), int(row["version"]))
-                if key in keys:
-                    chosen.add((key[0], key[1], str(row["event"])))
-                    taken[key] = taken.get(key, 0) + 1
-        else:
-            chosen |= _counted(store, r, progs, day, at, taken)
+def members(picks: Mapping[tuple[str, int], Sequence[Mapping[str, Any]]]) -> list[dict[str, Any]]:
+    """MEMBERS of D (section 7.2): one per issuer with a pick read by the members rule (`source_picks`); its EVENT the
+    earliest-knowable such pick's event (ties: the lowest id), its TAGS the sources giving one ("<id>:<version>", in
+    programs.py's order, then ascending version); `only_px` when every tag is a PX row."""
+    order = {(p.id, p.version): i for i, p in enumerate(P.PROGRAMS)}
+    far = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+    by: dict[str, list[tuple[dt.datetime, str, str, tuple[str, int]]]] = {}
+    for key, rows in picks.items():
+        for r in rows:
+            if not r.get("cik"):
+                continue
+            by.setdefault(str(r["cik"]), []).append((r.get("knowable_at") or far, str(r["event"]), str(r["symbol"]), key))
     out = []
-    for pid, version, event in sorted(chosen):
-        row = store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND event=?",
-                               (pid, version, event)).fetchone()
-        if row is not None:
-            out.append(dict(row))
+    for cik, rs in sorted(by.items()):
+        rs.sort(key=lambda x: (x[0], x[1]))
+        first = rs[0]
+        tags = sorted({k for *_, k in rs}, key=lambda k: (order.get(k, 10 ** 6), k[1], k[0]))
+        out.append({"cik": cik, "event": first[1], "symbol": first[2].upper(),
+                    "knowable_at": None if first[0] == far else first[0],
+                    "tags": [f"{p}:{v}" for p, v in tags], "only_px": all(P.is_px8(k[0]) for k in tags)})
     return out
 
 
@@ -516,53 +589,7 @@ def event_knowable(store: Any, event: str) -> dt.datetime | None:
         return None
 
 
-def members(store: Any, day: dt.date, auction: str, intents: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """MEMBERS of D (section 7.2): one per issuer with a non-skipped source intent read by the cutoff; its EVENT the
-    earliest-knowable such event (ties: the lowest id), its TAGS the sources holding one ("<id>:<version>", in
-    programs.py's order)."""
-    order = {(p.id, p.version): i for i, p in enumerate(P.PROGRAMS)}
-    by: dict[str, list[dict[str, Any]]] = {}
-    for r in intents:
-        if str(r["status"]).startswith("skipped") or not r.get("cik"):
-            continue
-        by.setdefault(str(r["cik"]), []).append(dict(r))
-    out = []
-    for cik, rs in sorted(by.items()):
-        known = []
-        for r in rs:
-            at = event_knowable(store, str(r["event"]))
-            known.append((at or dt.datetime.max.replace(tzinfo=dt.timezone.utc), str(r["event"]), r))
-        known.sort(key=lambda x: (x[0], x[1]))
-        first = known[0]
-        tags = sorted({(str(r["program"]), int(r["version"])) for r in rs},
-                      key=lambda k: (order.get(k, 10 ** 6), k[1], k[0]))
-        out.append({"cik": cik, "event": first[1], "symbol": str(first[2]["symbol"]).upper(),
-                    "knowable_at": None if first[0].year == dt.MAXYEAR else first[0],
-                    "tags": [f"{p}:{v}" for p, v in tags], "only_px": all(P.is_px8(k[0]) for k in tags)})
-    return out
-
-
 # ---------------------------------------------------------------------------------------------- a member's inputs
-def _universe_live(store: Any, day: dt.date, cik: str, by: dt.datetime | None) -> dict[str, Any] | None:
-    """The lane's LIVE-rule eligible universe row of (D, CIK) whose result was decided at or before `by` (PREREG-EVL-7's
-    E5 reading); the highest ADV when two."""
-    sql = ("SELECT u.* FROM universe u JOIN eligibility e ON e.day=u.day AND e.cik=u.cik AND e.symbol=u.symbol WHERE "
-           "u.day=? AND u.cik=? AND e.rule='live' AND e.eligible=1")
-    args: list[Any] = [day.isoformat(), str(cik)]
-    if by is not None:
-        sql += " AND e.decided_at<=?"
-        args.append(S.iso(by))
-    rows = [dict(r) for r in store.db.execute(sql, args)]
-    return max(rows, key=lambda r: float(r.get("adv20") or 0)) if rows else None
-
-
-def _first_finish(store: Any, day: dt.date, auction: str) -> dt.datetime | None:
-    first = _first_receipt(store, f"decide-{'open' if auction == 'o1' else 'close'}:{day.isoformat()}")
-    if first is None or not first.get("finished_at"):
-        return None
-    return S.parse_iso(str(first["finished_at"]))
-
-
 def _closes20(store: Any, px_db: Any, symbol: str, day: dt.date) -> list[float] | None:
     """The 20 raw closes of the sessions before D (the lane's `bars`, else px.sqlite's `px_bars`), READ AS STORED
     WHATEVER THEIR WRITE TIME (PREREG-EVL-7 section 1.1's reading), oldest first; None unless all 20 are there."""
@@ -584,26 +611,11 @@ def _closes20(store: Any, px_db: Any, symbol: str, day: dt.date) -> list[float] 
     return out
 
 
-def _mark(store: Any, px_db: Any, symbol: str, day: dt.date, labels: Sequence[str], before: dt.datetime) -> float | None:
-    """D's mark of `symbol` under the first label stored before `before` (the lane's `marks`; `px1530` px.sqlite's)."""
-    for label in labels:
-        if label == "px1530":
-            if px_db is None:
-                continue
-            row = px_db.execute("SELECT value FROM px_minutes WHERE symbol=? AND day=? AND label='px1530' AND fetched_at<?",
-                                (symbol, day.isoformat(), S.iso(before))).fetchone()
-        else:
-            row = store.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=? AND fetched_at<?",
-                                   (symbol, day.isoformat(), label, S.iso(before))).fetchone()
-        if row is not None and row[0] is not None and float(row[0]) > 0:
-            return float(row[0])
-    return None
-
-
-def inputs(store: Any, px_db: Any, m: Mapping[str, Any], day: dt.date, auction: str, t: dt.datetime,
-           started: dt.datetime, uni: Mapping[str, Any] | None) -> dict[str, Any]:
-    """A member's feature inputs (section 7.3), every one from rows stored before tau (the marks: before the decision
-    starts, from bars ending before tau)."""
+def inputs(store: Any, view: AsOf | None, px_marks: Mapping[str, Mapping[str, Any]], px_db: Any, m: Mapping[str, Any],
+           day: dt.date, auction: str, t: dt.datetime, uni: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A member's feature inputs (section 7.3), every one from rows stored before tau, and for ON the marks from THE
+    MARKS (section 7.2): REACT D's lane `1530` mark (`AsOf`), else the live PX run's `px1530` (`px_marks`); GAP D's
+    `0930` mark; a mark missing there switches its group off."""
     session = C.session(store, day)
     event = str(m["event"])
     kind, _, ident = event.partition(":")
@@ -650,11 +662,16 @@ def inputs(store: Any, px_db: Any, m: Mapping[str, Any], day: dt.date, auction: 
         out["cov72"] = n
     out["closes20"] = _closes20(store, px_db, str(m["symbol"]).upper(), day)
     if auction == "on" and out.get("prev_close"):
-        react = _mark(store, px_db, str(m["symbol"]).upper(), day, ("1530", "px1530"), started)
-        gap = _mark(store, px_db, str(m["symbol"]).upper(), day, ("0930",), started)
+        sym = str(m["symbol"]).upper()
+        react = view.mark(sym, "1530") if view is not None else None
+        if react is None:
+            got = px_marks.get(sym)
+            react = _f(got.get("px")) if got is not None else None
+        gap = view.mark(sym, "0930") if view is not None else None
         out["react"] = None if react is None else react / float(out["prev_close"])
         out["gap"] = None if gap is None else gap / float(out["prev_close"])
     return out
+
 
 
 def _f(x: Any) -> float | None:
@@ -670,21 +687,27 @@ def _held(store: Any, prog: Any, cik: str, day: dt.date) -> bool:
 
 
 # ---------------------------------------------------------------------------------------------- the outcomes (F9)
-def member_outcome(store: Any, event: str, tags: Sequence[str], before: dt.datetime) -> dict[str, Any] | None:
-    """A MEMBER'S OUTCOME (F9): the settled `outcomes` row of its event under the FIRST of its tags (programs.py's order,
-    then ascending version: `tags` is in that order) that holds one, settled before `before`; NO OUTCOME (None) when its
-    RAW ENTRY PRINT was above 1.25 x the raw SIP close of the session before D (PREREG-EVL-2's LIMIT AT ENTRY) or that
-    cannot be read; {status: "terminal"} when no tag will ever hold one (every tag's intent skipped), {status:
-    "pending"} while one may still come. Only a TRADABLE outcome is {status: "settled", a, tradable}."""
+def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Sequence[str], before: dt.datetime
+                   ) -> dict[str, Any]:
+    """A MEMBER'S OUTCOME (F9, section 7.2's one reading): the settled `outcomes` row, under the FIRST of its tags
+    (programs.py's order, then ascending version: `tags` is in that order) that holds one, of THAT TAG'S INTENT OF THE
+    ISSUER entering at D's X auction with the member's exit auction (each tag prices the same issuer at the same two
+    auctions; PREREG-EVL-7 section 1.1's POOL OUTCOME reading), settled before `before`. NO OUTCOME ({status:
+    "terminal"}) when its RAW ENTRY PRINT was above 1.25 x the raw SIP close of the session before D (PREREG-EVL-2's
+    LIMIT AT ENTRY) or that cannot be read, or not TRADABLE, or when no tag will ever hold one (every tag's intent of the
+    issuer skipped, or none); {status: "pending"} while one may still come. Only a TRADABLE outcome is {status:
+    "settled", a, tradable}."""
+    entry, exit_ = ("open", "close") if auction == "o1" else ("close", "open")
     pending = False
     for tag in tags:
         pid, _, ver = tag.rpartition(":")
-        intent = store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND event=?",
-                                  (pid, int(ver), event)).fetchone()
-        if intent is None:
+        intent = store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND cik=? AND entry_day=? AND "
+                                  "entry_at=? AND exit_at=? ORDER BY (status LIKE 'skipped%'), event LIMIT 1",
+                                  (pid, int(ver), str(cik), day.isoformat(), entry, exit_)).fetchone()
+        if intent is None or str(intent["status"]).startswith("skipped"):
             continue
         row = store.db.execute("SELECT * FROM outcomes WHERE program=? AND version=? AND event=? AND status='settled'",
-                               (pid, int(ver), event)).fetchone()
+                               (pid, int(ver), str(intent["event"]))).fetchone()
         if row is None or S.parse_iso(str(row["settled_at"])) >= before:
             if str(intent["status"]) in ("planned", "entered") or row is not None:
                 pending = True
@@ -693,7 +716,8 @@ def member_outcome(store: Any, event: str, tags: Sequence[str], before: dt.datet
             return {"status": "terminal", "why": "limit at entry"}
         if not row["tradable"]:
             return {"status": "terminal", "why": "not tradable"}
-        return {"status": "settled", "a": float(row["a"]), "tradable": True, "program": pid, "version": int(ver)}
+        return {"status": "settled", "a": float(row["a"]), "r": None if row["r"] is None else float(row["r"]),
+                "tradable": True, "program": pid, "version": int(ver), "event": str(intent["event"])}
     return {"status": "pending"} if pending else {"status": "terminal", "why": "no outcome"}
 
 
@@ -771,8 +795,13 @@ def learner(auction: str) -> P.Program8 | None:
 
 
 # ---------------------------------------------------------------------------------------------- the state as of sigma
-def state_sessions(store: Any, prog: Any, day: dt.date, sig: dt.datetime, fam: set[str], gof: Mapping[str, str]
-                   ) -> tuple[list[tuple[Any, int, float, float]], int, int]:
+class Yielded(Exception):
+    """A state computation that stopped before its next step because another lane task fell due (section 4.6: the
+    pre-pass YIELDS, writing nothing until it is whole); the next turn computes it again from the same stored rows."""
+
+
+def state_sessions(store: Any, prog: Any, day: dt.date, sig: dt.datetime, fam: set[str], gof: Mapping[str, str],
+                   late: Callable[[], bool] | None = None) -> tuple[list[tuple[Any, int, float, float]], int, int]:
     """THE STATE'S SESSIONS (section 7.4) of a decision of D at state time `sig`: every entry session from STATE_FROM
     before D with members written (`mrl_pool`), in session order, that has ENTERED by `sig` (every member settled or
     terminal by `sig`, or IMPUTE_AFTER sessions closed after its scheduled exit, a member still unsettled then at
@@ -784,6 +813,8 @@ def state_sessions(store: Any, prog: Any, day: dt.date, sig: dt.datetime, fam: s
     imputed = 0
     closed = [s.day for s in C.sessions(store, STATE_FROM, day) if s.close_at <= sig]
     for d in days:
+        if late is not None and late():
+            raise Yielded(f"the state of {day.isoformat()} yields before session {d}")
         sday = dt.date.fromisoformat(d)
         exit_s = sday if prog.entry_at == "open" else (C.nth(store, sday, 2).day if C.nth(store, sday, 2) else None)
         rows = [dict(r) for r in store.db.execute("SELECT * FROM mrl_pool WHERE program=? AND version=? AND day=? ORDER BY "
@@ -791,7 +822,7 @@ def state_sessions(store: Any, prog: Any, day: dt.date, sig: dt.datetime, fam: s
         mem = []
         waiting = []
         for r in rows:
-            got = member_outcome(store, str(r["event"]), json.loads(r["tags"]), sig)
+            got = member_outcome(store, str(r["cik"]), sday, auction_of(prog), json.loads(r["tags"]), sig)
             rules = rules_of(json.loads(r["features"]), json.loads(r["tags"]), gof, json.loads(r["xrules"]), fam)
             if got["status"] == "settled":
                 mem.append({"rules": rules, "a": got["a"], "tradable": True})
@@ -807,12 +838,14 @@ def state_sessions(store: Any, prog: Any, day: dt.date, sig: dt.datetime, fam: s
     return out, len(out), imputed
 
 
-def compute_state(store: Any, prog: Any, day: dt.date, sig: dt.datetime) -> dict[str, Any]:
-    """The state as of `sig` (section 7.4): {stats: {rule: (A, G, NB)}, entered, imputed, sigma2}."""
+def compute_state(store: Any, prog: Any, day: dt.date, sig: dt.datetime, late: Callable[[], bool] | None = None
+                  ) -> dict[str, Any]:
+    """The state as of `sig` (section 7.4): {stats: {rule: (A, G, NB)}, entered, imputed, sigma2}. `late`: a yield
+    before each session's step (`Yielded`)."""
     auction = auction_of(prog)
     fam_list, fam = family(auction, sig)
     gof = group_of(GROUPS[auction])
-    sessions, entered, imputed = state_sessions(store, prog, day, sig, fam, gof)
+    sessions, entered, imputed = state_sessions(store, prog, day, sig, fam, gof, late)
     return {"stats": state(sessions), "entered": entered, "imputed": imputed, "sigma2": sigma2_of(sessions)}
 
 
@@ -844,9 +877,11 @@ def write_state(store: Any, prog: Any, day: dt.date, sig: dt.datetime, got: Mapp
     return True
 
 
-def prepass(store: Any, day: dt.date, auction: str, *, now: dt.datetime, run: str) -> dict[str, Any]:
-    """THE STATE PRE-PASS (`prepass-meta:<X>:<D>`, section 4.6): the meta-learner's state as of its state time, computed
-    at or after it and stored once. Counts only."""
+def prepass(store: Any, day: dt.date, auction: str, *, now: dt.datetime, run: str,
+            late: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """THE STATE PRE-PASS (`prepass-meta:<open|close>:<D>`, section 4.6): the meta-learner's state as of its state time,
+    computed at or after it and stored once, WHOLE (it yields before each step when `late` says another task is due:
+    `Yielded`, nothing written). Counts only."""
     prog = learner(auction)
     if prog is None:
         return {"skipped": "PREREG-EVL-8 is not pinned"}
@@ -857,7 +892,7 @@ def prepass(store: Any, day: dt.date, auction: str, *, now: dt.datetime, run: st
     if now < sig:
         raise ValueError(f"the state of {day} {auction} is computed at or after its state time {S.iso(sig)}")
     ensure(store)
-    got = compute_state(store, prog, day, sig)
+    got = compute_state(store, prog, day, sig, late)
     wrote = write_state(store, prog, day, sig, got, run=run, now=now)
     return {"day": day.isoformat(), "auction": auction, "entered": got["entered"], "written": wrote}
 
@@ -901,7 +936,8 @@ def decide(store: S.Store, day: dt.date, auction: str, *, now: Callable[[], dt.d
     started = now()
     if started < t:
         raise ValueError(f"a meta decision of {day} runs at or after its tau {S.iso(t)}")
-    job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else f"{JOB_CATCHUP}:{auction}:{day.isoformat()}"
+    job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else \
+        f"{JOB_CATCHUP}:{'open' if auction == 'o1' else 'close'}:{day.isoformat()}"
     rid = store.start_receipt(job, now=started)
     out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "code_sha": CODE_SHA}
     try:
@@ -917,21 +953,27 @@ def decide(store: S.Store, day: dt.date, auction: str, *, now: Callable[[], dt.d
 
 def _decide(store: S.Store, prog: Any, session: C.Session, auction: str, t: dt.datetime, started: dt.datetime, *,
             now: Callable[[], dt.datetime], kind: str, late: Callable[[], bool] | None, receipt: int) -> dict[str, Any]:
+    from . import book as EB
     from . import px as PXL
     from . import score as SC
 
     day = session.day
     srcs = sources(auction, t)
-    rows = cutoff(store, day, auction, started, srcs)
-    mem = members(store, day, auction, rows)
+    first = first_decision(store, day, auction)
+    finish = S.parse_iso(str(first["finished_at"])) if first is not None else None
     root = getattr(store, "root", None)
     px_db = PXL.read_only(Path(root)) if root is not None else None
+    view = AsOf(store, session, auction, t, finish) if finish is not None and root is not None else None
     try:
-        values = PXL.features(px_db, day, "o1" if auction == "o1" else "on") if px_db is not None else {}
+        picked = source_picks(store, view, px_db, session, auction, t, first, srcs)
+        mem = members(picked)
+        values = PXL.live_features(px_db, day, auction) if px_db is not None else {}
         recs = PXL.records("O1" if auction == "o1" else "ON") if values else []
-        seats_of = PXL.seat_events(store, day) if values else {}
+        chosen = PXL.live_selections(px_db, day, auction) if values else {}
+        seats_of = {pid: {str(r["cik"]) for r in rows} for pid, rows in chosen.items()}
         selected = {r["id"]: PXL.select_record(r, values, seat_events=seats_of) for r in recs}
-        first_finish = _first_finish(store, day, auction)
+        px_marks = PXL.live_marks(px_db, day) if (px_db is not None and auction == "on") else {}
+        uni_all = EB.universe_rows(view, day) if view is not None else {}
         prev = C.previous(store, day, 1)
         equity = SC.equity_on(store, prev[0].day) if prev else None
         reg = prog.registered_at
@@ -941,14 +983,14 @@ def _decide(store: S.Store, prog: Any, session: C.Session, auction: str, t: dt.d
         for m in mem:
             if late is not None and late():
                 return {"_status": "cut", "cut": "the part's bound passed"}
-            uni = _universe_live(store, day, m["cik"], first_finish) if first_finish is not None else None
+            uni = uni_all.get(m["cik"])
             if uni is None and m["only_px"] and px_db is not None:
                 got = px_db.execute("SELECT * FROM px_universe WHERE day=? AND cik=? AND rule='live' AND decided_at<?",
                                     (day.isoformat(), m["cik"], S.iso(t))).fetchone()
                 uni = None if got is None else dict(got)
-            inp = inputs(store, px_db, m, day, auction, t, started, uni)
+            inp = inputs(store, view, px_marks, px_db, m, day, auction, t, uni)
             feats = sorted(features(inp, auction))
-            xr = sorted(r for r, chosen in selected.items() if m["cik"] in chosen)
+            xr = sorted(r for r, sel in selected.items() if m["cik"] in sel)
             known = m.get("knowable_at")
             tradable = bool(uni is not None and equity is not None and uni.get("prev_close") is not None and
                             LIMIT_MULTIPLE * float(uni["prev_close"]) <= TRADABLE_SHARE * float(equity))
@@ -962,6 +1004,8 @@ def _decide(store: S.Store, prog: Any, session: C.Session, auction: str, t: dt.d
                          "prev_close": None if uni is None else _f(uni.get("prev_close")), "cost_rt": cost,
                          "rules": rules_of(feats, m["tags"], gof, xr, fam)})
     finally:
+        if view is not None:
+            view.close()
         if px_db is not None:
             px_db.close()
     sig = sigma_time(session, auction)
@@ -1031,40 +1075,47 @@ def pool_rows(store: Any, prog: Any, *, before: dt.datetime | None = None) -> li
         day = dt.date.fromisoformat(str(d[0]))
         for r in store.db.execute("SELECT * FROM mrl_pool WHERE program=? AND version=? AND day=? AND eligible=1",
                                   (prog.id, prog.version, day.isoformat())):
-            got = member_outcome(store, str(r["event"]), json.loads(r["tags"]), now)
+            got = member_outcome(store, str(r["cik"]), day, auction_of(prog), json.loads(r["tags"]), now)
             if got["status"] != "settled":
                 continue
-            row = store.db.execute("SELECT r FROM outcomes WHERE program=? AND version=? AND event=?",
-                                   (got["program"], got["version"], str(r["event"]))).fetchone()
             out.append({"entry_day": day, "issuer": str(r["cik"]), "event": str(r["event"]), "a": got["a"],
-                        "r": None if row is None else row[0], "tradable": True})
+                        "r": got.get("r"), "tradable": True})
     return out
 
 
 def report_lines(store: Any, day: dt.date) -> dict[str, Any]:
     """THE REPORT'S META BLOCK of D (section 10), COUNTS ONLY: members, members eligible to pick, picks written, imputed
-    members, decision status (live, cut, catch-up). No LCB, sub-rule, hash or figure."""
+    members, decision status (live, cut, catch-up) and the share of the run's sessions decided live. No LCB, sub-rule,
+    hash or figure."""
     if not P.registers_8() or not has_tables(store.db):
         return {}
     out: dict[str, Any] = {}
+    reg = P.REGISTERED_AT_8
     for auction, pid in PROGRAM_OF.items():
         row = store.db.execute("SELECT kind, status, members, eligible, picks FROM mrl_decisions WHERE program=? AND "
                                "version=1 AND day=?", (pid, day.isoformat())).fetchone()
         imp = store.db.execute("SELECT imputed FROM mrl_state WHERE program=? AND version=1 AND day=?",
                                (pid, day.isoformat())).fetchone()
+        # (the share of the run's sessions decided LIVE, from the first session after REGISTERED_AT_8: a catch-up is
+        # never a judged block, so a share q decided by catch-up needs about 1 / (1 - q) times the sessions to a look)
+        since = S.parse_iso(str(reg)).astimezone(C.NY).date().isoformat() if reg else day.isoformat()
+        kinds = store.db.execute("SELECT SUM(kind='live' AND status='ok') AS live, COUNT(*) AS n FROM mrl_decisions WHERE "
+                                 "program=? AND version=1 AND day>=? AND day<=?", (pid, since, day.isoformat())).fetchone()
+        n = int(kinds["n"] or 0)
+        share = None if n == 0 else round(int(kinds["live"] or 0) / n, 4)
         out[pid] = None if row is None else {"kind": row["kind"], "status": row["status"], "members": row["members"],
                                              "eligible": row["eligible"], "picks": row["picks"],
-                                             "imputed": None if imp is None else imp["imputed"]}
+                                             "imputed": None if imp is None else imp["imputed"], "live_share": share}
     return out
 
 
 __all__ = ["K", "H", "TAU", "SF", "Z", "HURDLE", "MINB", "WARM", "WINSOR", "VAR_FLOOR", "IMPUTE_AFTER", "IMPUTE_A",
            "ISSUER_GAP", "FAMILY_CAP", "LIMIT_MULTIPLE", "TRADABLE_SHARE", "STATE_FROM", "PROGRAM_OF", "POOL_OF",
-           "BY_ITSELF", "JOB_LIVE", "JOB_CATCHUP", "JOB_PREPASS", "SIGMA_OPEN", "SIGMA_CLOSE_BEFORE", "PREPASS_BUDGET",
-           "META_CLOSE_RECEIPT_BY", "META_CLOSE_BOUND", "META_CLOSE_UNTIL", "WHY", "CODE_SHA", "SCHEMA", "TABLES",
+           "JOB_LIVE", "JOB_CATCHUP", "JOB_PREPASS", "SIGMA_OPEN", "SIGMA_CLOSE_BEFORE", "PREPASS_BUDGET",
+           "META_CLOSE_BOUND", "META_CLOSE_UNTIL", "WHY", "CODE_SHA", "SCHEMA", "TABLES", "Yielded",
            "GROUPS_O1", "GROUPS_ON", "GROUPS", "group_of", "grid_rules", "et_hour_bin", "features", "rules_of",
            "session_stats", "state", "sigma2_of", "posterior", "walk", "qualified", "cbar_of", "rule_hash", "ensure",
-           "has_tables", "max_rowid", "note_run", "sources", "cutoff_runs", "cutoff", "event_knowable", "members",
+           "has_tables", "sources", "first_decision", "entry_at", "AsOf", "source_picks", "members", "event_knowable",
            "inputs", "member_outcome", "family", "tau", "sigma_time", "auction_of", "learner", "state_sessions",
            "compute_state", "stored_state", "write_state", "prepass", "decided", "live_allowed", "decide", "live_picks",
            "pool_rows", "report_lines"]

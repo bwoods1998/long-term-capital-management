@@ -115,7 +115,7 @@ test('an INFO notice sent while a told owner cause stands (release 1019f) says n
   // Release 1019i (the attempts ledger): a fill-rate drop and an order with no final state on record.
   for (const cause of ['evl_fill_rate', 'evl_attempts']) assert.ok(Object.hasOwn(STALL_CAUSES, cause), cause);
   // Release 1019j (PREREG-EVL-8): a PX run or a meta-learner's part missed, a PX recorder lagging, the placebo audit.
-  assert.ok(Object.hasOwn(STALL_CAUSES, 'evl_px8'));
+  assert.ok(Object.hasOwn(STALL_CAUSES, 'evl_price'));
 });
 
 test('the composer reads every fact the House writes, and no fact it does not write', () => {

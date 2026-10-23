@@ -324,9 +324,10 @@ FACTS_DENY = FACTS_DENY | frozenset({"real_attempts", "score_parity"})
 FACTS_DENY = FACTS_DENY | PXS.TABLES
 #: ... and (release 1019j, PREREG-EVL-8 section 10, F8) every px.sqlite table PREREG-EVL-8 adds (league/events/px.py
 #: `TABLES_8`: the morning values, the decisions, the panel, the record days, the basis, the prints, the placebos) and
-#: every mrl_* table of its meta-learners (league/events/meta.py `TABLES`: the members, the state, the walk, their runs):
-#: machine-only figures no designer, judge, captain or birth reads. The facts read no intent at all, the meta-learners'
-#: included.
+#: every mrl_* table of its meta-learners (league/events/meta.py `TABLES`: the members, the state, the walk, the
+#: decisions): machine-only figures no designer, judge, captain or birth reads. The facts read no intent at all, the
+#: meta-learners' included, and its programs are EXCLUDED from the facts' selection counts and the validator's Jaccard
+#: (its section 4.4); px.sqlite is never attached to a births connection.
 FACTS_DENY = FACTS_DENY | PXL.TABLES_8 | MT.TABLES
 #: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
 #: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
@@ -998,7 +999,9 @@ class Facts:
 
     def facts(self, programs: Sequence[P.Program] | None = None) -> dict[str, Any]:
         """The architect's facts (JSON-ready; counts only): the module docstring's list."""
-        progs = list(P.PROGRAMS if programs is None else programs)
+        # (PREREG-EVL-8 section 4.4, re-check 1's minor 6, its rule (1): its programs, controls, records and placebos,
+        # EVL-META-* included, are EXCLUDED from the facts' selection counts: births never read a row of that file)
+        progs = [p for p in (P.PROGRAMS if programs is None else programs) if not P.is_8(p)]
         n = len(self.days)
         fam: dict[str, dict[str, Any]] = {}
         items: dict[str, int] = {}
@@ -1168,7 +1171,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             known_sha.add(str(r["sha"]))
     used = budget_used_tenths(store)
     tonight_used = _tonight(store, night)
-    registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS]
+    # (PREREG-EVL-8 section 4.4: its rows are EXCLUDED from the Jaccard "against every registered program")
+    registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS if not P.is_8(p)]
     accepted: list[tuple[str, set[str]]] = []
     out: list[dict[str, Any]] = []
     for seq, proposal in enumerate(proposals):

@@ -1,7 +1,7 @@
 """PREREG-EVL-8 PART A: THE PX LANE (docs/prereg/PREREG-EVL-8.md once frozen; until then
-goal-2026-10-19/evl8/PREREG-EVL-8.md, the draft as the captain's decisions F1-F13 change it). Standard library only.
-NOTHING HERE DECIDES, WRITES OR IS CHARGED while league/events/programs.py `REGISTERED_AT_8` is None (`registers_8`):
-this file's rows are in no registry, every entry point returns at once and writes nothing.
+goal-2026-10-19/evl8/PREREG-EVL-8.md, the final text of the fix round). Standard library only. NOTHING HERE DECIDES,
+WRITES OR IS CHARGED while league/events/programs.py `REGISTERED_AT_8` is None (`registers_8`): this file's rows are in
+no registry, every entry point returns at once and writes nothing.
 
 THE ROWS (league/events/programs.py `ROWS_8`): three seats (PX-DROP-ON, PX-SURGE-ON: D's closing cross -> D+1's
 opening cross; PX-GAP-O1: D's opening cross -> D's closing cross) and two controls (CTRL-PX-ALL-ON, CTRL-PX-ALL-O1:
@@ -12,16 +12,25 @@ too: no intent, no seat, no charge, never reported by figure.
 
 ONE CLOCK (section 1.2). The decision time tau of an auction (D, X) is 09:15:00 ET of D for O1 and D's close decision
 time (close - 14 minutes) for ON. A decision of (D, X), live or catch-up, reads exactly: (a) rows STORED BEFORE tau (the
-lane's items by `book._stored_before`, px_universe and the morning pass's values of D, `px_am`, written by `morning`
-before tau); (b) the rows ITS OWN RUN wrote after tau from raw SIP 1Min bars whose bar end is at or before the value's
-knowable time (x_D and V_D: 15:30 ET, or close - 30 minutes; pm_D: 08:59 ET), fetched inside the run because the
-Basic plan serves a bar 16 minutes after it ends; nothing else. Every value is written ONCE into px.sqlite
-`px_features` (INSERT OR IGNORE) with the run's id, `decided_at` (the wall time of the write), `as_of` (tau),
-`inputs_at` (the latest fetch time of its inputs) and `bar_end` (the latest bar end of its inputs), under the kind of
-its run (`KIND_OF`: "on" / "o1" for a live run, "on@c" / "o1@c" for a catch-up), and the deciding run of (D, X) is
-written once (px_meta `DECIDED_KEY`): a decision reads only the rows of its own run. A live run that did not finish
-leaves its rows unread; its auction is decided later BY ITSELF (`decide`, kind "catchup", receipt `decide-px:<X>:<D>`),
-a REPORTED SHADOW and a source of the meta-learners, NEVER A JUDGED BLOCK AND NEVER TRADED.
+lane's items by `book._stored_before`, px_universe and the morning pass's values of D, `px_am`, written whole by
+`morning` and serving an auction only when stored before its tau); (b) the rows ITS OWN RUN wrote after tau from raw
+SIP 1Min bars whose bar end is at or before the value's knowable time (x_D and V_D: 15:30 ET, or close - 30 minutes;
+pm_D: 08:59 ET), fetched inside the run because the Basic plan serves a bar 16 minutes after it ends; nothing else.
+Every value is written ONCE into px.sqlite `px_features` (INSERT OR IGNORE) with the run's id, `decided_at` (the wall
+time of the write), `as_of` (tau), `inputs_at` (the latest fetch time of its inputs) and `bar_end` (the latest bar end
+of its inputs), under the kind of its run (`KIND_OF`: "on" / "o1" for a live run, "on@c" / "o1@c" for a catch-up), with
+the live close run's `px1530` marks (`px_marks`, the run's id as their source) and every seat's and control's
+selection (`px_decisions`); the deciding run of (D, X) is written once (px_meta `DECIDED_KEY`). A meta-learner reads
+only THE LIVE PX RUN's rows (`live_features`, `live_selections`, `live_marks`: section 1.2 (c)); the hourly re-decision
+reads the rows of the run that decided (D, X) (`redecide`: 1.2 (d)). A live run that did not finish leaves its rows
+unread; its auction is decided later BY ITSELF (`decide`, kind "catchup", receipt `decide-px:<open|close>:<D>`), a
+REPORTED SHADOW, NEVER A JUDGED BLOCK, NEVER TRADED and never a meta-learner's member.
+
+THE RUNS' TIMES (section 4.6; league/events/house.py schedules them): the morning pass from 09:05 ET (it yields to every
+other lane task and runs until 15:30: PXU(D) stored before 09:15 serves both auctions, later only the ON one); the
+open run on the lane's open receipt, 60 s, never past 09:19:30 (`OPEN_BOUND`, `OPEN_UNTIL`); the close run from tau, no
+read sent after tau + 45 s, each read's timeout min(45 s, tau + 50 s - now), its rows written only when every read
+returned, ended by tau + 55 s (`CLOSE_LAST_REQUEST`, `CLOSE_READS_UNTIL`, `CLOSE_DONE`, `READ_CAP`).
 
 CORPORATE ACTIONS (section 1.3). `morning` (`px-am:<D>`, after 09:00 ET of D) reads c*_P (P's adjustment=all close
 read after 09:00 ET of D: league/events/pxdata.py `flags`, write-once in `px_flags`, the benchmarks' too), FLAGGED(D),
@@ -101,11 +110,17 @@ PANEL_KEY = "px8:panel:{day}"
 #: The receipts (the lane's store): the live runs and a catch-up.
 JOB_LIVE = {"on": "decide-close-px8", "o1": "decide-open-px8"}
 JOB_CATCHUP = "decide-px"
+#: A catch-up's receipt names its auction as the lane's runs do: `decide-px:open:<D>`, `decide-px:close:<D>`.
+AT_OF = {"o1": "open", "on": "close"}
 JOB_AM = "px-am"
 JOB_MID = "px-mid"
 #: The lane's meta: PREREG-EVL-8's RELEASE, the moment the House's code carrying this file first ran its lane while it
 #: registers anything (written once). A decision whose tau is before it was decided before the release: a catch-up.
 RELEASE_KEY = "evl8:release"
+#: The lane's meta: a run of this file FINISHED (section 4.6, the book's late passes BY TIME, league/events/book.py
+#: `ready_8`): "open" once the House's open run `decide-open-px8:<D>` (its PX-GAP-O1 part, then its EVL-META-O1 part)
+#: has ended whatever each part's end, "close-meta" once EVL-META-ON's part `decide-close-meta8:<D>` has.
+RAN_KEY = "evl8:ran:{key}:{day}"
 #: A catch-up's and a re-decision's why, as the intents keep it.
 WHY_LIVE = "px8 live"
 WHY_CATCHUP = "px8 catch-up (PREREG-EVL-8 section 3.4: a reported shadow, never judged, never traded)"
@@ -113,14 +128,21 @@ WHY_REMOVED = "skipped:stored-item"
 #: Section 4.6's timing (ET wall times on a full day; an early close moves the close side by (close - 16:00)).
 AM_AT = dt.time(9, 5)
 AM_BUDGET = 300.0
-AM_UNTIL = dt.time(9, 13)
+#: The morning pass serves BOTH auctions of D only when PXU(D) is stored before 09:15:00 (the O1 tau); it yields to every
+#: other lane task, resumes after the open decisions and runs until 15:30:00 (stored in [09:15, 15:30) it serves only
+#: the ON auction; none by 15:30: no PX event of D).
+AM_UNTIL = dt.time(15, 30)
 MID_AT = dt.time(10, 0)
 OPEN_BOUND = 60.0
 OPEN_UNTIL = dt.time(9, 19, 30)
-#: The close run: from tau, no request after tau + 42 s, done by tau + 50 s (the lane's live close run starts at tau +
-#: 60 s, CLOSE_GRACE).
-CLOSE_LAST_REQUEST = dt.timedelta(seconds=42)
-CLOSE_DONE = dt.timedelta(seconds=50)
+#: The close run (section 4.6): from tau, NO READ SENT after tau + 45 s, EACH READ'S TIMEOUT min(45 s, tau + 50 s - now)
+#: (`READ_CAP`), its rows written only when every read returned, and ended by tau + 55 s (DECISION_MARGIN before the
+#: lane's live close run at tau + 60 s, CLOSE_GRACE). The open run: 60 s from its start, never past 09:19:30 ET, each
+#: read's timeout min(45 s, the bound - now).
+CLOSE_LAST_REQUEST = dt.timedelta(seconds=45)
+CLOSE_READS_UNTIL = dt.timedelta(seconds=50)
+CLOSE_DONE = dt.timedelta(seconds=55)
+READ_CAP = 45.0
 
 SCHEMA_8 = """
 CREATE TABLE IF NOT EXISTS px_am(day TEXT NOT NULL, cik TEXT NOT NULL, symbol TEXT NOT NULL, in_pxu INTEGER NOT NULL,
@@ -451,7 +473,7 @@ def drift_events(store: Any, day: dt.date) -> dict[str, dict[str, dt.date]]:
 
 def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run: str,
             tickers: Mapping[str, Any] | None = None, assets: Mapping[str, Any] | None = None,
-            late: Callable[[], bool] | None = None) -> dict[str, Any]:
+            late: Callable[[], bool] | None = None, clock: Callable[[], dt.datetime] | None = None) -> dict[str, Any]:
     """THE MORNING PASS OF D (`px-am:<D>`, section 4.6; after 09:00 ET of D, before either decision time): PXU(D)'s base
     (league/events/pxdata.py `universe`, write-once, when the 07:40 recorder has not written it and `tickers` and
     `assets` are given), c*_P and FLAGGED(D) of every base name and of both benchmarks (`pxdata.flags`), the full
@@ -495,8 +517,9 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
     rows: dict[str, dict[str, Any]] = {}
     for cik, base_row in sorted(base.items()):
         if late is not None and late():
-            out["left"] = out.get("left", 0) + 1
-            continue
+            # (PXU(D) is WRITTEN WHOLE AT ITS END, section 1.1: a pass cut here writes no row; its stored reads stay and
+            # the next turn computes every row again from them)
+            return out | {"left": len(base) - len(rows), "written": 0, "pxu": 0, "_status": "partial"}
         sym = str(base_row["symbol"]).upper()
         why, value = _am_value(px, sym, cik, base_row, day, prior, window, bench, drift, now)
         value["sic2"] = sic.get(str(cik))
@@ -515,7 +538,8 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
         else:
             v["z1s"] = None
     written = inside = 0
-    stamp = S.iso(now)
+    wrote = clock() if clock is not None else now     # (THE WRITE'S OWN TIME: the rows serve an auction only when
+    stamp = S.iso(wrote)                              # stored before its tau, section 1.1)
     with px.tx() as db:
         for cik, row in rows.items():
             cur = db.execute("INSERT OR IGNORE INTO px_am(day, cik, symbol, in_pxu, why, value, decided_at, inputs_at, run) "
@@ -524,8 +548,8 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
                               json.dumps(row["value"], sort_keys=True), stamp, row["value"].get("inputs_at"), run))
             written += cur.rowcount
             inside += int(row["why"] is None and cur.rowcount == 1)
-        if not out.get("left"):
-            _set_once(db, AM_KEY.format(day=day.isoformat()), {"run": run, "at": stamp, "pxu": inside})
+        _set_once(db, AM_KEY.format(day=day.isoformat()), {"run": run, "at": stamp, "pxu": inside,
+                                                            "serves": "both" if wrote < session.open_decide else "on"})
     return out | {"written": written, "pxu": inside}
 
 
@@ -807,7 +831,8 @@ def decide(px: Any, store: S.Store, gw: Any, day: dt.date, auction: str, *, now:
            kind: str = "live", tickers: Mapping[str, Any] | None = None, late: Callable[[], bool] | None = None
            ) -> dict[str, Any]:
     """ONE PX DECISION OF (D, X) (section 3.4), BY ITSELF: `kind` "live" (`decide-close-px8:<D>` from tau, or
-    `decide-open-px8:<D>` on the lane's open receipt) or "catchup" (`decide-px:<X>:<D>`, an auction no live run decided;
+    `decide-open-px8:<D>` on the lane's open receipt) or "catchup" (`decide-px:<open|close>:<D>`, an auction no live run
+    decided;
     never judged, never traded). It reads PXU(D) and the morning values as stored before tau, the items stored before
     tau (`item_ciks`), and its own minute reads (section 1.2 (b)); writes every name's values once into `px_features`
     under its run's kind, its seats' and control's intents (K 40 each after A72's skips; the control's 200), its ranked
@@ -828,7 +853,8 @@ def decide(px: Any, store: S.Store, gw: Any, day: dt.date, auction: str, *, now:
     started = now()
     if started < t:
         raise ValueError(f"a PX decision of {day} {auction} runs at or after its tau {S.iso(t)}")
-    job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else f"{JOB_CATCHUP}:{auction}:{day.isoformat()}"
+    job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else \
+        f"{JOB_CATCHUP}:{AT_OF[auction]}:{day.isoformat()}"
     rid = store.start_receipt(job, now=started)
     run = px.start_run(JOB_LIVE[auction] if kind == "live" else JOB_CATCHUP, now=started)
     out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "run": run}
@@ -907,10 +933,19 @@ def _decide(px: Any, store: S.Store, gw: Any, session: C.Session, auction: str, 
         ends = [e for r in reads.values() for e in [(r.get(sym) or (None, None, None))[2]] if e]
         rows.append((day.isoformat(), cik, feature_kind, sym, json.dumps(v, sort_keys=True), S.iso(stamp), inputs_at,
                      None, max(ends) if ends else None, "live", run, S.iso(t), max(ends) if ends else None))
+    marks = []
+    if auction == "on":     # (THE PX1530 MARKS of D, section 7.2's THE MARKS: written by this run, with its id)
+        for sym, (value, _, end) in sorted((reads.get("x") or {}).items()):
+            if value is not None and end:
+                marks.append((sym, day.isoformat(), "px1530", float(value),
+                              S.iso(S.parse_iso(end) - dt.timedelta(minutes=1)), run, S.iso(stamp)))
     with px.tx() as db:
         for row in rows:
             db.execute("INSERT OR IGNORE INTO px_features(day, cik, kind, symbol, value, decided_at, inputs_at, bars_from, "
                        "bars_to, source, run, as_of, bar_end) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+        for row in marks:
+            db.execute("INSERT OR IGNORE INTO px_marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, ?, ?, "
+                       "?, ?)", row)
     out["features"] = len(rows)
     why = WHY_LIVE if kind == "live" else WHY_CATCHUP
     counts: dict[str, Any] = {}
@@ -933,28 +968,36 @@ def _decide(px: Any, store: S.Store, gw: Any, session: C.Session, auction: str, 
             pop = sorted(control_population(auction, values), key=lambda c: control_hash(auction, day, c))
             got, _ = take(store, ctl, day, pop, CONTROL_N)
             counts[ctl.id] = write_rows(store, ctl, day, got, values, ranks={}, decided_at=t, why=why)
+            with px.tx() as db:     # (the control's selection by this run: section 7.2's members of the live PX run)
+                for n, cik in enumerate(got, 1):
+                    db.execute("INSERT OR IGNORE INTO px_decisions(run, auction, day, program, rank, event, cik, symbol, "
+                               "rank_key, adv20, prev_close) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               (run, auction, day.isoformat(), ctl.id, n, event_id(ctl, day, cik), cik,
+                                values[cik]["symbol"], None, values[cik].get("adv20"), values[cik].get("prev_close")))
     out["programs"] = counts
     return out
 
 
 def redecide(px: Any, store: S.Store, day: dt.date, auction: str, *, now: dt.datetime,
              tickers: Mapping[str, Any] | None = None, keep: Callable[[Any], bool] | None = None) -> dict[str, Any]:
-    """THE LANE'S HOURLY RE-DECISION OF THE PX ROWS of (D, X) (section 3.4), shadow only: the seats' K 40 and the
-    control's 200 re-taken from the DECIDING run's stored values (never recomputed) under the shadow's NO STORED ITEM
-    reading (an item knowable in the span, whenever stored, removes its issuer: its unsettled intent moves to
-    `skipped:stored-item`, and the next qualifying name in the stored ranking takes its place). Never a meta-learner's,
-    never an auction a catch-up decided (its intents are a reported shadow), never a program `keep` holds (a written
-    look of it covering D). Returns {program: {removed, added}}."""
+    """THE LANE'S HOURLY RE-DECISION OF THE PX ROWS of (D, X) (section 3.4, section 1.2 (d)), shadow only: the seats'
+    K 40 and the control's 200 re-taken from the stored px_features of THE PX RUN THAT DECIDED (D, X) (the live run,
+    else its `decide-px` catch-up; never recomputed, never written again) under the shadow's NO STORED ITEM reading (an
+    item knowable in the span, whenever stored, removes its issuer: its unsettled intent moves to `skipped:stored-item`,
+    and the next qualifying name in the stored ranking takes its place). Never a meta-learner's (its decision is written
+    once, and its members read the live run's selections at tau, `px_decisions`, never these), never a program `keep`
+    holds (a written look of it covering D). Returns {program: {removed, added}}."""
     if not registered():
         return {}
     got = decided(px.db, day, auction)
-    if got is None or got.get("kind") != "live":
+    if got is None:
         return {}
     if tickers is None:
         from . import book as EB
         tickers = EB.lane_tickers(store, day)
     lo, hi = spans(store, day)[auction]
-    kind = KIND_OF[(auction, "live")]
+    kind = KIND_OF[(auction, "live" if got.get("kind") == "live" else "catchup")]
+    why = WHY_LIVE if got.get("kind") == "live" else WHY_CATCHUP
     values = {str(r["cik"]): json.loads(r["value"]) for r in px.db.execute(
         "SELECT cik, value FROM px_features WHERE day=? AND kind=? AND run=?", (day.isoformat(), kind, got["run"]))}
     if not values:
@@ -998,7 +1041,7 @@ def redecide(px: Any, store: S.Store, day: dt.date, auction: str, *, now: dt.dat
                     continue
                 want.append(cik)
             new = [c for c in want if c not in have]
-            added = write_rows(store, prog, day, new, values, ranks=ranks, decided_at=t, why=WHY_LIVE)["planned"] \
+            added = write_rows(store, prog, day, new, values, ranks=ranks, decided_at=t, why=why)["planned"] \
                 if new else 0
             out[prog.id] = {"removed": removed, "added": added}
     return out
@@ -1014,6 +1057,47 @@ def live_picks(db: Any, prog: Any, day: dt.date) -> list[dict[str, Any]]:
         return []
     return [dict(r) for r in db.execute("SELECT * FROM px_decisions WHERE run=? AND program=? AND day=? ORDER BY rank",
                                         (got["run"], getattr(prog, "id", prog), day.isoformat()))]
+
+
+def live_run(db: Any, day: dt.date, auction: str) -> str | None:
+    """THE LIVE PX RUN OF (D, X) (section 1.2 (c)): the run id of `decide-close-px8:<D>` (X = ON) or of the PX-GAP-O1
+    part of `decide-open-px8:<D>` (X = O1) when it finished and wrote its px_features (the deciding mark, kind live);
+    None otherwise (no catch-up is ever a meta-learner's PX run)."""
+    got = decided(db, day, auction)
+    return None if got is None or got.get("kind") != "live" else str(got["run"])
+
+
+def live_features(db: Any, day: dt.date, auction: str) -> dict[str, dict[str, Any]]:
+    """The px_features rows of THE LIVE PX RUN OF (D, X) ({cik: values}): a meta-learner's `x:` experts and PX
+    members read these only (section 7.3); {} with no live run."""
+    run = live_run(db, day, auction)
+    if run is None:
+        return {}
+    return {str(r["cik"]): json.loads(r["value"]) for r in db.execute(
+        "SELECT cik, value FROM px_features WHERE day=? AND kind=? AND run=?",
+        (day.isoformat(), KIND_OF[(auction, "live")], run))}
+
+
+def live_selections(db: Any, day: dt.date, auction: str) -> dict[str, list[dict[str, Any]]]:
+    """{program: the names THE LIVE PX RUN OF (D, X) selected, in its order} for its seats (K 40) and its control (200)
+    (`px_decisions`: the intents that run wrote, never the hourly re-decision's); {} with no live run (section 7.2)."""
+    run = live_run(db, day, auction)
+    if run is None:
+        return {}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for r in db.execute("SELECT * FROM px_decisions WHERE run=? AND day=? ORDER BY program, rank", (run, day.isoformat())):
+        out.setdefault(str(r["program"]), []).append(dict(r))
+    return out
+
+
+def live_marks(db: Any, day: dt.date) -> dict[str, dict[str, Any]]:
+    """D's `px1530` marks as THE LIVE PX RUN OF (D, ON) wrote them ({symbol: {px, t, fetched_at}}; section 7.2's THE
+    MARKS); {} with no live run."""
+    run = live_run(db, day, "on")
+    if run is None:
+        return {}
+    return {str(r["symbol"]).upper(): dict(r) for r in db.execute(
+        "SELECT * FROM px_marks WHERE day=? AND label='px1530' AND source=?", (day.isoformat(), run))}
 
 
 def universe_row(db: Any, day: dt.date, cik: str) -> dict[str, Any] | None:
@@ -1370,6 +1454,9 @@ def report_lines(store: Any, root: Any, day: dt.date) -> dict[str, Any]:
         for auction in AUCTIONS:
             got = decided(db, day, auction)
             out[f"decided_{auction}"] = None if got is None else got.get("kind")
+        am_done = _meta_json(db, AM_KEY.format(day=day.isoformat()))
+        # (section 4.6: PXU(D) stored before 09:15 serves both auctions, in [09:15, 15:30) only the ON one, none: neither)
+        out["auctions_lost_am"] = 2 if am_done is None else (1 if am_done.get("serves") == "on" else 0)
         progs: dict[str, Any] = {}
         for p in P.rows_8():
             if not p.px:
@@ -1407,7 +1494,8 @@ __all__ = ["K", "CONTROL_N", "Z_SEAT", "DROP_MOVE", "SURGE_MOVE", "SURGE_VOLUME"
            "FLAG_TOLERANCE", "SIGMA_SESSIONS", "HIGH_SESSIONS", "VOLUME_SESSIONS", "GROUP_MIN", "PLACEBOS",
            "PLACEBO_EVENTS", "PLACEBO_ALARM", "GRID_SHA256", "GRID_FILE", "DRIFT_CONTROLS", "DRIFT_KS", "AUCTIONS",
            "WINDOWS_OF", "KIND_OF", "DECIDED_KEY", "AM_KEY", "MID_KEY", "PANEL_KEY", "JOB_LIVE", "JOB_CATCHUP", "JOB_AM",
-           "JOB_MID", "RELEASE_KEY", "WHY_LIVE", "WHY_CATCHUP", "WHY_REMOVED", "AM_AT", "AM_BUDGET", "AM_UNTIL", "MID_AT",
+           "JOB_MID", "RELEASE_KEY", "RAN_KEY", "AT_OF", "CLOSE_READS_UNTIL", "READ_CAP", "live_run", "live_features",
+           "live_selections", "live_marks", "WHY_LIVE", "WHY_CATCHUP", "WHY_REMOVED", "AM_AT", "AM_BUDGET", "AM_UNTIL", "MID_AT",
            "OPEN_BOUND", "OPEN_UNTIL", "CLOSE_LAST_REQUEST", "CLOSE_DONE", "SCHEMA_8", "TABLES_8", "FEATURE_COLUMNS",
            "PxCutShort", "registered", "program", "seats", "control", "auction_of", "event_id", "parse_event", "knowable",
            "event_knowable", "tau", "spans", "ensure", "open_px", "read_only", "decided", "release_at", "mark_release",

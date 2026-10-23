@@ -444,9 +444,62 @@ def _eight(store: S.Store, day: dt.date) -> dict[str, Any] | None:
         return None
     try:
         return {"px": PXL.report_lines(store, store.root, day), "meta": MT.report_lines(store, day),
-                "charges": S8.charges(store)}
+                "charges": S8.charges(store), "late": late_passes_8(store, day), "mechanism": S8.one_mechanism(store),
+                "done_beside": done_beside(store)}
     except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
         return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+
+#: PREREG-EVL-8's late passes of the book (league/equity/live.py `EIGHT_PASSES`), by auction.
+EIGHT_PASSES = ("open-px8", "close-px8", "close-meta8")
+
+
+def late_passes_8(store: S.Store, day: dt.date) -> dict[str, Any] | None:
+    """PREREG-EVL-8 section 4.6 and 10: THE AUCTIONS OF D WHOSE LATE PASS DID NOT COME INSIDE THE WINDOW, from the book's
+    own rows (`<state>/live.sqlite` `eq_event_decisions`, read-only; the state root is the lane's store's parent): {pass:
+    "planned" | "failed" | "not come"}; None with no live.sqlite (no book on this House). Counts only."""
+    path = Path(store.root).parent / "live.sqlite"
+    if not path.exists():
+        return None
+    try:
+        db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            rows = {str(r[0]): str(r[1]) for r in db.execute(
+                "SELECT at, status FROM eq_event_decisions WHERE day=? AND at IN (?, ?, ?)", (day.isoformat(), *EIGHT_PASSES))}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return {k: ("planned" if rows.get(k) == "done" else rows.get(k) or "not come") for k in EIGHT_PASSES}
+
+
+def done_beside(store: S.Store) -> dict[str, Any] | None:
+    """PREREG-EVL-8 section 10 (the red team's `rt_done_beta`): BESIDE Done's issuer-block bound (league/events/done.py,
+    the owner's, unchanged), the same 95% two-sided bound of the counted events' per-event raw return with SESSION
+    blocks, and the MARKET-DIRECTION SHARE (the benchmarks' summed return b over the events' summed r): a long-only
+    book's issuer-block bound is carried by the market's direction. None before any counted event."""
+    from . import done as DN
+
+    rows = []
+    for r in DN.counted(store)["counted"]:
+        if r.get("r") is None:
+            continue
+        row = dict(r)
+        if not row.get("entry_day"):
+            got = store.db.execute("SELECT entry_day FROM intents WHERE program=? AND version=? AND event=?",
+                                   (row["program"], int(row["version"]), str(row["event"]))).fetchone()
+            if got is None:
+                continue
+            row["entry_day"] = got[0]
+        rows.append(row)
+    if not rows:
+        return None
+    got = SC.bootstrap_bounds(rows, "session", DN.LEVEL, DN.DRAWS, SC.seed_of("PREREG-EVL-8|done-beside|session"))
+    sum_r = math.fsum(float(r["r"]) for r in rows)
+    b = [float(r["b"]) for r in rows if r.get("b") is not None]
+    share = None if not b or sum_r == 0 else round(math.fsum(b) / sum_r, 4)
+    return {"n": len(rows), "sessions": got["groups"], "lower": got["lower"], "upper": got["upper"],
+            "direction_share": share}
 
 
 def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
@@ -667,12 +720,26 @@ def _eight_lines(e8: Mapping[str, Any]) -> list[str]:
             parts.append(f"{pid} no decision")
         else:
             parts.append(f"{pid} {m.get('kind')}/{m.get('status')}: members {m.get('members')}, eligible "
-                         f"{m.get('eligible')}, picks {m.get('picks')}, imputed {m.get('imputed')}")
+                         f"{m.get('eligible')}, picks {m.get('picks')}, imputed {m.get('imputed')}, decided live "
+                         f"{_pct(m.get('live_share'))} of the run's sessions")
     lines.append("META: " + ("; ".join(parts) if parts else "none"))
     if ch:
         lines.append(f"PREREG-EVL-8 expected false passes: {ch.get('count'):.2f} (0.13 a version or run), base model "
                      f"{ch.get('base'):.2f}, stresses' worst {ch.get('stress'):.2f}; per version PX "
                      f"{(ch.get('per_version') or {}).get('px')}, META {(ch.get('per_version') or {}).get('meta')}")
+    late = e8.get("late")
+    if late:
+        lines.append("PREREG-EVL-8 late passes: " + ", ".join(f"{k} {v}" for k, v in late.items())
+                     + f"; PX auctions lost to a late morning pass {px.get('auctions_lost_am')}")
+    mech = e8.get("mechanism") or {}
+    if mech.get("count"):
+        lines.append(f"PREREG-EVL-8 one mechanism beside Done's >= 3 programs: {mech['count']} pair(s) "
+                     + "; ".join("+".join(p) for p in mech.get("pairs") or []))
+    beside = e8.get("done_beside")
+    if beside:
+        lines.append(f"Beside Done's issuer-block bound: session blocks [{beside['lower']:+.4f}, {beside['upper']:+.4f}] "
+                     f"over {beside['sessions']} sessions, n {beside['n']}, market-direction share "
+                     f"{beside.get('direction_share')}")
     return lines
 
 

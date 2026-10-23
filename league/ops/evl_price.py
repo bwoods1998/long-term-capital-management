@@ -1,9 +1,9 @@
-"""PREREG-EVL-8's ALARMS (its section 10; league/ops/evl_health.py's cause `evl_px8`), read-only from the lane's store and
+"""PREREG-EVL-8's ALARMS (its section 10; league/ops/evl_health.py's cause `evl_price`), read-only from the lane's store and
 px.sqlite beside it: the price lane and the meta-learners fail quietly (a run cut at its bound trades nothing, a recorder
 that lags leaves no PX event at all), so the stall job says when
 
 - A PART FAILED OR EXPIRED: an auction of the last `LOOK_HOURS` whose live window has passed (the open's 09:19:30 ET, the
-  close's tau + 50 s for PX and the close - 11:20 for EVL-META-ON) with no LIVE decision of a PX run (a morning pass
+  close's tau + 55 s for PX and the close - 11:20 for EVL-META-ON) with no LIVE decision of a PX run (a morning pass
   made PXU(D)) or of a meta-learner: never traded at that auction, decided later by a catch-up (the alarm says whether
   one has);
 - A RECORDER LAGS: the morning pass of today's session not done by 09:13 ET, the 09:30 opens not read by 11:00 ET, or the
@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from . import guard
 
-CAUSE = "evl_px8"
+CAUSE = "evl_price"
 STORE = Path("events") / "events.sqlite"
 PX_STORE = Path("events") / "px.sqlite"
 NY = ZoneInfo("America/New_York")
@@ -34,7 +34,7 @@ LOOK_HOURS = 24.0
 AM_BY = dt.time(9, 13)
 MID_BY = dt.time(11, 0)
 BARS_BY = dt.time(6, 0)
-DOING = ("PREREG-EVL-8's runs go by themselves at section 4.6's times (the morning pass at 09:05 ET, PX-GAP-O1 and "
+DOING = ("PREREG-EVL-8's runs go by themselves at section 4.6's times (the morning pass from 09:05 ET, PX-GAP-O1 and "
          "EVL-META-O1 on the lane's open receipt, PX-DROP-ON and PX-SURGE-ON from the close decision time, EVL-META-ON on "
          "the lane's close receipt), each under its own bound; one that fails or runs past it is never traded at that "
          "auction and is decided later by a catch-up (a reported shadow, never judged); the recorders' lag leaves no PX "

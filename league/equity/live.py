@@ -5463,25 +5463,27 @@ class EquityBook:
                                             **({"sale_to_later": summary["sale_to_later"]}
                                                if summary.get("sale_to_later") else {})})
 
-    #: PREREG-EVL-8 section 4.6: how long this file's late passes wait for a run still owed, after the auction's decision
-    #: time (the open's PX-GAP-O1 and EVL-META-O1 run, bounded to 09:19:30 ET: 270 s; EVL-META-ON's, never past the
-    #: close - 11:20, 160 s after the close decision time), then plan what is on record (a part not finished trades
-    #: nothing at that auction). PX-DROP-ON's and PX-SURGE-ON's run ends 10 s before the lane's close run starts: their
-    #: pass waits for nothing.
-    EVENT_8_WAIT_S = {"open-px8": 270.0, "close-meta8": 160.0, "close-px8": 0.0}
+    #: PREREG-EVL-8 section 4.6: THIS FILE'S LATE PASSES OF AN AUCTION, BY TIME, in ROOM's order among its rows (each
+    #: `eq_event_decisions` row (day, key), once a session). No pass waits and none keeps room: each is planned at the
+    #: FIRST BOOK TICK INSIDE THE AUCTION'S WINDOW at which it is READY (league/events/book.py `ready_8`: the open's once
+    #: the House's `decide-open-px8:<D>` run has finished; the close's PX pass once the lane's close receipt of D is in;
+    #: EVL-META-ON's once `decide-close-meta8:<D>` has finished too), after every PREREG-EVL-7 row of the auction is
+    #: planned or has failed (its "<at>-lrn" pass, where the tree has learners); a pass not ready inside the window is
+    #: never planned (its buys are not sent; the shadow keeps every event).
+    EIGHT_PASSES = {"open": (("open-px8", ("PX-GAP-O1", "EVL-META-O1")),),
+                    "close": (("close-px8", ("PX-DROP-ON", "PX-SURGE-ON")), ("close-meta8", ("EVL-META-ON",)))}
 
     def _event_decide_8(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
-        """PREREG-EVL-8 SECTION 4.2-4.6: THIS FILE'S LATE PASSES OF THE AUCTION (`eq_event_decisions` rows (day,
-        "open-px8"), (day, "close-px8") and (day, "close-meta8")), each once a session, AFTER the auction's own decision
-        of every earlier row (`_event_decide`, births included) and after PREREG-EVL-7's learners' pass where the tree
-        has one (its row "<at>-lrn"), so the book plans every earlier row exactly as without this file: each live seat
-        of the pass asked for its picks (`book.picks_8`: its LIVE run's ranked names, or the meta-learner's live
-        intents, less its guard and one position per issuer), passing over every name already given at this auction
-        and the picks `_event_gate` skips, up to its room (`book.max_open_8`: PX's learning room 4 by the money row
-        `event.max_open_v8.learning`), allocated in this file's ROOM (`book.allocate`, `room_key`'s EIGHT tiers) and
-        planned as buys sent after every earlier buy (`send_key`). A pass waits for its run up to `EVENT_8_WAIT_S`,
-        then plans what is on record: a run that did not finish is never traded at that auction. Nothing while this
-        file registers nothing."""
+        """PREREG-EVL-8 SECTION 4.2-4.6: THIS FILE'S LATE PASSES OF THE AUCTION (`EIGHT_PASSES`), each once a session,
+        AFTER the auction's main pass of every earlier row (`_event_decide`, births included) and after PREREG-EVL-7's
+        learners' pass where the tree has one (its row "<at>-lrn" done or failed), so the book plans every earlier row
+        exactly as without this file: each live seat of the pass asked for its picks (`book.picks_8`: its LIVE run's
+        ranked names, or the meta-learner's live intents, less its guard and one position per issuer), passing over every
+        name already given at this auction and the picks `_event_gate` skips, up to its room (`book.max_open_8`: PX's
+        learning room 4 by the money row `event.max_open_v8.learning`), allocated in this file's ROOM (`book.allocate`,
+        `room_key`'s EIGHT tiers) and planned as buys sent after every earlier buy in the same tick (`send_key`). A pass
+        is planned only at a tick at which it is READY (`book.ready_8`); none waits, and a run that did not finish is
+        never traded at that auction. Nothing while this file registers nothing."""
         progs = getattr(adapter, "P", None)
         if progs is None or not getattr(progs, "registers_8", lambda: False)():
             return
@@ -5492,20 +5494,26 @@ class EquityBook:
         if lane is None or not s.enabled:
             return
         is_learner = getattr(adapter, "is_learner", None)
-        if is_learner is not None and not self._event_decided(day, f"{at}-lrn") and \
+        if is_learner is not None and not self._event_made(day, f"{at}-lrn") and \
                 any(is_learner(i.family) for i in self._instances(alive=True) if i.kind == EVENT_KIND):
+            out["event_decide_8"] = f"PREREG-EVL-8's pass of {at} {day} comes after PREREG-EVL-7's rows"
             return      # (PREREG-EVL-7's learners' pass first: a name a learner is given is never also bought here)
         decided_at = em.open_decide if at == "open" else em.close_decide
-        passes = [("open-px8", ("PX-GAP-O1", "EVL-META-O1"))] if at == "open" else \
-            [("close-px8", ("PX-DROP-ON", "PX-SURGE-ON")), ("close-meta8", ("EVL-META-ON",))]
-        for key, ids in passes:
+        for key, ids in self.EIGHT_PASSES[at]:
             if self._event_decided(day, key):
                 continue
-            ready = adapter.decided_8(lane, em.day, key) and (key != "open-px8" or adapter.meta_o1_done(lane, em.day))
-            if not ready and now < decided_at + self.EVENT_8_WAIT_S[key]:
-                out["event_decide_8"] = f"waiting for PREREG-EVL-8's run of {key} ({day})"
-                return      # (the later pass of the same auction waits behind it: ROOM's order among this file's rows)
+            if not adapter.ready_8(lane, em.day, key):
+                out["event_decide_8"] = f"PREREG-EVL-8's pass {key} of {day} is not ready at this tick"
+                return      # (the later pass of the same auction is never planned ahead of it: ROOM's order)
             self._event_decide_8_pass(now, em, at, key, ids, s, adapter, lane, decided_at, out)
+            if not self._event_decided(day, key):
+                return      # (a pass that could not read its gate goes again next tick, still ahead of the next one)
+
+    def _event_made(self, day: str, at: str) -> bool:
+        """Whether the book's decision row (day, at) is made or has failed (`eq_event_decisions` status `done` or
+        `failed`): a pass that comes after it may go."""
+        return bool(self.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE day=? AND at=? AND status IN ('done', "
+                                    "'failed')", (day, at)))
 
     def _event_decide_8_pass(self, now: float, em: S.EventMoments, at: str, key: str, ids: Sequence[str], s: Any,
                              adapter: Any, lane: Any, decided_at: float, out: dict) -> None:
@@ -6648,8 +6656,10 @@ class EquityBook:
         (`programs.<program>.picks`, written by `_event_decide`) and `eq_event_intents`."""
         counts: list[int] = []
         days: list[str] = []
-        for r in self.state.rows("SELECT day, summary FROM eq_event_decisions WHERE at=? AND status='done' ORDER BY day "
-                                 "DESC LIMIT 60", (at,)):
+        ats = (at, *(key for key, _ in self.EIGHT_PASSES.get(at, ())))   # (PREREG-EVL-8's late passes' rows too)
+        marks = ", ".join("?" for _ in ats)
+        for r in self.state.rows(f"SELECT day, summary FROM eq_event_decisions WHERE at IN ({marks}) AND status='done' "
+                                 f"ORDER BY day DESC LIMIT 60", ats):
             summary = loads(r["summary"], {})
             programs = summary.get("programs") if isinstance(summary, Mapping) else None
             mine = programs.get(inst.family) if isinstance(programs, Mapping) else None

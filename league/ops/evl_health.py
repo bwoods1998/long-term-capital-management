@@ -112,7 +112,7 @@ from . import guard
 from . import schedule as S
 
 CAUSES = ("evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
-          "evl_backfill", "evl_handback", "evl_fill_rate", "evl_attempts", "evl_px8")
+          "evl_backfill", "evl_handback", "evl_fill_rate", "evl_attempts", "evl_price")
 #: The stall job's key in `<state>/ops.json` that switches these off: `{"stall": {"evl": false}}`.
 SWITCH = "evl"
 #: The lane's state under the House's state root (league/events/store.py `DB_NAME`), its idle switch and the House's pause.
@@ -252,8 +252,8 @@ DOING = {
                      "order); the venue ends an auction order at its cross and a day sale at the close, so an order with "
                      "no final state an hour after its auction, or one the ledger lacks, is a gap in the fill evidence "
                      "COST-7 measures, for the House to read again or fix."),
-    "evl_px8": ("PREREG-EVL-8's price lane and meta-learners run by themselves at their section 4.6 times under their own "
-                "bounds (league/ops/evl_px8.py); a run that fails or expires is never traded at that auction and is "
+    "evl_price": ("PREREG-EVL-8's price lane and meta-learners run by themselves at their section 4.6 times under their own "
+                "bounds (league/ops/evl_price.py); a run that fails or expires is never traded at that auction and is "
                 "decided later by a catch-up; the recorders feed the morning pass; the placebo audit is a report line."),
     "evl_handback": ("The book writes each real event fill back into the lane's store every minute until the store takes "
                      "it (league/equity/live.py `_event_fills`: a buy once its intent has ended, a sale once its lot is "
@@ -1632,14 +1632,14 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
                                   "is not judged")
                 out["evl_final"] = _not_judged(f"the final records could not be read ({type(exc).__name__})")
         out["evl_backfill"] = _backfill(now, f, backfill_reach(now))
-        try:    # (PREREG-EVL-8, release 1019j, league/ops/evl_px8.py: its own reader, blinding no other cause)
-            from . import evl_px8 as PX8
+        try:    # (PREREG-EVL-8, release 1019j, league/ops/evl_price.py: its own reader, blinding no other cause)
+            from . import evl_price as PX8
 
-            out["evl_px8"] = PX8.check(root, now)
+            out["evl_price"] = PX8.check(root, now)
         except Exception as exc:  # noqa: BLE001 - said, and the other causes stand as judged
             if errors is not None:
-                errors.append(f"PREREG-EVL-8's records could not be read ({type(exc).__name__}): evl_px8 is not judged")
-            out["evl_px8"] = _not_judged(f"PREREG-EVL-8's records could not be read ({type(exc).__name__})")
+                errors.append(f"PREREG-EVL-8's records could not be read ({type(exc).__name__}): evl_price is not judged")
+            out["evl_price"] = _not_judged(f"PREREG-EVL-8's records could not be read ({type(exc).__name__})")
         # THE BOOK'S OWN ROWS (live.sqlite, read-only), each read on its own: one that cannot be read blinds only itself.
         # (Release 1019i: the attempts ledger's two causes read the lane's ledger and the book's rows beside it.)
         ledger: dict[str, Any] = {}

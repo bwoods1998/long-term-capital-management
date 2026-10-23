@@ -357,7 +357,7 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
           "cap_breach", "evl_record", "evl_decide", "evl_verdicts", "evl_score", "evl_fills", "evl_final", "evl_entries",
-          "evl_backfill", "evl_handback", "evl_fill_rate", "evl_attempts", "evl_px8", "elane_dq", "elane_births",
+          "evl_backfill", "evl_handback", "evl_fill_rate", "evl_attempts", "evl_price", "elane_dq", "elane_births",
           "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf", "stock" or, since release E4, "panel": league/swarm/store.py `OPTIONS_ONLY_SQL`, held equal by
