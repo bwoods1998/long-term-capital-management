@@ -1033,6 +1033,13 @@ def _max_open(s: Any, band: str, program: Any) -> int:
         return int(s.max_open(band))
 
 
+def _v6_sized(program: Any) -> bool:
+    """Whether a program's Probe and Sized buys are PREREG-EVL-6 section 6's (clause 2's fewest whole shares to 0.8 of
+    the band's target, the `reach_bar` switch, section 3's unsettled-lot hold): a version PREREG-EVL-6 judges
+    (`Program.evl6`) and a seatable PREREG-EVL-8 version (its section 4.1, `Program8.v6_sized`)."""
+    return bool(getattr(program, "evl6", False) or getattr(program, "v6_sized", False))
+
+
 def _learner(adapter: Any, inst: Any) -> bool:
     """Whether an event instance is a PREREG-EVL-7 learner's (league/events/book.py `is_learner`; an adapter without it
     has none): its auction's picks are its own decision's, after every other row's (`EquityBook._event_decide_lrn`)."""
@@ -5432,7 +5439,7 @@ class EquityBook:
                 # count includes the superseded version's lots still open, section 1.1: the seat is the new version's)
                 room = s.max_open(inst.band, program) - self._event_seat_count(inst, adapter)
                 stuck = self._event_unsettled(inst, em.day, adapter) \
-                    if inst.band in adapter.PROBE_UP and getattr(program, "evl6", False) else []
+                    if inst.band in adapter.PROBE_UP and _v6_sized(program) else []
                 if stuck:
                     # (PREREG-EVL-6 section 3: a real-money event of its stay unsettled past the ladder holds its new
                     # Probe and Sized buys, the reading that trades less; the shadow keeps its picks)
@@ -5564,9 +5571,7 @@ class EquityBook:
         lane = self._event_lane_store()
         if lane is None or not s.enabled:
             return
-        is_learner = getattr(adapter, "is_learner", None)
-        if is_learner is not None and not self._event_made(day, f"{at}-lrn") and \
-                any(is_learner(i.family) for i in self._instances(alive=True) if i.kind == EVENT_KIND):
+        if not self._event_lrn_settled(day, at, adapter):
             out["event_decide_8"] = f"PREREG-EVL-8's pass of {at} {day} comes after PREREG-EVL-7's rows"
             return      # (PREREG-EVL-7's learners' pass first: a name a learner is given is never also bought here)
         decided_at = em.open_decide if at == "open" else em.close_decide
@@ -5579,6 +5584,21 @@ class EquityBook:
             self._event_decide_8_pass(now, em, at, key, ids, s, adapter, lane, decided_at, out)
             if not self._event_decided(day, key):
                 return      # (a pass that could not read its gate goes again next tick, still ahead of the next one)
+
+    def _event_lrn_settled(self, day: str, at: str, adapter: Any) -> bool:
+        """Whether PREREG-EVL-7's learners' pass of the auction (`_event_decide_lrn`, row (day, "<at>-lrn")) is behind us:
+        its row made or failed, or nothing for it to plan at this auction (no live learner instance entering here and no
+        birth the auction's own decision held back for the learners: the very condition under which that pass writes
+        no row). PREREG-EVL-8 section 4.2 and 4.6: this file's late pass comes after every PREREG-EVL-7 row of the
+        auction is planned or has failed, and never waits for a pass that will not come."""
+        if getattr(adapter, "is_learner", None) is None or self._event_made(day, f"{at}-lrn"):
+            return True
+        if self._event_learners(at, adapter):
+            return False
+        main = self._event_summary(day, at)
+        held_back = main.get("learners") if isinstance(main.get("learners"), Mapping) else {}
+        deferred = held_back.get("deferred") if isinstance(held_back.get("deferred"), Mapping) else {}
+        return not deferred
 
     def _event_made(self, day: str, at: str) -> bool:
         """Whether the book's decision row (day, at) is made or has failed (`eq_event_decisions` status `done` or
@@ -5606,11 +5626,21 @@ class EquityBook:
             rooms: dict[str, int] = {}
             insts = {}
             for inst, program in seats:
-                room = adapter.max_open_8(s, inst.band, program) - self._event_open_count(inst.id)
+                room = adapter.max_open_8(s, inst.band, program) - self._event_seat_count(inst, adapter)
                 insts[inst.family] = (inst, program)
                 if room <= 0:
                     wanted[inst.family], rooms[inst.family] = [], 0
                     summary["programs"][inst.family] = {"picks": None, "room": 0}
+                    continue
+                stuck = self._event_unsettled(inst, em.day, adapter) \
+                    if inst.band in adapter.PROBE_UP and _v6_sized(program) else []
+                if stuck:
+                    # (PREREG-EVL-8 section 5.1, PREREG-EVL-6 section 3 as frozen: a real-money event of the stay
+                    # unsettled past the ladder holds the version's new Probe and Sized buys, the reading that trades
+                    # less; the shadow keeps its picks)
+                    wanted[inst.family], rooms[inst.family] = [], 0
+                    summary["programs"][inst.family] = {"picks": None, "room": 0, "held": "unsettled",
+                                                        "why": self._event_unsettled_hold(inst, stuck, em.day)[:300]}
                     continue
                 held = self._event_held(inst, em.day, adapter)
                 try:
@@ -5728,14 +5758,25 @@ class EquityBook:
           planned or working today given back), a send and its one re-send (2 each);
         - plus one for the last entry's own exit as `_count_refusal` counts it (a close entry's exit is a later day's).
         An exit is never stopped by the line; a later day's line is not this one's (EVL-LRN-ON's sales at D+1's open
-        are exits there, which the line never stops: section 1.9)."""
+        are exits there, which the line never stops: section 1.9).
+
+        PREREG-EVL-8 SECTION 4.3 (release 1019n): "THE 150-ORDER LINE refuses this file's entries first among the PREREG
+        rows (after PREREG-EVL-7's)": AN ENTRY OF ONE OF ITS SEATS keeps the same orders for every earlier PREREG row,
+        PREREG-EVL-7's learners among them (every live event instance that is none of this file's and no birth), by the
+        same rule and across the same auctions, so the line refuses its entries before a learner's and a learner's
+        before an earlier row's. Its overnight lots keep their exits on the next session's line as every lot does
+        (`_count_refusal`'s held exits); an exit is never stopped by it."""
         test = getattr(adapter, "is_learner", None)
-        if test is None or not test(inst.family):
+        learner = test is not None and test(inst.family)
+        eight = _eight(adapter, inst)
+        if not (learner or eight):
             return 0
 
         def earlier(o: Instance) -> bool:
-            if o.kind != EVENT_KIND or test(o.family) or not o.live:
+            if o.kind != EVENT_KIND or not o.live or _eight(adapter, o):
                 return False
+            if learner and test(o.family):
+                return False        # (a learner keeps for PREREG-EVL-1 to -6's rows; this file's seats for theirs too)
             program = adapter.program_of(o.family, o.version)
             return program is not None and getattr(program, "spec", None) is None
         mine = {o.id: o for o in self._instances(alive=True) if earlier(o)}
@@ -6057,7 +6098,7 @@ class EquityBook:
             # (`book.under_bar`; the shadow keeps it); release 1019h's S2 alone would buy it under the bar
             if band in adapter.PROBE_UP:
                 program = adapter.program_of(pick.program, pick.version)
-                if program is not None and getattr(program, "evl6", False):
+                if program is not None and _v6_sized(program):
                     if s.reach_bar(band) < V6_SIZE_BAR:
                         return "reach_bar_off"      # (the row below clause 2's 0.8 switches these buys OFF: A123, A134)
                     if adapter.under_bar(band, s.share(band) * E, limit, walls, bar=V6_SIZE_BAR):
@@ -6638,7 +6679,8 @@ class EquityBook:
         # and a PREREG-EVL-5 row's, still keep out of it)
         room = ahead.for_buy(ahead.overdue and inst is not None and _room_free(adapter, inst.family, inst.version))
         # (PREREG-EVL-7 section 1.9: a learner's entry leaves the earlier PREREG rows every order they may still send on
-        # this day's line, so the line refuses this file's entries after every earlier row's; an exit is never stopped)
+        # this day's line, so the line refuses this file's entries after every earlier row's; an exit is never stopped;
+        # PREREG-EVL-8 section 4.3: its seats' entries leave the learners' orders too, so they are refused first)
         keep = self._event_line_keep(intent, inst, day, at, s, adapter) if inst is not None else 0
         why = self._open_block(real_block, inst, killed)
         hold = None
@@ -6656,8 +6698,9 @@ class EquityBook:
         if why is None and self._event_sales_at(day, at, str(intent.symbol).upper()):
             why = f"a sale of {intent.symbol} is planned or working at this {at} auction: no buy of it goes in the same cross"
         if why is None and keep:
-            # (PREREG-EVL-7 section 1.9: a learner's entry meets the day's line with `keep` more orders kept on it for
-            # the earlier PREREG rows; tighter than the count below, which every other entry meets as before)
+            # (PREREG-EVL-7 section 1.9 and PREREG-EVL-8 section 4.3: a learner's or this file's entry meets the day's
+            # line with `keep` more orders kept on it for the earlier PREREG rows; tighter than the count below, which
+            # every other entry meets as before)
             why = self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders, keep=keep)
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
@@ -6898,8 +6941,8 @@ class EquityBook:
                            min_order_usd=Decimal(str(et.min_order_usd)))
         adapter = self._event_adapter()
         program = adapter.program_of(inst.family, inst.version) if adapter is not None else None
-        if getattr(program, "evl6", False) and inst.band in adapter.PROBE_UP:
-            # PREREG-EVL-6 section 6, clause 2 (A99), for the versions it judges: the buy takes THE FEWEST whole shares
+        if _v6_sized(program) and inst.band in adapter.PROBE_UP:
+            # PREREG-EVL-6 section 6, clause 2 (A99), for the versions it judges (and PREREG-EVL-8's, its section 4.1): the buy takes THE FEWEST whole shares
             # whose value at the limit reaches Done's size bar (`book.at_size_count`, never above the band's frozen
             # envelope of the walls' equity), and that ask is judged again by every cap (`size_entry`: the name wall,
             # the 100% book, cash, the loss budget at the lot's weight, A85's reservation and the buys ahead); a cap that

@@ -28,14 +28,21 @@ from league.events import programs as P
 @contextlib.contextmanager
 def unpinned_7() -> Iterator[None]:
     """The registries without the learners for the block (REGISTERED_AT_7 None, rebuilt by `refresh_7` with R3's births
-    as loaded), restored and rebuilt on exit."""
-    patch = mock.patch.object(P, "REGISTERED_AT_7", None)
-    patch.start()
+    as loaded), restored and rebuilt on exit. They stood so before A125 pinned the learners, and PREREG-EVL-8's rows
+    were in no registry then either (REGISTERED_AT_8 was pinned by A122's release 1019n, after it): the block holds
+    REGISTERED_AT_8 None too (`refresh_7` composes `refresh_8`), so these tests run on exactly the registries they were
+    written on. PREREG-EVL-8's own effects on these paths are league/tests/test_events_evl8*.py's."""
+    patches = [mock.patch.object(P, "REGISTERED_AT_7", None)]
+    if hasattr(P, "REGISTERED_AT_8"):
+        patches.append(mock.patch.object(P, "REGISTERED_AT_8", None))
+    for patch in patches:
+        patch.start()
     P.refresh_7()
     try:
         yield
     finally:
-        patch.stop()
+        for patch in reversed(patches):
+            patch.stop()
         P.refresh_7()
 
 

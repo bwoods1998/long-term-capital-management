@@ -1395,6 +1395,14 @@ class Program8(Program):
         return False
 
     @property
+    def v6_sized(self) -> bool:
+        """PREREG-EVL-8 section 4.1: a Probe or Sized buy of a seatable version of this file is PREREG-EVL-6 section 6's,
+        clause (2) (A99, A100's `reach_bar` rows): the fewest whole shares reaching 0.8 of the band's target, inside the
+        band's frozen envelope, judged again by every cap; a pick no such count reaches is skipped before it takes a
+        slot; and section 3's unsettled-lot hold. `evl6` stays False: PREREG-EVL-6's own screen never judges it."""
+        return self.seatable
+
+    @property
     def px(self) -> bool:
         """Part A's (a PX seat or control)."""
         return self.family in PX_FAMILIES

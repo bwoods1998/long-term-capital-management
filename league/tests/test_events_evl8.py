@@ -831,8 +831,6 @@ class TheRoom(Pinned):
         self.assertEqual(order, sorted(order), "the tables' order: PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, META-O1, META-ON")
         self.assertEqual(EB.send_key("PX-DROP-ON", "probe", 1)[1], 1, "round-robin inside this file's Probe tier")
         self.assertEqual(EB.send_key("PX-DROP-ON", "learning", 3)[1], 0)
-        self.assertEqual(EB.line_keep_8("PX-GAP-O1"), 32)
-        self.assertEqual(EB.line_keep_8("EVL-ERN-READ-O1"), 0)
 
 
 # ================================================================================================ secrecy and the report

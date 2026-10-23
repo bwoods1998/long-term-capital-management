@@ -22,8 +22,9 @@ from league.events import programs as P
 
 
 def table_1019h() -> dict[str, Any]:
-    """The program module's globals as release 1019h had them (every PREREG-EVL-6 row left out)."""
-    rows = tuple(p for p in P.PREREG_PROGRAMS if p.regfile is None)
+    """The program module's globals as release 1019h had them (every PREREG-EVL-6 row left out, and PREREG-EVL-8's,
+    which no registry held then)."""
+    rows = tuple(p for p in P.PREREG_PROGRAMS if p.regfile is None and not getattr(P, "is_8", lambda _: False)(p))
     return {"PROGRAMS": rows, "PREREG_PROGRAMS": rows, "BY_KEY": {(p.id, p.version): p for p in rows},
             "BY_ID": {p.id: p for p in rows if p.version == 1}, "BIRTHS": (),
             "SEATING": tuple(p for p in rows if p.seatable and p.prereg in P.SEATING_PREREGS),

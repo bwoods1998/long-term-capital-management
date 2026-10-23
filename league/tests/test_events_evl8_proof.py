@@ -105,6 +105,24 @@ class TheWeekWithAndWithout(unittest.TestCase):
         self.assertTrue(removed, "PXB's article stored after D's decision: the re-decision removed it")
 
 
+def learners_failed(h, auction: str) -> None:
+    """PREREG-EVL-7's learners of the auction (pinned in the tree) with their own live receipts FINISHED and naming none
+    of them (league/events/learner.py `live_state` "not_named": section 4.6, "a part the receipt does not name has
+    failed"), so their pass of the auction plans nothing and this file's pass may follow it."""
+    from league.events import learner as LR
+
+    at = dt.datetime(2026, 11, 4, 20, 47, 30, tzinfo=dt.timezone.utc)
+    for prog in P.learners():
+        if (prog.entry_at == "close") == (auction == "on"):
+            rid = h.lane.st.start_receipt(LR.live_job(prog, TB.DAY), now=at)
+            h.lane.st.finish_receipt(rid, "failed", {"error": "invented"}, now=at)
+
+
+def seat(program: str) -> P.Program:
+    """The SEATING version of an earlier program in the tree as it stands (PREREG-EVL-6's version 3 of the nine)."""
+    return next(p for p in P.SEATING if p.id == program)
+
+
 class TheBookWithAndWithout(TB.EventTest):
     """THE HOUSE'S OWN BOOK (league/equity/live.py, the real `size_entry`): an earlier close-entry row and PX-DROP-ON at
     the same close. The earlier row's buys are planned and sized exactly as without this file; PX's in its own late pass
@@ -112,7 +130,7 @@ class TheBookWithAndWithout(TB.EventTest):
 
     def seed(self, h, *, eight: bool) -> None:
         # EVL-ERN-REACT-ON (version 2, a close entry): an earnings 8-K and its reaction
-        prog = TB.V2("EVL-ERN-REACT-ON")
+        prog = seat("EVL-ERN-REACT-ON")
         h.lane.filing("a-1", TB.CIK, accepted=TB.iso(TB.DAY, 11, 0), received=TB.iso(TB.DAY, 11, 1))
         h.lane.universe(TB.DAY, "ACME", TB.CIK, 16.0)
         h.lane.intent(prog, "8k:a-1", "ACME", TB.CIK, TB.DAY, TB.NEXT)
@@ -155,6 +173,7 @@ class TheBookWithAndWithout(TB.EventTest):
             self.addCleanup(h.lane.st.close)
             self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
             self.seed(h, eight=eight)
+            learners_failed(h, "on")
             self.ready(h)
             h.day(upto=(15, 48))
             return h, [dict(r) for r in h.event_intents("buy")]
@@ -818,10 +837,14 @@ class TheLatePasses(TB.EventTest):
     def mine(self, h) -> list[str]:
         return [r["symbol"] for r in h.event_intents("buy") if P.is_8(r["program"])]
 
+    def learners_failed(self, h, auction: str) -> None:
+        learners_failed(h, auction)
+
     def test_v_planned_at_the_first_tick_the_lanes_close_receipt_is_in(self):
         with W.pinned():
             on = self.harness8("in")
             self.seed(on, "PX-DROP-ON", "on")
+            self.learners_failed(on, "on")
             on.lane.decided(TB.DAY, "open")
             for hh, mm in ((15, 46), (15, 47)):
                 on.tick(hh, mm)
@@ -831,6 +854,7 @@ class TheLatePasses(TB.EventTest):
             self.assertEqual(self.mine(on), ["PXA", "PXB", "PXC"], "planned at the 15:48 tick")
             late = self.harness8("late")
             self.seed(late, "PX-DROP-ON", "on")
+            self.learners_failed(late, "on")
             late.lane.decided(TB.DAY, "open")
             for hh, mm in ((15, 46), (15, 47), (15, 48)):
                 late.tick(hh, mm)
@@ -841,25 +865,38 @@ class TheLatePasses(TB.EventTest):
             self.assertFalse(late.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at='close-px8'"))
 
     def test_after_every_prereg_evl7_row_planned_or_failed(self):
+        """Section 4.2 and 4.6 on the tree's own learners (PREREG-EVL-7, pinned): while EVL-LRN-ON's own live receipt
+        of the close has not finished, the learners' pass waits and this file's close pass waits behind it, whatever
+        the lane's close receipt; once that receipt finishes (here naming none: its part failed), the learners' pass is
+        made and this file's pass follows it IN THE SAME TICK, after it."""
+        from league.events import learner as LR
+
         with W.pinned():
             h = self.harness8("lrn")
             self.seed(h, "PX-DROP-ON", "on")
             self.ready(h)
-            # (a tree with PREREG-EVL-7's learners: one of the book's instances is a learner, so this file's close pass
-            # comes only once the learners' pass "close-lrn" is planned or has failed)
-            with mock.patch.object(EB, "is_learner", lambda family: family == "PX-DROP-ON", create=True):
-                h.tick(15, 46)
-                h.tick(15, 47)
-                self.assertEqual(self.mine(h), [], "a learner's pass of the close is not planned yet")
-                h.state.upsert("eq_event_decisions", {"day": TB.DAY.isoformat(), "at": "close-lrn", "decided_at": "x",
-                                                      "status": "failed", "summary": "{}", "created_at": 0.0}, "day, at")
-                h.tick(15, 48)
-                self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"], "it failed: this file's pass goes")
+            self.assertTrue(P.learners(), "the tree carries PREREG-EVL-7's learners, pinned")
+            h.tick(15, 46)
+            out = h.tick(15, 47)
+            self.assertEqual(self.mine(h), [], "the learners' own receipt is not in: their pass and this file's wait")
+            self.assertIn("comes after PREREG-EVL-7's rows", str(out.get("event_decide_8")))
+            self.assertFalse(h.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at IN ('close-lrn', 'close-px8')"))
+            at = dt.datetime(2026, 11, 4, 20, 47, 40, tzinfo=dt.timezone.utc)
+            for prog in P.learners():
+                if prog.entry_at == "close":
+                    rid = h.lane.st.start_receipt(LR.live_job(prog, TB.DAY), now=at)
+                    h.lane.st.finish_receipt(rid, "failed", {"error": "invented"}, now=at)
+            h.tick(15, 48)
+            self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"], "the learners' part failed: this file's pass goes")
+            rows = h.state.rows("SELECT at, status FROM eq_event_decisions WHERE at IN ('close-lrn', 'close-px8') "
+                                "ORDER BY rowid")
+            self.assertEqual([(r["at"], r["status"]) for r in rows], [("close-lrn", "done"), ("close-px8", "done")])
 
     def test_the_open_pass_after_the_houses_open_run(self):
         with W.pinned():
             h = self.harness8("open")
             self.seed(h, "PX-GAP-O1", "o1")
+            self.learners_failed(h, "o1")
             self.ready(h)
             h.tick(9, 15)
             h.tick(9, 16)
@@ -867,6 +904,128 @@ class TheLatePasses(TB.EventTest):
             h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
             h.tick(9, 17)
             self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"])
+
+    def test_a_learner_of_the_other_auction_alone_never_holds_this_files_pass(self):
+        """The learners' pass of the open writes its row only when it has a live learner entering there or a birth held
+        back for one (league/equity/live.py `_event_decide_lrn`); with EVL-LRN-O1 retired and EVL-LRN-ON (a close
+        entry) alive, the open's learners' pass never comes, and this file's open pass goes once the House's open run
+        has finished (`_event_lrn_settled`), not never."""
+        with W.pinned():
+            h = self.harness8("other")
+            self.seed(h, "PX-GAP-O1", "o1")
+            h.lane.band("EVL-LRN-O1", "retired", version=1)
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            h.tick(9, 15)
+            h.tick(9, 16)
+            alive = {i.family: i.live for i in h.book._instances(alive=True) if P.is_learner(i.family)}
+            self.assertFalse(alive.get("EVL-LRN-O1"), alive)
+            self.assertTrue(alive.get("EVL-LRN-ON"), alive)
+            self.assertFalse(h.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at='open-lrn'"))
+            self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"])
+
+
+class ThePromotedSizing(TB.EventTest):
+    """SECTION 4.1: a Probe or Sized buy of a version of this file is PREREG-EVL-6 section 6's (clause 2, A99, A123's
+    literal reading): THE FEWEST whole shares whose value at the limit reaches Done's 0.8 bar of the band's target,
+    judged again by every cap; at E $1,898 and goal V3's Probe share (5%, A138) a target of $94.90 and a $5.00 limit
+    that is 16 shares ($80.00 >= $75.92), never release 1019h's S2 floor of the target, 18 (league/equity/live.py
+    `_v6_sized`, programs.py `Program8.v6_sized`)."""
+
+    def run_probe(self, sized: bool):
+        with W.pinned(), mock.patch.object(P.Program8, "v6_sized", property(lambda self: sized and self.seatable)):
+            root = self.root / ("v6" if sized else "s2")
+            root.mkdir()
+            h = TB.Harness(root, cash="1898", E="1898")
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            h.lane.band("PX-GAP-O1", "probe", version=1)
+            px = PXL.open_px(h.lane.st.root)
+            try:
+                run, cik = f"{PXL.JOB_LIVE['o1']}:invented", W.PX_CIK["PXA"]
+                px.put_result(TB.DAY, cik, S.LIVE_RULE, {"symbol": "PXA", "name": "PXA", "exchange": "NASDAQ",
+                                                         "prev_close": 4.0, "adv20": 4e7, "adv20sh": 2e6, "bench": "IWM",
+                                                         "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc))
+                event = f"px:PX-GAP-O1:{TB.DAY}:{cik}"
+                px.db.execute("INSERT INTO px_decisions(run, auction, day, program, rank, event, cik, symbol, rank_key, "
+                              "adv20, prev_close) VALUES(?, 'o1', ?, 'PX-GAP-O1', 1, ?, ?, 'PXA', 9.0, 4e7, 4.0)",
+                              (run, TB.DAY.isoformat(), event, cik))
+                px.db.execute("INSERT INTO px_meta(key, value) VALUES(?, ?)",
+                              (PXL.DECIDED_KEY.format(auction="o1", day=TB.DAY.isoformat()),
+                               json.dumps({"run": run, "kind": "live", "receipt": 1, "at": "x"})))
+            finally:
+                px.close()
+            h.lane.intent(P.BY_KEY[("PX-GAP-O1", 1)], event, "PXA", cik, TB.DAY, TB.DAY)
+            h.symbol("PXA", last=4.0, sd=0.02)
+            learners_failed(h, "o1")
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            with mock.patch.object(L, "event_orders_today", lambda rows, day: 0), \
+                    mock.patch.object(EB, "LINE_ACROSS_AUCTIONS", False):
+                h.tick(9, 15)
+                h.tick(9, 16)
+            return {b["symbol"]: b["qty"] for b in h.bodies() if b["side"] == "buy"}, h.event_intents("buy")
+
+    def test_a_probe_buy_takes_the_fewest_whole_shares_that_reach_dones_bar(self):
+        share = EB.settings().share("probe")
+        target = share * D("1898")
+        self.assertEqual(EB.at_size_count("probe", target, D("5"), D("1898")), 16)
+        sent, rows = self.run_probe(True)
+        self.assertEqual(sent, {"PXA": "16"}, f"the fewest whole shares reaching 0.8 x ${target} at $5.00")
+        self.assertEqual(D(rows[0]["target_usd"]).quantize(D("0.01")), target.quantize(D("0.01")),
+                         "the target stays the band's")
+        old, _ = self.run_probe(False)
+        self.assertEqual(old, {"PXA": "18"}, "without section 4.1's sizing: S2's floor of the target")
+
+
+class TheLine8(TB.EventTest):
+    """SECTION 4.3: THE 150-ORDER LINE REFUSES THIS FILE'S ENTRIES FIRST AMONG THE PREREG ROWS, AFTER PREREG-EVL-7'S
+    (league/equity/live.py `_event_line_keep`): an entry of this file keeps every order every earlier PREREG row may still
+    send on the day's line, PREREG-EVL-7's learners among them, across the day's auctions (A130 R5's reading, the one
+    that trades less), so its keep is a learner's keep plus the learners' own room."""
+
+    def test_an_open_entry_keeps_the_days_close_entries_of_every_earlier_row_the_learners_included(self):
+        with W.pinned():
+            root = self.root / "line"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheLatePasses.seed(self, h, "PX-GAP-O1", "o1")
+            learners_failed(h, "o1")
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            for minute in (15, 16, 17):
+                h.tick(9, minute)
+            s, adapter = EB.settings(), h.book._event_adapter()
+            buys = [r for r in h.event_intents("buy") if r["program"] == "PX-GAP-O1"]
+            self.assertEqual([r["symbol"] for r in buys], ["PXA", "PXB", "PXC"], "planned in the open's late pass")
+            intent = h.book._intent(int(buys[0]["iid"]))
+            mine = h.book._instance(L.instance_key("PX-GAP-O1", 1))
+            lrn_o1 = h.book._instance(L.instance_key("EVL-LRN-O1", 1))
+            lrn_on = h.book._instance(L.instance_key("EVL-LRN-ON", 1))
+            keep = h.book._event_line_keep(intent, mine, TB.DAY.isoformat(), "open", s, adapter)
+            learner = h.book._event_line_keep(intent, lrn_o1, TB.DAY.isoformat(), "open", s, adapter)
+            on_room = s.max_open(lrn_on.band, adapter.program_of(lrn_on.family, lrn_on.version))
+            self.assertGreater(learner, 0)
+            self.assertEqual(keep, learner + 2 * on_room, "a learner's keep plus EVL-LRN-ON's close room (send and re-send)")
+            self.assertEqual(h.book._event_line_keep(intent, h.book._instance(L.instance_key("PX-DROP-ON", 1)),
+                                                     TB.DAY.isoformat(), "open", s, adapter) > 0, True)
+            read = next(p for p in EB.seatable() if p.id == "EVL-ERN-READ-O1")
+            self.assertEqual(h.book._event_line_keep(intent, h.book._instance(L.instance_key(read.id, read.version)),
+                                                     TB.DAY.isoformat(), "open", s, adapter), 0, "an earlier row keeps none")
+            # THE STATED EFFECT (the reading that trades less): the close rows' room alone exceeds the 150 line, so this
+            # file's open entries are refused on an empty day, as EVL-LRN-O1's are, and nothing is sent
+            self.assertGreater(keep, int(s.max_orders_day))
+            for r in h.event_intents("buy"):
+                if r["program"] == "PX-GAP-O1":
+                    self.assertEqual(r["status"], "planned")
+                    self.assertIn("the event kind's day order count", r["why"])
+            self.assertEqual([b for b in h.bodies() if b.get("side") == "buy"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

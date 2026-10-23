@@ -1798,49 +1798,23 @@ __all__ += ["under_bar", "at_size_count"]
 #: each of its buys sizes less the reservation, as a PREREG learning row's.
 EIGHT_ROOM = {"sized": 6, "probe": 7, "learning": 8}
 EIGHT_ROUND_ROBIN = (EIGHT_ROOM["sized"], EIGHT_ROOM["probe"])
-#: PREREG-EVL-8 section 4.3's 150-ORDER LINE: a buy of this file leaves this many slots of the event kind's day line to
-#: every earlier row (PREREG-EVL-7's learners' keep, 32, and their own most, 2 x 8 entries and their exits, 32), on top
-#: of its own entry and exit, so the line refuses this file's entries first among the PREREG rows, after PREREG-EVL-7's;
-#: an exit is never stopped by it (league/equity/live.py `_count_refusal`). Each overnight lot keeps its exit's order of
-#: the next session's line (`_exit_reserve`: a lot not yet sold that day).
-EIGHT_LINE_KEEP = 64
+#: PREREG-EVL-8 section 4.3's 150-ORDER LINE is league/equity/live.py `_event_line_keep` (release 1019n): an entry of
+#: this file keeps every order the earlier PREREG rows, PREREG-EVL-7's learners among them, may still send on the day's
+#: line across its auctions, so the line refuses this file's entries first among the PREREG rows, after PREREG-EVL-7's
+#: (the first build's fixed keep of 64 did not hold across auctions). An exit is never stopped by it.
 #: PREREG-EVL-8 section 4.1: the PX seats' learning band holds at most `event.max_open_v8.learning` (4) open (read only
-#: for them); its Probe band PREREG-EVL-6 section 6's `event.max_open_v6.probe` (14) when the table carries it (release
-#: 1019i), else 6 (the reading that trades less until A100's rows are live); the meta-learners PREREG-EVL-3's bands.
+#: for them, `Settings.max_open`); its Probe band PREREG-EVL-6 section 6's `event.max_open_v6.probe` (14); the
+#: meta-learners PREREG-EVL-3's learning band (8).
 MAX_OPEN_V8 = "max_open_v8"
 
 
-def line_keep_8(program: str) -> int:
-    """The buys' worth of the day order line a buy of `program` leaves to the earlier rows (`HeldAhead`'s unit: each
-    keeps a send and an exit): EIGHT_LINE_KEEP / 2 for this file's seats, 0 for every other program."""
-    return EIGHT_LINE_KEEP // 2 if P.is_8(program) else 0
-
-
-def max_open_8(s: Settings, band: str, program: Any, constitution: Mapping[str, Any] | None = None) -> int:
-    """PREREG-EVL-8 section 4.1's open positions a seat of this file may hold at `band`: a PX seat at learning the money
-    row `event.max_open_v8.learning` (4, bounds 0-4; none readable: 0, nothing opens); at Probe
-    `event.max_open_v6.probe` (14) where the table carries it, else `event.max_open.probe` (6); at Sized
-    `event.max_open.sized` (8); a meta-learner PREREG-EVL-3's bands (`event.max_open`: learning 8, Probe as a PX seat's,
-    Sized 8)."""
-    from ..constitution import CONSTITUTION
-
-    rules = CONSTITUTION if constitution is None else constitution
-    try:
-        e = rules["equity_money"]["event"]
-    except (KeyError, TypeError):
-        return 0
-    band = str(band)
-    if band == "learning" and P.is_px8(program):
-        try:
-            return int(e[MAX_OPEN_V8]["learning"])
-        except (KeyError, TypeError, ValueError):
-            return 0
-    if band == "probe":
-        try:
-            return int(e["max_open_v6"]["probe"])
-        except (KeyError, TypeError, ValueError):
-            return s.max_open("probe")
-    return s.max_open(band)
+def max_open_8(s: Settings, band: str, program: Any) -> int:
+    """PREREG-EVL-8 section 4.1's open positions a seat of this file may hold at `band`: `Settings.max_open` with the
+    program (the book's one rule, the table the settings were read from): a PX seat at learning the money row
+    `event.max_open_v8.learning` (4, bounds 0-4; none readable: 0, nothing opens); at Probe `event.max_open_v6.probe`
+    (14); at Sized `event.max_open.sized` (8); a meta-learner PREREG-EVL-3's learning band (8), Probe and Sized as a PX
+    seat's."""
+    return s.max_open(band, program)
 
 
 def px_store(lane: Any) -> Any:
@@ -1998,5 +1972,5 @@ def ready_8(lane: Any, day: dt.date, pass_: str) -> bool:
     return False
 
 
-__all__ += ["EIGHT_ROOM", "EIGHT_ROUND_ROBIN", "EIGHT_LINE_KEEP", "MAX_OPEN_V8", "line_keep_8", "max_open_8", "px_store",
+__all__ += ["EIGHT_ROOM", "EIGHT_ROUND_ROBIN", "MAX_OPEN_V8", "max_open_8", "px_store",
             "meta_on_guard", "meta_o1_guard", "picks_8", "eligible_8", "ready_8"]
