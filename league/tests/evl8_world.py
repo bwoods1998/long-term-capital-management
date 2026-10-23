@@ -29,6 +29,10 @@ et = W4.et
 P_DAY, D_DAY, N_DAY = W5.P_DAY, W5.D_DAY, W5.N_DAY
 PIN = "2026-10-23T12:00:00Z"
 RELEASE = "2026-10-23T13:00:00Z"
+#: The 270-session backfill: its run (px_runs job "backfill"), read on the night of Mon Oct 19 (its last session).
+BACKFILL_RUN = "backfill:seed"
+BACKFILL_AT = "2026-10-20T03:00:00Z"
+BACKFILL_LAST = dt.date(2026, 10, 19)
 #: The price lane's invented issuers (CIKs from 1001), their benchmark by ADV (all above $50M: SPY; the last four IWM).
 PX_NAMES = tuple(f"PX{chr(65 + i)}" for i in range(26))
 PX_CIK = {t: str(1001 + i).zfill(10) for i, t in enumerate(PX_NAMES)}
@@ -99,7 +103,9 @@ class Gateway8(W5.Gateway):
                     for d in W4.weekdays(first, last):
                         b = daily(s, d)
                         f = self.adjust.get((s, d), 1.0) if params.get("adjustment") == "all" else 1.0
-                        rows.append({"t": f"{d}T04:00:00Z", "o": b["o"] * f, "h": b["h"] * f, "l": b["l"] * f,
+                        # (a daily bar's time is the session's New York midnight, as the vendor's: 04:00Z in summer,
+                        # 05:00Z in winter)
+                        rows.append({"t": S.iso(et(d, 0, 0)), "o": b["o"] * f, "h": b["h"] * f, "l": b["l"] * f,
                                      "c": round(b["c"] * f, 4), "v": b["v"], "n": 100, "vw": b["c"]})
                     out[s] = rows
                 return {"bars": out, "next_page_token": None}
@@ -195,9 +201,12 @@ class World8(W5.World):
         return PXL.open_px(self.root)
 
     def seed_px(self) -> None:
-        """px.sqlite as the PX recorders leave it: every name's and benchmark's raw and adjusted bars from Aug 3, 2026 to
-        Mon Oct 26 (fetched on the night of each), each night marked, the backfill done, the operating cache, and PXU's
-        base of Tue Oct 27 and Wed Oct 28 (px_universe, the live rule) written by the 07:40 recorder."""
+        """px.sqlite as the PX recorders leave it: THE 270-SESSION BACKFILL on the night of Mon Oct 19 (`BACKFILL_AT`, a
+        `backfill` run: every name's and benchmark's raw and adjusted bars from Aug 3, 2026 to Oct 19, read then), each
+        later night's bars to Mon Oct 26 (fetched on the night of each), each night marked, the backfill done, FLAGGED of
+        every name and benchmark on each session after the backfill (Oct 20-26: c*_P read at 09:01 ET, none flagged, as
+        the morning passes and release 1019i's flags recorder leave them), the operating cache, and PXU's base of Tue
+        Oct 27 and Wed Oct 28 (px_universe, the live rule) written by the 07:40 recorder."""
         from league.events import calendar as C
         from league.events import store as S
 
@@ -205,21 +214,31 @@ class World8(W5.World):
         try:
             days = [s.day for s in C.sessions(self.st, dt.date(2026, 8, 3), N_DAY)]
             with px.tx() as db:
+                db.execute("INSERT OR REPLACE INTO px_runs(run, job, started_at, finished_at, status) VALUES(?, "
+                           "'backfill', ?, ?, 'ok')", (BACKFILL_RUN, BACKFILL_AT, BACKFILL_AT))
                 for sym in (*PX_NAMES, "SPY", "IWM"):
                     for d in days:
                         if d >= D_DAY:
                             continue
                         b = daily(sym, d)
-                        fetched = S.iso(et(d, 20, 0))
+                        night = d > BACKFILL_LAST
+                        fetched = S.iso(et(d, 20, 0)) if night else BACKFILL_AT
                         for adj in ("raw", "all"):
                             db.execute("INSERT OR REPLACE INTO px_bars(symbol, day, adj, o, h, l, c, v, n, vw, t, fetched_at, "
-                                       "run) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 100, ?, ?, ?, 'seed')",
+                                       "run) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 100, ?, ?, ?, ?)",
                                        (sym, d.isoformat(), adj, b["o"], b["h"], b["l"], b["c"], b["v"], b["c"],
-                                        f"{d}T04:00:00Z", fetched))
+                                        f"{d}T04:00:00Z", fetched, "seed" if night else BACKFILL_RUN))
+                    for prev, d in zip(days, days[1:]):
+                        if not BACKFILL_LAST < d < D_DAY:
+                            continue
+                        c = daily(sym, prev)["c"]
+                        db.execute("INSERT OR REPLACE INTO px_flags(day, symbol, prev_day, c_raw, c_adj, ratio, flagged, "
+                                   "read_at, run) VALUES(?, ?, ?, ?, ?, 1.0, 0, ?, 'seed-flags')",
+                                   (d.isoformat(), sym, prev.isoformat(), c, c, S.iso(et(d, 9, 1))))
                 for d in days:
                     db.execute("INSERT OR REPLACE INTO px_meta(key, value) VALUES(?, ?)",
                                (f"px:bars:{d.isoformat()}", S.iso(et(d, 20, 5))))
-                db.execute("INSERT OR REPLACE INTO px_meta(key, value) VALUES('px:backfill:done', '2026-10-20T03:00:00Z')")
+                db.execute("INSERT OR REPLACE INTO px_meta(key, value) VALUES('px:backfill:done', ?)", (BACKFILL_AT,))
                 for t in PX_NAMES:
                     db.execute("INSERT OR REPLACE INTO cik_info(cik, sic, periodic_form, periodic_at, operating, "
                                "checked_at) VALUES(?, ?, '10-Q', '2026-08-01', 1, '2026-10-20T03:00:00Z')",
@@ -389,5 +408,5 @@ def births_view(world: World8) -> dict[str, Any]:
             "validate": [{k: c.get(k) for k in ("ok", "reasons", "selected", "per_session", "jaccard")} for c in checked]}
 
 
-__all__ = ["PIN", "RELEASE", "PX_NAMES", "PX_CIK", "X1530", "VOLUME", "PM", "unit", "daily", "Gateway8", "sec8",
-           "pinned", "World8", "decide_week8", "the_week8", "earlier", "run_week", "PROPOSAL", "births_view"]
+__all__ = ["PIN", "RELEASE", "BACKFILL_RUN", "BACKFILL_AT", "BACKFILL_LAST", "PX_NAMES", "PX_CIK", "X1530", "VOLUME",
+           "PM", "unit", "daily", "Gateway8", "sec8", "pinned", "World8", "decide_week8", "the_week8", "earlier", "run_week", "PROPOSAL", "births_view"]

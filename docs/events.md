@@ -721,6 +721,15 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   of a flagged issuer, sigma60, sigma_on60, ADV20, the records' values), written whole at its end into px.sqlite
   (`px_am`; PX never writes the lane's `eligibility` or `universe`, F10): stored before 09:15 it serves both auctions,
   later (it yields and runs until 15:30) only the ON one.
+- ONE BASIS A WINDOW (section 1.3; px.py `_basis_ok`, release 1019n's fix round): a session of a name's window (the 61
+  before D; h52's 252) is FLAGGED when its c*_P read was off by more than 0.001 OR NO c*_P WAS STORED BEFORE ITS
+  DECISION TIME (section 1.1: a session the name was out of the base, a morning pass that never ran); such a session
+  needs the name's latest FULL re-read after it (`px_rereads`, or the first night's 270-session read of its adjusted
+  bars: `reread_at`), with every adjusted row of the window fetched at or after that re-read, else the name is out of
+  PXU(D) (h52: none). The morning pass makes the full re-read of every name and benchmark FLAGGED at D, then of those
+  FLAGGED on a window session after their latest full re-read, before it decides PXU(D); one it cannot make leaves the
+  name out (a missed morning costs one pass of re-reads, never 61 sessions of the lane). A benchmark FLAGGED at D (an
+  ETF's dividend) is on one basis by its re-read, else no value that needs it exists.
 - THE DATA (release 1019i's recorders, harness H2): `events.px_data` ON from this release (league/config.json), now that
   A128's major is closed: every recorder read goes through the lane's one slot DATA_INTERVAL (0.5 s) after its last
   market-data read (pxdata.py `PxGateway`'s `space`, house.py `_px`), and this file's decision runs keep the same

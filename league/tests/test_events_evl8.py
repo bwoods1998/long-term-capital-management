@@ -163,7 +163,11 @@ class TheRowsUnpinned(unittest.TestCase):
                 self.assertIn("not pinned", MT.decide(w.st, D_DAY, "on", now=lambda: w.now)["skipped"])
                 self.assertEqual(S8.run(w.st, D_DAY, now=w.now), {"written": [], "waiting": [], "errors": [], "started": []})
                 self.assertEqual(S8.charges(w.st), {})
-                self.assertEqual(EB.eligible_8(EB.Lane(w.st.root / S.DB_NAME), D_DAY), set())
+                lane = EB.Lane(w.st.root / S.DB_NAME)
+                try:
+                    self.assertEqual(EB.eligible_8(lane, D_DAY), set())
+                finally:
+                    lane.close()
                 self.assertEqual(RP.build(w.st, D_DAY)["eight"], None)
                 self.assertIsNone(PXL.mark_release(w.st, w.now))
                 self.assertFalse(w.st.db.execute("SELECT 1 FROM intents WHERE program LIKE 'PX%' OR program LIKE "
@@ -247,16 +251,152 @@ class TheMorning(WorldCase):
         self.assertTrue(self.px().db.execute("SELECT 1 FROM px_rereads WHERE symbol='PXC' AND day=?",
                                              (D_DAY.isoformat(),)).fetchone(), "the full re-read the House makes")
 
+    def run_morning(self, *, reread: bool = True):
+        """The morning pass of D at 09:05; with `reread` False the House can make no full re-read in it (each one cut
+        before its read: `reread` writes none), every other step goes on."""
+        px = self.px()
+
+        def morning():
+            return PXL.morning(px, self.w.st, self.w.gw, D_DAY, now=et(D_DAY, 9, 5), run="am",
+                               clock=lambda: et(D_DAY, 9, 5, 30))
+        if reread:
+            return morning()
+        with mock.patch.object(PXL, "reread", lambda *a, **k: {"symbols": 0, "requests": 0, "rows": 0}):
+            return morning()
+
+    def am(self, symbol: str) -> dict:
+        row = self.px().db.execute("SELECT in_pxu, why, value FROM px_am WHERE day=? AND cik=?",
+                                   (D_DAY.isoformat(), W.PX_CIK[symbol])).fetchone()
+        return {"in_pxu": row["in_pxu"], "why": row["why"], **json.loads(row["value"])}
+
     def test_a_flagged_session_in_the_window_without_a_reread_is_out(self):
         px = self.px()
-        mid = C.previous(self.w.st, D_DAY, 30)[0].day
-        px.db.execute("INSERT INTO px_flags(day, symbol, prev_day, c_raw, c_adj, ratio, flagged, read_at, run) VALUES(?, "
-                      "'PXD', ?, 20, 10, 0.5, 1, ?, 'r')", (mid.isoformat(), mid.isoformat(), S.iso(et(mid, 9, 1))))
-        self.morning()
-        row = px.db.execute("SELECT in_pxu, why FROM px_am WHERE day=? AND cik=?",
-                            (D_DAY.isoformat(), W.PX_CIK["PXD"])).fetchone()
-        self.assertEqual(row["in_pxu"], 0)
-        self.assertIn("no full re-read", row["why"])
+        mid = dt.date(2026, 10, 22)        # (a session after the first night's full read: the backfill covers none)
+        px.db.execute("INSERT OR REPLACE INTO px_flags(day, symbol, prev_day, c_raw, c_adj, ratio, flagged, read_at, run) "
+                      "VALUES(?, 'PXD', ?, 20, 10, 0.5, 1, ?, 'r')", (mid.isoformat(), mid.isoformat(),
+                                                                       S.iso(et(mid, 9, 1))))
+        self.run_morning(reread=False)
+        got = self.am("PXD")
+        self.assertEqual(got["in_pxu"], 0)
+        self.assertIn("no full re-read", got["why"])
+        self.assertTrue(self.am("PXC")["in_pxu"], "a name with every window session clear is in")
+
+    def test_a_flagged_session_of_the_window_gets_its_full_re_read_and_is_in(self):
+        px = self.px()
+        mid = dt.date(2026, 10, 22)
+        px.db.execute("INSERT OR REPLACE INTO px_flags(day, symbol, prev_day, c_raw, c_adj, ratio, flagged, read_at, run) "
+                      "VALUES(?, 'PXD', ?, 20, 10, 0.5, 1, ?, 'r')", (mid.isoformat(), mid.isoformat(),
+                                                                       S.iso(et(mid, 9, 1))))
+        got = self.run_morning()
+        self.assertEqual(got["reread_window"]["symbols"], 1, "the full re-read the House makes when it can (section 1.3)")
+        self.assertTrue(px.db.execute("SELECT 1 FROM px_rereads WHERE symbol='PXD' AND day=?",
+                                      (D_DAY.isoformat(),)).fetchone())
+        self.assertEqual(self.am("PXD")["in_pxu"], 1)
+
+    def split_unflagged(self, symbol: str) -> dt.date:
+        """A 2:1 split effective three sessions before D on a session `symbol` was out of the base (its c*_P never read:
+        no px_flags row), the vendor's nightly 5-session re-read leaving every older adjusted row on the old basis."""
+        px = self.px()
+        window = [x.day for x in C.previous(self.w.st, D_DAY, 61)]
+        x = window[-3]
+        px.db.execute("DELETE FROM px_flags WHERE symbol=? AND day=?", (symbol, x.isoformat()))
+        px.db.execute("UPDATE px_bars SET c=c*2, o=o*2, h=h*2, l=l*2 WHERE symbol=? AND adj='all' AND day<?",
+                      (symbol, window[-5].isoformat()))
+        return x
+
+    def test_a_window_session_with_no_c_star_stored_is_flagged(self):
+        """Section 1.1: FLAGGED includes "no c*_P stored before the decision time"; section 1.3: an issuer FLAGGED on any
+        of the 61 sessions before D without a full re-read after it is not in PXU(D). (The review's case: before, a
+        session with no px_flags row read as clear and PXE entered PXU(D) on two bases, z5 about -3.3.)"""
+        x = self.split_unflagged("PXE")
+        self.run_morning(reread=False)
+        got = self.am("PXE")
+        self.assertEqual(got["in_pxu"], 0, got.get("why"))
+        self.assertIn(f"flagged {x.isoformat()} (no c*_P stored before its decision time)", got["why"])
+        self.assertIsNone(got.get("sigma60"), "no value on two bases")
+
+    def test_a_window_session_with_no_c_star_gets_its_re_read_and_one_basis(self):
+        self.split_unflagged("PXE")
+        self.run_morning()
+        got = self.am("PXE")
+        self.assertEqual(got["in_pxu"], 1, got.get("why"))
+        window = [x.day for x in C.previous(self.w.st, D_DAY, 61)]
+        closes = [W.daily("PXE", d)["c"] for d in window]
+        import statistics
+        rets = [closes[i] / closes[i - 1] - 1 for i in range(1, 61)]
+        self.assertAlmostEqual(got["sigma60"], statistics.stdev(rets), places=12, msg="the vendor's one series")
+
+    def test_a_c_star_read_after_the_sessions_decision_time_is_none_stored(self):
+        px = self.px()
+        x = dt.date(2026, 10, 21)
+        px.db.execute("UPDATE px_flags SET read_at=? WHERE symbol='PXF' AND day=?", (S.iso(et(x, 15, 50)), x.isoformat()))
+        self.run_morning(reread=False)
+        self.assertIn("no c*_P stored before its decision time", self.am("PXF")["why"])
+
+    def test_a_benchmark_flagged_at_d_is_on_one_basis_by_its_re_read(self):
+        self.w.gw.adjust.update({("IWM", d.day): 0.99 for d in C.previous(self.w.st, D_DAY, 270)})   # (a dividend at D)
+        got = self.run_morning()
+        self.assertTrue(PXS.PxStore.flag(self.px(), D_DAY, "IWM")["flagged"])
+        self.assertTrue(self.px().db.execute("SELECT 1 FROM px_rereads WHERE symbol='IWM' AND day=?",
+                                             (D_DAY.isoformat(),)).fetchone(), "the benchmark's full re-read")
+        self.assertGreater(got["pxu"], 0)
+        small = self.am("PXZ")         # (an IWM name)
+        self.assertEqual(small["in_pxu"], 1, small.get("why"))
+        self.assertAlmostEqual(small["cb_star"], round(W.daily("IWM", P_DAY)["c"] * 0.99, 4), places=6)
+
+    def test_a_benchmark_flagged_at_d_without_its_re_read_has_no_value(self):
+        self.w.gw.adjust.update({("IWM", d.day): 0.99 for d in C.previous(self.w.st, D_DAY, 270)})
+        self.run_morning(reread=False)
+        small = self.am("PXZ")
+        self.assertEqual(small["in_pxu"], 0)
+        self.assertIn("benchmark IWM: flagged at D with no full re-read", small["why"])
+
+    def h52_world(self) -> tuple[list[dt.date], dt.date]:
+        """PXD's 252 sessions before D on the calendar (Sep 2025 on), its first full read on the night of the 251st
+        session before D, c*_P read clear every session since, but one FLAGGED 100 sessions before D (a 2:1 split, no
+        full re-read after it), every older adjusted row on the old basis (twice the new)."""
+        C.refresh(self.w.st, self.w.gw, dt.date(2025, 9, 1), dt.date(2026, 7, 31))
+        prior = [x for x in C.previous(self.w.st, D_DAY, 253)]
+        self.assertEqual(len(prior), 253)
+        first = et(prior[1].day, 20, 0)
+        px = self.px()
+        with px.tx() as db:
+            db.execute("INSERT INTO px_runs(run, job, started_at, finished_at, status) VALUES('backfill:early', 'backfill', "
+                       "?, ?, 'ok')", (S.iso(first), S.iso(first)))
+            for prev, x in zip(prior, prior[1:]):
+                b = W.daily("PXD", x.day)
+                if x.day < dt.date(2026, 8, 3):
+                    for adj in ("raw", "all"):
+                        db.execute("INSERT OR REPLACE INTO px_bars(symbol, day, adj, o, h, l, c, v, n, vw, t, fetched_at, "
+                                   "run) VALUES('PXD', ?, ?, ?, ?, ?, ?, ?, 100, ?, ?, ?, 'backfill:early')",
+                                   (x.day.isoformat(), adj, b["o"], b["h"], b["l"], b["c"], b["v"], b["c"],
+                                    f"{x.day}T04:00:00Z", S.iso(first)))
+                if prior[1].day < x.day and x.day <= W.BACKFILL_LAST:
+                    c = W.daily("PXD", prev.day)["c"]
+                    db.execute("INSERT OR REPLACE INTO px_flags(day, symbol, prev_day, c_raw, c_adj, ratio, flagged, "
+                               "read_at, run) VALUES(?, 'PXD', ?, ?, ?, 1.0, 0, ?, 'f')",
+                               (x.day.isoformat(), prev.day.isoformat(), c, c, S.iso(et(x.day, 9, 1))))
+            db.execute("UPDATE px_bars SET run='backfill:early', fetched_at=? WHERE symbol='PXD' AND run=?",
+                       (S.iso(first), W.BACKFILL_RUN))
+            old = prior[-100].day
+            db.execute("UPDATE px_flags SET c_adj=c_raw / 2, ratio=0.5, flagged=1 WHERE symbol='PXD' AND day=?",
+                       (old.isoformat(),))
+            db.execute("UPDATE px_bars SET h=h*2, c=c*2 WHERE symbol='PXD' AND adj='all' AND day<?", (old.isoformat(),))
+        return [x.day for x in prior], old
+
+    def test_h52s_252_sessions_are_on_one_basis_or_it_does_not_exist(self):
+        _, old = self.h52_world()
+        self.run_morning(reread=False)
+        got = self.am("PXD")
+        self.assertEqual(got["in_pxu"], 1, "its 61 sessions are clear")
+        self.assertIsNone(got["h52"], f"FLAGGED {old} (100 sessions back) with no full re-read: no h52")
+
+    def test_h52_after_its_full_re_read(self):
+        prior, _ = self.h52_world()
+        self.run_morning()
+        got = self.am("PXD")
+        highs = [W.daily("PXD", d)["h"] for d in prior[-252:]]
+        self.assertAlmostEqual(got["h52"], got["c_star"] / max(highs), places=9)
 
     def test_refused_before_nine(self):
         with self.assertRaises(ValueError):

@@ -34,11 +34,15 @@ returned, ended by tau + 55 s (`CLOSE_LAST_REQUEST`, `CLOSE_READS_UNTIL`, `CLOSE
 
 CORPORATE ACTIONS (section 1.3). `morning` (`px-am:<D>`, after 09:00 ET of D) reads c*_P (P's adjustment=all close
 read after 09:00 ET of D: league/events/pxdata.py `flags`, write-once in `px_flags`, the benchmarks' too), FLAGGED(D),
-makes the full adjusted re-read of an issuer FLAGGED at D (`px_rereads`), decides PXU(D) (px_universe's live base, then
-not FLAGGED(D), no FLAGGED session among the 61 before D without a full re-read stored after its flag) and writes every
-adjusted value of D once (`px_am`: sigma60, sigma_on60 (the sample sd, n - 1, of the 60 returns ending at P), the
-records' z1, z5, z20, z1s, h52, v and the DRIFT values). A catch-up reads `px_am` AS STORED BEFORE tau; with none there
-is no PX event of D at either auction.
+makes the full adjusted re-read of a name or benchmark FLAGGED at D, then of one FLAGGED on a session of its windows
+after its latest full re-read (`px_rereads`; `reread_at`: the latest of those and the first night's 270-session read),
+decides PXU(D) (px_universe's live base, then not FLAGGED(D), no FLAGGED session among the 61 before D without a full
+re-read stored after its flag: `_basis_ok`, where a session with NO c*_P STORED BEFORE ITS DECISION TIME is FLAGGED,
+section 1.1, as one out of the base that morning is) and writes every adjusted value of D once (`px_am`: sigma60,
+sigma_on60 (the sample sd, n - 1, of the 60 returns ending at P), the records' z1, z5, z20, z1s, h52 (its 252 sessions
+on one basis too, else none), v and the DRIFT values; a benchmark's closes on one basis with its cb*_P, else no value
+that needs them). A catch-up reads `px_am` AS STORED BEFORE tau; with none there is no PX event of D at either
+auction.
 
 THE PX LANE NEVER CHANGES AN EARLIER PROGRAM'S RECORD (F10): it writes the lane's events.sqlite only for its own
 programs' intents and its own receipts, and px.sqlite (its own px_* tables) for everything else; never the lane's
@@ -113,6 +117,9 @@ JOB_CATCHUP = "decide-px"
 #: A catch-up's receipt names its auction as the lane's runs do: `decide-px:open:<D>`, `decide-px:close:<D>`.
 AT_OF = {"o1": "open", "on": "close"}
 JOB_AM = "px-am"
+#: px_runs' job of release 1019i's 270-SESSION BACKFILL (league/events/house.py `_px_job` "backfill"): its read of an
+#: issuer's adjusted bars is the issuer's first FULL re-read (section 1.3, `reread_at`).
+BACKFILL_JOB = "backfill"
 JOB_MID = "px-mid"
 #: The lane's meta: PREREG-EVL-8's RELEASE, the moment the House's code carrying this file first ran its lane while it
 #: registers anything (written once). A decision whose tau is before it was decided before the release: a catch-up.
@@ -418,29 +425,81 @@ def _pos(x: Any) -> float | None:
     return v if math.isfinite(v) and v > 0 else None
 
 
-def _basis_ok(px: Any, symbol: str, days: Sequence[dt.date], now: dt.datetime) -> str | None:
-    """Section 1.3's ONE BASIS A WINDOW for `symbol` over the sessions `days` (the window before D): None when every
-    FLAGGED session of it has a full re-read stored after its flag's read and before `now`, and every adjusted row of
-    the window was fetched at or after that re-read; else why not."""
-    want = [d.isoformat() for d in days]
-    if not want:
+def reread_at(px: Any, symbol: str, now: dt.datetime) -> dt.datetime | None:
+    """THE ISSUER'S LATEST FULL RE-READ stored before `now` (section 1.3): its latest `px_rereads` row (the full adjusted
+    re-read the House makes after 09:00 ET of a session on which it is FLAGGED), else THE 270-SESSION READ OF THE FIRST
+    NIGHT (league/events/pxdata.py `backfill`: the fetch time of its adjusted bars a `backfill` run wrote, the earliest
+    of them, the reading that covers less), whichever is later; None with neither."""
+    sym, stamp = symbol.upper(), S.iso(now)
+    got = []
+    row = px.db.execute("SELECT MAX(fetched_at) FROM px_rereads WHERE symbol=? AND fetched_at<?", (sym, stamp)).fetchone()
+    if row is not None and row[0]:
+        got.append(S.parse_iso(str(row[0])))
+    row = px.db.execute("SELECT MIN(fetched_at) FROM px_bars WHERE symbol=? AND adj='all' AND fetched_at<? AND run IN "
+                        "(SELECT run FROM px_runs WHERE job=?)", (sym, stamp, BACKFILL_JOB)).fetchone()
+    if row is not None and row[0]:
+        got.append(S.parse_iso(str(row[0])))
+    return max(got) if got else None
+
+
+def _basis_ok(px: Any, symbol: str, sessions: Sequence[C.Session], now: dt.datetime) -> str | None:
+    """Section 1.3's ONE BASIS A WINDOW for `symbol` over `sessions` (a window before D: the 61 sessions, or h52's 252),
+    read as stored before `now`: None when every session of it is CLEAR or COVERED, and every adjusted row of the
+    window was fetched at or after the full re-read a COVERED session relies on; else why not (the issuer is not in
+    PXU(D), or the value does not exist).
+    - CLEAR: FLAGGED(s) is false: its `px_flags` row holds a c*_P read before s's last decision time (its close
+      decision time) with |c*_P / c_P(raw) - 1| <= 0.001.
+    - FLAGGED, section 1.1: a flagged row, OR NO c*_P STORED BEFORE THE DECISION TIME (no row, as for a session the
+      issuer was out of the base, or one read too late): a split or a dividend effective s may be in the vendor's
+      adjusted series and in no flag. Such a session is COVERED only by the issuer's latest full re-read (`reread_at`)
+      fetched at or after its flag's read (with no row: at or after 09:00 ET of s, from when an action effective s is
+      in the adjusted series); else the window mixes two bases."""
+    if not sessions:
         return None
+    sym = symbol.upper()
+    want = [x.day.isoformat() for x in sessions]
     marks = ",".join("?" * len(want))
-    flagged = px.db.execute(f"SELECT day, read_at FROM px_flags WHERE symbol=? AND flagged=1 AND day IN ({marks})",
-                            (symbol.upper(), *want)).fetchall()
-    latest: str | None = None
-    for f in flagged:
-        rr = px.db.execute("SELECT fetched_at FROM px_rereads WHERE symbol=? AND fetched_at>=? AND fetched_at<? ORDER BY "
-                           "fetched_at DESC LIMIT 1", (symbol.upper(), str(f["read_at"]), S.iso(now))).fetchone()
-        if rr is None:
-            return f"flagged {f['day']} with no full re-read"
-        latest = max(latest or "", str(rr["fetched_at"]))
-    if latest is not None:
+    flags = {str(r["day"]): dict(r) for r in px.db.execute(
+        f"SELECT day, flagged, c_adj, read_at FROM px_flags WHERE symbol=? AND day IN ({marks}) AND read_at<?",
+        (sym, *want, S.iso(now)))}
+    latest = reread_at(px, sym, now)
+    relied: dt.datetime | None = None
+    for x in sessions:
+        f = flags.get(x.day.isoformat())
+        read = S.parse_iso(str(f["read_at"])) if f is not None else None
+        if f is not None and not f["flagged"] and f["c_adj"] is not None and read < x.close_decide:
+            continue
+        since = read if f is not None and f["flagged"] else x.at(PX.FLAG_FROM)
+        if latest is None or latest < since:
+            if f is not None and f["flagged"]:
+                return f"flagged {x.day.isoformat()} with no full re-read"
+            return f"flagged {x.day.isoformat()} (no c*_P stored before its decision time) with no full re-read"
+        relied = latest
+    if relied is not None:
         old = px.db.execute(f"SELECT 1 FROM px_bars WHERE symbol=? AND adj='all' AND day IN ({marks}) AND fetched_at<? "
-                            "LIMIT 1", (symbol.upper(), *want, latest)).fetchone()
+                            "LIMIT 1", (sym, *want, S.iso(relied))).fetchone()
         if old is not None:
             return "an adjusted bar older than its basis"
     return None
+
+
+def _bench_basis(px: Any, symbol: str, flag: Mapping[str, Any] | None, sessions: Sequence[C.Session],
+                 now: dt.datetime) -> str | None:
+    """Section 1.3 for a BENCHMARK (cb, cb*_P: "the same for the issuer's benchmark"): its c*_P stored, its window on one
+    basis (`_basis_ok`) and, when it is FLAGGED at D itself (an ETF's dividend), a full re-read stored after that flag's
+    read with every adjusted row of the window fetched at or after it, so cb*_P and its closes share a basis; else why
+    not (no value that needs it exists)."""
+    if flag is None or flag.get("c_adj") is None:
+        return "no benchmark c*_P stored"
+    if flag.get("flagged"):
+        latest = reread_at(px, symbol, now)
+        if latest is None or latest < S.parse_iso(str(flag["read_at"])):
+            return "flagged at D with no full re-read"
+        want = [x.day.isoformat() for x in sessions]
+        if want and px.db.execute(f"SELECT 1 FROM px_bars WHERE symbol=? AND adj='all' AND day IN ({','.join('?' * len(want))}) "
+                                  "AND fetched_at<? LIMIT 1", (symbol.upper(), *want, S.iso(latest))).fetchone():
+            return "an adjusted bar older than its basis"
+    return _basis_ok(px, symbol, sessions, now)
 
 
 def reread(px: Any, gw: Any, symbols: Iterable[str], calendar: Any, day: dt.date, *, now: dt.datetime, run: str,
@@ -505,9 +564,10 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
     """THE MORNING PASS OF D (`px-am:<D>`, section 4.6; after 09:00 ET of D, before either decision time): PXU(D)'s base
     (league/events/pxdata.py `universe`, write-once, when the 07:40 recorder has not written it and `tickers` and
     `assets` are given), c*_P and FLAGGED(D) of every base name and of both benchmarks (`pxdata.flags`), the full
-    adjusted re-read of the names FLAGGED at D (`reread`), then for every base name its `px_am` row, WRITE-ONCE: in or
-    out of PXU(D) with why, and its adjusted values (section 1.1, 2 and the records' texts). Returns its counts. Raises
-    ValueError before 09:00 ET of D."""
+    adjusted re-read of the names and benchmarks FLAGGED at D, then of those FLAGGED on a session of their windows (the
+    61, h52's 252) after their latest full re-read (`reread`, while `late` lets it), then for every base name its
+    `px_am` row, WRITE-ONCE: in or out of PXU(D) with why (`_basis_ok`), and its adjusted values (section 1.1, 1.3, 2
+    and the records' texts). Returns its counts. Raises ValueError before 09:00 ET of D."""
     if not registered():
         return {"skipped": "PREREG-EVL-8 is not pinned"}
     session = C.session(store, day)
@@ -527,11 +587,20 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
         return out | {"why": "no PX universe base of the session"}
     names = sorted({str(r["symbol"]).upper() for r in base.values()})
     out["flags"] = PX.flags(px, gw, names + list(PX.BENCHMARKS), store, day, now=now, run=run)
-    flagged = [s for s in names if (px.flag(day, s) or {}).get("flagged")]
+    every = names + list(PX.BENCHMARKS)
+    flagged = [s for s in every if (px.flag(day, s) or {}).get("flagged")]
     out["reread"] = reread(px, gw, flagged, store, day, now=now, run=run, late=late)
     prior = PX.sessions_before(store, day, max(HIGH_SESSIONS, WINDOW_SESSIONS) + 1)
     if len(prior) < WINDOW_SESSIONS:
         return out | {"why": "the calendar holds fewer than 61 sessions before it"}
+    # SECTION 1.3: a name (or a benchmark) FLAGGED on a session of its windows (the 61, h52's 252) after its latest full
+    # re-read, a session with no c*_P stored before its decision time among them (section 1.1), gets the full re-read
+    # the House makes "after 09:00 ET of a session on which the issuer is FLAGGED, ... when it can": now, after the names
+    # FLAGGED at D, while the pass may go on; one it cannot make leaves the name out of PXU(D) (`_basis_ok`).
+    reach = prior[-HIGH_SESSIONS:]
+    stamp = now + dt.timedelta(seconds=1)
+    gapped = [s for s in every if s not in set(flagged) and _basis_ok(px, s, reach, stamp) is not None]
+    out["reread_window"] = reread(px, gw, gapped, store, day, now=now, run=run, late=late)
     window = [s.day for s in prior[-WINDOW_SESSIONS:]]          # the 61 sessions before D, P last
     p_day = window[-1]
     sic: dict[str, str | None] = {str(r[0]): (str(r[1])[:2] if r[1] else None)
@@ -540,7 +609,12 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
     for b in PX.BENCHMARKS:
         f = _flag(px, day, b, now + dt.timedelta(seconds=1))
         closes = _bars_between(px, b, prior[0].day, p_day, "all")
-        bench[b] = {"c_star": _pos((f or {}).get("c_adj")), "closes": {d: _pos(r.get("c")) for d, r in closes.items()}}
+        # (section 1.3: the benchmark's closes in a value are on one basis too, cb*_P's: FLAGGED at D or a window
+        # session FLAGGED with no full re-read, it has none, and no value that needs it exists)
+        why = _bench_basis(px, b, f, prior[-WINDOW_SESSIONS:], stamp)
+        bench[b] = {"c_star": _pos((f or {}).get("c_adj")) if why is None else None,
+                    "closes": {d: _pos(r.get("c")) for d, r in closes.items()},
+                    "why": None if why is None else f"benchmark {b}: {why}"}
     drift = drift_events(store, day)
     rows: dict[str, dict[str, Any]] = {}
     for cik, base_row in sorted(base.items()):
@@ -593,13 +667,13 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
         return "flagged: no c*_P stored", value
     if f.get("flagged"):
         return "flagged", value
-    why = _basis_ok(px, sym, window, now + dt.timedelta(seconds=1))
+    why = _basis_ok(px, sym, prior[-WINDOW_SESSIONS:], now + dt.timedelta(seconds=1))
     if why is not None:
         return why, value
     b = str(base_row.get("bench") or "")
     bc = bench.get(b) or {}
     if bc.get("c_star") is None:
-        return "no benchmark c*_P stored", value
+        return bc.get("why") or "no benchmark c*_P stored", value
     first = prior[0].day
     adj = _bars_between(px, sym, first, window[-1], "all")
     raw = _bars_between(px, sym, first, window[-1], "raw")
@@ -628,8 +702,10 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
         return (c_star / ck - bc["c_star"] / bk) / (sig * math.sqrt(k))
     value["z1"], value["z5"], value["z20"] = zk(1), zk(5), zk(20)
     value["ratio1"] = c_star / closes[-2] if closes[-2] else None
+    # (h52 reads the 252 sessions' adjusted highs: on one basis too, section 1.3, else it does not exist)
     highs = [_pos((adj.get(s.day.isoformat()) or {}).get("h")) for s in prior[-HIGH_SESSIONS:]]
-    value["h52"] = (c_star / max(highs)) if len(highs) == HIGH_SESSIONS and all(h is not None for h in highs) else None
+    value["h52"] = (c_star / max(highs)) if len(highs) == HIGH_SESSIONS and all(h is not None for h in highs) and \
+        _basis_ok(px, sym, prior[-HIGH_SESSIONS:], now + dt.timedelta(seconds=1)) is None else None
     vols = [_pos((raw.get(d.isoformat()) or {}).get("v")) for d in window[-(VOLUME_SESSIONS + 1):]]
     value["v"] = (vols[-1] / (math.fsum(vols[:-1]) / VOLUME_SESSIONS)
                   if len(vols) == VOLUME_SESSIONS + 1 and all(x is not None for x in vols) else None)
