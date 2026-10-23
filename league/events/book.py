@@ -1839,15 +1839,10 @@ def meta_on_guard(lane: Any, cik: str, session: C.Session | None, decided_at: dt
 def meta_o1_guard(lane: Any, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
     """EVL-META-O1'S GUARD (PREREG-EVL-8 section 7.7, PREREG-EVL-7's E8 reading), IN REAL MONEY ONLY: True when the
     issuer is an ERN(D) issuer (an 8-K with item 2.02 knowable in D's close window and stored before the decision
-    time), whose close-entry rows this learner's sale at D's close would take. Unreadable inputs read as barred."""
-    try:
-        lo, hi = P.close_window(lane, day)
-        for row in P.filings_window(lane, "8-K", lo, hi):
-            if str(row.get("cik")) == str(cik) and P.items_of(row) & P.ERN_ITEMS and _stored_before(row, decided_at, lane):
-                return True
-    except (LookupError, sqlite3.Error, TypeError, ValueError):
-        return True
-    return False
+    time), whose close-entry rows this learner's sale at D's close would take. It IS E8's guard (`ern_issuer`, called,
+    never copied: release 1019n's second money review, so a later fix of E8 reaches this guard too, as `meta_on_guard`
+    calls E10's). Unreadable inputs read as barred."""
+    return ern_issuer(lane, cik, day, decided_at)
 
 
 def picks_8(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,

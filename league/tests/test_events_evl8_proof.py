@@ -1393,6 +1393,32 @@ class TheMetaMoney(TB.EventTest):
                              "MB (an 8-K read at score 3) and MC (the late, unanswered 8-K) are barred")
 
 
+    def test_its_o1_guard_is_e8s_called_never_copied(self):
+        """Section 7.7: EVL-META-O1 never buys an ERN(D) issuer, PREREG-EVL-7's E8 reading (an 8-K with item 2.02
+        knowable in D's close window and stored before tau). Its guard IS E8's (`book.ern_issuer`, called: release
+        1019n's second money review, so a later fix of E8 reaches it), case by case and by delegation."""
+        with W.pinned():
+            root = self.root / "o1-guard"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            h.lane.filing("e-1", "0000007001", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 8, 1))
+            h.lane.filing("e-2", "0000007002", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 9, 40))
+            h.lane.filing("e-3", "0000007003", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 8, 1),
+                          items=("8.01",))
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            tau = C.session(h.lane.st, TB.DAY).open_decide
+            ciks = ("0000007001", "0000007002", "0000007003", "0000007004")
+            self.assertEqual([EB.meta_o1_guard(lane, cik, TB.DAY, tau) for cik in ciks], [True, False, False, False],
+                             "an earnings 8-K stored before tau bars its issuer; one stored after it, an 8.01, none do not")
+            for cik in ciks:
+                self.assertEqual(EB.meta_o1_guard(lane, cik, TB.DAY, tau), EB.ern_issuer(lane, cik, TB.DAY, tau), cik)
+            with mock.patch.object(EB, "ern_issuer", lambda *a, **k: "E8's"):
+                self.assertEqual(EB.meta_o1_guard(lane, "0000007004", TB.DAY, tau), "E8's", "E8's own guard is called")
+
+
 class ThePromotedSizing(TB.EventTest):
     """SECTION 4.1: a Probe or Sized buy of a version of this file is PREREG-EVL-6 section 6's (clause 2, A99, A123's
     literal reading): THE FEWEST whole shares whose value at the limit reaches Done's 0.8 bar of the band's target,
