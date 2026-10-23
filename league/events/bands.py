@@ -409,7 +409,8 @@ def review6(store: S.Store, program: str, version: int, *, now: Any = None, toda
     the fixed reads those settlements cross (the 100th, 200th, ... real-money event, in order; p <= 0.15 demotes), then
     the money stop, both over the stay's real-money events settled so far whose scheduled exit is at or before the close
     (an older one still unsettled is left out until it settles: the reading that demotes more), WHETHER OR NOT THE CLOSE
-    IS FINAL; then the stay's look when one falls due at it. Only the look waits for its record: it is held once the
+    IS FINAL; then the stay's look when one falls due at it. Only the look waits for its record, and WHETHER one falls
+    due at a close is read only on that close's final record (release 1019k): it is held once the
     close is final for the version (`screen.final_until`) with every intent of it and of its control scheduled to exit
     by then settled and every copy made, the reads and the stop at that close judged again first over every event
     settled by then (so the order holds when an older event settled late); the looks wait in their order, and a later
@@ -510,6 +511,16 @@ def review6(store: S.Store, program: str, version: int, *, now: Any = None, toda
             through = x.day
         if waiting or (looked is not None and x.day <= looked):
             continue
+        if final is None:
+            final = SC.final_until(store, program, version, today, now)
+        if final[0] is None or x.day > final[0] or any(d <= x.day for _, d in pending) or uncopied(store, prog, x.day):
+            # (WHETHER a stay look falls due at x is decided only on x's final, settled and copied record, so a block
+            # or event that reaches x later (a backfill, a re-decided session, an intent still entered at night) can
+            # never move the look to a later close or lose it: section 2's "late data delays a look, never its as-of
+            # close", which section 3 applies to stays; release 1019i's re-review. Nothing of x is marked looked
+            # before that; the reads and the money stop above never wait for it.)
+            waiting = True
+            continue
         cov = SC.covered(record, x.day)
         blk = SC.blocks6(cov)
         events = [e for b in blk[:SC.V6_RUN_BLOCKS] for e in b.events]
@@ -523,10 +534,13 @@ def review6(store: S.Store, program: str, version: int, *, now: Any = None, toda
         if not ready:
             waiting = True      # (the order at x waits for x's real-money events; a later close's reads and stop go on)
             continue
-        if final is None:
-            final = SC.final_until(store, program, version, today, now)
-        if final[0] is None or x.day > final[0] or any(d <= x.day for _, d in pending) or uncopied(store, prog, x.day):
-            waiting = True      # (the stay look of this close waits for its record; the reads and the stop do not)
+        older = [e for e in real if exit_of(e) <= x.day and not e["settled"]]
+        if any(not stuck(e) for e in older):
+            # (section 3's real-money conditions are judged over EVERY real-money event of the stay due by x: an older
+            # lot still on the ladder holds the look as x's own lots do (bounded by STUCK_AFTER; the reads and the stop
+            # go on); past the ladder the look runs and Sized is refused below: release 1019i's re-review, the money
+            # lens, the reading that trades less)
+            waiting = True
             continue
         why = judge(x)          # (x's reads and stop again first, over every event settled by now that is due by x)
         if why is not None:
@@ -541,6 +555,10 @@ def review6(store: S.Store, program: str, version: int, *, now: Any = None, toda
                              len(C.sessions(store, first_entry, x.day)), judged)
         if judged.get("decision") == "pass":
             look["v6"]["sized"] = sized_conditions6(store, program, version, due)
+            if older:
+                look["v6"]["sized"].update(ok=False, unsettled=sorted(str(e["event"]) for e in older),
+                                           why="a real-money event due by this close is unsettled past the ladder: "
+                                               "section 3's conditions are judged whole at the next stay look")
         moved: list[str | None] = [None]
 
         def apply(db: Any, look: dict[str, Any] = look) -> None:

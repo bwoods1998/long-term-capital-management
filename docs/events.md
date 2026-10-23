@@ -567,10 +567,15 @@ gets their every p, q and decision):
   holds a later close: it counts once it settles); then the stay's look when one falls due there (its lower tail
   demotes, its PASS with >= 30 real events at Probe size or above, summed P&L above 0 and fills within 15 bp moves Probe
   to Sized). ONLY THE LOOK WAITS for the close to be final (with its and its control's intents due by then settled and
-  every copy made); it is then held as of that close, that close's reads and stop judged again first, the looks in
+  every copy made), and WHETHER a look falls due at a close is decided only on that final record (a block that reaches
+  the close late can never move the look to a later close or lose it: section 2's "late data delays a look, never its
+  as-of close"; release 1019k); it is then held as of that close, that close's reads and stop judged again first, the looks in
   their order (meta `evl6:stay:...` keeps `through`, the last close whose reads and stop were judged, and `looked`, the
   last close whose look is settled). A real-money event still unsettled `bands.STUCK_AFTER` (6 = `book.LADDER_CLOSES` +
-  1) sessions after its scheduled exit no longer holds its close (judged without it, named in the stay state's
+  1) sessions after its scheduled exit no longer holds its close, and an OLDER real-money lot still on the ladder holds
+  the look as the close's own lots do (release 1019k: Sized's conditions are judged over every real-money event due by
+  the look's close; past the ladder the look runs and a PASS leaves the version at Probe, `v6.sized.unsettled` naming
+  the lot, until the next stay look); past the ladder its close is judged without it (named in the stay state's
   `unsettled`), and the House holds that version's new Probe and Sized buys while its lot is held, with an error alarm
   once a session (league/equity/live.py `_event_unsettled`; the readings that demote more and trade less, section 7).
   PREREG-EVL-3's $150 stop, rolling read, bootstrap Sized and reversed-p retirement are not these versions'.
