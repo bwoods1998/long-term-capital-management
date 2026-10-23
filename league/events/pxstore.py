@@ -69,7 +69,7 @@ SCHEMA_VERSION = 1
 FLAG_TOLERANCE = 0.001
 SOURCES = ("live", "backfill")
 RULES = (S.LIVE_RULE, S.BACKFILL_RULE)
-LABELS = ("px1530", "v1530", "pm")
+LABELS = ("px1530", "v1530", "pm", "o0930")      # (o0930: PREREG-EVL-8 section 3.3's OPENGAP, D's 09:30 minute's open)
 #: THE STORE'S ROOM (the module docstring): px.sqlite's size line, the swarm guard's floor and the PX floor above it.
 MAX_BYTES = 2 * 1024 ** 3
 GUARD_FREE_GB = 3.0

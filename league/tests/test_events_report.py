@@ -173,8 +173,12 @@ class ProgramTableTest(unittest.TestCase):
         self.assertEqual(set(SC.SEATABLE), {p.id for p in P.PROGRAMS if p.seatable})
         self.assertEqual(set(SC.SEATABLE) | set(SC.RECORDS), {p.id for p in P.PROGRAMS})
         self.assertEqual(SC.HOLDS, {p.id: p.hold for p in P.PROGRAMS})
-        self.assertEqual(set(SC.CONTROLS), {p.id for p in P.PROGRAMS if p.seatable and p.reads})
+        # (PREREG-EVL-8 section 3.2: its three PX seats read no verdict and have a control condition, screen.CONTROLS'
+        # rows of that file, judged by league/events/screen8.py: league/tests/test_events_evl8.py holds them)
+        self.assertEqual({k for k in SC.CONTROLS if not P.is_8(k)}, {p.id for p in P.PROGRAMS if p.seatable and p.reads})
         for prog, ctl in SC.CONTROLS.items():
+            if P.is_8(prog):
+                continue        # (a PX seat's family is its own and its control's another: test_events_evl8.py)
             self.assertEqual(P.BY_ID[ctl].family, P.BY_ID[prog].family)
             self.assertFalse(P.BY_ID[ctl].reads or P.BY_ID[ctl].seatable)
 

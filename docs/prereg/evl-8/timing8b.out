@@ -1,0 +1,24 @@
+constants from origin/rel/1019h: DATA_INTERVAL 0.5 s (120 reads a minute at most, one slot: True; 'a bound is not a promise': True); the gateway client's read timeout 45 s; DECISION_MARGIN 5 s; DECIDE_BUDGET 150 s; RECORD_BUDGET 90 s; VERDICT_BUDGET 90 s; CLOSE_GRACE 60 s; HOLD_LEAD 150 s; EVL5_BUDGET 45 s, EVL5_FINISH 15 s; the book: one decision an auction True, its wait for the lane's decision open 240 s / close 60 s, its minute tick 3 s into each minute after the options path's own reads (skipped when those hung and ended past second 45); order path open_send = open - 840 s, open_until = open - 180 s, close decide = close - 840 s, close_send = close - 780 s, close_until = close - 660 s; SIP_DELAY 16 min
+
+CLOSE (a full day; an early close moves every row by close - 16:00):
+  HOLD_LEAD's lead from 15:44:30; tau 15:46:00 (the 15:29 bar on the Basic plan's tape from 15:46:00); the lane's live close run 15:47:00; the book's main close pass at its first tick at or after 15:47:00 (its wait ends then: the lane's run has only just started), i.e. 15:47:03 or later; close_until 15:49:00
+  the book's ticks inside the close window: 15:47:03, 15:48:03 (+ the options path's reads); the 15:49:03 tick is past close_until: THE LAST TICK INSIDE THE WINDOW IS THE 15:48 TICK
+  N_U 2000: decide-close-px8 sends 32 reads at DATA_INTERVAL: 16.0 s when each returns within 0.5 s; from 15:46:00 the last is sent by 15:46:15 (the run sends none after 15:46:45: 90 reads at most)
+  N_U 3000: decide-close-px8 sends 42 reads at DATA_INTERVAL: 21.0 s when each returns within 0.5 s; from 15:46:00 the last is sent by 15:46:20 (the run sends none after 15:46:45: 90 reads at most)
+  N_U 4500: decide-close-px8 sends 57 reads at DATA_INTERVAL: 28.5 s when each returns within 0.5 s; from 15:46:00 the last is sent by 15:46:28 (the run sends none after 15:46:45: 90 reads at most)
+  N_U 6041: decide-close-px8 sends 73 reads at DATA_INTERVAL: 36.5 s when each returns within 0.5 s; from 15:46:00 the last is sent by 15:46:36 (the run sends none after 15:46:45: 90 reads at most)
+  each PX read's timeout min(45 s, 15:46:50 - now): a read sent at 15:46:45 returns or is abandoned by 15:46:50; the run writes and ends by 15:46:55 (DECISION_MARGIN before the lane's run), so the lane's live close run starts at 15:47:00 whatever the gateway does (with the client's own 45 s a read sent at 15:46:45 could return at 15:47:30, 30 s late)
+  PX-DROP-ON's and PX-SURGE-ON's late pass: the lane's close receipt in before the 15:48 tick reads it (15:48:03 or later): the lane's run at most 63 s (+ the options path's reads of that minute)
+  EVL-META-ON's late pass: decide-close-meta8 (bound 15 s, the first task on the lane's receipt) finished before the 15:48 tick: the lane's run at most 48 s at META's bound (63 s less META's own run time)
+  the lane's run's isolated parts at their own bounds: PREREG-EVL-5 45 s + PREREG-EVL-7 120 s + finish 15 s = 180 s (before the earlier rows' own time) against 120 s to close_until: at such closes this file's close rows buy nothing (never an earlier row)
+  PREREG-EVL-5's part alone at its bound with its finish: 60 s, leaving 3 s (PX-ON) / -12 s (META-ON) for every earlier row
+
+OPEN:
+  tau 09:15:00 (the 08:58 bar on the tape from 09:15:00); the lane's open run from 09:15:00, its receipt by 09:17:30 at DECIDE_BUDGET (PREREG-EVL-7's learner part 90 s inside it); the book's main open pass on that receipt, or at its first tick at or after 09:19:00; sends from 09:16:00; open_until 09:27:00
+  N_U 2000: PX-GAP-O1's pm_D reads 10 x 0.5 s = 5.0 s
+  N_U 3000: PX-GAP-O1's pm_D reads 15 x 0.5 s = 7.5 s
+  N_U 4500: PX-GAP-O1's pm_D reads 23 x 0.5 s = 11.5 s
+  N_U 6041: PX-GAP-O1's pm_D reads 31 x 0.5 s = 15.5 s
+  decide-open-px8 (PX-GAP-O1, then EVL-META-O1) the first task on the lane's open receipt, 60 s, never past 09:19:30 (by 09:18:30 on a receipt at the bound); THE OPEN LATE PASS at the first book tick after it finished: 8 ticks inside the window even then (09:19:03 to 09:26:03)
+
+REQUESTS: under release 1019h every lane read goes through its one slot at DATA_INTERVAL (at most 120 a minute); this file's reads run only in its own runs on that slot, so they never share a moment with the lane's own reads; the 150-a-minute token bucket over every data-host read is NEW CODE (the judge's harness H2), and when it ships this file's reads keep the slot's spacing.

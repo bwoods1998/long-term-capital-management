@@ -1081,6 +1081,12 @@ class TheCount(LaneCase):
         self.assertEqual(SC.expected_false_passes(self.st)["expected"], 2.08, "a later version the store holds: 0.13")
 
     def test_r3s_validator_reads_the_restated_charge_and_the_budget_after_every_waiting_run(self):
+        _rs = mock.patch.object(BI, "RESTATED", ())   # (the 3.9 accounting, without goal V3's restatement)
+        _rs.start()
+        self.addCleanup(_rs.stop)
+        _nc = mock.patch("league.events.births.NIGHT_CAPS", ())
+        _nc.start()
+        self.addCleanup(_nc.stop)
         self.assertEqual((BI.CHARGE_HUNDREDTHS, BI.BUDGET_HUNDREDTHS), (13, 390))
         with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3), \
                 mock.patch.object(BI, "RESERVED", ()):

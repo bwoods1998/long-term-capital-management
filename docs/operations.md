@@ -10,6 +10,109 @@ is built and not deployed); the running House release is release 1019g (live sin
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019n (Oct 23, 2026): PREREG-EVL-8, the price lane and the meta-learners, frozen and pinned: `feat/evl-8`, not deployed
+
+`feat/evl-8` = the first build (`b52f4bbe`, its WIP `686f1db2`) merged with release 1019l (`rel/1019l`, `3df7dd9d`:
+releases 1019i-1019k, PREREG-EVL-6's code, PREREG-EVL-7's learners, the PX data layer, the stay look, births.RESERVED,
+goal V3's rows) and then with `main` (release 1019m-hotfix `bc33cf95`, A140; release 1019m `84de2f4a`, A139; release
+1019m-cost `1c87837f`, A145: no digest moves), finished to the frozen text; PR 609 with base `main` (which carries
+release 1019l). Its code lives in its own modules
+(league/events/px.py, px_grid8.json, meta.py, screen8.py, league/ops/evl_price.py, league/tests/evl8_world.py,
+test_events_evl8.py, test_events_evl8_proof.py) and in short, marked hunks of book.py, run.py, house.py, score.py,
+births.py, report.py, bands.py, screen.py (CONTROLS' three rows), programs.py, pxdata.py, site_lane.py,
+league/equity/live.py and constitution.py. The rules: docs/events.md, **PREREG-EVL-8**; the frozen text
+docs/prereg/PREREG-EVL-8.md (tag `prereg-evl-8`, sha256 `37150fac`) and docs/prereg/evl-8/, byte for byte.
+
+IT SHIPS PINNED: league/events/programs.py `REGISTERED_AT_8 = "2026-10-22T18:43:24Z"` (A122). SHIPPING IT STARTS THE
+FILE: the House's first turn under this code writes THE RELEASE (`evl8:release` in the lane's meta); from the first
+decision after it, the five seats decide live and trade real money at learning size (the PX seats at most 4 open
+each, the meta-learners 8), every judged record starts, and the meta catch-ups decide every session of the state from
+Oct 20, 2026 once (never judged, never traded). The judged clocks: no look before a run's 22nd settled block.
+
+IDENTITIES (the tree's own functions, 3.14 and 3.11): money `1687e4e3` -> `77c3cfed` and constitution `3feab26d` ->
+`138ee8eb`, ONE ROW in its own commit: `equity_money.event.max_open_v8.learning` 4 (EQUITY_MONEY_BOUNDS (0, 4), read
+only for the PX seats at learning: book.py `Settings.max_open`); the options execution fingerprint `b60410ad`, the
+equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract `397b22b7`, the Done rule `54241925`, the
+births prompt `1442a2a2` at `PARSE_VERSION` 5 and `equity_money_problems()` [] do not move. The row at 0 is the pair
+`2d112ae9` / `992cefd8` (PX buys nothing at learning); `event.enabled` False under this table is `93bb7e4a` /
+`520fb41c` (league/tests/equity_design.py `V8_SLOTS_OFF`, `ROLLBACK_1019N`). THE STANDING GRANT IS RE-RATIFIED for
+`77c3cfed`.
+
+THE FLAG: `events.px_data` SHIPS ON (league/config.json; release 1019i shipped it off until A128's major was fixed,
+which this release does: every recorder read spaced on the lane's one slot at DATA_INTERVAL). The first night fills
+the 270-session daily backfill and the operating-company cache (2,000-18,123 SEC reads at the lane's SEC pacing, the
+text's section 8); the first PX events are of the first session whose morning pass stored its inputs before its
+decision time. With it off the meta-learners still decide (their PX members and `x:` experts empty).
+
+THE RUNS ON THE HOUSE (league/events/house.py's PREREG-EVL-8 comment, section 4.6 of the text): the state pre-passes
+`prepass-meta:open:<D>` from 09:00 ET and `prepass-meta:close:<D>` from the close - 30 minutes; the morning pass
+`px-am:<D>` from 09:05 ET (yields, runs until 15:30); `decide-open-px8:<D>` then `decide-open-meta8:<D>` after the
+lane's open decision call (after PREREG-EVL-7's live learner part; 60 s, never past 09:19:30; `decide-open-meta8:<D>`
+runs only when the PX part finished `ok`, else EVL-META-O1's open is its `decide-meta:open:<D>` catch-up's alone);
+`decide-close-px8:<D>` from the close decision time (no read after tau + 45 s, ended by tau + 55 s);
+`decide-close-meta8:<D>` after the lane's close decision call (15 s, never past the close - 11:20); the catch-ups
+`decide-px:<open|close>:<D>` and `decide-meta:<open|close>:<D>` (never judged, never traded; each receipt records its
+code's sha256 and the House release); the panel after 21:00 ET. The lead holds for the live close decision whether or
+not PREREG-EVL-5 has programs, and inside it a record or verdict task started before tau ends by tau.
+
+WHAT TO EXPECT IN REAL MONEY (the frozen text's own stated limits): PX-DROP-ON's and PX-SURGE-ON's close buys go only
+when the lane's close receipt and PREREG-EVL-7's learners' pass are in before the book's 15:48 tick; EVL-META-ON's
+needs its own part done by then too (its 15 s bound often comes after EVL-LRN-ON's 120 s part: then it is decided by
+its catch-up and buys nothing). THE 150-ORDER LINE refuses this file's entries before every earlier PREREG row's,
+across the day's auctions (A130 R5's reading), so PX-GAP-O1's and EVL-META-O1's open entries buy nothing while the
+close rows' learning room holds the line, as EVL-LRN-O1's do. The shadow, the judged record, keeps every event. An
+earlier row's buy held for a retryable reading (a 424, A80's re-send) keeps its room from this file's buys, and every
+earlier row's buy of a tick is sent before this file's late pass reads anything: a PX or META buy that fits only but
+for that room is refused in its tick (its why: "sizing: ... earlier rows' buys still to go at this auction"). THE
+SECOND FIX ROUND: the earlier rows' sends are exactly as without this file, the eligible list included: they send the
+lane's live list alone, as before, and never again because this file's names widened it; this file's names go to
+the gateway only in its own pass and send, after every earlier send of the tick. This file's work in a book tick is
+bounded at 30 s from the tick's start (`EIGHT_TICK_S`: its reads, its POST and its orders, each request's timeout
+ending by it). What that promises, and only that: this file's own work in the tick ends by about :33 whatever the
+gateway does, and the minute's later steps (the proof, the share lanes' windows, the exports, the fees read) keep the
+rest. It does not promise the 15:47 tick ends by 15:48:03: later steps that need more than the rest (a slow data host
+while share-lane exits are re-priced at 15:47) can still run it past and skip the 15:48 tick and the earlier rows' A80
+re-sends there, which they would not without this file's 30 s (a residual edge); a buy of this file not sent in the tick its late pass planned it is refused
+("PREREG-EVL-8: not sent in the tick its late pass planned it"), never sent later. Watch: `eq_event_decisions`'
+`out` lines `event_decide_8` ("waits for the next tick" when a pass had under 10 s of the bound left).
+
+WHAT TO EXPECT OF PXU(D) (section 1.3, the fix round): a session of a name's 61-session window with no c*_P stored
+before its decision time (a name out of the base that morning, a morning pass that never ran) is FLAGGED; the morning
+pass makes the name's full adjusted re-read (`px_rereads`, one request a name) before it decides PXU(D), and a name
+it cannot re-read in time is out of PXU(D). So after a missed morning the next one re-reads every base name once (up
+to about 6,000 requests at the slot's 120 a minute, yielding: PXU(D) then may land after 09:15 and serve only the ON
+auction that day). h52 needs its 52-week window on one basis the same way (else it is none). A benchmark (SPY, IWM)
+FLAGGED at D or on a window session with no full re-read never takes a name out of PXU(D): only the values that read
+its stored closes (z1, z5, z20, the DRIFT values) are none, the reason in the name's `bench_why` (px_am's value). A PX or META part that did
+not finish on the lane's first finished decision of (D, X) is decided by its catch-up alone: a later live receipt of
+that decision (a pending decision's retry, the hourly re-decision while it is still live) never runs it again.
+
+**Deploy, in order** (an owner deploy with the release that carries it; never 12:55-20:05Z on a trading day
+(12:55-21:05Z from Nov 2), never with an order in flight, CI green on the exact head; rerere off; THE HOUSE MUST BE ON
+main's head FIRST (`1c87837f`: releases 1019m and 1019m-cost, which carry release 1019l), or this release carries
+it):
+1. THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_price`'s words beside release 1019i's): `cd gateway
+   && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces (an older
+   gateway refuses a stall notice naming `evl_price`).
+2. THE HOUSE by the captain's ship script with the release's pair (`77c3cfed 138ee8eb`), then the grant re-ratified
+   for the new money digest. Verify (read-only): promoted, `real_money` true, failures []; `evl8:release` in the lane's
+   meta at the House's first turn; the stall job's `evl_price` judged; the night after: px.sqlite's backfill and
+   operating cache filling (`px_runs`), the meta catch-ups of every session from Oct 20 (oldest first, `decide-meta:`
+   receipts with `code_sha`); the next morning `px8:am:<D>` in px.sqlite's meta by 09:15 ET (its `serves` "both"),
+   `decide-open-px8:<D>` and `decide-open-meta8:<D>` receipts finished by 09:19:30, `decide-close-px8:<D>` finished
+   by tau + 55 s and the lane's `decide-close:<D>` started at tau + 60 s as before, `decide-close-meta8:<D>` after it,
+   the book's `eq_event_decisions` rows `open-px8`, `close-px8`, `close-meta8`, and the daily report's PX, META and
+   late-pass lines (counts only).
+
+**Rollback**: the price lane's every run: `events.px_data` false (a config deploy): no PX event, no PX buy; the
+meta-learners go on with no PX member. PX's real money alone: the row `event.max_open_v8.learning` 0 (a money deploy,
+pair `2d112ae9` / `992cefd8`, grant re-ratified): the PX seats buy nothing at learning, the shadow and the records go
+on. Everything of the file: `REGISTERED_AT_8` back to None (a code deploy): nothing of it runs or trades; its open lots
+still exit at their own planned exits (each lot's `evl_exit`, league/equity/live.py `_event_exits`, whatever the
+registry); px.sqlite and the mrl_* tables stay, read by nothing. The whole release: the House to main's head before it
+(`1c87837f`, releases 1019m and 1019m-cost) by `floor_box.py rollback` with that pair (`1687e4e3` / `3feab26d`,
+unchanged since release 1019l), then the gateway by `wrangler rollback`.
+
 ## Release 1019m-cost (Oct 23, 2026): goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145): `fix/cost-v3`, not deployed
 
 Goal V3, item 5: "Cost: metered compute <= $10 a day plus half the trailing week's realized net profit, never above
@@ -3961,7 +4064,7 @@ the equity lots: $1900 - 0.15 x E against the one-ETF lots above. The gateway's 
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `1687e4e3`, full digest `3feab26d` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `baaa5ad6` / `e865fed5`.
+Money digest `77c3cfed`, full digest `138ee8eb` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `92bca93b` / `779ca4d7`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered

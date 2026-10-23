@@ -1,0 +1,1913 @@
+"""PREREG-EVL-8's PROOF AND ITS TESTS OF TIME (its sections 4.4, 1.2, 7.2 and 4.6; F10; the task's item 6), on the
+invented week of league/tests/evl8_world.py (no figure here is a market's):
+
+- every earlier program's shadow intents (PREREG-EVL-1 to -5's and R3's births') and every earlier seatable program's
+  real-money picks are byte-identical with and without PREREG-EVL-8 (pinned, its morning passes, PX runs, meta-learners'
+  parts and re-decisions made at their times), and so are the lane's eligibility, universe, bars and marks (PX never
+  changes an earlier record, F10) and R3's births job's facts and its validator's Jaccards (section 4.4's exclusion);
+- the House's own book plans every earlier row of an auction exactly as without this file, and this file's buys only
+  after them, BY TIME, PX's learning room 4 (league/equity/live.py `_event_decide_8`, through the real book);
+- THE MEMBERS RULE (section 7.2): fixed by stored times alone, the same `mrl_pool` rows live and in a catch-up a day
+  later; a re-decision's late event, a cut part's rows and a mark stored after the lane's first finish are never read;
+- section 1.2's TEST (i)-(v) and section 4.6's TEST (i)-(v), the House's timing;
+- a look-ahead test plants a future bar and a future member outcome and shows both ignored;
+- a meta-learner fed noise records picks noise."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import math
+import random
+import tempfile
+import unittest
+from decimal import Decimal as D
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+from league.equity import live as L
+from league.events import book as EB
+from league.events import calendar as C
+from league.events import house as H
+from league.events import meta as MT
+from league.events import programs as P
+from league.events import px as PXL
+from league.events import run as R
+from league.events import store as S
+from league.tests import evl5_world as W5
+from league.tests import evl8_world as W
+from league.tests import test_events_book as TB
+
+et = W.et
+D_DAY, N_DAY, P_DAY = W.D_DAY, W.N_DAY, W.P_DAY
+
+
+def lane_tables(root: Path) -> dict[str, list]:
+    with S.Store(root) as st:
+        out = {}
+        for table, order in (("eligibility", "day, cik, rule"), ("universe", "day, symbol"), ("bars", "symbol, day, adj"),
+                             ("marks", "symbol, day, label")):
+            cols = [r[1] for r in st.db.execute(f"PRAGMA table_info({table})")]
+            keep = [c for c in cols if c not in ("decided_at", "fetched_at")]
+            out[table] = [tuple(r) for r in st.db.execute(f"SELECT {', '.join(keep)} FROM {table} ORDER BY {order}")]
+        return out
+
+
+class TheWeekWithAndWithout(unittest.TestCase):
+    """THE PROOF: the same invented week decided twice, PREREG-EVL-8 off (unpinned, none of its runs) and on."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+        cls.off = W.run_week(root / "off", eight=False)
+        cls.on = W.run_week(root / "on", eight=True)
+        cls.off_tables = lane_tables(root / "off")
+        cls.on_tables = lane_tables(root / "on")
+        with W.pinned():
+            with S.Store(root / "on") as st:
+                cls.mine = [dict(r) for r in st.db.execute(
+                    "SELECT program, status, COUNT(*) AS n FROM intents GROUP BY program, status")]
+                cls.receipts = [str(r[0]) for r in st.db.execute("SELECT job FROM receipts ORDER BY id")]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_every_earlier_programs_shadow_intents_are_byte_identical(self):
+        off = [r for r in self.off["intents"] if not P.is_8(r[0])]
+        on = [r for r in self.on["intents"] if not P.is_8(r[0])]
+        self.assertTrue(off)
+        self.assertEqual(off, on)
+        self.assertEqual([r for r in self.off["intents"] if P.is_8(r[0])], [], "off: no intent of this file")
+
+    def test_every_earlier_seatable_programs_real_money_picks_are_identical(self):
+        self.assertTrue(any(self.off["picks"].values()), "the week trades")
+        self.assertEqual(self.off["picks"], self.on["picks"])
+
+    def test_births_facts_and_jaccards_are_identical(self):
+        self.assertTrue(self.off["births"]["facts"], "the facts are read")
+        self.assertEqual(self.off["births"], self.on["births"])
+        self.assertNotIn("PX-DROP-ON", json.dumps(self.on["births"]), "births never read a row of this file")
+
+    def test_px_never_changes_an_earlier_record(self):
+        for table in ("eligibility", "universe", "bars", "marks"):
+            self.assertEqual(self.off_tables[table], self.on_tables[table], table)
+
+    def test_and_this_files_rows_were_decided(self):
+        programs = {r["program"] for r in self.mine}
+        self.assertTrue({"PX-DROP-ON", "PX-SURGE-ON", "PX-GAP-O1", "CTRL-PX-ALL-ON", "CTRL-PX-ALL-O1"} <= programs,
+                        programs)
+        for job in ("decide-close-px8:2026-10-27", "decide-open-px8:2026-10-27", "decide-open-meta8:2026-10-27",
+                    "decide-close-meta8:2026-10-27", "decide-close-px8:2026-10-28"):
+            self.assertIn(job, self.receipts)
+        removed = [r for r in self.mine if r["status"] == PXL.WHY_REMOVED]
+        self.assertTrue(removed, "PXB's article stored after D's decision: the re-decision removed it")
+
+
+def learners_failed(h, auction: str) -> None:
+    """PREREG-EVL-7's learners of the auction (pinned in the tree) with their own live receipts FINISHED and naming none
+    of them (league/events/learner.py `live_state` "not_named": section 4.6, "a part the receipt does not name has
+    failed"), so their pass of the auction plans nothing and this file's pass may follow it."""
+    from league.events import learner as LR
+
+    at = dt.datetime(2026, 11, 4, 20, 47, 30, tzinfo=dt.timezone.utc)
+    for prog in P.learners():
+        if (prog.entry_at == "close") == (auction == "on"):
+            rid = h.lane.st.start_receipt(LR.live_job(prog, TB.DAY), now=at)
+            h.lane.st.finish_receipt(rid, "failed", {"error": "invented"}, now=at)
+
+
+def seat(program: str) -> P.Program:
+    """The SEATING version of an earlier program in the tree as it stands (PREREG-EVL-6's version 3 of the nine)."""
+    return next(p for p in P.SEATING if p.id == program)
+
+
+class TheBookWithAndWithout(TB.EventTest):
+    """THE HOUSE'S OWN BOOK (league/equity/live.py, the real `size_entry`): an earlier close-entry row and PX-DROP-ON at
+    the same close. The earlier row's buys are planned and sized exactly as without this file; PX's in its own late pass
+    after them, at most its learning room 4, never a name the earlier row was given."""
+
+    def seed(self, h, *, eight: bool) -> None:
+        # EVL-ERN-REACT-ON (version 2, a close entry): an earnings 8-K and its reaction
+        prog = seat("EVL-ERN-REACT-ON")
+        h.lane.filing("a-1", TB.CIK, accepted=TB.iso(TB.DAY, 11, 0), received=TB.iso(TB.DAY, 11, 1))
+        h.lane.universe(TB.DAY, "ACME", TB.CIK, 16.0)
+        h.lane.intent(prog, "8k:a-1", "ACME", TB.CIK, TB.DAY, TB.NEXT)
+        h.lane.st.db.execute("INSERT INTO bars(symbol, day, adj, o, h, l, c, v, fetched_at) VALUES('ACME', ?, 'raw', 16, "
+                             "16, 16, 16.0, 1e6, 'x')", (TB.PRIOR.isoformat(),))
+        h.lane.st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('ACME', ?, '1530', "
+                             "16.8, 'x', 'sip-1min', 'x')", (TB.DAY.isoformat(),))
+        h.symbol("ACME", last=16.0)
+        if not eight:
+            return
+        px = PXL.open_px(h.lane.st.root)
+        try:
+            run = "decide-close-px8:invented"
+            for n, sym in enumerate(("ACME", "PXA", "PXB", "PXC", "PXD", "PXE"), 1):
+                cik = TB.CIK if sym == "ACME" else W.PX_CIK[sym]
+                px.put_result(TB.DAY, cik, S.LIVE_RULE, {"symbol": sym, "name": sym, "exchange": "NASDAQ",
+                                                          "prev_close": 16.0, "adv20": 4e7, "adv20sh": 2e6,
+                                                          "bench": "IWM", "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc))
+                event = f"px:PX-DROP-ON:{TB.DAY}:{cik}"
+                px.db.execute("INSERT INTO px_decisions(run, auction, day, program, rank, event, cik, symbol, rank_key, "
+                              "adv20, prev_close) VALUES(?, 'on', ?, 'PX-DROP-ON', ?, ?, ?, ?, ?, 4e7, 16.0)",
+                              (run, TB.DAY.isoformat(), n, event, cik, sym, 10.0 - n))
+                h.lane.intent(P.BY_KEY[("PX-DROP-ON", 1)], event, sym, cik, TB.DAY, TB.NEXT)
+                if sym != "ACME":
+                    h.symbol(sym, last=16.0)
+            px.db.execute("INSERT INTO px_meta(key, value) VALUES(?, ?)",
+                          (PXL.DECIDED_KEY.format(auction="on", day=TB.DAY.isoformat()),
+                           json.dumps({"run": run, "kind": "live", "receipt": 1, "at": "x"})))
+        finally:
+            px.close()
+
+    def run_day(self, *, eight: bool):
+        ctx = W.pinned() if eight else W.pinned(None)      # (off: no row of this file in any registry)
+        with ctx:
+            root = self.root / ("on" if eight else "off")
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            self.seed(h, eight=eight)
+            learners_failed(h, "on")
+            self.ready(h)
+            h.day(upto=(15, 48))
+            return h, [dict(r) for r in h.event_intents("buy")]
+
+    def test_the_earlier_rows_buys_identical_and_px_after_them(self):
+        _, off = self.run_day(eight=False)
+        h, on = self.run_day(eight=True)
+        earlier = [r for r in on if not P.is_8(r["program"])]
+        self.assertEqual({r["symbol"] for r in off}, {"ACME"}, "the earlier rows buy ACME at the close")
+        keep = ("program", "version", "event", "symbol", "band", "tif", "limit_px", "rank_key", "target_usd", "status")
+        self.assertEqual([{k: r[k] for k in keep} for r in off], [{k: r[k] for k in keep} for r in earlier])
+        mine = [r for r in on if P.is_8(r["program"])]
+        self.assertEqual([r["symbol"] for r in mine], ["PXA", "PXB", "PXC", "PXD"],
+                         "ACME was given to the earlier row; the learning room is 4")
+        self.assertTrue(all(int(m["iid"]) > max(int(r["iid"]) for r in earlier) for m in mine), "planned after them")
+        rows = {r["at"]: r for r in h.state.rows("SELECT * FROM eq_event_decisions WHERE day=?", (TB.DAY.isoformat(),))}
+        self.assertIn("close-px8", rows)
+        self.assertEqual(json.loads(rows["close-px8"]["summary"])["programs"]["PX-DROP-ON"]["room"], 4)
+        sent = [b["symbol"] for b in h.bodies() if b["side"] == "buy" and b["time_in_force"] == "cls"]
+        if sent:
+            self.assertEqual(sent[0], "ACME", "the earlier row's buy is sent first")
+
+
+class TheEarlierBuysFirst(TB.EventTest):
+    """SECTION 4.2 IN THE HOUSE'S OWN BOOK (the money review of release 1019n): "an earlier file's row ... is never
+    refused, at its own auction, because of this file's buys", and "no earlier file's row ever waits for a read, a write
+    or a room of this file". (1) An earlier row's buy the gateway refused with a reading it could not make (424 `bars`)
+    keeps its room from this file's buys until its retry (league/equity/live.py `_event_kept_8`): with PREREG-EVL-8 on,
+    its retry is sized as without it. (2) Every earlier row's send of a tick (A80's re-send) goes BEFORE this file's late
+    pass, so a slow read of that pass (its picks' bars) never holds it past the window's cut-off."""
+
+    def harness_of(self, name: str, *, eight: bool, venue=None):
+        root = self.root / name
+        root.mkdir()
+        h = TB.Harness(root)
+        if venue is not None:
+            h.venue = venue(h)
+            h.book = h.new_book()
+        self.addCleanup(h.state.close)
+        self.addCleanup(h.lane.st.close)
+        self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+        TheBookWithAndWithout.seed(self, h, eight=eight)      # (ACME for an earlier close row; PX-DROP-ON's picks)
+        learners_failed(h, "on")
+        return h
+
+    def retry_day(self, *, eight: bool):
+        from league.live.venue import Submitted
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            def venue(h):       # (its gateway refuses the FIRST buy of ACME with 424 `bars`: nothing sent, a retry)
+                v = TB.AuctionVenue(h.market, h.clock)
+                real = v.submit
+                refused: list[int] = []
+
+                def submit(body, *, exit):
+                    if body["side"] == "buy" and body["symbol"] == "ACME" and not refused:
+                        refused.append(1)
+                        v.sent.append(dict(body))
+                        return Submitted(False, {"error": "bars", "cap": "bars"}, "HTTP 424 bars", status=424)
+                    return real(body, exit=exit)
+                v.submit = submit
+                return v
+            h = self.harness_of("on" if eight else "off", eight=eight, venue=venue)
+            h.options.reserved_usd = 1800.0         # (the cash the event buys may take: $2,000 - $1,800 - the $50 reserve)
+            self.ready(h)
+            h.day(upto=(15, 48))
+            return h
+
+    def test_an_earlier_buys_retry_is_sized_as_without_this_file(self):
+        off = self.retry_day(eight=False)
+        on = self.retry_day(eight=True)
+        mine = lambda h: [b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]  # noqa: E731
+        self.assertEqual([(b["qty"], b["limit_price"]) for b in mine(off)], [("5", "20.00"), ("5", "20.00")],
+                         "without PREREG-EVL-8: refused (424) at 15:47, five shares at its 15:48 retry")
+        self.assertEqual([(b["qty"], b["limit_price"]) for b in mine(on)], [("5", "20.00"), ("5", "20.00")],
+                         "with it: the same retry, the same five shares")
+        acme = [r for r in on.event_intents("buy") if r["symbol"] == "ACME"]
+        self.assertEqual([r["status"] for r in acme], ["sent"])
+        px = {r["symbol"]: r for r in on.event_intents("buy") if P.is_8(r["program"])}
+        self.assertEqual(px["PXA"]["status"], "sent", "PX's buys take what ACME's retry leaves")
+        sent = [b["symbol"] for b in on.bodies() if b["side"] == "buy"]
+        self.assertEqual(sent[0], "ACME")
+        self.assertLess(sent.index("PXA"), len(sent) - 1, "PXA went at 15:47, sized beside ACME's kept room")
+        self.assertEqual([(b["symbol"], b["qty"]) for b in on.bodies() if b["side"] == "buy"],
+                         [("ACME", "5"), ("PXA", "2"), ("ACME", "5")],
+                         "at 15:47 PXA takes two shares beside ACME's kept $100, PXB to PXD are refused there")
+        # (release 1019n's second money review, sections 4.2 and 4.6: a buy of this file that fits only but for the
+        # room earlier rows' buys keep is refused IN ITS TICK, never left waiting for a later one)
+        held = [r for r in on.event_intents("buy") if r["symbol"] in ("PXB", "PXC", "PXD")]
+        self.assertEqual([r["status"] for r in held], ["refused"] * 3)
+        self.assertTrue(all(w.startswith("sizing") and L.HELD_EARLIER in w for w in (r["why"] for r in held)),
+                        [r["why"] for r in held])
+
+    def slow_day(self, *, eight: bool):
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            def venue(h):
+                v = VC.CancellingVenue(h.market, h.clock)
+                v.venue_cancels = [0.005]       # (ACME's first buy, cancelled by the venue 5 ms after it: A80's re-send)
+                return v
+            h = self.harness_of("slow-on" if eight else "slow-off", eight=eight, venue=venue)
+            real = h.market.bars
+            reads: list[float] = []
+
+            def bars(symbols, **kw):        # (this file's picks' bars: a read that takes 70 s)
+                if any(str(x).startswith("PX") for x in symbols):
+                    h.clock.set(h.clock() + 70.0)
+                    reads.append(h.clock())
+                return real(symbols, **kw)
+            h.market.bars = bars
+            h.lane.decided(TB.DAY, "open")
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            h.lane.decided(TB.DAY, "close")         # (the lane's close receipt at 15:47:40: PX's pass at the 15:48 tick)
+            h.tick(15, 48)
+            return h, reads
+
+    def test_an_earlier_rows_re_send_never_waits_for_this_files_reads(self):
+        off, _ = self.slow_day(eight=False)
+        on, reads = self.slow_day(eight=True)
+        acme = lambda h: [b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]  # noqa: E731
+        self.assertEqual(len(acme(off)), 2, "without PREREG-EVL-8: the buy and A80's re-send at 15:48")
+        self.assertEqual(len(acme(on)), 2, "with it: A80's re-send goes at 15:48:03, before this file's slow read")
+        self.assertTrue(reads, "this file's pass read its picks' bars in that tick")
+        self.assertEqual([b["symbol"] for b in on.bodies() if b["side"] == "buy" and P.is_8(
+            next(r["program"] for r in on.event_intents("buy") if r["symbol"] == b["symbol"]))], [],
+            "this file's buys, planned after a read that ended past 15:49:00, are not sent")
+
+
+def next_tick(ended: float) -> float:
+    """When live/step.py `_loop` runs the next minute() after one that ENDED at `ended` (its own formula: the next
+    minute's `MINUTE_OFFSET` counted from the end, so a tick ending past it skips that minute)."""
+    from league.live.step import MINUTE_OFFSET
+
+    wait = 60.0 - (ended % 60.0) + MINUTE_OFFSET
+    if wait >= 60.0:
+        wait -= 60.0
+    return ended + wait
+
+
+class TimedClient:
+    """A venue client's timeout as league/live/venue.py's is read (`timeout`, per request), for the slow fakes below:
+    a request that takes longer than it raises TimeoutError once it has taken it (the fake clock moves)."""
+
+    def __init__(self, clock, timeout: float = 20.0):
+        self.clock, self.timeout, self.seen = clock, float(timeout), []
+
+    def take(self, seconds: float) -> None:
+        self.seen.append(self.timeout)
+        if seconds > self.timeout:
+            self.clock.set(self.clock() + self.timeout)
+            raise TimeoutError("timed out")
+        self.clock.set(self.clock() + seconds)
+
+
+class TheEarlierList(TB.EventTest):
+    """SECTIONS 4.2 AND 4.3 IN THE BOOK (release 1019n's second money review, its major 2): THE EARLIER ROWS' ELIGIBLE
+    LIST, AND WHEN IT IS SENT, ARE EXACTLY AS WITHOUT THIS FILE. `book.eligible` is the lane's live rows alone; this
+    file's names (`book.eligible_8`) are sent with them only in its own pass and send (league/equity/live.py
+    `_event_publish` `eight`), after every earlier send of the tick, and a list they widened never makes an earlier row
+    POST again. The review's case: ACME's 15:47 buy cancelled by the venue (A80), an EVL-META-ON pick that is no lane
+    name landing before the 15:48 tick, the gateway's eligible route down at 15:48."""
+
+    def land_meta_on(self, h) -> None:
+        MT.ensure(h.lane.st)
+        h.lane.st.db.execute("INSERT INTO mrl_decisions(program, version, day, kind, receipt, started_at, finished_at, "
+                             "status, code_sha, members, eligible, picks) VALUES('EVL-META-ON', 1, ?, 'live', 1, 'x', "
+                             "'x', 'ok', 'c', 1, 1, 1)", (TB.DAY.isoformat(),))
+        h.lane.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                             "exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-META-ON', 1, 'px:x', 'MZZ', "
+                             "'0000007999', ?, ?, 'close', ?, 'open', 16.0, 'shadow', 'planned', 'mrl')",
+                             (TB.iso(TB.DAY, 15, 46), TB.DAY.isoformat(), TB.NEXT.isoformat()))
+        h.lane.st.set_meta(PXL.RAN_KEY.format(key="close-meta", day=TB.DAY.isoformat()), "{}")
+
+    def close_day(self, *, eight: bool):
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            root = self.root / ("on" if eight else "off")
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's first buy, cancelled 5 ms after it: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=False)     # (ACME for the earlier close row only)
+            learners_failed(h, "on")
+            self.ready(h)
+            log: list[tuple[str, Any]] = []
+            post, submit = h.venue.client.request, h.venue.submit
+
+            def request(method, url, *, headers, body, timeout):
+                log.append(("list", tuple(json.loads(body)["symbols"])))
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                log.append(("order", body["symbol"]))
+                return submit(body, exit=exit)
+            h.venue.client.request, h.venue.submit = request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            if eight:
+                self.land_meta_on(h)
+            h.venue.client.fail = True              # (the gateway's eligible route fails at 15:48)
+            mark = len(log)
+            h.tick(15, 48)
+            acme = [r for r in h.event_intents("buy") if r["symbol"] == "ACME"]
+            return log[mark:], acme
+
+    def test_the_earlier_rows_re_send_goes_as_without_this_file(self):
+        off, off_acme = self.close_day(eight=False)
+        on, on_acme = self.close_day(eight=True)
+        self.assertEqual(off, [("order", "ACME")], "without PREREG-EVL-8: A80's re-send at 15:48, no POST")
+        self.assertEqual(on[:1], [("order", "ACME")], "with it: the same re-send, first, with no POST before it")
+        self.assertNotIn(("list", ("ACME",)), on, "the earlier rows' list is never sent again")
+        self.assertEqual([r["status"] for r in on_acme], [r["status"] for r in off_acme])
+        self.assertFalse(any("eligible list" in str(r["why"]) for r in on_acme), [r["why"] for r in on_acme])
+
+    def test_the_earlier_path_never_reads_this_files_names(self):
+        """`book.eligible` is the lane's live rows alone: the earlier rows' path reads no store of this file."""
+        with W.pinned():
+            root = self.root / "names"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            with mock.patch.object(EB, "eligible_8", side_effect=AssertionError("read on the earlier path")):
+                self.assertEqual(EB.eligible(lane, TB.DAY), ["ACME"])
+            self.assertEqual(EB.eligible_8(lane, TB.DAY), {"ACME", "PXA", "PXB", "PXC", "PXD", "PXE"})
+
+    def test_this_files_names_go_in_its_own_pass_and_an_earlier_buy_needs_no_post_after_them(self):
+        with W.pinned():
+            root = self.root / "own"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)
+            h.day(upto=(15, 48))
+            lists = [tuple(x["symbols"]) for x in h.venue.client.lists]
+            self.assertEqual(lists[0], ("ACME",), "the earlier rows' list first, alone")
+            self.assertIn(("ACME", "PXA", "PXB", "PXC", "PXD", "PXE"), lists, "this file's names in its own pass")
+            self.assertEqual(lists.count(("ACME",)), 1, "never the earlier rows' list again once widened")
+
+    def test_once_this_files_names_are_at_the_gateway_an_earlier_re_send_posts_no_list(self):
+        """The second half of the rule (the money lens's re-review of release 1019n): with the lane's close receipt in
+        before the 15:47 tick, PX's close pass POSTs the earlier list with this file's names at 15:47; ACME's 15:47 buy
+        is cancelled by the venue, and at 15:48 (the eligible route up) its A80 re-send goes FIRST WITH NO POST BEFORE
+        IT: the gateway's list was made of the earlier rows' list (kv `eq_event_list` `base`), so the earlier path
+        never POSTs its own list again (a POST it would never wait for without this file, which would narrow the
+        gateway's list)."""
+        from league.tests import test_events_venue_cancel as VC
+
+        with W.pinned():
+            root = self.root / "base"
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's 15:47 buy, cancelled 5 ms after it: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)                           # (the lane's close receipt in: PX's close pass at 15:47)
+            log: list[tuple[str, Any]] = []
+            post, submit = h.venue.client.request, h.venue.submit
+
+            def request(method, url, *, headers, body, timeout):
+                log.append(("list", tuple(json.loads(body)["symbols"])))
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                log.append(("order", body["symbol"]))
+                return submit(body, exit=exit)
+            h.venue.client.request, h.venue.submit = request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            union = ("ACME", "PXA", "PXB", "PXC", "PXD", "PXE")
+            self.assertEqual([x for k, x in log if k == "list"][-1], union, "PX's 15:47 pass sent its names")
+            self.assertEqual(h.state.get("eq_event_list")["count"], len(union))
+            self.assertIn(("order", "PXA"), log, "PX's buys went at 15:47")
+            mark = len(log)
+            h.tick(15, 48)
+            after = log[mark:]
+            self.assertEqual(after[:1], [("order", "ACME")], "ACME's A80 re-send at 15:48, first")
+            self.assertEqual([x for x in after if x[0] == "list"], [], "no POST of the earlier rows' list after the union")
+            self.assertEqual(len([b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]), 2)
+
+
+class TheTickBound(TB.EventTest):
+    """SECTIONS 4.2 AND 4.6 IN THE BOOK'S MINUTE (release 1019n's second money review, its major 3): this file's work
+    in a tick (its late pass's reads, its POST, its sends) is bounded from THE TICK'S START (`live.EIGHT_TICK_S`, each
+    request's timeout ending by it), so it never runs the minute into the next one: live/step.py `_loop` starts the next
+    minute() at the next :03 counted from the tick's END, and a 15:47 tick ending past 15:48:03 skips the 15:48 tick,
+    where the earlier rows' A80 re-sends go. Slow fakes honour the clients' timeouts; with the lane's close receipt in
+    before the 15:47 tick, PX's close pass runs there."""
+
+    def day(self, name: str, *, eight: bool, bars_s: float = 0.0, list_s: float = 0.0, order_s: float = 0.0):
+        from league.live.venue import Submitted
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            root = self.root / name
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's 15:47 buy, cancelled by the venue: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=eight)
+            learners_failed(h, "on")
+            h.lane.decided(TB.DAY, "open")
+            data = h.market.client = TimedClient(h.clock, 45.0)     # (a market data client of 45 s, as the lane's)
+            h.venue.client.timeout = 20.0                       # (the real account's client, as the book caps it)
+            real_bars, post, submit = h.market.bars, h.venue.client.request, h.venue.submit
+            self.order_timeouts: list[float] = []
+
+            def bars(symbols, **kw):
+                if bars_s and any(str(x).startswith("PX") for x in symbols):
+                    data.take(bars_s)
+                return real_bars(symbols, **kw)
+
+            def request(method, url, *, headers, body, timeout):
+                if list_s and any(x.startswith("PX") for x in json.loads(body)["symbols"]):
+                    TimedClient(h.clock, timeout).take(list_s)
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                if order_s and str(body["symbol"]).startswith("PX"):
+                    self.order_timeouts.append(h.venue.client.timeout)
+                    try:
+                        TimedClient(h.clock, h.venue.client.timeout).take(order_s)
+                    except TimeoutError as exc:
+                        return Submitted(False, None, f"no answer: {exc}", unknown=True)
+                return submit(body, exit=exit)
+            h.market.bars, h.venue.client.request, h.venue.submit = bars, request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46)):
+                h.tick(hh, mm)
+            h.lane.decided(TB.DAY, "close")         # (the lane's close receipt in before the 15:47 tick)
+            start = TB.at(TB.DAY, 15, 47)
+            h.tick(15, 47)
+            ended = h.clock() + 0.5                 # (the tick's own work: the fake clock does not move for it)
+            nxt = next_tick(ended)
+            stamp = dt.datetime.fromtimestamp(nxt, TB.NY)
+            h.tick(stamp.hour, stamp.minute, stamp.second)
+            return h, start, ended, nxt
+
+    def acme(self, h) -> int:
+        return len([b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"])
+
+    def test_a_slow_read_and_post_of_this_files_pass_end_by_the_bound_and_the_next_minute_runs(self):
+        """Its picks' bars read hanging (the data client's 45 s) and its eligible-list POST hanging (`book.publish`'s 20
+        s): without the bound the 15:47 tick ends at 15:48:08 and the 15:48 tick, with ACME's re-send, is skipped."""
+        off, start, ended, nxt = self.day("off", eight=False, bars_s=61.0, list_s=61.0)
+        self.assertEqual((self.acme(off), nxt), (2, TB.at(TB.DAY, 15, 48)), "without PREREG-EVL-8: 15:47 and 15:48")
+        on, start, ended, nxt = self.day("on", eight=True, bars_s=61.0, list_s=61.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5, "this file's work ended by the tick's bound")
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48), "the 15:48 tick runs")
+        self.assertEqual(self.acme(on), 2, "ACME's A80 re-send goes at 15:48, as without this file")
+        self.assertLessEqual(max(on.market.client.seen), L.EIGHT_TICK_S, "the read's timeout capped at the bound")
+        px = [r for r in on.event_intents("buy") if P.is_8(r["program"])]
+        self.assertTrue(px, "PX's pass was planned at 15:47")
+        self.assertEqual({r["status"] for r in px}, {"refused"}, "not sent in their tick: refused, never sent at 15:48")
+        self.assertTrue(all(r["why"].startswith(L.EIGHT_UNSENT) for r in px), [r["why"] for r in px])
+        self.assertEqual([b for b in on.bodies() if str(b["symbol"]).startswith("PX")], [])
+
+    def test_slow_sends_of_this_file_stop_at_the_bound(self):
+        """Each of its orders hanging past the account client's 20 s: the first takes its 20 s, the second only what
+        the bound leaves (its timeout capped), the rest are not sent in the tick and are refused."""
+        on, start, ended, nxt = self.day("sends", eight=True, order_s=25.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5)
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48))
+        self.assertEqual(self.acme(on), 2, "ACME's A80 re-send goes at 15:48")
+        self.assertEqual(len(self.order_timeouts), 2, self.order_timeouts)
+        self.assertEqual(self.order_timeouts[0], 20.0)
+        self.assertLess(self.order_timeouts[1], 20.0, "the second order's timeout ends by the bound")
+        px = {r["symbol"]: r for r in on.event_intents("buy") if P.is_8(r["program"])}
+        unsent = [r for r in px.values() if not on.book._intent_orders(int(r["iid"]))]
+        self.assertEqual(len(unsent), len(px) - 2)
+        self.assertEqual({r["status"] for r in unsent}, {"refused"})
+        self.assertTrue(all(L.EIGHT_BOUND in r["why"] for r in unsent), [r["why"] for r in unsent])
+
+    def test_a_slow_post_of_this_files_names_ends_by_the_bound(self):
+        on, start, ended, nxt = self.day("post", eight=True, list_s=61.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5)
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48))
+        self.assertEqual(self.acme(on), 2)
+        self.assertEqual({r["status"] for r in on.event_intents("buy") if P.is_8(r["program"])}, {"refused"})
+        self.assertEqual([b for b in on.bodies() if str(b["symbol"]).startswith("PX")], [])
+
+    def test_a_pass_with_too_little_of_the_bound_left_waits_for_the_next_tick(self):
+        """A late pass starts only with `EIGHT_PASS_LEAST_S` of the tick's bound left; else nothing of it is read or
+        written in that tick, and it is planned, and its buys sent, at the next tick inside the window."""
+        with W.pinned():
+            root = self.root / "least"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46)):
+                h.tick(hh, mm)
+            out: dict = {}
+            em = L.S.event_moments(TB.DAY, EB.settings().offsets)
+            start = TB.at(TB.DAY, 15, 47)
+            h.clock.set(start + L.EIGHT_TICK_S - L.EIGHT_PASS_LEAST_S + 1)
+            h.book._event_decide_8(start, em, "close", EB.settings(), h.book._event_adapter(), out,
+                                   bound=start + L.EIGHT_TICK_S)
+            self.assertIn("waits for the next tick", out["event_decide_8"])
+            self.assertEqual([r for r in h.event_intents("buy") if P.is_8(r["program"])], [])
+            h.tick(15, 48)
+            sent = [b["symbol"] for b in h.bodies() if str(b["symbol"]).startswith("PX")]
+            self.assertEqual(sent, ["PXA", "PXB", "PXC", "PXD"], "planned and sent at the 15:48 tick")
+
+
+class TheLookAhead(unittest.TestCase):
+    """Section 1.2: nothing read after tau. A future bar in the vendor's answer and a future member outcome are planted:
+    both are ignored."""
+
+    def setUp(self):
+        ctx = W.pinned()
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def decide(self, name: str, plant: bool) -> tuple[dict, list]:
+        w = W.World8(Path(self.tmp.name) / name)
+        try:
+            w.st.set_meta("equity:2026-10-26", "1900")
+            w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+            real = W.Gateway8._minutes
+
+            def planted(gw, symbols, start, end):
+                out = real(gw, symbols, start, end)
+                if plant:
+                    for s in symbols:
+                        out[s].append({"t": S.iso(end + dt.timedelta(minutes=1)), "o": 1.0, "h": 1.0, "l": 1.0,
+                                       "c": 1.0, "v": 9e9})
+                return out
+            with mock.patch.object(W.Gateway8, "_minutes", planted):
+                w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on")
+            if plant:      # a future member outcome: an outcome of a source event of D settled after the state time
+                w.st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                                "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) SELECT "
+                                "program, version, event, 20, 30, 'SPY', 1, 1, 7, 7, 0.5, 0, 0.5, 1, ?, 'settled' FROM "
+                                "intents WHERE program='CTRL-PX-ALL-ON'", (S.iso(et(D_DAY, 15, 40)),))
+            w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+            w.at(et(D_DAY, 15, 48, 10)).meta_decide(D_DAY, "on")
+            px = w.px()
+            try:
+                values = {c: {k: v.get(k) for k in ("x", "zd", "move_d", "vd")}
+                          for c, v in PXL.features(px.db, D_DAY, "on").items()}
+            finally:
+                px.close()
+            state = [tuple(r) for r in w.st.db.execute("SELECT rule_h, a, g, nb FROM mrl_stats ORDER BY rule_h")]
+            mine = [tuple(r) for r in w.st.db.execute("SELECT program, event, status, rank_key FROM intents WHERE "
+                                                      "program LIKE 'PX-%' OR program LIKE 'EVL-META%' ORDER BY 1, 2")]
+            return values, state + mine
+        finally:
+            w.close()
+
+    def test_a_future_bar_and_a_future_member_outcome_are_ignored(self):
+        clean = self.decide("clean", False)
+        planted = self.decide("planted", True)
+        self.assertEqual(clean[0], planted[0], "a bar after the value's knowable time is never read")
+        self.assertEqual(clean[1], planted[1], "an outcome settled after the state time is never in the state")
+
+    def test_the_state_reads_only_outcomes_settled_before_sigma(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                MT.ensure(st)
+                st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                              "exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-CTRL-NEWS-ALL-O1', 1, 'news:1', "
+                              "'S', '1', 'x', '2026-10-26', 'open', '2026-10-26', 'close', NULL, 'shadow', 'exited', NULL)")
+                st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                              "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES("
+                              "'EVL-CTRL-NEWS-ALL-O1', 1, 'news:1', 20, 21, 'SPY', 1, 1, 7, 7, 0.05, 0, 0.05, 1, "
+                              "'2026-10-27T13:30:00Z', 'settled')")
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('S', '2026-10-26', "
+                              "'open', 20, 't', 'sip', 'x')")
+                st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
+                              "VALUES('2026-10-26', 'S', '1', 'n', 'NASDAQ', 20, 1e8, 'SPY', NULL)")
+                before = S.parse_iso("2026-10-27T13:00:00Z")
+                after = S.parse_iso("2026-10-27T14:00:00Z")
+                day = dt.date(2026, 10, 26)
+                tags = ["EVL-CTRL-NEWS-ALL-O1:1"]
+                self.assertEqual(MT.member_outcome(st, "1", day, "o1", tags, before)["status"], "pending")
+                got = MT.member_outcome(st, "1", day, "o1", tags, after)
+                self.assertEqual((got["status"], got["event"]), ("settled", "news:1"),
+                                 "the first tag's intent OF THE ISSUER at the member's auctions")
+                self.assertEqual(MT.member_outcome(st, "1", day, "on", tags, after)["status"], "terminal",
+                                 "another auction's intent is not the member's")
+                st.db.execute("UPDATE marks SET px=26 WHERE symbol='S'")
+                self.assertEqual(MT.member_outcome(st, "1", day, "o1", tags, after),
+                                 {"status": "terminal", "why": "limit at entry"},
+                                 "F9: an entry printed above 1.25 x the previous close is no outcome")
+            finally:
+                st.close()
+
+
+class TheStateClock(unittest.TestCase):
+    """Section 7.4 on stored rows: an EARLIER session's member whose outcome settles AFTER the state time sigma of D is
+    not in D's state (its session has not entered), and is once it settles before sigma; the state is the same
+    whenever it is computed (a catch-up a week later reads it as of sigma)."""
+
+    def test_an_outcome_settled_after_sigma_is_out_of_the_state_and_in_once_settled_before_it(self):
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                MT.ensure(st)
+                days = [dt.date(2026, 10, d) for d in (26, 27, 28, 29, 30)]
+                with st.tx() as db:
+                    for d in days:
+                        db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                                   (d.isoformat(), S.iso(et(d, 9, 30)), S.iso(et(d, 16, 0))))
+                prog = P.BY_KEY[("EVL-META-O1", 1)]
+                src = "EVL-CTRL-NEWS-ALL-O1"
+                first = days[0]
+                st.db.execute("INSERT INTO mrl_pool(program, version, day, cik, symbol, event, knowable_at, tags, features, "
+                              "xrules, eligible, adv20, prev_close, cost_rt) VALUES(?, 1, ?, '1', 'S', 'news:1', NULL, ?, ?, "
+                              "'[]', 1, 1e8, 20, 0.0014)", (prog.id, first.isoformat(), json.dumps([f"{src}:1"]),
+                                                            json.dumps(["adv>=100M", "px10-50"])))
+                st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                              "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, 'news:1', 'S', '1', 'x', ?, "
+                              "'open', ?, 'close', NULL, 'shadow', 'exited', NULL)", (src, first.isoformat(), first.isoformat()))
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('S', ?, 'open', 20, "
+                              "'t', 'sip', 'x')", (first.isoformat(),))
+                st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
+                              "VALUES(?, 'S', '1', 'n', 'NASDAQ', 20, 1e8, 'SPY', NULL)", (first.isoformat(),))
+                d = days[2]
+                sig = MT.sigma_time(C.session(st, d), "o1")
+                st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                              "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, 1, "
+                              "'news:1', 20, 21, 'SPY', 1, 1, 7, 7, 0.05, 0, 0.05, 1, ?, 'settled')",
+                              (src, S.iso(sig + dt.timedelta(minutes=1))))
+                late = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(late["entered"], 0, "settled one minute after sigma: the session has not entered")
+                self.assertEqual(late["stats"], {})
+                again = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(again, late, "computed again (a catch-up), the same state")
+                st.db.execute("UPDATE outcomes SET settled_at=? WHERE event='news:1'", (S.iso(sig - dt.timedelta(minutes=1)),))
+                early = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(early["entered"], 1, "settled before sigma: in the state")
+                self.assertIn("g:adv>=100M", early["stats"])
+            finally:
+                st.close()
+
+
+class TheCodeIdentity(unittest.TestCase):
+    """Section 8: every catch-up is decided "by the release's code, whose commit sha each receipt records": a
+    `decide-px` and a `decide-meta` catch-up's receipt names its code (the sha256 of px.py's and meta.py's own bytes,
+    PREREG-EVL-7's precedent) and the House release it ran from (None off the House box; the deploy log maps the id to
+    its commit)."""
+
+    def test_each_catch_up_receipt_records_its_code(self):
+        import hashlib
+
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            w = W.World8(Path(tmp) / "lane")
+            try:
+                w.st.set_meta("equity:2026-10-26", "1900")
+                w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+                w.at(et(D_DAY, 15, 50)).px_decide(D_DAY, "on", kind="catchup")
+                w.at(et(D_DAY, 15, 51)).meta_decide(D_DAY, "on", kind="catchup")
+                got = {}
+                for job, summary in w.st.db.execute("SELECT job, summary FROM receipts WHERE job LIKE 'decide-px:%' OR "
+                                                    "job LIKE 'decide-meta:%'"):
+                    got[str(job).split(":")[0]] = json.loads(summary)
+            finally:
+                w.close()
+        here = Path(PXL.__file__)
+        self.assertEqual(got["decide-px"]["code_sha"], hashlib.sha256(here.read_bytes()).hexdigest())
+        self.assertEqual(got["decide-meta"]["code_sha"], hashlib.sha256(Path(MT.__file__).read_bytes()).hexdigest())
+        self.assertIsNone(got["decide-px"]["release"], "off the House box")
+        self.assertIn("release", got["decide-meta"])
+        self.assertEqual(PXL.release_id(Path("/workspace/releases/20261023T040959Z-3ac3423732e2/league/events/px.py")),
+                         "20261023T040959Z-3ac3423732e2")
+        self.assertIsNone(PXL.release_id(Path("/home/x/Work/ltcm/league/events/px.py")))
+
+
+class ThePxSettlement(unittest.TestCase):
+    """Section 4.4 and 3.1 in the nightly score (league/events/score.py `px_event`): a PX event settles on PREREG-EVL-1
+    section 5's prints and costs read from px.sqlite alone (its px_universe row, its `px_marks` prints, its `px_bars`),
+    its outcome in the lane's `outcomes` as every program's; nothing of the lane's `marks`, `bars` or `universe` is
+    written; PREREG-EVL-2's LIMIT AT ENTRY applies (an entry above 1.25 x the raw previous close is skipped); the batched
+    pass never settles one from its cache."""
+
+    def test_a_px_event_settles_on_px_sqlite_alone_and_its_limit_at_entry_holds(self):
+        from league.events import score as SCO
+        from league.tests import test_events_score as TS
+
+        with W.pinned():
+            t = TS.ScoreTest("test_open_to_close_on_the_listing_exchanges_crosses_with_the_cost_allowance")
+            t.setUp()
+            self.addCleanup(t.tearDown)
+            st, d0 = t.st, t.d0
+            d1 = C.nth(st, d0.day, 2)
+            t.equity(dt.date(2026, 10, 19), 20000.0)
+            t.spy(d0)
+            t.spy(d1)
+            px = PXL.open_px(st.root)
+            try:
+                events = {}
+                for sym, cik, prev in (("PXQ", "0000005001", 49.0), ("PXR", "0000005002", 40.0)):
+                    t.tape(d0, sym, "N", None, 51.0, bar=(50.0, 51.0))
+                    t.tape(d1, sym, "N", 52.0, None, bar=(52.0, 52.5))
+                    px.put_result(d0.day, cik, S.LIVE_RULE, {"symbol": sym, "name": sym, "exchange": "NYSE",
+                                                             "prev_close": prev, "adv20": 5e7, "adv20sh": 1e6,
+                                                             "bench": "SPY", "adjusted61": 61, "inputs_at": "x"},
+                                  why=None, run="u", now=d0.open_at)
+                    event = PXL.event_id("PX-DROP-ON", d0.day, cik)
+                    st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                  "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('PX-DROP-ON', 1, ?, "
+                                  "?, ?, ?, ?, 'close', ?, 'open', 3, 'shadow', 'planned', 'px8 live')",
+                                  (event, sym, cik, S.iso(d0.close_decide), d0.day.isoformat(), d1.day.isoformat()))
+                    events[sym] = event
+            finally:
+                px.close()
+            out = SCO.settle(st, t.gw, now=d1.close_at + dt.timedelta(minutes=30))
+            self.assertEqual(out["settled"], 1, out)
+            o = t.outcome(events["PXQ"])
+            self.assertEqual((o["entry_px"], o["exit_px"], o["bench_entry"], o["status"]), (51.0, 52.0, 603.0, "settled"))
+            self.assertEqual(t.status(events["PXR"])["status"], "skipped:limit", "$51 above 1.25 x $40: PREREG-EVL-2's limit")
+            for table in ("marks", "bars", "universe"):
+                self.assertFalse(st.db.execute(f"SELECT 1 FROM {table} WHERE symbol IN ('PXQ', 'PXR')").fetchone(),
+                                 f"the lane's {table} never gains a PX event's row")
+            px = PXL.open_px(st.root)
+            try:
+                marks = {(r["symbol"], r["label"]): r["px"] for r in px.db.execute("SELECT * FROM px_marks")}
+                self.assertEqual((marks[("PXQ", "close")], marks[("PXQ", "open")]), (51.0, 52.0))
+                self.assertTrue(px.db.execute("SELECT 1 FROM px_bars WHERE symbol='PXQ'").fetchone())
+            finally:
+                px.close()
+            self.assertFalse(SCO.parity_sampled({"program": "PX-DROP-ON", "version": 1, "event": events["PXQ"]}))
+
+
+class ThePxMemberLimit(unittest.TestCase):
+    """F9 for a PX member (section 7.2, 4.4): its LIMIT AT ENTRY reads the raw entry print where the PX event's own
+    settlement read it, px.sqlite's `px_marks` (and px_universe's prev_close), never the lane's marks: a print above 1.25
+    x the raw previous close is NO OUTCOME even when the adjusted entry price (a split inside the window) is under it."""
+
+    def test_the_raw_print_of_a_px_event_is_px_sqlites(self):
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            px = PXL.open_px(st.root)
+            try:
+                day = dt.date(2026, 10, 27)
+                event = f"px:CTRL-PX-ALL-ON:{day}:0000001001"
+                intent = {"program": "CTRL-PX-ALL-ON", "version": 1, "event": event, "symbol": "PXA",
+                          "entry_day": day.isoformat(), "entry_at": "close"}
+                outcome = {"entry_px": 11.0}            # (adjusted: a 2-for-1 split later in the window)
+                px.put_result(day, "0000001001", S.LIVE_RULE, {"symbol": "PXA", "name": "PXA", "exchange": "NASDAQ",
+                                                               "prev_close": 20.0, "adv20": 4e7, "adv20sh": 2e6,
+                                                               "bench": "SPY", "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 10, 27, 12, tzinfo=dt.timezone.utc))
+                px.db.execute("INSERT INTO px_marks(symbol, day, label, px, t, source, fetched_at) VALUES('PXA', ?, "
+                              "'close', 26.0, 't', 'sip:Q:6', 'x')", (day.isoformat(),))
+                self.assertFalse(MT._within_limit(st, intent, outcome), "the raw print $26 > 1.25 x $20: no outcome")
+                px.db.execute("UPDATE px_marks SET px=22.0 WHERE symbol='PXA'")
+                self.assertTrue(MT._within_limit(st, intent, outcome), "the raw print $22 <= $25")
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('PXA', ?, 'close', "
+                              "40.0, 't', 'sip', 'x')", (day.isoformat(),))
+                self.assertTrue(MT._within_limit(st, intent, outcome), "the lane's marks are never a PX event's")
+            finally:
+                px.close()
+                st.close()
+
+
+class TheNoise(unittest.TestCase):
+    """A meta-learner fed noise records picks noise: with no sub-rule's edge, few sub-rules ever qualify (Z = 3, a prior
+    of 30 bp, the cost hurdle), and what it picks earns what the pool earns."""
+
+    def test_noise_in_noise_out(self):
+        rng = random.Random(20261022)
+        gof = MT.group_of(MT.GROUPS_ON)
+        cost = 0.0014
+        pool = [MT.features({"fam": rng.choice(["news-on", "news-day", "8k", "ern", "price"]),
+                             "score": rng.choice([None, -1, 0, 1, 2, 3]), "hour_et": (rng.randrange(24), 0),
+                             "cov72": rng.randrange(6), "adv20": rng.choice([5e6, 5e7, 5e8]),
+                             "prev_close": rng.choice([5.0, 20.0, 80.0]), "react": rng.uniform(0.9, 1.1),
+                             "gap": rng.uniform(0.95, 1.05)}, "on") for _ in range(300)]
+        rules = [MT.rules_of(f, [], gof) for f in pool]
+        sessions, picked, outcomes, days_with = [], 0, [], 0
+        for day in range(60):
+            if len(sessions) > MT.WARM:
+                st = MT.state(sessions)
+                today = [{"event": f"{day}:{i}", "cik": str(i), "adv20": 1e6 * (i + 1), "rules": rules[i],
+                          "eligible": True, "cost_rt": cost} for i in range(len(pool))]
+                picks = MT.walk(today, st, MT.cbar_of(today), session_index=len(sessions))
+                days_with += bool(picks)
+                picked += len(picks)
+                a_today = [rng.gauss(-cost, 0.03) for _ in pool]
+                outcomes += [a_today[int(e.split(":")[1])] - (math.fsum(a_today) / len(a_today)) for e, _, _ in picks]
+            else:
+                a_today = [rng.gauss(-cost, 0.03) for _ in pool]
+            sessions.append(MT.session_stats([{"rules": r, "a": a, "tradable": True} for r, a in zip(rules, a_today)]))
+        share = days_with / (60 - MT.WARM - 1)
+        self.assertLess(share, 0.15, f"a noise pool qualifies a sub-rule on {share:.0%} of the sessions")
+        if outcomes:
+            mean = math.fsum(outcomes) / len(outcomes)
+            se = 0.03 / math.sqrt(len(outcomes))
+            self.assertLess(abs(mean), 4 * se, "its picks earn what the pool earns")
+
+
+class Eight(unittest.TestCase):
+    """A pinned world (the PX store seeded, the equity of P), its own temporary root."""
+
+    def setUp(self):
+        ctx = W.pinned()
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def world(self, name: str = "lane", *, rows: bool = True) -> W.World8:
+        w = W.World8(Path(self.tmp.name) / name)
+        self.addCleanup(w.close)
+        for day in ("2026-10-26", "2026-10-27"):
+            w.st.set_meta(f"equity:{day}", "1900")
+        if rows:
+            w.births()
+            W5.evl4_rows(w)
+            W5.evl5_rows(w)
+        return w
+
+    @staticmethod
+    def pool(w: W.World8, program: str, day: dt.date = D_DAY) -> list[tuple]:
+        if not MT.has_tables(w.st.db):
+            return []
+        return [tuple(r) for r in w.st.db.execute(
+            "SELECT cik, symbol, event, knowable_at, tags, features, xrules, eligible, adv20, prev_close, cost_rt FROM "
+            "mrl_pool WHERE program=? AND day=? ORDER BY cik", (program, day.isoformat()))]
+
+    @staticmethod
+    def tags(rows: list[tuple]) -> set[str]:
+        return {t.rsplit(":", 1)[0] for r in rows for t in json.loads(r[4])}
+
+
+def the_open(w: W.World8, day: dt.date = D_DAY, *, meta: bool = True) -> None:
+    """D's open as the House runs it: the morning pass at 09:05, the lane's live open decision at 09:15:30, then the open
+    run on its receipt (PX-GAP-O1's part, then EVL-META-O1's unless `meta` is False)."""
+    w.at(et(P_DAY, 15, 47)).decide("close", P_DAY)
+    w.at(et(day, 9, 5)).morning(day)
+    w.at(et(day, 9, 15, 30)).decide("open", day)
+    w.at(et(day, 9, 16)).px_decide(day, "o1")
+    if meta:
+        w.at(et(day, 9, 16, 20)).meta_decide(day, "o1")
+    w.ran("open", day)
+
+
+def the_close(w: W.World8, day: dt.date = D_DAY, *, meta: bool = True, px: bool = True) -> None:
+    """D's close as the House runs it: PX-DROP-ON's and PX-SURGE-ON's run at 15:46:05 (unless `px` is False), the
+    lane's live close decision at 15:47, EVL-META-ON's part on its receipt (unless `meta` is False)."""
+    if px:
+        w.at(et(day, 15, 46, 5)).px_decide(day, "on")
+    w.at(et(day, 15, 47)).decide("close", day)
+    if meta:
+        w.at(et(day, 15, 48, 10)).meta_decide(day, "on")
+        w.ran("close-meta", day)
+
+
+class TheMembersRule(Eight):
+    """SECTION 7.2's MEMBERS RULE, FIXED BY STORED TIMES ALONE, and its TEST."""
+
+    def test_a_px_gap_pick_is_a_member_live_and_in_a_catch_up_alike(self):
+        live = self.world("live")
+        the_open(live)
+        later = self.world("later")
+        the_open(later, meta=False)
+        later.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "o1", kind="catchup")
+        px = live.px()
+        try:
+            chosen = {str(r["cik"]) for r in PXL.live_selections(px.db, D_DAY, "o1").get("PX-GAP-O1", [])}
+        finally:
+            px.close()
+        self.assertTrue(chosen, "PX-GAP-O1 picks at D's open")
+        rows = self.pool(live, "EVL-META-O1")
+        self.assertTrue(chosen <= {r[0] for r in rows if "PX-GAP-O1:1" in json.loads(r[4])})
+        self.assertEqual(rows, self.pool(later, "EVL-META-O1"), "a catch-up a day later writes the same mrl_pool rows")
+        self.assertEqual(MT.decided(later.st.db, MT.learner("o1"), D_DAY)["kind"], "catchup")
+        self.assertIn(f"decide-meta:open:{D_DAY}", [str(r[0]) for r in later.st.db.execute("SELECT job FROM receipts")])
+
+    def test_an_event_stored_after_tau_that_the_re_decision_adds_is_a_member_of_neither(self):
+        def week(name: str, *, catchup: bool) -> W.World8:
+            w = self.world(name)
+            w.article("n-jjj-late", "JJJ", knowable=et(D_DAY, 8, 0), stored=et(D_DAY, 9, 40))
+            the_open(w, meta=not catchup)
+            w.at(et(D_DAY, 10, 0)).decide("open", D_DAY, live=False)     # (the hourly re-decision)
+            if catchup:
+                w.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "o1", kind="catchup")
+            return w
+        live, later = week("live", catchup=False), week("later", catchup=True)
+        jjj = str(W5.TICKERS.index("JJJ") + 1).zfill(10) if hasattr(W5, "TICKERS") else None
+        added = [r for r in live.st.db.execute("SELECT program FROM intents WHERE event='news:n-jjj-late'")]
+        self.assertTrue(added, "the re-decision took the late article into the shadow")
+        for w in (live, later):
+            events = {r[2] for r in self.pool(w, "EVL-META-O1")}
+            self.assertNotIn("news:n-jjj-late", events)
+            if jjj is not None:
+                self.assertNotIn(jjj, {r[0] for r in self.pool(w, "EVL-META-O1")})
+        self.assertEqual(self.pool(live, "EVL-META-O1"), self.pool(later, "EVL-META-O1"))
+
+    def test_a_cut_evl5_part_gives_no_member_live_or_after_its_own_decision(self):
+        five = {p.id for p in R.five_programs()}
+        self.assertTrue(five, "PREREG-EVL-5 has programs on this tree")
+        whole = self.world("whole")
+        the_open(whole)
+        the_close(whole)
+        self.assertTrue(five & self.tags(self.pool(whole, "EVL-META-ON")), "named: PREREG-EVL-5's rows give members")
+
+        def cut(name: str, *, catchup: bool) -> W.World8:
+            w = self.world(name)
+            the_open(w)
+            w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on")
+            with mock.patch.object(R, "part_until", lambda ctx, budget: -1.0):
+                w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+            got = json.loads(w.st.db.execute("SELECT summary FROM receipts WHERE job=?",
+                                             (f"decide-close:{D_DAY}",)).fetchone()[0])
+            self.assertIn("evl5_error", got, "PREREG-EVL-5's part was cut")
+            if catchup:
+                w.at(et(D_DAY, 16, 0))
+                R.decide_close(w.ctx, D_DAY, backfill_run=True, evl5_only=True)
+                w.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "on", kind="catchup")
+            else:
+                w.at(et(D_DAY, 15, 48, 10)).meta_decide(D_DAY, "on")
+            return w
+        live, later = cut("live", catchup=False), cut("later", catchup=True)
+        self.assertIn(f"decide-close-evl5:{D_DAY}", [str(r[0]) for r in later.st.db.execute("SELECT job FROM receipts")])
+        for w in (live, later):
+            rows = self.pool(w, "EVL-META-ON")
+            self.assertTrue(rows)
+            self.assertFalse(five & self.tags(rows), "no PREREG-EVL-5 row gives a member")
+        self.assertEqual(self.pool(live, "EVL-META-ON"), self.pool(later, "EVL-META-ON"))
+
+    def test_the_marks_and_the_eligibility_cut(self):
+        w = self.world("marks", rows=False)
+        w.at(et(P_DAY, 15, 47)).decide("close", P_DAY)
+        w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+        st = w.st
+        first = MT.first_decision(st, D_DAY, "on")
+        finish = S.parse_iso(first["finished_at"])
+        s = C.session(st, D_DAY)
+        tau = s.close_decide
+        rows = [("MA", "1530", S.iso(et(D_DAY, 15, 29)), finish), ("MB", "1530", S.iso(et(D_DAY, 15, 29)),
+                                                                    finish + dt.timedelta(seconds=1)),
+                ("MC", "0930", S.iso(et(D_DAY, 9, 30)), finish - dt.timedelta(minutes=5)),
+                ("MD", "1530", S.iso(et(D_DAY, 15, 45)), finish - dt.timedelta(seconds=1))]
+        for sym, label, t, fetched in rows:
+            st.db.execute("INSERT OR REPLACE INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, 10, ?, "
+                          "'sip', ?)", (sym, D_DAY.isoformat(), label, t, S.iso(fetched)))
+        for cik, sym, at in (("901", "MA", finish), ("902", "MB", finish + dt.timedelta(seconds=1))):
+            st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) VALUES("
+                          "?, ?, ?, 'n', 'NASDAQ', 10, 1e8, 'SPY', NULL)", (D_DAY.isoformat(), sym, cik))
+            st.db.execute("INSERT INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, 'live', 1, ?, "
+                          "?)", (D_DAY.isoformat(), cik, sym, S.iso(at)))
+        view = MT.AsOf(st, s, "on", tau, finish)
+        try:
+            self.assertEqual(view.mark("MA", "1530"), 10.0, "stored at the lane's first finish: read")
+            self.assertIsNone(view.mark("MB", "1530"), "stored after it: missing")
+            self.assertEqual(view.mark("MC", "0930"), 10.0)
+            self.assertIsNone(view.mark("MD", "1530"), "a bar that does not end before tau: missing")
+            uni = EB.universe_rows(view, D_DAY)
+            self.assertIn("901", uni)
+            self.assertNotIn("902", uni, "ELIGIBLE TO PICK: a live result decided after the first finish is not")
+            self.assertEqual(view.eligible_by, min(finish, s.close_at))
+        finally:
+            view.close()
+        self.assertEqual(st.db.execute("SELECT COUNT(*) FROM marks WHERE symbol='MB'").fetchone()[0], 1,
+                         "the lane's own marks are untouched (the view's table is its connection's own)")
+        early = MT.AsOf(st, s, "o1", s.open_decide, et(D_DAY, 9, 40))
+        try:
+            self.assertEqual(early.eligible_by, s.open_at, "never later than the entry auction (09:30 for O1)")
+        finally:
+            early.close()
+
+
+class TheClockTest(Eight):
+    """SECTION 1.2's TEST (ii)-(iv) on the House's runs (league/tests/test_events_evl8.py `TheClock` holds (i), (iii)'s
+    PX reads and the re-decision of (v))."""
+
+    def test_ii_meta_on_reads_the_live_px_runs_selections_and_rows_live_and_in_a_catch_up(self):
+        live = self.world("live")
+        the_open(live)
+        the_close(live)
+        later = self.world("later")
+        the_open(later)
+        the_close(later, meta=False)
+        px = later.px()
+        try:          # (another run's row of D: never read by the meta-learner)
+            px.db.execute("INSERT OR IGNORE INTO px_features(day, cik, kind, symbol, value, decided_at, inputs_at, source, "
+                          "run, as_of, bar_end) VALUES(?, '0000009999', 'on@c', 'ZZZ', '{\"zd\": -9}', 'x', 'x', 'live', "
+                          "'other', 'x', 'x')", (D_DAY.isoformat(),))
+        finally:
+            px.close()
+        later.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "on", kind="catchup")
+        px = live.px()
+        try:
+            chosen = PXL.live_selections(px.db, D_DAY, "on")
+        finally:
+            px.close()
+        rows = self.pool(live, "EVL-META-ON")
+        by = {r[0]: json.loads(r[4]) for r in rows}
+        for pid in ("PX-DROP-ON", "CTRL-PX-ALL-ON"):
+            self.assertTrue(chosen.get(pid), pid)
+            for r in chosen[pid]:
+                self.assertIn(f"{pid}:1", by.get(str(r["cik"]), []), (pid, r["cik"]))
+        self.assertTrue(any(json.loads(r[6]) for r in rows), "x: experts read the live run's px_features rows")
+        self.assertEqual(rows, self.pool(later, "EVL-META-ON"), "the same mrl_pool rows, live and in a catch-up")
+
+    def test_iv_a_cut_px_run_gives_no_buy_no_judged_block_and_no_meta_member(self):
+        def week(name: str, *, catchup: bool) -> W.World8:
+            w = self.world(name)
+            the_open(w)
+            w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on", late=lambda: True)
+            w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+            if catchup:
+                w.at(et(N_DAY, 20, 0)).px_decide(D_DAY, "on", kind="catchup")
+                w.at(et(N_DAY, 20, 5)).meta_decide(D_DAY, "on", kind="catchup")
+            else:
+                w.at(et(D_DAY, 15, 48, 10)).meta_decide(D_DAY, "on")
+            return w
+        live, later = week("live", catchup=False), week("later", catchup=True)
+        lane = EB.Lane(later.st.root / S.DB_NAME)
+        try:
+            prog = P.BY_KEY[("PX-DROP-ON", 1)]
+            self.assertEqual(EB.picks(lane, prog, D_DAY, decided_at=C.session(lane, D_DAY).close_decide), [],
+                             "PX-DROP-ON buys nothing at D's close")
+        finally:
+            lane.close()
+        px = later.px()
+        try:
+            self.assertEqual(PXL.decided(px.db, D_DAY, "on")["kind"], "catchup")
+            self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "on"), "its catch-up is never a judged block")
+        finally:
+            px.close()
+        for w in (live, later):
+            rows = self.pool(w, "EVL-META-ON")
+            self.assertFalse({t for t in self.tags(rows) if P.is_px8(t)}, "no PX selection is a member")
+            self.assertFalse(any(json.loads(r[6]) for r in rows), "every x: sub-rule is empty")
+        self.assertEqual(self.pool(live, "EVL-META-ON"), self.pool(later, "EVL-META-ON"))
+
+
+class Clock:
+    """One clock for the House's wall time and its monotonic time (a read that hangs moves both)."""
+
+    def __init__(self, at: dt.datetime):
+        self.at = at.timestamp()
+
+    def clock(self) -> float:
+        return self.at
+
+    def __call__(self) -> float:
+        return self.at
+
+    def advance(self, s: float) -> None:
+        self.at += float(s)
+
+
+class Hanging:
+    """A gateway client whose PX reads hang until their timeout (`timeout` the client's, as gw.Gateway's), the first
+    `slow` of them returning after `slow_s` seconds instead (the invented answers of `inner`)."""
+
+    def __init__(self, inner, clock: Clock, *, slow: int = 0, slow_s: float = 0.0):
+        self.inner, self.clock, self.timeout = inner, clock, 45.0
+        self.seen = {"reads": 0, "timeouts": []}
+        self.slow, self.slow_s = slow, slow_s
+
+    def get_json(self, path, params=None):
+        if not path.endswith("/v2/stocks/bars"):
+            return self.inner.get_json(path, params)
+        self.seen["reads"] += 1
+        if self.seen["reads"] <= self.slow:
+            self.clock.advance(self.slow_s)
+            return self.inner.get_json(path, params)
+        self.seen["timeouts"].append(self.timeout)
+        self.clock.advance(self.timeout)
+        raise TimeoutError("the read hung until its timeout")
+
+
+class TheHouseTiming(Eight):
+    """SECTION 4.6's TIMING on the House's lane and its TEST (i)-(iv) ((v) is the book's, `TheLatePasses`): the PX
+    close run from tau, its reads' timeouts capped at tau + 50 s and its end by tau + 55 s; the record and verdict tasks
+    inside the lead bounded to tau; PREREG-EVL-5's pre-pass first; the lowest-priority tasks yield; the morning pass
+    until 15:30; the pre-passes' windows; EVL-META-ON on the lane's close receipt, never past the close - 11:20."""
+
+    def lane(self, w: W.World8, at: dt.datetime, gateway=None) -> tuple[H.EventLane, Clock]:
+        clock = Clock(at)
+        lane = H.EventLane(clock, w.st.root, gateway=gateway or w.gw, sec=W.sec8, settings={"px_data": True},
+                           monotonic=clock, sleep=clock.advance)
+        lane.throttle = lambda: None
+        return lane, clock
+
+    @staticmethod
+    def ctx(lane: H.EventLane, w: W.World8) -> H.LaneContext:
+        return H.LaneContext(lane, w.st, H.LaneGateway(w.gw, lane, None, cut=False), W.sec8, lane.now)
+
+    def test_i_a_hanging_gateway_ends_the_px_close_run_by_tau_plus_55(self):
+        for slow, slow_s in ((0, 0.0), (1, 44.0)):
+            w = self.world(f"hang{slow}", rows=False)
+            w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+            s = C.session(w.st, D_DAY)
+            tau = s.close_decide
+            lane, clock = self.lane(w, tau)
+            stub = Hanging(w.gw, clock, slow=slow, slow_s=slow_s)
+            lane._gateway = stub
+            task = lane._eight_close_due(w.st, lane.now(), D_DAY, s, [])
+            self.assertEqual(task.name, "px8-close")
+            got = lane._eight_close_run(self.ctx(lane, w), D_DAY)
+            self.assertNotEqual(got["_status"], "ok")
+            self.assertLessEqual(lane.now(), tau + dt.timedelta(seconds=55), "ended unfinished by 15:46:55")
+            self.assertTrue(stub.seen["timeouts"])
+            self.assertLessEqual(max(stub.seen["timeouts"]), 45.0)
+            if slow:
+                self.assertAlmostEqual(stub.seen["timeouts"][0], 6.0, places=3,
+                                       msg="a read sent at tau + 44 s waits min(45 s, tau + 50 s - now)")
+            px = w.px()
+            try:
+                self.assertIsNone(PXL.decided(px.db, D_DAY, "on"))
+                self.assertEqual(px.db.execute("SELECT COUNT(*) FROM px_features WHERE day=? AND kind='on'",
+                                               (D_DAY.isoformat(),)).fetchone()[0], 0, "no row written")
+            finally:
+                px.close()
+            self.assertIsNone(lane._eight_close_due(w.st, tau + dt.timedelta(seconds=45), D_DAY, s, []),
+                              "no read sent after tau + 45 s")
+            clock.at = (tau + dt.timedelta(seconds=60)).timestamp()
+            task, _ = lane._plan(w.st, lane.now())
+            self.assertEqual(getattr(task, "name", None), "decide-close", "the lane's live close run at 15:47:00")
+
+    def test_ii_a_record_pass_waits_for_the_px_close_run_and_one_inside_the_lead_ends_by_tau(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        s = C.session(w.st, D_DAY)
+        tau = s.close_decide
+        lane, clock = self.lane(w, tau + dt.timedelta(seconds=10))
+        task, _ = lane._plan(w.st, lane.now())
+        self.assertEqual(task.name, "px8-close", "a record pass due at 15:46:10 starts only after it")
+        clock.at = (tau - dt.timedelta(seconds=10)).timestamp()
+        record = H.Task("record", lambda ctx, deadline: {}, H.RECORD_BUDGET)
+        self.assertAlmostEqual(lane._deadline(w.st, lane.now(), record) - clock(), 10.0, places=3,
+                               msg="a record pass started at 15:45:50 ends by 15:46:00")
+        verdicts = H.Task("verdicts", lambda ctx, deadline: {}, H.VERDICT_BUDGET, cut=True)
+        self.assertAlmostEqual(lane._deadline(w.st, lane.now(), verdicts) - clock(), 10.0, places=3)
+        pre = H.Task("verdicts", lambda ctx, deadline: {}, H.VERDICT_BUDGET, cut=True, pre=True)
+        self.assertGreater(lane._deadline(w.st, lane.now(), pre) - clock(), 10.0, "PREREG-EVL-5's pre-pass keeps its own")
+        clock.at = (tau - dt.timedelta(seconds=200)).timestamp()
+        self.assertAlmostEqual(lane._deadline(w.st, lane.now(), record) - clock(), H.RECORD_BUDGET, places=3,
+                               msg="before the lead: as before")
+        with W.pinned(None):
+            clock.at = (tau - dt.timedelta(seconds=10)).timestamp()
+            self.assertIsNone(lane._eight_lead_tau(w.st, lane.now()), "nothing while unpinned")
+
+    def test_iii_prereg_evl5s_pre_pass_runs_first_while_its_key_is_not_stored(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        s = C.session(w.st, D_DAY)
+        lane, _ = self.lane(w, s.close_decide)
+        self.assertTrue(R.five_programs())
+        rid = w.st.start_receipt("record", now=s.close_decide - dt.timedelta(seconds=30))     # (a record pass just ran)
+        w.st.finish_receipt(rid, "ok", {}, now=s.close_decide - dt.timedelta(seconds=20))
+        with mock.patch.object(lane, "_verdict_targets", lambda *a, **k: (("close", D_DAY, True), None)):
+            task, _ = lane._plan(w.st, lane.now())
+            self.assertEqual((task.name, task.pre), ("verdicts", True))
+            w.st.set_meta(f"{R.PRE_KEY}{D_DAY.isoformat()}", json.dumps({"cut": "x"}))
+            task, _ = lane._plan(w.st, lane.now())
+            self.assertEqual(task.name, "px8-close")
+
+    def test_iv_the_morning_pass_and_the_pre_pass_yield(self):
+        w = self.world(rows=False)
+        s = C.session(w.st, D_DAY)
+        lane, clock = self.lane(w, et(D_DAY, 9, 6))
+        due = H.Task("verdicts", lambda ctx, deadline: {}, H.VERDICT_BUDGET, cut=True)
+        mine = H.Task("px8-am", lambda ctx, deadline: {}, 60.0)
+        with mock.patch.object(lane, "_plan", lambda st, now: (due, now)):
+            self.assertTrue(lane._eight_yield(w.st, "px8-am"))
+        with mock.patch.object(lane, "_plan", lambda st, now: (mine, now)):
+            self.assertFalse(lane._eight_yield(w.st, "px8-am"))
+        reads = len(w.gw.px_gets)
+        px = w.px()
+        try:
+            got = PXL.morning(px, w.st, w.gw, D_DAY, now=et(D_DAY, 9, 6), run="am", late=lambda: len(w.gw.px_gets) > reads)
+            self.assertIn(got.get("_status"), ("partial", None))
+            self.assertIsNone(PXL._meta(px.db, PXL.AM_KEY.format(day=D_DAY.isoformat())), "stopped before its next read")
+            self.assertEqual(px.db.execute("SELECT COUNT(*) FROM px_am").fetchone()[0], 0, "PXU(D) is written whole")
+            got = PXL.morning(px, w.st, w.gw, D_DAY, now=et(D_DAY, 9, 8), run="am2", clock=lambda: et(D_DAY, 9, 8, 30))
+            self.assertGreater(got["pxu"], 0)
+            self.assertEqual(json.loads(PXL._meta(px.db, PXL.AM_KEY.format(day=D_DAY.isoformat())))["serves"], "both")
+        finally:
+            px.close()
+        MT.ensure(w.st)
+        prog = MT.learner("o1")
+        w.st.db.execute("INSERT INTO mrl_pool(program, version, day, cik, symbol, event, knowable_at, tags, features, xrules, "
+                        "eligible, adv20, prev_close, cost_rt) VALUES(?, 1, '2026-10-26', '1', 'S', 'news:1', NULL, '[]', "
+                        "'[]', '[]', 1, 1e8, 20, 0.001)", (prog.id,))
+        clock.at = et(D_DAY, 9, 1).timestamp()
+        with mock.patch.object(lane, "_eight_yield", lambda st, me: True):
+            got = lane._eight_prepass(self.ctx(lane, w), D_DAY, "o1", None)
+        self.assertEqual(got["_status"], "yielded")
+        self.assertIsNone(MT.stored_state(w.st, prog, D_DAY, MT.sigma_time(s, "o1")), "nothing written until whole")
+        self.assertEqual(w.st.db.execute("SELECT status FROM receipts WHERE job=?",
+                                         (f"prepass-meta:open:{D_DAY}",)).fetchone()[0], "yielded")
+        with mock.patch.object(lane, "_eight_yield", lambda st, me: False):     # (the slot free again: whole)
+            got = lane._eight_prepass(self.ctx(lane, w), D_DAY, "o1", None)
+        self.assertIsNotNone(MT.stored_state(w.st, prog, D_DAY, MT.sigma_time(s, "o1")))
+
+    def test_a_morning_pass_after_the_open_decision_serves_only_the_on_auction(self):
+        w = self.world(rows=False)
+        px = w.px()
+        try:
+            PXL.morning(px, w.st, w.gw, D_DAY, now=et(D_DAY, 11, 0), run="am", clock=lambda: et(D_DAY, 11, 0, 30))
+            self.assertEqual(json.loads(PXL._meta(px.db, PXL.AM_KEY.format(day=D_DAY.isoformat())))["serves"], "on")
+            s = C.session(w.st, D_DAY)
+            self.assertEqual(PXL.pxu(px.db, D_DAY, before=s.open_decide), {}, "no PX-GAP-O1 event of D")
+            self.assertTrue(PXL.pxu(px.db, D_DAY, before=s.close_decide))
+        finally:
+            px.close()
+
+    def test_the_morning_and_the_prepasses_in_their_windows(self):
+        w = self.world(rows=False)
+        st, s = w.st, C.session(w.st, D_DAY)
+        lane, _ = self.lane(w, et(D_DAY, 9, 0))
+        self.assertEqual(lane._eight_due(st, et(D_DAY, 9, 6), D_DAY, s, []).name, "px8-am")
+        self.assertIsNone(lane._eight_due(st, et(D_DAY, 9, 14, 55), D_DAY, s, []), "never inside a decision's margin")
+        self.assertEqual(lane._eight_due(st, et(D_DAY, 11, 0), D_DAY, s, []).name, "px8-am",
+                         "it resumes after the open decisions and runs until 15:30")
+        got = lane._eight_due(st, et(D_DAY, 9, 1), D_DAY, s, [])
+        self.assertEqual(got.name, "meta8-prepass-o1")
+        got = lane._eight_due(st, et(D_DAY, 15, 31), D_DAY, s, [])
+        self.assertEqual(got.name, "meta8-prepass-on")
+        self.assertIsNone(lane._eight_due(st, et(D_DAY, 15, 44), D_DAY, s, []), "never past the close - 17 min")
+        self.assertIsNotNone(lane._hold_at(st, et(D_DAY, 15, 0)), "the lead holds for this file too")
+
+    def test_meta_on_on_the_lanes_close_receipt_never_past_the_close_less_1120(self):
+        for name, now, made in (("in", et(D_DAY, 15, 48, 30), True), ("past", et(D_DAY, 15, 48, 41), False)):
+            w = self.world(name)
+            the_open(w)
+            w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on")
+            w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+            lane, _ = self.lane(w, now)
+            lane._eight_close_meta(self.ctx(lane, w), D_DAY)
+            got = MT.decided(w.st.db, MT.learner("on"), D_DAY)
+            self.assertEqual(got is not None and got["kind"] == "live", made, name)
+            self.assertEqual(w.st.meta(PXL.RAN_KEY.format(key="close-meta", day=D_DAY.isoformat())) is not None, made)
+
+    def test_the_meta_catch_ups_from_oct_20_oldest_first_once_the_lanes_decision_is_in(self):
+        w = self.world(rows=False)
+        lane, _ = self.lane(w, et(D_DAY, 12, 0))
+        oct20 = dt.date(2026, 10, 20)
+        self.assertIsNone(lane._eight_owed(w.st, lane.now(), D_DAY), "the lane's decision of Oct 20's open is not in")
+        rid = w.st.start_receipt(f"decide-open:{oct20}", now=et(oct20, 9, 15))
+        w.st.finish_receipt(rid, "ok", {}, now=et(oct20, 9, 16))
+        self.assertEqual(lane._eight_owed(w.st, lane.now(), D_DAY), ("meta", oct20, "o1"))
+        w.at(et(D_DAY, 12, 0)).meta_decide(oct20, "o1", kind="catchup")
+        self.assertIsNone(lane._eight_owed(w.st, lane.now(), D_DAY), "next: Oct 20's close, whose decision is not in")
+        far = et(dt.date(2027, 1, 20), 12, 0)
+        self.assertEqual(lane._eight_owed(w.st, far, D_DAY)[:2], ("meta", oct20),
+                         "a session older than the look-back is decided with none, never skipped (section 8)")
+
+    def test_the_open_run_marks_its_end_for_the_book(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        w.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)
+        lane, _ = self.lane(w, et(D_DAY, 9, 16))
+        lane._eight_open(self.ctx(lane, w), D_DAY)
+        jobs = [str(r[0]) for r in w.st.db.execute("SELECT job FROM receipts")]
+        self.assertIn(f"decide-open-px8:{D_DAY}", jobs)
+        self.assertIn(f"decide-open-meta8:{D_DAY}", jobs)
+        self.assertIsNotNone(w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat())))
+        past = self.world("past", rows=False)
+        past.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)
+        lane, _ = self.lane(past, et(D_DAY, 9, 19, 31))
+        lane._eight_open(self.ctx(lane, past), D_DAY)
+        self.assertNotIn(f"decide-open-px8:{D_DAY}", [str(r[0]) for r in past.st.db.execute("SELECT job FROM receipts")],
+                         "never past 09:19:30")
+
+
+class TheOneLiveRun(Eight):
+    """SECTIONS 3.4, 4.6 AND 7.7 (the money review of release 1019n): this file's parts run live on THE LANE'S FIRST
+    FINISHED DECISION of (D, X) alone, and each live part runs once: a part that was cut or failed trades nothing at
+    that auction and is decided only by its catch-up, never by a later live receipt (a pending decision's retry, or the
+    hourly re-decision of today's open while it is still live), so it is never a judged block and never a pick."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    def test_a_cut_open_part_is_never_run_live_again_on_a_later_receipt(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        w.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)          # (the lane's first finished decision of (D, O1))
+        lane, clock = self.lane(w, et(D_DAY, 9, 15, 40))
+        lane._gateway = Hanging(w.gw, clock)                       # (every PX read hangs: the PX part does not finish)
+        lane._eight_after(self.ctx(lane, w), "open", D_DAY, True)
+        status = dict(w.st.db.execute("SELECT job, status FROM receipts WHERE job=?", (f"decide-open-px8:{D_DAY}",)))
+        self.assertNotEqual(status[f"decide-open-px8:{D_DAY}"], "ok")
+        ran = w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat()))
+        self.assertIsNotNone(ran)
+        metas = w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?", (f"decide-open-meta8:{D_DAY}",)).fetchone()[0]
+        # the hourly re-decision of today's open while it is still live: a later receipt of (D, O1)
+        w.at(et(D_DAY, 9, 17, 20)).decide("open", D_DAY)
+        later, _ = self.lane(w, et(D_DAY, 9, 17, 30))
+        later._eight_after(self.ctx(later, w), "open", D_DAY, True)
+        self.assertEqual(w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?",
+                                         (f"decide-open-px8:{D_DAY}",)).fetchone()[0], 1, "no second live PX run")
+        self.assertEqual(w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?",
+                                         (f"decide-open-meta8:{D_DAY}",)).fetchone()[0], metas, "no second META part")
+        self.assertEqual(w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat())), ran,
+                         "the open run's end is the first receipt's")
+        px = w.px()
+        try:
+            self.assertIsNone(PXL.decided(px.db, D_DAY, "o1"), "nothing decided live")
+            self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "o1"), "nothing judged")
+            self.assertEqual(PXL.live_picks(px.db, P.BY_KEY[("PX-GAP-O1", 1)], D_DAY), [], "no pick")
+        finally:
+            px.close()
+        lane_ro = EB.Lane(w.st.root / S.DB_NAME)
+        try:
+            self.assertEqual(EB.picks(lane_ro, P.BY_KEY[("PX-GAP-O1", 1)], D_DAY,
+                                      decided_at=C.session(lane_ro, D_DAY).open_decide), [], "no real-money pick")
+        finally:
+            lane_ro.close()
+
+    def test_a_pending_decisions_retry_is_no_first_receipt(self):
+        w = self.world("pending", rows=False)
+        st = w.st
+        for status, at in (("pending", et(D_DAY, 15, 47, 40)), ("ok", et(D_DAY, 15, 48, 20))):
+            rid = st.start_receipt(f"decide-close:{D_DAY}", now=at - dt.timedelta(seconds=30))
+            st.finish_receipt(rid, status, {}, now=at)
+            self.assertEqual(H.EventLane._eight_first(st, "close", D_DAY), status == "pending")
+        lane, _ = self.lane(w, et(D_DAY, 15, 48, 25))
+        with mock.patch.object(lane, "_eight_close_meta") as part:
+            lane._eight_after(self.ctx(lane, w), "close", D_DAY, True)
+        part.assert_not_called()
+
+    def test_a_cut_live_part_is_decided_by_its_catch_up_alone(self):
+        w = self.world("cut")
+        the_open(w, meta=False)
+        w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on", late=lambda: True)          # (cut: no decision mark)
+        self.assertIn("ran already", w.at(et(D_DAY, 15, 46, 20)).px_decide(D_DAY, "on")["skipped"])
+        w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+        got = MT.decide(w.st, D_DAY, "on", now=lambda: et(D_DAY, 15, 48, 0), kind="live", late=lambda: True)
+        self.assertEqual(got["_status"], "cut")
+        self.assertIn("ran already", w.at(et(D_DAY, 15, 48, 10)).meta_decide(D_DAY, "on")["skipped"])
+        self.assertIsNone(MT.decided(w.st.db, MT.learner("on"), D_DAY), "no live META decision")
+        w.at(et(N_DAY, 20, 0)).px_decide(D_DAY, "on", kind="catchup")
+        w.at(et(N_DAY, 20, 5)).meta_decide(D_DAY, "on", kind="catchup")
+        self.assertEqual(MT.decided(w.st.db, MT.learner("on"), D_DAY)["kind"], "catchup")
+        px = w.px()
+        try:
+            self.assertEqual(PXL.decided(px.db, D_DAY, "on")["kind"], "catchup")
+            self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "on"))
+        finally:
+            px.close()
+
+
+class Refusing:
+    """A gateway client whose PX bar reads fail at once (the data host refuses them), leaving the open run's bound
+    almost whole; every other route is `inner`'s."""
+
+    def __init__(self, inner):
+        self.inner, self.timeout = inner, 45.0
+
+    def get_json(self, path, params=None):
+        if path.endswith("/v2/stocks/bars"):
+            raise RuntimeError("the data host refused the read (invented)")
+        return self.inner.get_json(path, params)
+
+
+class TheOpenMetaAfterPx(Eight):
+    """SECTION 4.6'S OPEN ROW (the judges' re-review of release 1019n, its major): "a PX part not finished gives
+    EVL-META-O1 no member, section 7.2, and then the META part is decided only by its catch-up". So after a PX-GAP-O1
+    part that did not finish, `decide-open-px8:<D>` runs no live META part however much of its 60 s is left: no
+    `decide-open-meta8:<D>` receipt, no live decision, no real-money pick; `decide-meta:open:<D>` decides the session
+    later (a reported shadow, never traded, never judged). The close is not the same: section 1.2's test (iv) keeps
+    EVL-META-ON live with no PX member when the PX close run is cut (`TheClockTest`)."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    @staticmethod
+    def every_eligible(pool, st, cbar, *, session_index):
+        """The walk, invented: every eligible member, so a live decision has picks whatever the state holds."""
+        return [(m["event"], "g:invented", 0.01) for m in pool if m["eligible"]][:MT.K]
+
+    def run_open(self, name: str, *, cut: bool) -> W.World8:
+        w = self.world(name)
+        w.at(et(P_DAY, 15, 47)).decide("close", P_DAY)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        w.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)          # (the lane's first finished decision of (D, O1))
+        lane, _ = self.lane(w, et(D_DAY, 9, 15, 40))
+        if cut:
+            lane._gateway = Refusing(w.gw)                         # (the PX part fails at once: its bound is left)
+        with mock.patch.object(MT, "walk", self.every_eligible):
+            lane._eight_after(self.ctx(lane, w), "open", D_DAY, True)
+        self.assertLess(lane.now(), et(D_DAY, 9, 16, 40), "time was left for a META part")
+        self.assertIsNotNone(w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat())),
+                             "the open run's end is marked for the book's late pass whatever its parts did")
+        return w
+
+    def real_picks(self, w: W.World8) -> list:
+        lane_ro = EB.Lane(w.st.root / S.DB_NAME)
+        try:
+            return EB.picks_8(lane_ro, MT.learner("o1"), D_DAY, decided_at=C.session(lane_ro, D_DAY).open_decide)
+        finally:
+            lane_ro.close()
+
+    def jobs(self, w: W.World8) -> dict[str, str]:
+        return {str(r[0]): str(r[1]) for r in w.st.db.execute("SELECT job, status FROM receipts")}
+
+    def test_a_finished_px_part_then_meta_live(self):
+        w = self.run_open("whole", cut=False)
+        self.assertEqual(self.jobs(w).get(f"decide-open-px8:{D_DAY}"), "ok")
+        self.assertIn(f"decide-open-meta8:{D_DAY}", self.jobs(w))
+        self.assertEqual(MT.decided(w.st.db, MT.learner("o1"), D_DAY)["kind"], "live")
+        self.assertTrue(self.real_picks(w), "named: a live META-O1 decision with picks is real money")
+
+    def test_a_cut_px_part_then_no_live_meta_part_and_no_real_buy(self):
+        w = self.run_open("cut", cut=True)
+        jobs = self.jobs(w)
+        self.assertIn(jobs.get(f"decide-open-px8:{D_DAY}"), ("cut", "failed"), "the PX part did not finish")
+        self.assertNotIn(f"decide-open-meta8:{D_DAY}", jobs, "no live META part after a PX part not finished")
+        self.assertIsNone(MT.decided(w.st.db, MT.learner("o1"), D_DAY), "nothing decided live")
+        self.assertEqual(self.real_picks(w), [], "no real-money pick")
+        with mock.patch.object(MT, "walk", self.every_eligible):
+            got = w.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "o1", kind="catchup")
+        self.assertEqual(got["_status"], "ok")
+        self.assertGreater(got["picks"], 0, "the catch-up's shadow keeps its picks")
+        self.assertEqual(MT.decided(w.st.db, MT.learner("o1"), D_DAY)["kind"], "catchup")
+        self.assertEqual(self.real_picks(w), [], "a catch-up is never traded")
+        self.assertFalse(any(t.startswith("PX-") for t in self.tags(self.pool(w, "EVL-META-O1"))),
+                         "and it holds no PX member")
+
+
+class TheMidBound(Eight):
+    """SECTION 4.6 (the money review of release 1019n): THE 09:30 OPENS (`px8-mid`, from 10:00 ET) keep their task's
+    bound, as every PX recorder does: no read is sent past it, and the task YIELDS before each read to any other lane
+    task due, so its 11-31 SIP reads never reach the next decision's turn on the lane's one slot."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    def test_no_read_past_its_bound_and_it_yields(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        s = C.session(w.st, D_DAY)
+        lane, clock = self.lane(w, et(D_DAY, 10, 5))
+        ok = {"size_bytes": 0, "free_bytes": 10 ** 12, "ok": True, "why": None}
+        with mock.patch.object(H.PXS, "room", lambda root: dict(ok)):
+            task = lane._eight_due(w.st, lane.now(), D_DAY, s, [])
+            self.assertEqual(task.name, "px8-mid")
+            reads = len(w.gw.px_gets)
+            got = task.run(self.ctx(lane, w), clock() - 1.0)          # (its bound passed already)
+            self.assertEqual(len(w.gw.px_gets), reads, "no read sent past the task's bound")
+            self.assertEqual(got["_status"], "cut")
+            with mock.patch.object(lane, "_eight_yield", lambda st, me: True):
+                got = task.run(self.ctx(lane, w), clock() + 60.0)
+            self.assertEqual((len(w.gw.px_gets), got["_status"]), (reads, "cut"), "it yields before its read")
+            with mock.patch.object(lane, "_eight_yield", lambda st, me: False):     # (the slot free: it reads)
+                got = task.run(self.ctx(lane, w), clock() + 60.0)
+            self.assertEqual(got["_status"], "ok", got)
+            self.assertGreater(len(w.gw.px_gets), reads)
+        px = w.px()
+        try:
+            self.assertIsNotNone(PXL._meta(px.db, PXL.MID_KEY.format(day=D_DAY.isoformat())))
+        finally:
+            px.close()
+
+
+class TheLatePasses(TB.EventTest):
+    """SECTION 4.6's TEST (v) AND THE LATE PASSES BY TIME (league/equity/live.py `_event_decide_8`): PX-DROP-ON's buys
+    are planned at the first tick at which the lane's close receipt is in, after every PREREG-EVL-7 row of the close is
+    planned or has failed; a receipt after the 15:48 tick: never planned; the open's pass at the first tick after the
+    House's open run has finished."""
+
+    def harness8(self, name: str):
+        root = self.root / name
+        root.mkdir()
+        h = TB.Harness(root)
+        self.addCleanup(h.state.close)
+        self.addCleanup(h.lane.st.close)
+        self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+        return h
+
+    def seed(self, h, program: str, auction: str) -> None:
+        px = PXL.open_px(h.lane.st.root)
+        try:
+            run = f"{PXL.JOB_LIVE[auction]}:invented"
+            for n, sym in enumerate(("PXA", "PXB", "PXC"), 1):
+                cik = W.PX_CIK[sym]
+                px.put_result(TB.DAY, cik, S.LIVE_RULE, {"symbol": sym, "name": sym, "exchange": "NASDAQ",
+                                                          "prev_close": 16.0, "adv20": 4e7, "adv20sh": 2e6,
+                                                          "bench": "IWM", "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc))
+                event = f"px:{program}:{TB.DAY}:{cik}"
+                px.db.execute("INSERT INTO px_decisions(run, auction, day, program, rank, event, cik, symbol, rank_key, "
+                              "adv20, prev_close) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 4e7, 16.0)",
+                              (run, auction, TB.DAY.isoformat(), program, n, event, cik, sym, 10.0 - n))
+                exit_ = TB.NEXT if auction == "on" else TB.DAY
+                h.lane.intent(P.BY_KEY[(program, 1)], event, sym, cik, TB.DAY, exit_)
+                h.symbol(sym, last=16.0)
+            px.db.execute("INSERT INTO px_meta(key, value) VALUES(?, ?)",
+                          (PXL.DECIDED_KEY.format(auction=auction, day=TB.DAY.isoformat()),
+                           json.dumps({"run": run, "kind": "live", "receipt": 1, "at": "x"})))
+        finally:
+            px.close()
+
+    def mine(self, h) -> list[str]:
+        return [r["symbol"] for r in h.event_intents("buy") if P.is_8(r["program"])]
+
+    def learners_failed(self, h, auction: str) -> None:
+        learners_failed(h, auction)
+
+    def test_v_planned_at_the_first_tick_the_lanes_close_receipt_is_in(self):
+        with W.pinned():
+            on = self.harness8("in")
+            self.seed(on, "PX-DROP-ON", "on")
+            self.learners_failed(on, "on")
+            on.lane.decided(TB.DAY, "open")
+            for hh, mm in ((15, 46), (15, 47)):
+                on.tick(hh, mm)
+            self.assertEqual(self.mine(on), [], "the lane's close receipt is not in yet: nothing planned")
+            on.lane.decided(TB.DAY, "close")            # (the receipt at 15:47:40)
+            on.tick(15, 48)
+            self.assertEqual(self.mine(on), ["PXA", "PXB", "PXC"], "planned at the 15:48 tick")
+            late = self.harness8("late")
+            self.seed(late, "PX-DROP-ON", "on")
+            self.learners_failed(late, "on")
+            late.lane.decided(TB.DAY, "open")
+            for hh, mm in ((15, 46), (15, 47), (15, 48)):
+                late.tick(hh, mm)
+            late.lane.decided(TB.DAY, "close")          # (the receipt at 15:48:20, after the 15:48 tick)
+            late.tick(15, 49)
+            late.tick(16, 1)
+            self.assertEqual(self.mine(late), [], "the last tick inside the window has passed: never planned")
+            self.assertFalse(late.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at='close-px8'"))
+
+    def test_after_every_prereg_evl7_row_planned_or_failed(self):
+        """Section 4.2 and 4.6 on the tree's own learners (PREREG-EVL-7, pinned): while EVL-LRN-ON's own live receipt
+        of the close has not finished, the learners' pass waits and this file's close pass waits behind it, whatever
+        the lane's close receipt; once that receipt finishes (here naming none: its part failed), the learners' pass is
+        made and this file's pass follows it IN THE SAME TICK, after it."""
+        from league.events import learner as LR
+
+        with W.pinned():
+            h = self.harness8("lrn")
+            self.seed(h, "PX-DROP-ON", "on")
+            self.ready(h)
+            self.assertTrue(P.learners(), "the tree carries PREREG-EVL-7's learners, pinned")
+            h.tick(15, 46)
+            out = h.tick(15, 47)
+            self.assertEqual(self.mine(h), [], "the learners' own receipt is not in: their pass and this file's wait")
+            self.assertIn("comes after PREREG-EVL-7's rows", str(out.get("event_decide_8")))
+            self.assertFalse(h.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at IN ('close-lrn', 'close-px8')"))
+            at = dt.datetime(2026, 11, 4, 20, 47, 40, tzinfo=dt.timezone.utc)
+            for prog in P.learners():
+                if prog.entry_at == "close":
+                    rid = h.lane.st.start_receipt(LR.live_job(prog, TB.DAY), now=at)
+                    h.lane.st.finish_receipt(rid, "failed", {"error": "invented"}, now=at)
+            h.tick(15, 48)
+            self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"], "the learners' part failed: this file's pass goes")
+            rows = h.state.rows("SELECT at, status FROM eq_event_decisions WHERE at IN ('close-lrn', 'close-px8') "
+                                "ORDER BY rowid")
+            self.assertEqual([(r["at"], r["status"]) for r in rows], [("close-lrn", "done"), ("close-px8", "done")])
+
+    def test_the_open_pass_after_the_houses_open_run(self):
+        with W.pinned():
+            h = self.harness8("open")
+            self.seed(h, "PX-GAP-O1", "o1")
+            self.learners_failed(h, "o1")
+            self.ready(h)
+            h.tick(9, 15)
+            h.tick(9, 16)
+            self.assertEqual(self.mine(h), [], "the open run has not finished")
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            h.tick(9, 17)
+            self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"])
+
+    def test_a_learner_of_the_other_auction_alone_never_holds_this_files_pass(self):
+        """The learners' pass of the open writes its row only when it has a live learner entering there or a birth held
+        back for one (league/equity/live.py `_event_decide_lrn`); with EVL-LRN-O1 retired and EVL-LRN-ON (a close
+        entry) alive, the open's learners' pass never comes, and this file's open pass goes once the House's open run
+        has finished (`_event_lrn_settled`), not never."""
+        with W.pinned():
+            h = self.harness8("other")
+            self.seed(h, "PX-GAP-O1", "o1")
+            h.lane.band("EVL-LRN-O1", "retired", version=1)
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            h.tick(9, 15)
+            h.tick(9, 16)
+            alive = {i.family: i.live for i in h.book._instances(alive=True) if P.is_learner(i.family)}
+            self.assertFalse(alive.get("EVL-LRN-O1"), alive)
+            self.assertTrue(alive.get("EVL-LRN-ON"), alive)
+            self.assertFalse(h.state.rows("SELECT 1 AS x FROM eq_event_decisions WHERE at='open-lrn'"))
+            self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"])
+
+
+class TheMetaMoney(TB.EventTest):
+    """Section 7.7 in the House's own book: EVL-META-ON's real-money picks are its LIVE decision's intents in rank_key
+    order (book.py `picks_8`, `meta.live_picks`), planned in the close's META late pass after the PX pass, less its
+    8-K guard (PREREG-EVL-7's E10 reading: an 8-K knowable from 09:00 ET of D, stored before tau, read ok with score
+    >= 2, bars the issuer) and one position per issuer; a decision made by a catch-up is never traded."""
+
+    PICKS = (("MA", "0000007001"), ("MB", "0000007002"), ("MC", "0000007003"))
+
+    def seed(self, h, kind: str) -> None:
+        MT.ensure(h.lane.st)
+        h.lane.st.db.execute("INSERT INTO mrl_decisions(program, version, day, kind, receipt, started_at, finished_at, "
+                             "status, code_sha, members, eligible, picks) VALUES('EVL-META-ON', 1, ?, ?, 1, 'x', 'x', 'ok', "
+                             "'c', 3, 3, 3)", (TB.DAY.isoformat(), kind))
+        for n, (sym, cik) in enumerate(self.PICKS, 1):
+            h.lane.universe(TB.DAY, sym, cik, 16.0, adv20=4e7)
+            h.lane.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                 "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-META-ON', 1, ?, ?, "
+                                 "?, ?, ?, 'close', ?, 'open', ?, 'shadow', 'planned', 'mrl')",
+                                 (f"news:meta-{n}", sym, cik, TB.iso(TB.DAY, 15, 46), TB.DAY.isoformat(),
+                                  TB.NEXT.isoformat(), float(MT.K + 1 - n)))
+            h.symbol(sym, last=16.0)
+        h.lane.filing("m-1", "0000007002", accepted=TB.iso(TB.DAY, 10, 0), items=("8.01",))
+        h.lane.verdict("m-1", 3, answered=TB.iso(TB.DAY, 10, 30))
+        h.lane.st.set_meta(PXL.RAN_KEY.format(key="close-meta", day=TB.DAY.isoformat()), "{}")
+
+    def run_close(self, name: str):
+        with W.pinned():
+            root = self.root / name
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            self.seed(h, "catchup" if name == "catchup" else "live")
+            learners_failed(h, "on")
+            self.ready(h)
+            h.tick(15, 47)
+            h.tick(15, 48)
+            mine = [r["symbol"] for r in h.event_intents("buy") if r["program"] == "EVL-META-ON"]
+            rows = [r["at"] for r in h.state.rows("SELECT at FROM eq_event_decisions WHERE day=? ORDER BY rowid",
+                                                  (TB.DAY.isoformat(),))]
+            return mine, rows
+
+    def test_its_live_intents_in_rank_order_less_its_guard_after_the_px_pass(self):
+        mine, rows = self.run_close("live")
+        self.assertEqual(mine, ["MA", "MC"], "MB's 8-K of D read at score 3 bars it (section 7.7)")
+        self.assertLess(rows.index("close-px8"), rows.index("close-meta8"), "the META pass after the PX pass")
+        with mock.patch.object(EB, "meta_on_guard", lambda *a, **k: False):
+            unguarded, _ = self.run_close("unguarded-live")
+        self.assertEqual(unguarded, ["MA", "MB", "MC"], "without the guard MB goes: the guard is what bars it")
+
+    def test_a_catch_up_decision_is_never_traded(self):
+        mine, rows = self.run_close("catchup")
+        self.assertEqual(mine, [])
+
+    def test_its_guard_is_e10s_the_late_filing_included(self):
+        """Section 7.7 reads PREREG-EVL-7's E10, which A131 (M2) holds with NO upper bound on the knowable time: an 8-K
+        STORED before tau whose knowable time falls after it, unanswered, bars the issuer (else it is bought, held
+        overnight, and its sale at D+1's open takes an earlier next-open row's buy through the sale gate). The guard
+        is E10's own (`book.issuer_8k_guard`), case by case."""
+        with W.pinned():
+            root = self.root / "late"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            self.seed(h, "live")
+            s = C.session(h.lane.st, TB.DAY)
+            knowable = s.close_decide + dt.timedelta(minutes=5)          # (15:51: after tau)
+            h.lane.filing("m-late", "0000007003", accepted=S.iso(knowable - dt.timedelta(minutes=10)), items=("8.01",),
+                          received=S.iso(s.at(dt.time(15, 30))))           # (stored at 15:30: before tau, unanswered)
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            for _, cik in self.PICKS:
+                self.assertEqual(EB.meta_on_guard(lane, cik, s, s.close_decide),
+                                 EB.issuer_8k_guard(lane, cik, s, s.close_decide), cik)
+            self.assertTrue(EB.meta_on_guard(lane, "0000007003", s, s.close_decide), "the late filing bars MC")
+            self.assertFalse(EB.meta_on_guard(lane, "0000007001", s, s.close_decide), "MA has no 8-K")
+            learners_failed(h, "on")
+            self.ready(h)
+            h.tick(15, 47)
+            h.tick(15, 48)
+            self.assertEqual([r["symbol"] for r in h.event_intents("buy") if r["program"] == "EVL-META-ON"], ["MA"],
+                             "MB (an 8-K read at score 3) and MC (the late, unanswered 8-K) are barred")
+
+
+    def test_its_o1_guard_is_e8s_called_never_copied(self):
+        """Section 7.7: EVL-META-O1 never buys an ERN(D) issuer, PREREG-EVL-7's E8 reading (an 8-K with item 2.02
+        knowable in D's close window and stored before tau). Its guard IS E8's (`book.ern_issuer`, called: release
+        1019n's second money review, so a later fix of E8 reaches it), case by case and by delegation."""
+        with W.pinned():
+            root = self.root / "o1-guard"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            h.lane.filing("e-1", "0000007001", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 8, 1))
+            h.lane.filing("e-2", "0000007002", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 9, 40))
+            h.lane.filing("e-3", "0000007003", accepted=TB.iso(TB.DAY, 8, 0), received=TB.iso(TB.DAY, 8, 1),
+                          items=("8.01",))
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            tau = C.session(h.lane.st, TB.DAY).open_decide
+            ciks = ("0000007001", "0000007002", "0000007003", "0000007004")
+            self.assertEqual([EB.meta_o1_guard(lane, cik, TB.DAY, tau) for cik in ciks], [True, False, False, False],
+                             "an earnings 8-K stored before tau bars its issuer; one stored after it, an 8.01, none do not")
+            for cik in ciks:
+                self.assertEqual(EB.meta_o1_guard(lane, cik, TB.DAY, tau), EB.ern_issuer(lane, cik, TB.DAY, tau), cik)
+            with mock.patch.object(EB, "ern_issuer", lambda *a, **k: "E8's"):
+                self.assertEqual(EB.meta_o1_guard(lane, "0000007004", TB.DAY, tau), "E8's", "E8's own guard is called")
+
+
+class ThePromotedSizing(TB.EventTest):
+    """SECTION 4.1: a Probe or Sized buy of a version of this file is PREREG-EVL-6 section 6's (clause 2, A99, A123's
+    literal reading): THE FEWEST whole shares whose value at the limit reaches Done's 0.8 bar of the band's target,
+    judged again by every cap; at E $1,898 and goal V3's Probe share (5%, A138) a target of $94.90 and a $5.00 limit
+    that is 16 shares ($80.00 >= $75.92), never release 1019h's S2 floor of the target, 18 (league/equity/live.py
+    `_v6_sized`, programs.py `Program8.v6_sized`)."""
+
+    def run_probe(self, sized: bool):
+        with W.pinned(), mock.patch.object(P.Program8, "v6_sized", property(lambda self: sized and self.seatable)):
+            root = self.root / ("v6" if sized else "s2")
+            root.mkdir()
+            h = TB.Harness(root, cash="1898", E="1898")
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            h.lane.band("PX-GAP-O1", "probe", version=1)
+            px = PXL.open_px(h.lane.st.root)
+            try:
+                run, cik = f"{PXL.JOB_LIVE['o1']}:invented", W.PX_CIK["PXA"]
+                px.put_result(TB.DAY, cik, S.LIVE_RULE, {"symbol": "PXA", "name": "PXA", "exchange": "NASDAQ",
+                                                         "prev_close": 4.0, "adv20": 4e7, "adv20sh": 2e6, "bench": "IWM",
+                                                         "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 11, 4, 12, tzinfo=dt.timezone.utc))
+                event = f"px:PX-GAP-O1:{TB.DAY}:{cik}"
+                px.db.execute("INSERT INTO px_decisions(run, auction, day, program, rank, event, cik, symbol, rank_key, "
+                              "adv20, prev_close) VALUES(?, 'o1', ?, 'PX-GAP-O1', 1, ?, ?, 'PXA', 9.0, 4e7, 4.0)",
+                              (run, TB.DAY.isoformat(), event, cik))
+                px.db.execute("INSERT INTO px_meta(key, value) VALUES(?, ?)",
+                              (PXL.DECIDED_KEY.format(auction="o1", day=TB.DAY.isoformat()),
+                               json.dumps({"run": run, "kind": "live", "receipt": 1, "at": "x"})))
+            finally:
+                px.close()
+            h.lane.intent(P.BY_KEY[("PX-GAP-O1", 1)], event, "PXA", cik, TB.DAY, TB.DAY)
+            h.symbol("PXA", last=4.0, sd=0.02)
+            learners_failed(h, "o1")
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            with mock.patch.object(L, "event_orders_today", lambda rows, day: 0), \
+                    mock.patch.object(EB, "LINE_ACROSS_AUCTIONS", False):
+                h.tick(9, 15)
+                h.tick(9, 16)
+            return {b["symbol"]: b["qty"] for b in h.bodies() if b["side"] == "buy"}, h.event_intents("buy")
+
+    def test_a_probe_buy_takes_the_fewest_whole_shares_that_reach_dones_bar(self):
+        share = EB.settings().share("probe")
+        target = share * D("1898")
+        self.assertEqual(EB.at_size_count("probe", target, D("5"), D("1898")), 16)
+        sent, rows = self.run_probe(True)
+        self.assertEqual(sent, {"PXA": "16"}, f"the fewest whole shares reaching 0.8 x ${target} at $5.00")
+        self.assertEqual(D(rows[0]["target_usd"]).quantize(D("0.01")), target.quantize(D("0.01")),
+                         "the target stays the band's")
+        old, _ = self.run_probe(False)
+        self.assertEqual(old, {"PXA": "18"}, "without section 4.1's sizing: S2's floor of the target")
+
+
+class TheLine8(TB.EventTest):
+    """SECTION 4.3: THE 150-ORDER LINE REFUSES THIS FILE'S ENTRIES FIRST AMONG THE PREREG ROWS, AFTER PREREG-EVL-7'S
+    (league/equity/live.py `_event_line_keep`): an entry of this file keeps every order every earlier PREREG row may still
+    send on the day's line, PREREG-EVL-7's learners among them, across the day's auctions (A130 R5's reading, the one
+    that trades less), so its keep is a learner's keep plus the learners' own room."""
+
+    def test_an_open_entry_keeps_the_days_close_entries_of_every_earlier_row_the_learners_included(self):
+        with W.pinned():
+            root = self.root / "line"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheLatePasses.seed(self, h, "PX-GAP-O1", "o1")
+            learners_failed(h, "o1")
+            self.ready(h)
+            h.lane.st.set_meta(PXL.RAN_KEY.format(key="open", day=TB.DAY.isoformat()), "{}")
+            for minute in (15, 16, 17):
+                h.tick(9, minute)
+            s, adapter = EB.settings(), h.book._event_adapter()
+            buys = [r for r in h.event_intents("buy") if r["program"] == "PX-GAP-O1"]
+            self.assertEqual([r["symbol"] for r in buys], ["PXA", "PXB", "PXC"], "planned in the open's late pass")
+            intent = h.book._intent(int(buys[0]["iid"]))
+            mine = h.book._instance(L.instance_key("PX-GAP-O1", 1))
+            lrn_o1 = h.book._instance(L.instance_key("EVL-LRN-O1", 1))
+            lrn_on = h.book._instance(L.instance_key("EVL-LRN-ON", 1))
+            keep = h.book._event_line_keep(intent, mine, TB.DAY.isoformat(), "open", s, adapter)
+            learner = h.book._event_line_keep(intent, lrn_o1, TB.DAY.isoformat(), "open", s, adapter)
+            on_room = s.max_open(lrn_on.band, adapter.program_of(lrn_on.family, lrn_on.version))
+            self.assertGreater(learner, 0)
+            self.assertEqual(keep, learner + 2 * on_room, "a learner's keep plus EVL-LRN-ON's close room (send and re-send)")
+            self.assertEqual(h.book._event_line_keep(intent, h.book._instance(L.instance_key("PX-DROP-ON", 1)),
+                                                     TB.DAY.isoformat(), "open", s, adapter) > 0, True)
+            read = next(p for p in EB.seatable() if p.id == "EVL-ERN-READ-O1")
+            self.assertEqual(h.book._event_line_keep(intent, h.book._instance(L.instance_key(read.id, read.version)),
+                                                     TB.DAY.isoformat(), "open", s, adapter), 0, "an earlier row keeps none")
+            # THE STATED EFFECT (the reading that trades less): the close rows' room alone exceeds the 150 line, so this
+            # file's open entries are refused on an empty day, as EVL-LRN-O1's are, and nothing is sent
+            self.assertGreater(keep, int(s.max_orders_day))
+            for r in h.event_intents("buy"):
+                if r["program"] == "PX-GAP-O1":
+                    # (section 4.6: not sent in the tick its late pass planned it, so refused there, never sent later)
+                    self.assertEqual(r["status"], "refused")
+                    self.assertIn(L.EIGHT_UNSENT, r["why"])
+                    self.assertIn("the event kind's day order count", r["why"])
+            self.assertEqual([b for b in h.bodies() if b.get("side") == "buy"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

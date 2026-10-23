@@ -1,0 +1,8 @@
+Z15     w 0.50 | dP(Done<=120) +0.000 dPnL   -20.1 dP(falseDone) +0.000 dFalsePromos +0.003
+E1      w 0.15 | dP(Done<=120) +0.006 dPnL   +41.5 dP(falseDone) +0.000 dFalsePromos -0.029
+PX40    w 0.10 | dP(Done<=120) +0.000 dPnL  +107.3 dP(falseDone) +0.000 dFalsePromos +0.009
+META    w 0.10 | dP(Done<=120) +0.000 dPnL  +100.7 dP(falseDone) +0.000 dFalsePromos -0.004
+E1PX    w 0.05 | dP(Done<=120) +0.060 dPnL   +90.5 dP(falseDone) +0.003 dFalsePromos -0.031
+E3news  w 0.05 | dP(Done<=120) +0.025 dPnL    -1.7 dP(falseDone) +0.003 dFalsePromos +0.009
+PX60    w 0.05 | dP(Done<=120) +0.000 dPnL  +405.7 dP(falseDone) +0.000 dFalsePromos +0.009
+MIXTURE {'dP_done': 0.0052, 'dpnl': 41.7182, 'dfalse_done': 0.0003, 'd_false_promos': -0.003}

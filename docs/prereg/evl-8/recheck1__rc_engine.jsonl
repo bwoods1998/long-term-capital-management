@@ -1,0 +1,1 @@
+{"cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40", "seed": 193000001, "R": 2000, "fixer_run1": 0.1095, "mine_run1": 0.1105, "fixer_two": 0.194, "mine_two": 0.198, "both_run1": 218, "fixer_only_run1": 1, "mine_only_run1": 3, "fixer_only_two": 2, "mine_only_two": 10, "secs": 495}

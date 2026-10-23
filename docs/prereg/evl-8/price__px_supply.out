@@ -1,0 +1,7 @@
+P(z <= -2) 0.0237  P(z >= +2) 0.0237  P(z_gap <= -2) 0.0055
+N_U=1500 no-news 0.3: DROP-ON lam  10.7  SURGE-ON lam   5.3  GAP-O1 lam   4.5 (with a daily sigma60:  1.0)  (cap 20 each)
+N_U=1500 no-news 0.6: DROP-ON lam  21.3  SURGE-ON lam  10.7  GAP-O1 lam   9.0 (with a daily sigma60:  2.1)  (cap 20 each)
+N_U=2000 no-news 0.3: DROP-ON lam  14.2  SURGE-ON lam   7.1  GAP-O1 lam   6.0 (with a daily sigma60:  1.4)  (cap 20 each)
+N_U=2000 no-news 0.6: DROP-ON lam  28.5  SURGE-ON lam  14.2  GAP-O1 lam  11.9 (with a daily sigma60:  2.8)  (cap 20 each)
+N_U=3000 no-news 0.3: DROP-ON lam  21.3  SURGE-ON lam  10.7  GAP-O1 lam   9.0 (with a daily sigma60:  2.1)  (cap 20 each)
+N_U=3000 no-news 0.6: DROP-ON lam  42.7  SURGE-ON lam  21.4  GAP-O1 lam  17.9 (with a daily sigma60:  4.2)  (cap 20 each)

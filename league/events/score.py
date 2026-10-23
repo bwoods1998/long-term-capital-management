@@ -212,21 +212,24 @@ def _window(session: C.Session, kind: str) -> tuple[dt.datetime, dt.datetime]:
 
 
 def _mark(store: S.Store, symbol: str, day: dt.date, label: str, px: float | None, t: str | None, source: str,
-          now: dt.datetime) -> None:
-    store.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, ?, ?, ?, ?) "
-                     "ON CONFLICT(symbol, day, label) DO UPDATE SET px=excluded.px, t=excluded.t, source=excluded.source, "
-                     "fetched_at=excluded.fetched_at", (symbol, day.isoformat(), label, px, t, source, S.iso(now)))
+          now: dt.datetime, *, pxs: Any = None) -> None:
+    db, table = (store.db, "marks") if pxs is None else (pxs.db, "px_marks")
+    db.execute(f"INSERT INTO {table}(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, ?, ?, ?, ?, ?) "
+               "ON CONFLICT(symbol, day, label) DO UPDATE SET px=excluded.px, t=excluded.t, source=excluded.source, "
+               "fetched_at=excluded.fetched_at", (symbol, day.isoformat(), label, px, t, source, S.iso(now)))
 
 
-def tape_print(store: S.Store, gw: Any, symbol: str, code: str, session: C.Session, kind: str, now: dt.datetime
-               ) -> tuple[float | None, bool]:
+def tape_print(store: S.Store, gw: Any, symbol: str, code: str, session: C.Session, kind: str, now: dt.datetime, *,
+               pxs: Any = None) -> tuple[float | None, bool]:
     """(price, known): the session's opening cross ('open') or closing cross ('close') from listing exchange `code`
     (its `Q` / `M` official record when it printed no `O` / `6`), or its first trade on any venue ('first'). `known`
     is False while the window is not yet readable in full; (None, True) means there was none. Kept in `marks` (source
-    `sip:<x>:<conditions>`, or `none`), so the tape is read once."""
+    `sip:<x>:<conditions>`, or `none`), so the tape is read once. `pxs` (PREREG-EVL-8 section 4.4: a PX intent's
+    settlement): px.sqlite's `px_marks` instead, never the lane's."""
     symbol = symbol.upper()
-    row = store.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=?",
-                           (symbol, session.day.isoformat(), kind)).fetchone()
+    db, table = (store.db, "marks") if pxs is None else (pxs.db, "px_marks")
+    row = db.execute(f"SELECT px FROM {table} WHERE symbol=? AND day=? AND label=?",
+                     (symbol, session.day.isoformat(), kind)).fetchone()
     if row is not None:
         return (None if row["px"] is None else float(row["px"])), True
     start, end = _window(session, kind)
@@ -234,31 +237,46 @@ def tape_print(store: S.Store, gw: Any, symbol: str, code: str, session: C.Sessi
     stand_in = None
     for trade in _trades(gw, symbol, start, end, now, limit=1 if kind == "first" else TRADES_PAGE):
         if kind == "first":
-            return _keep(store, symbol, session.day, kind, trade, now), True
+            return _keep(store, symbol, session.day, kind, trade, now, pxs=pxs), True
         if trade.get("x") != code:
             continue
         conds = trade.get("c") or []
         if CONDITIONS[kind][0] in conds:
-            return _keep(store, symbol, session.day, kind, trade, now), True
+            return _keep(store, symbol, session.day, kind, trade, now, pxs=pxs), True
         if stand_in is None and CONDITIONS[kind][1] in conds:
             stand_in = trade
     if not complete:
         return None, False
     if stand_in is not None:
-        return _keep(store, symbol, session.day, kind, stand_in, now), True
-    _mark(store, symbol, session.day, kind, None, None, "none", now)
+        return _keep(store, symbol, session.day, kind, stand_in, now, pxs=pxs), True
+    _mark(store, symbol, session.day, kind, None, None, "none", now, pxs=pxs)
     return None, True
 
 
-def _keep(store: S.Store, symbol: str, day: dt.date, kind: str, trade: Mapping[str, Any], now: dt.datetime) -> float:
+def _keep(store: S.Store, symbol: str, day: dt.date, kind: str, trade: Mapping[str, Any], now: dt.datetime, *,
+          pxs: Any = None) -> float:
     px = float(trade["p"])
     conds = ",".join(str(c).strip() for c in (trade.get("c") or []) if str(c).strip())
-    _mark(store, symbol, day, kind, px, str(trade.get("t")), f"sip:{trade.get('x')}:{conds}", now)
+    _mark(store, symbol, day, kind, px, str(trade.get("t")), f"sip:{trade.get('x')}:{conds}", now, pxs=pxs)
     return px
 
 
-def _bar(store: S.Store, symbol: str, day: dt.date, adj: str) -> Mapping[str, Any] | None:
+def _bar(store: S.Store, symbol: str, day: dt.date, adj: str, *, pxs: Any = None) -> Mapping[str, Any] | None:
+    if pxs is not None:     # (PREREG-EVL-8 section 4.4: a PX intent's bars are px.sqlite's `px_bars`)
+        return pxs.bars(symbol, [day], adj).get(day.isoformat())
     return U.bars(store, symbol, [day], adj).get(day.isoformat())
+
+
+def _fetch_bars(store: S.Store, gw: Any, symbols: Sequence[str], first: dt.date, last: dt.date, *, adj: str,
+                now: dt.datetime, pxs: Any = None) -> None:
+    """A settlement's daily bars: the lane's (`universe.fetch_daily_bars`), or for a PX intent px.sqlite's `px_bars`
+    (league/events/pxdata.py `daily_bars`, its run `score-px`), never the lane's (PREREG-EVL-8 section 4.4)."""
+    if pxs is None:
+        U.fetch_daily_bars(store, gw, list(symbols), first, last, adj=adj, now=now)
+        return
+    from . import pxdata as PXD
+
+    PXD.daily_bars(pxs, gw, list(symbols), first, last, adj=adj, now=now, run=f"score-px:{S.iso(now)}")
 
 
 def _positive(value: Any) -> float | None:
@@ -269,10 +287,12 @@ def _positive(value: Any) -> float | None:
     return x if math.isfinite(x) and x > 0 else None
 
 
-def bench_print(store: S.Store, gw: Any, bench: str, session: C.Session, kind: str, now: dt.datetime) -> float:
+def bench_print(store: S.Store, gw: Any, bench: str, session: C.Session, kind: str, now: dt.datetime, *,
+                pxs: Any = None) -> float:
     """The benchmark's own print at this auction ('open' or 'close'); missing on a readable tape, its daily bar once
-    one more session has closed (source `bar-fallback`). Raises Waiting until then."""
-    px, known = tape_print(store, gw, bench, BENCH_CODE, session, kind, now)
+    one more session has closed (source `bar-fallback`). Raises Waiting until then. `pxs`: px.sqlite's marks and bars
+    (a PX intent's settlement)."""
+    px, known = tape_print(store, gw, bench, BENCH_CODE, session, kind, now, pxs=pxs)
     if px is not None:
         return px
     if not known:
@@ -280,18 +300,18 @@ def bench_print(store: S.Store, gw: Any, bench: str, session: C.Session, kind: s
     after = C.sessions(store, session.day + dt.timedelta(days=1), session.day + dt.timedelta(days=10))
     if not after or after[0].close_at + TAPE_DELAY > now:
         raise Waiting(f"{bench} {kind} {session.day}: no print; a session's wait before its bar")
-    U.fetch_daily_bars(store, gw, [bench], session.day, session.day, adj="raw", now=now)
-    bar = _bar(store, bench, session.day, "raw")
+    _fetch_bars(store, gw, [bench], session.day, session.day, adj="raw", now=now, pxs=pxs)
+    bar = _bar(store, bench, session.day, "raw", pxs=pxs)
     value = _positive(bar.get("o" if kind == "open" else "c")) if bar else None
     if value is None:
         raise Waiting(f"{bench} {kind} {session.day}: no print and no bar")
-    _mark(store, bench, session.day, kind, value, None, "bar-fallback", now)
+    _mark(store, bench, session.day, kind, value, None, "bar-fallback", now, pxs=pxs)
     return value
 
 
-def _ratio(store: S.Store, symbol: str, day: dt.date) -> float:
+def _ratio(store: S.Store, symbol: str, day: dt.date, *, pxs: Any = None) -> float:
     """Alpaca's adjusted / raw daily close for `day` (1.0 when either bar is missing)."""
-    raw, adj = _bar(store, symbol, day, "raw"), _bar(store, symbol, day, "all")
+    raw, adj = _bar(store, symbol, day, "raw", pxs=pxs), _bar(store, symbol, day, "all", pxs=pxs)
     rc, ac = (_positive(raw.get("c")) if raw else None), (_positive(adj.get("c")) if adj else None)
     return ac / rc if rc and ac else 1.0
 
@@ -308,9 +328,19 @@ def due(store: S.Store, now: dt.datetime) -> list[dict[str, Any]]:
     return out
 
 
-def _universe(store: S.Store, day: str, symbol: str) -> Mapping[str, Any] | None:
+def _universe(store: S.Store, day: str, symbol: str, *, pxs: Any = None) -> Mapping[str, Any] | None:
+    if pxs is not None:     # (PREREG-EVL-8 section 4.4: a PX event's row is px_universe's live row, never the lane's)
+        row = pxs.db.execute("SELECT * FROM px_universe WHERE day=? AND symbol=? AND rule=? ORDER BY adv20 DESC LIMIT 1",
+                             (day, symbol, S.LIVE_RULE)).fetchone()
+        return None if row is None else dict(row)
     row = store.db.execute("SELECT * FROM universe WHERE day=? AND symbol=?", (day, symbol)).fetchone()
     return None if row is None else dict(row)
+
+
+def px_event(intent: Mapping[str, Any]) -> bool:
+    """PREREG-EVL-8 section 4.4: a PX event (`px:<program>:<D>:<cik>`), a PX seat's, a control's or a meta-learner's pick
+    of one, settled on px.sqlite's universe, prints and bars, never the lane's."""
+    return str(intent.get("event") or "").startswith("px:")
 
 
 def exit_ladder(store: S.Store, exit_day: dt.date, exit_at: str) -> list[tuple[C.Session | None, str]]:
@@ -356,11 +386,20 @@ def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.da
     THAT LIVES ONLY FOR THE PASS: when it holds every bar the settlement reads (`Prefetch.serves`) the settlement's own
     two fetches are skipped, its ratios are read from the cache, and exactly the rows those two fetches would have
     stored are written to `bars` (`Prefetch.store_window`); else (or with anything but a `Prefetch`) the two fetches
-    are made as before."""
+    are made as before. A PX event (`px_event`, PREREG-EVL-8 section 4.4) is settled on px.sqlite's universe, prints
+    and bars alone, never the lane's and never from the pass's cache."""
+    pxs = None
+    if px_event(intent):    # (PREREG-EVL-8 section 4.4: px.sqlite's universe, prints and bars, never the lane's)
+        from . import px as PXL
+
+        pxs = PXL.open_px(store.root)
     try:
-        got = _compute(store, gw, intent, now, prefetched)
+        got = _compute(store, gw, intent, now, prefetched, pxs=pxs)
     except Waiting as wait:
         return f"waiting:{wait}"
+    finally:
+        if pxs is not None:
+            pxs.close()
     if isinstance(got, str):
         return _skip(store, intent, got)
     row, moved = got
@@ -381,7 +420,7 @@ def settle_one(store: S.Store, gw: Any, intent: Mapping[str, Any], *, now: dt.da
 
 
 def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetime, source: Any = None, *,
-             dry: bool = False) -> str | tuple[dict[str, Any], dict[str, str] | None]:
+             dry: bool = False, pxs: Any = None) -> str | tuple[dict[str, Any], dict[str, str] | None]:
     """The settlement of one intent, computed and not written: the skip's why (a str), or (the outcome row's fields,
     the late exit's meta {day, kind, planned} or None). Raises Waiting. Prints read are kept in `marks` as they are
     read (the tape is read once). THE DAILY BARS by `source` (release 1019i): a `Prefetch` that serves the intent
@@ -391,7 +430,7 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
     serve the intent raises `_Missed` instead of fetching."""
     entry_day, exit_day = dt.date.fromisoformat(intent["entry_day"]), dt.date.fromisoformat(intent["exit_day"])
     symbol = str(intent["symbol"]).upper()
-    uni = _universe(store, intent["entry_day"], symbol)
+    uni = _universe(store, intent["entry_day"], symbol, pxs=pxs)
     if uni is None or not uni.get("bench") or uni.get("adv20") is None:
         return "no-universe-row"
     code = U.EXCHANGE_CODES.get(str(uni.get("exchange") or "").upper())
@@ -403,8 +442,8 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
         raise Waiting(f"no session {entry_day} in the calendar")
     entry_kind = "close" if intent["entry_at"] == "close" else "open"
 
-    bench_in = bench_print(store, gw, bench, entry_s, entry_kind, now)  # the day's tape is readable from here on
-    stock_in, known = tape_print(store, gw, symbol, code, entry_s, entry_kind, now)
+    bench_in = bench_print(store, gw, bench, entry_s, entry_kind, now, pxs=pxs)  # the day's tape is readable from here on
+    stock_in, known = tape_print(store, gw, symbol, code, entry_s, entry_kind, now, pxs=pxs)
     if stock_in is None:
         if not known:
             raise Waiting(f"{symbol} {entry_kind} {entry_day}: tape not complete")
@@ -422,7 +461,7 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
             break
         if session.close_at + TAPE_DELAY > now:
             raise Waiting(f"{symbol}: the {kind} of {session.day} is not on the tape yet")
-        px, known = tape_print(store, gw, symbol, code, session, kind, now)
+        px, known = tape_print(store, gw, symbol, code, session, kind, now, pxs=pxs)
         if px is not None:
             exit_s, exit_kind, stock_out = session, kind, px
             break
@@ -431,13 +470,22 @@ def _compute(store: S.Store, gw: Any, intent: Mapping[str, Any], now: dt.datetim
     if exit_s is None:
         raise Waiting("no exit found")  # unreachable: the ladder ends at 'zero'
     bench_kind = {"open": "open", "close": "close", "first": "open", "zero": "close"}[exit_kind]
-    bench_out = bench_print(store, gw, bench, exit_s, bench_kind, now)
+    bench_out = bench_print(store, gw, bench, exit_s, bench_kind, now, pxs=pxs)
 
     # One fetch of the window's daily bars, raw and adjusted, so entry and exit share one adjustment. Release 1019i
     # (the batched score): from the pass's cache when it holds every bar read below (and then exactly the rows the two
-    # fetches would have stored are written: `bars` ends the pass as under release 1019h), else the two fetches.
+    # fetches would have stored are written: `bars` ends the pass as under release 1019h), else the two fetches. A PX
+    # event (`pxs`, PREREG-EVL-8 section 4.4) always makes its own two fetches into px.sqlite's `px_bars`.
     ratio: Callable[[str, dt.date], float]
-    if isinstance(source, Prefetch) and source.serves((symbol, bench), entry_day, exit_s.day):
+    if pxs is not None:
+        if dry:
+            raise _Missed(f"{symbol}: a PX event is never settled by the batched pass")
+        for adj in ("raw", "all"):
+            _fetch_bars(store, gw, [symbol, bench], entry_day, exit_s.day, adj=adj, now=now, pxs=pxs)
+
+        def ratio(sym: str, day: dt.date) -> float:
+            return _ratio(store, sym, day, pxs=pxs)
+    elif isinstance(source, Prefetch) and source.serves((symbol, bench), entry_day, exit_s.day):
         ratio = source.ratio
         source.hits.add(_key(intent))
         if not dry:
@@ -679,8 +727,8 @@ def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, n
     since: dict[str, dt.date] = {}
     for intent in intents:
         symbol, entry_day = str(intent.get("symbol") or "").upper(), intent.get("entry_day")
-        if not symbol or not entry_day:
-            continue
+        if not symbol or not entry_day or px_event(intent):
+            continue        # (PREREG-EVL-8: a PX intent reads px.sqlite's bars, never the lane's)
         uni = _universe(store, str(entry_day), symbol)
         if uni is None or not uni.get("bench") or uni.get("adv20") is None:
             continue
@@ -722,6 +770,8 @@ def prefetch(store: S.Store, gw: Any, intents: Iterable[Mapping[str, Any]], *, n
 def parity_sampled(intent: Mapping[str, Any], share: float = PARITY_SHARE) -> bool:
     """Whether an intent is in the parity night's sample: the first 8 hex digits of sha256("<program>|<version>|<event>")
     over 2^32 below `share` (about 5% of intents, the same ones on every run)."""
+    if px_event(intent):
+        return False        # (PREREG-EVL-8: a PX intent is settled on px.sqlite alone, never by the batched pass)
     key = f"{intent['program']}|{int(intent['version'])}|{intent['event']}".encode("utf-8")
     return int(hashlib.sha256(key).hexdigest()[:8], 16) / float(1 << 32) < share
 
@@ -915,8 +965,8 @@ def settle(store: S.Store, gw: Any, *, now: dt.datetime | None = None, batch: bo
     return summary
 
 
-__all__ = ["cost_bp", "impact_bp", "after_cost_return", "equity_on", "equity_key", "record_equity", "tape_print",
-           "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting", "Prefetch", "Narrow", "Counted",
-           "prefetch", "order_due", "batch_on", "parity_sampled", "parity_due", "note_first_night", "check_parity",
-           "parity_window", "parity_counts", "latched", "latch", "unlatch", "BATCH_DEFAULT", "BENCHMARKS",
-           "PARITY_SHARE", "PARITY_FIRST", "PARITY_LATCH", "PARITY_FIELDS"]
+__all__ = ["px_event", "cost_bp", "impact_bp", "after_cost_return", "equity_on", "equity_key", "record_equity",
+           "tape_print", "bench_print", "exit_ladder", "due", "settle_one", "settle", "Waiting", "Prefetch", "Narrow",
+           "Counted", "prefetch", "order_due", "batch_on", "parity_sampled", "parity_due", "note_first_night",
+           "check_parity", "parity_window", "parity_counts", "latched", "latch", "unlatch", "BATCH_DEFAULT",
+           "BENCHMARKS", "PARITY_SHARE", "PARITY_FIRST", "PARITY_LATCH", "PARITY_FIELDS"]

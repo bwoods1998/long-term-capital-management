@@ -111,10 +111,10 @@ class WhenJudged(Lane):
             switched = self.check(cause, now, settings={"stall": {"evl": False}})
             self.assertIn("switched off (ops.json stall.evl is false)", switched["what"])
         self.assertEqual(EV.checks({}, self.root, now)["evl_record"]["judged"], False, "no config: the lane is off")
-        self.assertEqual(ST.CAUSES[-18:-4], EV.CAUSES, "the fourteen (release 1019f: A84's evl_final after evl_fills, "
+        self.assertEqual(ST.CAUSES[-19:-4], EV.CAUSES, "the fifteen (release 1019f: A84's evl_final after evl_fills, "
                          "then evl_entries, evl_backfill and evl_handback; release 1019i: the attempts ledger's "
-                         "evl_fill_rate and evl_attempts, and from its review evl_score_parity and evl_px_store, after PREREG-EVL-7's evl_learner), before "
-                         "the equity lanes' own four")
+                         "evl_fill_rate and evl_attempts, and from its review evl_score_parity and evl_px_store, after "
+                         "PREREG-EVL-7's evl_learner; PREREG-EVL-8's evl_price), before the equity lanes' own four")
 
     def test_a_lane_switched_on_with_no_store_has_recorded_nothing(self):
         empty = Path(self.tmp.name) / "bare"

@@ -1,0 +1,71 @@
+{
+ "rule": "the earliest first look whose worst plausible rate (fresh where re-run, else search) <= 0.13",
+ "table": [
+  {
+   "first_look": 22,
+   "worst": 0.119,
+   "worst_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "worst_fresh": 0.119,
+   "worst_fresh_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "se_fresh": 0.005119545878298192,
+   "worst_rest_search": 0.105,
+   "worst_rest_cell": "rho15|phi0.10|crasht3cl|skew|d20|lam40K40",
+   "worst_search_all": 0.143,
+   "worst_search_cell": "rho15|phi0.20|crasht3cl|t3|d20|lam40K40",
+   "holds": true
+  },
+  {
+   "first_look": 25,
+   "worst": 0.1045,
+   "worst_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "worst_fresh": 0.1045,
+   "worst_fresh_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "se_fresh": 0.004836831349137574,
+   "worst_rest_search": 0.088,
+   "worst_rest_cell": "rho15|phi0.20|crasht3|skew|d20|lam40K40",
+   "worst_search_all": 0.125,
+   "worst_search_cell": "rho15|phi0.20|crasht3cl|t3|d20|lam40K40",
+   "holds": true
+  },
+  {
+   "first_look": 30,
+   "worst": 0.08025,
+   "worst_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "worst_fresh": 0.08025,
+   "worst_fresh_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "se_fresh": 0.004295635503042594,
+   "worst_rest_search": 0.067,
+   "worst_rest_cell": "rho15|phi0.20|crasht3|skew|d10|lam40K40",
+   "worst_search_all": 0.103,
+   "worst_search_cell": "rho15|phi0.20|crasht3cl|t3|d20|lam40K40",
+   "holds": true
+  },
+  {
+   "first_look": 35,
+   "worst": 0.0505,
+   "worst_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "worst_fresh": 0.0505,
+   "worst_fresh_cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40",
+   "se_fresh": 0.00346228789964093,
+   "worst_rest_search": 0.05,
+   "worst_rest_cell": "rho15|phi0.20|crasht3|skew|d20|lam40K40",
+   "worst_search_all": 0.067,
+   "worst_search_cell": "rho15|phi0.20|crasht3cl|t3|d20|lam40K40",
+   "holds": true
+  },
+  {
+   "first_look": 40,
+   "worst": 0.039,
+   "worst_cell": "rho15|phi0.20|crashcl|skew|d20|lam40K40",
+   "worst_fresh": 0.039,
+   "worst_fresh_cell": "rho15|phi0.20|crashcl|skew|d20|lam40K40",
+   "se_fresh": 0.0030610047370103824,
+   "worst_rest_search": 0.038,
+   "worst_rest_cell": "rho15|phi0.20|crasht3|skew|d20|lam40K40",
+   "worst_search_all": 0.049,
+   "worst_search_cell": "rho15|phi0.20|crasht3cl|t3|d20|lam40K40",
+   "holds": true
+  }
+ ],
+ "chosen_first_look": 22
+}

@@ -206,6 +206,45 @@ def late_rows(store: S.Store, program: str, version: int, day: dt.date) -> dict[
     return out
 
 
+#: PREREG-EVL-8 SECTION 10 (F8, THE NO-LEADERBOARD TEST; release 1019n's second judges review): a look of this file's
+#: versions names its control and that control's block count, NEVER A FIGURE OF IT. A META look's control is its POOL
+#: (EVL-META-*-POOL, section 7.1: a free record built from `mrl_pool`'s members, whose mean block is an mrl_* figure no
+#: report, site page or births read may carry), and a PX seat's is a free record of section 3.2 (CTRL-PX-ALL-*); so of
+#: the judge's control detail ({program, mean_block, blocks, program_mean_block}) only these keys reach the report.
+EIGHT_CONTROL_KEYS = ("program", "blocks")
+
+
+def control_of_look(program: str, control: Any) -> Any:
+    """A look's control detail as the report carries it (`program_status`): every earlier file's whole, as before; for a
+    version of PREREG-EVL-8 (`programs.is_8`) only `EIGHT_CONTROL_KEYS` (its name and block count: counts only)."""
+    from . import programs as P
+
+    if not isinstance(control, Mapping) or not P.is_8(program):
+        return control
+    return {k: control.get(k) for k in EIGHT_CONTROL_KEYS}
+
+
+#: PREREG-EVL-8 SECTIONS 3.2, 3.3, 7.1 AND 10 (release 1019n's third fix round, the judges' re-review): THIS FILE'S FREE
+#: RECORDS (the PX controls CTRL-PX-ALL-ON and CTRL-PX-ALL-O1, the meta-learners' POOL records EVL-META-O1-POOL and
+#: EVL-META-ON-POOL, the placebos PLC-PX-*) are reported by COUNTS ONLY: section 10's PX block lists "the controls'
+#: counts", and a record's return, mean or look is never reported by figure. A program row of one carries only these
+#: keys of its settled record (never mean_a, mean_r, mean_a_tradable, mean_r_tradable, mean_b_tradable, market_share,
+#: late_share or any other figure).
+FREE_8_SETTLED_KEYS = ("n", "issuers", "entry_sessions", "sessions", "n_tradable", "issuers_tradable", "fallback_exits")
+
+
+def free_record_8(program: str) -> bool:
+    """Whether `program` (an id) is one of PREREG-EVL-8's free records (`FREE_8_SETTLED_KEYS`' comment): a row of this
+    file that never seats (its controls), a meta-learner's POOL record, or a placebo. Pinned or not."""
+    from . import meta as MT
+    from . import programs as P
+
+    pid = str(getattr(program, "id", program))
+    if any(p.id == pid and not p.seatable for p in P.ROWS_8):
+        return True
+    return pid in MT.POOL_OF.values() or pid.startswith("PLC-PX-")
+
+
 def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
                    left: Mapping[str, Mapping[str, set[str]]] | None = None) -> dict[str, Any]:
     today = {c: 0 for c in INTENT_CLASSES}
@@ -234,6 +273,8 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
     }
     mb = settled["mean_b_tradable"]
     settled["market_share"] = (mb / mean_r_t) if (mb is not None and mean_r_t) else None
+    if free_record_8(program):      # (PREREG-EVL-8 sections 3.2 and 10: a free record of this file, counts only)
+        settled = {k: settled[k] for k in FREE_8_SETTLED_KEYS}
     looks = SC.look_rows(store, program, version)
     last = looks[-1] if looks else None
     last_out = None
@@ -241,7 +282,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
         detail = SC.look_detail(store, program, version, int(last["k"])) or {}
         last_out = {k: last[k] for k in ("k", "held", "passed", "p", "alpha", "fp_check", "n", "issuers", "blocks", "why")}
         last_out["issuer"] = detail.get("issuer")
-        last_out["control"] = detail.get("control")
+        last_out["control"] = control_of_look(program, detail.get("control"))
     from .bands import bands as _bands
     from .programs import BY_KEY
 
@@ -259,8 +300,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
         "intents_today": today, "intents_all": every, "settled": settled,
         "kept_out": {"events": len(out_events), "unjudged": len(set(mine.get("unjudged") or ()) - held - out_events)},
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
-        "next_look": SC.next_look6(store, program, version, day) if v6 else
-        SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day),
+        "next_look": _next_look(store, program, version, day, v2, v6),
         "last_look": last_out, "held_looks": sum(1 for r in looks if r["held"]),
         "late_rows": late_rows(store, program, version, day),
     }
@@ -451,9 +491,80 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "registered_without_intents": [p for p in SC.SEATABLE + SC.RECORDS if p not in with_rows],
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
-        "settle": settle_pace(store, day), "fill_rates": _fill_rates(store, day),
+        "settle": settle_pace(store, day), "fill_rates": _fill_rates(store, day), "eight": _eight(store, day),
         "learners": _learners(store, day),
     }
+
+
+def _eight(store: S.Store, day: dt.date) -> dict[str, Any] | None:
+    """PREREG-EVL-8's PX and META blocks (its section 10), COUNTS ONLY (league/events/px.py and meta.py
+    `report_lines`), and the lane's expected false passes three ways for its versions (league/events/screen8.py
+    `charges`); None while it registers nothing. No record's, placebo's, panel's or sub-rule's figure."""
+    from . import meta as MT
+    from . import programs as P
+    from . import px as PXL
+    from . import screen8 as S8
+
+    if not P.registers_8():
+        return None
+    try:
+        return {"px": PXL.report_lines(store, store.root, day), "meta": MT.report_lines(store, day),
+                "charges": S8.charges(store), "late": late_passes_8(store, day), "mechanism": S8.one_mechanism(store),
+                "done_beside": done_beside(store)}
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+
+#: PREREG-EVL-8's late passes of the book (league/equity/live.py `EIGHT_PASSES`), by auction.
+EIGHT_PASSES = ("open-px8", "close-px8", "close-meta8")
+
+
+def late_passes_8(store: S.Store, day: dt.date) -> dict[str, Any] | None:
+    """PREREG-EVL-8 section 4.6 and 10: THE AUCTIONS OF D WHOSE LATE PASS DID NOT COME INSIDE THE WINDOW, from the book's
+    own rows (`<state>/live.sqlite` `eq_event_decisions`, read-only; the state root is the lane's store's parent): {pass:
+    "planned" | "failed" | "not come"}; None with no live.sqlite (no book on this House). Counts only."""
+    path = Path(store.root).parent / "live.sqlite"
+    if not path.exists():
+        return None
+    try:
+        db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            rows = {str(r[0]): str(r[1]) for r in db.execute(
+                "SELECT at, status FROM eq_event_decisions WHERE day=? AND at IN (?, ?, ?)", (day.isoformat(), *EIGHT_PASSES))}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return {k: ("planned" if rows.get(k) == "done" else rows.get(k) or "not come") for k in EIGHT_PASSES}
+
+
+def done_beside(store: S.Store) -> dict[str, Any] | None:
+    """PREREG-EVL-8 section 10 (the red team's `rt_done_beta`): BESIDE Done's issuer-block bound (league/events/done.py,
+    the owner's, unchanged), the same 95% two-sided bound of the counted events' per-event raw return with SESSION
+    blocks, and the MARKET-DIRECTION SHARE (the benchmarks' summed return b over the events' summed r): a long-only
+    book's issuer-block bound is carried by the market's direction. None before any counted event."""
+    from . import done as DN
+
+    rows = []
+    for r in DN.counted(store)["counted"]:
+        if r.get("r") is None:
+            continue
+        row = dict(r)
+        if not row.get("entry_day"):
+            got = store.db.execute("SELECT entry_day FROM intents WHERE program=? AND version=? AND event=?",
+                                   (row["program"], int(row["version"]), str(row["event"]))).fetchone()
+            if got is None:
+                continue
+            row["entry_day"] = got[0]
+        rows.append(row)
+    if not rows:
+        return None
+    got = SC.bootstrap_bounds(rows, "session", DN.LEVEL, DN.DRAWS, SC.seed_of("PREREG-EVL-8|done-beside|session"))
+    sum_r = math.fsum(float(r["r"]) for r in rows)
+    b = [float(r["b"]) for r in rows if r.get("b") is not None]
+    share = None if not b or sum_r == 0 else round(math.fsum(b) / sum_r, 4)
+    return {"n": len(rows), "sessions": got["groups"], "lower": got["lower"], "upper": got["upper"],
+            "direction_share": share}
 
 
 def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
@@ -605,6 +716,24 @@ def _pct(x: float | None) -> str:
     return "n/a" if x is None else f"{x * 100:+.2f}%"
 
 
+def _next_look(store: S.Store, program: str, version: int, day: dt.date, v2: bool, v6: bool = False) -> dict[str, Any]:
+    """A program's next look: PREREG-EVL-8's versions by their own judge (league/events/screen8.py `next_look`, S_k
+    blocks), PREREG-EVL-6's by its screen (`screen.next_look6`), every other as before."""
+    from . import programs as P
+
+    prog = P.BY_KEY.get((program, int(version)))
+    if prog is not None and P.is_8(prog) and prog.can_seat:
+        from . import screen8 as S8
+
+        got = S8.next_look(store, prog, day)
+        if got.get("k") is None:
+            return got
+        return {"k": got["k"], "at_sessions": got["blocks_needed"], "sessions": got["blocks"], "status": got["status"]}
+    if v6:
+        return SC.next_look6(store, program, version, day)
+    return SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day)
+
+
 def render(report: Mapping[str, Any]) -> str:
     """The report as a few lines of plain text (counts and summary statistics only)."""
     ev, vd = report["events"], report["verdicts"]
@@ -626,8 +755,11 @@ def render(report: Mapping[str, Any]) -> str:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)
         line = (f"{p['program']} v{p['version']}{'' if p['seatable'] else ' (record)'}: today p/e/s/x {today}; settled "
-                f"n {st['n']} (tradable {st['n_tradable']}), issuers {st['issuers']}, sessions {st['sessions']}, "
-                f"r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}")
+                f"n {st['n']} (tradable {st['n_tradable']}), issuers {st['issuers']}, sessions {st['sessions']}")
+        if "mean_r" in st:      # (a free record of PREREG-EVL-8 carries counts only: `FREE_8_SETTLED_KEYS`)
+            line += f", r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}"
+        else:
+            line += " (counts only)"
         if p.get("band"):
             line += f"; band {p['band']}"
         ko = p.get("kept_out") or {}
@@ -747,11 +879,58 @@ def render(report: Mapping[str, Any]) -> str:
                          f"{short.get('venue_cancels', 0)}/{short.get('buy_orders', 0)}, re-sends {short.get('resent', 0)}, "
                          f"unsent {short.get('unsent', 0)}")
         lines.append("Fills (attempts ledger): " + " | ".join(parts))
+    e8 = report.get("eight")
+    if e8:
+        lines.extend(_eight_lines(e8))
     jb = report["jobs"]
     failed = ", ".join(f"{f['job']} {S.parse_iso(f['started_at']).astimezone(C.NY):%H:%M} ET ({f['status']})"
                        for f in jb["failed"]) or "none"
     lines.append(f"Jobs: {jb['receipts']} receipts; missed: {', '.join(jb['missed']) or 'none'}; failed: {failed}")
     return "\n".join(lines)
+
+
+def _eight_lines(e8: Mapping[str, Any]) -> list[str]:
+    """PREREG-EVL-8's two lines and its charges (counts only)."""
+    if e8.get("error"):
+        return [f"PREREG-EVL-8: not read ({e8['error']})"]
+    px, meta, ch = e8.get("px") or {}, e8.get("meta") or {}, e8.get("charges") or {}
+    progs = px.get("programs") or {}
+    seats = "; ".join(f"{k} " + "/".join(f"{s} {n}" for s, n in sorted(v.items())) for k, v in sorted(progs.items()))
+    basis = px.get("basis_bp") or {}
+    bline = ", ".join(f"{side} n {b['n']} mean {b['mean']:.1f} p90 {b['p90']:.1f} bp" for side, b in basis.items() if b)
+    lines = [f"PX: N_U {px.get('N_U')}, FLAGGED {_pct(px.get('flagged_share'))}, premarket {_pct(px.get('premarket_share'))}"
+             f", panel rows {px.get('panel_rows')}, decided open {px.get('decided_o1')} / close {px.get('decided_on')}, runs "
+             + "/".join(f"{k} {v}" for k, v in sorted((px.get("runs") or {}).items()))
+             + f", requests {px.get('requests')} ({px.get('plan_minutes')} min of the plan), pivot count "
+             f"{px.get('pivot_count')}, placebos passed {px.get('placebos_passed')}, canary {px.get('canary')}"
+             + (f"; {seats}" if seats else "") + (f"; basis {bline}" if bline else "")]
+    parts = []
+    for pid, m in sorted((meta or {}).items()):
+        if m is None:
+            parts.append(f"{pid} no decision")
+        else:
+            parts.append(f"{pid} {m.get('kind')}/{m.get('status')}: members {m.get('members')}, eligible "
+                         f"{m.get('eligible')}, picks {m.get('picks')}, imputed {m.get('imputed')}, decided live "
+                         f"{_pct(m.get('live_share'))} of the run's sessions")
+    lines.append("META: " + ("; ".join(parts) if parts else "none"))
+    if ch:
+        lines.append(f"PREREG-EVL-8 expected false passes: {ch.get('count'):.2f} (0.13 a version or run), base model "
+                     f"{ch.get('base'):.2f}, stresses' worst {ch.get('stress'):.2f}; per version PX "
+                     f"{(ch.get('per_version') or {}).get('px')}, META {(ch.get('per_version') or {}).get('meta')}")
+    late = e8.get("late")
+    if late:
+        lines.append("PREREG-EVL-8 late passes: " + ", ".join(f"{k} {v}" for k, v in late.items())
+                     + f"; PX auctions lost to a late morning pass {px.get('auctions_lost_am')}")
+    mech = e8.get("mechanism") or {}
+    if mech.get("count"):
+        lines.append(f"PREREG-EVL-8 one mechanism beside Done's >= 3 programs: {mech['count']} pair(s) "
+                     + "; ".join("+".join(p) for p in mech.get("pairs") or []))
+    beside = e8.get("done_beside")
+    if beside:
+        lines.append(f"Beside Done's issuer-block bound: session blocks [{beside['lower']:+.4f}, {beside['upper']:+.4f}] "
+                     f"over {beside['sessions']} sessions, n {beside['n']}, market-direction share "
+                     f"{beside.get('direction_share')}")
+    return lines
 
 
 def _rate(counts: Mapping[str, Any]) -> str:

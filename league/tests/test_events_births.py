@@ -510,6 +510,12 @@ class Validation(unittest.TestCase):
         patch = mock.patch.object(BI, "RESERVED", ())
         patch.start()
         self.addCleanup(patch.stop)
+        restated = mock.patch.object(BI, "RESTATED", ())     # (and without goal V3's weekly restatement: TheRestatement)
+        restated.start()
+        self.addCleanup(restated.stop)
+        caps = mock.patch.object(BI, "NIGHT_CAPS", ())       # (and R3's 3 a night: TheRestatement holds A156's 6)
+        caps.start()
+        self.addCleanup(caps.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(unload)
@@ -727,7 +733,51 @@ class TheReservations(Validation):
                 self.assertTrue(out["ok"], "3.9 - 2.73 - 0.43 holds one more")
 
 
+class TheRestatement(Validation):
+    """Goal V3 item 3 (A155): the births' limit is the screen's 3.9 plus every weekly restatement whose session has come;
+    it rations births only, never falls, and a later week adds a line."""
+
+    def test_six_seatable_births_a_night_from_the_lines_session(self):
+        st = self.s.st
+        with mock.patch.object(BI, "RESTATED", (("2026-10-23", 260, "invented"),)), \
+                mock.patch.object(BI, "NIGHT_CAPS", (("2026-10-23", 6),)):
+            self.assertEqual((BI.seatable_a_night(dt.date(2026, 10, 22)), BI.seatable_a_night(self.AS_OF)), (3, 6))
+            self.assertEqual(BI.budget(st, self.AS_OF)["seatable_left_tonight"], 6)
+            four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
+            out = BI.validate(st, BI.Facts(st, self.AS_OF), four, night=self.AS_OF)
+            self.assertEqual([c["ok"] for c in out], [True, True, True, True], "a fourth seatable birth is admitted")
+
+    def test_the_limit_from_the_restatements_session_and_never_before(self):
+        st = self.s.st
+        line = (("2026-10-23", 260, "invented"),)
+        with mock.patch.object(BI, "RESTATED", line):
+            self.assertEqual(BI.restated_hundredths(dt.date(2026, 10, 22)), 0)
+            self.assertEqual(BI.restated_hundredths(dt.date(2026, 10, 23)), 260)
+            self.assertEqual(BI.budget_limit_hundredths(dt.date(2026, 11, 6)), 650)
+            self.assertEqual(BI.budget(st, dt.date(2026, 10, 22))["limit"], 3.9)
+            got = BI.budget(st, self.AS_OF)
+            self.assertEqual((got["limit"], got["left"], got["left_for_births"]), (6.5, 4.55, 4.55))
+            for i in range(15):        # 1.95 + 1.95 = 3.9: the screen's figure spent, the restatement's room left
+                self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
+                                night=f"2026-09-{10 + i}", seq=i)
+            P.load_births(st)
+            self.assertEqual(BI.budget(st, self.AS_OF)["seatable_left_tonight"], 3)
+            [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                night=self.AS_OF)
+            self.assertTrue(out["ok"], "3.9 used, 6.5 the limit: a seatable birth is admitted")
+        with mock.patch.object(BI, "RESTATED", (("2026-11-07", 260, "invented"),)):
+            [old] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                night=self.AS_OF)
+            self.assertFalse(old["ok"], "a night before the restatement's session is held to 3.9")
+            self.assertIn("of 3.90 used", old["reasons"][0])
+
+
 class TheLiveReservations(unittest.TestCase):
+    def test_the_restatement_in_force_is_a155s(self):
+        self.assertEqual(tuple((d, h) for d, h, _ in BI.RESTATED), (("2026-10-23", 260),))
+        self.assertIn("A155", BI.RESTATED[0][2])
+        self.assertEqual(BI.NIGHT_CAPS, (("2026-10-23", 6),), "A156")
+
     def test_the_live_tree_holds_all_three(self):
         self.assertEqual([f for f, pin, _ in BI.RESERVED if getattr(P, pin, None) is None],
                          ["PREREG-EVL-8", "PREREG-EVL-9", "PREREG-EVL-10"])

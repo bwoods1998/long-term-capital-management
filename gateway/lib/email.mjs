@@ -233,6 +233,11 @@ export const STALL_CAUSES = {
   // a training lagging the evening score, a nightly recompute mismatch, a warm-up unmet. Deploy the gateway first, as
   // above: an older gateway refuses a notice naming a cause it does not word.
   evl_learner: 'the event lane\'s learners failed, lagged or mismatched',
+  // PREREG-EVL-8 (release 1019j; league/ops/evl_price.py, judged only once the freeze pins REGISTERED_AT_8): a PX run or
+  // a meta-learner's part that failed or ran past its own bound (never traded at that auction), a PX recorder lagging
+  // the morning pass or the nightly bars, or the placebo audit's alarm. Deploy the gateway first, as above: an older
+  // gateway refuses a notice naming a cause it does not word.
+  evl_price: 'the event lane\'s price lane or meta-learners missed a run or raised the placebo audit',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

@@ -1336,3 +1336,167 @@ __all__ += ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "PREREG_PROGRAMS", "PREREG
            "FAMILY_ERN_5", "CLOSE_FAMILIES_5", "attention_window", "night2_windows", "news_named", "ins_buys_window",
            "ciks_by_ticker", "named_ciks", "filed_ciks", "bought_ciks", "no_new_info", "taken_close_5", "dropped_ciks",
            "close_rows_5"]
+
+
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-8
+#: PREREG-EVL-8's REGISTRATION TIME (its preamble, A92's method: the latest of its commit's time, the pushing client's
+#: clock after the push of the tag `prereg-evl-8` returned and GitHub's activity time for the branch `prereg/evl-8`),
+#: THE ONE CONSTANT THE FREEZE SETS: A122 (the latest of the commit's 18:43:17Z, GitHub's 18:43:20Z and the client's
+#: 18:43:24Z after the tag push returned; tag prereg-evl-8, commit a5eea816, docs/prereg/PREREG-EVL-8.md sha256
+#: 37150fac..., docs/prereg/evl-8/ 160 files with SHA256SUMS). None refuses every decision of this file: its programs
+#: are then in no registry (`rows_8`), so nothing of it decides, trades or is charged, and nothing of the lane moves
+#: (league/events/px.py and meta.py check `registers_8` before every write). Pinned, the five seats and two controls
+#: start with the first release that carries this code (section 8: real money and every judged record from the
+#: release's first live decision; the meta-learners' state from Oct 20 is decided once by the catch-ups, never judged).
+REGISTERED_AT_8: str | None = "2026-10-22T18:43:24Z"  # A122: tag prereg-evl-8, commit a5eea816
+#: The frozen text's sha256 (A122), which league/tests/test_events_evl8.py holds equal to docs/prereg/PREREG-EVL-8.md.
+FROZEN_SHA256_8 = "37150facab4ca727ef06ae5522689b81096c156872184f7ebe1e28be09f43ed0"
+#: PREREG-EVL-6's registration time as the captain's A116 records it (tag prereg-evl-6, commit 4ae9017a): PREREG-EVL-8
+#: registers anything only when it is EARLIER than REGISTERED_AT_8 (its preamble: "This file is frozen only after
+#: PREREG-EVL-6 (REGISTERED_AT_6 < REGISTERED_AT_8)"; `registers_8`). Kept here beside this file's rows so they read no
+#: other branch's constant; a test holds it equal to `REGISTERED_AT_6` wherever the tree carries PREREG-EVL-6's code.
+REGISTERED_AT_6_FOR_8 = "2026-10-22T12:24:50Z"
+#: The file that registers this file's rows, and its families: the PX lane's three seats and two controls (part A,
+#: league/events/px.py decides them, never `select`), the two meta-learners (part B, league/events/meta.py).
+FILE_8 = 8
+PX_SEAT_FAMILIES = ("px-drop-on", "px-surge-on", "px-gap-o1")
+PX_CONTROL_FAMILIES = ("px-ctrl-on", "px-ctrl-o1")
+PX_FAMILIES = PX_SEAT_FAMILIES + PX_CONTROL_FAMILIES
+META_FAMILIES = ("meta-o1", "meta-on")
+FAMILIES_8 = PX_FAMILIES + META_FAMILIES
+
+
+@dataclasses.dataclass(frozen=True)
+class Program8(Program):
+    """A PREREG-EVL-8 version (part A's seats and controls, part B's meta-learners): its own registration time,
+    REGISTERED_AT_8 (never another file's), and its seat only when this file registers anything (`registers_8`). Its
+    rule is league/events/px.py's or meta.py's pinned procedure, never `select`'s: no verdict read by the shadow rule
+    (`reads` False). PREREG-EVL-2's limit at entry applies (league/events/score.py: prereg >= 2).
+
+    `evl6` is False: PREREG-EVL-6's own run machinery (league/events/screen.py `_run_v6` on release 1019i) never judges
+    these versions, because PREREG-EVL-8 section 5 reads the frozen text's 14 as THE OPEN CAP OF THE VERSION'S BAND
+    (F4: 4 for a PX run in learning, 8 for a meta-learner's run, 14 for a Probe stay, 8 for a Sized stay), which
+    PREREG-EVL-6's code holds at 14 for its own versions. THE ONE NARROW INTERFACE is league/events/screen8.py: this
+    file's judge, PREREG-EVL-6 sections 1.2-3 as frozen with that cap (`screen8.judge_blocks`), new code beside
+    screen.py's, PREREG-EVL-1 to -7's paths intact (PREREG-EVL-8 section 5.3)."""
+
+    @property
+    def registered_at(self) -> dt.datetime:
+        if REGISTERED_AT_8 is None:
+            raise RuntimeError("PREREG-EVL-8 is not pinned: none of its programs decides before its registration time")
+        return S.parse_iso(REGISTERED_AT_8)
+
+    @property
+    def can_seat(self) -> bool:
+        return self.seatable and registers_8()
+
+    @property
+    def evl6(self) -> bool:
+        return False
+
+    @property
+    def v6_sized(self) -> bool:
+        """PREREG-EVL-8 section 4.1: a Probe or Sized buy of a seatable version of this file is PREREG-EVL-6 section 6's,
+        clause (2) (A99, A100's `reach_bar` rows): the fewest whole shares reaching 0.8 of the band's target, inside the
+        band's frozen envelope, judged again by every cap; a pick no such count reaches is skipped before it takes a
+        slot; and section 3's unsettled-lot hold. `evl6` stays False: PREREG-EVL-6's own screen never judges it."""
+        return self.seatable
+
+    @property
+    def px(self) -> bool:
+        """Part A's (a PX seat or control)."""
+        return self.family in PX_FAMILIES
+
+    @property
+    def meta(self) -> bool:
+        """Part B's (a meta-learner)."""
+        return self.family in META_FAMILIES
+
+
+#: SECTION 3.1 AND 7.1'S PROGRAMS, VERSION 1 EACH, in ROOM's order (section 4.2: PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1,
+#: EVL-META-O1, EVL-META-ON), then the two controls (free records, PREREG-EVL-1 section 7: never seated, never
+#: charged). Hold 1 each: an ON row enters at D's close and exits at D+1's open; an O1 row enters at D's open and exits at
+#: D's close. The meta-learners' POOL records write no intents and are no rows here (league/events/meta.py).
+ROWS_8: tuple[Program8, ...] = (
+    Program8("PX-DROP-ON", 1, True, "px-drop-on", "close", 1, False, exit_at="open", rule="px", prereg=FILE_8),
+    Program8("PX-SURGE-ON", 1, True, "px-surge-on", "close", 1, False, exit_at="open", rule="px", prereg=FILE_8),
+    Program8("PX-GAP-O1", 1, True, "px-gap-o1", "open", 1, False, rule="px", prereg=FILE_8),
+    Program8("EVL-META-O1", 1, True, "meta-o1", "open", 1, False, rule="mrl", prereg=FILE_8),
+    Program8("EVL-META-ON", 1, True, "meta-on", "close", 1, False, exit_at="open", rule="mrl", prereg=FILE_8),
+    Program8("CTRL-PX-ALL-ON", 1, False, "px-ctrl-on", "close", 1, False, exit_at="open", rule="px", prereg=FILE_8),
+    Program8("CTRL-PX-ALL-O1", 1, False, "px-ctrl-o1", "open", 1, False, rule="px", prereg=FILE_8),
+)
+
+
+def registers_8() -> bool:
+    """Whether PREREG-EVL-8 registers anything: REGISTERED_AT_8 is pinned and PREREG-EVL-6's registration time is
+    earlier than it. Never True on an unreadable time (fail closed)."""
+    if REGISTERED_AT_8 is None:
+        return False
+    try:
+        return S.parse_iso(REGISTERED_AT_6_FOR_8) < S.parse_iso(REGISTERED_AT_8)
+    except (TypeError, ValueError):
+        return False
+
+
+def rows_8() -> tuple[Program8, ...]:
+    """This file's rows in force: all seven when it registers anything (`registers_8`), else none."""
+    return ROWS_8 if registers_8() else ()
+
+
+def is_8(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-8's, pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid for p in ROWS_8)
+
+
+def is_px8(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of part A's (a PX seat or control), pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid and p.px for p in ROWS_8)
+
+
+def is_meta8(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of part B's meta-learners, pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid and p.meta for p in ROWS_8)
+
+
+def refresh_8() -> tuple[Program8, ...]:
+    """THE REGISTRIES WITH PREREG-EVL-8 AS PINNED (`rows_8`): PREREG_PROGRAMS and PREREG_SEATING are every earlier
+    file's rows (whatever this tree holds of PREREG-EVL-1 to -7, in their order) then this file's; PROGRAMS, BY_KEY,
+    BY_ID and SEATING are rebound with R3's births loaded last after them (as `load_births` binds them), so ROOM's
+    order (league/events/book.py `order_of`) puts this file's seats after every earlier file's row and before R3's
+    births (section 4.2, A101), and no earlier row's place, rule or judge moves. Idempotent: this file's rows are taken
+    out first and appended again, so it composes with any earlier file's own refresh run before it. Run at import and
+    by a test that pins REGISTERED_AT_8. Returns the rows in force."""
+    global PROGRAMS, BY_KEY, BY_ID, SEATING, PREREG_PROGRAMS, PREREG_SEATING
+    rows = rows_8()
+    with _LOAD:
+        PREREG_PROGRAMS = tuple(p for p in PREREG_PROGRAMS if not is_8(p)) + rows
+        PREREG_SEATING = tuple(p for p in PREREG_SEATING if not is_8(p)) + tuple(p for p in rows if p.can_seat)
+        programs = PREREG_PROGRAMS + BIRTHS
+        PROGRAMS = programs
+        BY_KEY = {(p.id, p.version): p for p in programs}
+        BY_ID = {p.id: p for p in programs if p.version == 1}
+        SEATING = PREREG_SEATING + tuple(p for p in BIRTHS if p.can_seat)
+    return rows
+
+
+refresh_8()
+
+#: PREREG-EVL-7's `refresh_7` rebuilds the registries from its own snapshot of the files before it (`_BEFORE_7`), which
+#: holds none of this file's rows; every later call of it (league/tests/evl7_fakes.py `unpinned_7`, at entry and at exit)
+#: is followed by `refresh_8`, so this file's rows stay after PREREG-EVL-7's and before R3's births whoever refreshes.
+_refresh_7_alone = refresh_7
+
+
+def refresh_7() -> tuple[Learner, ...]:  # noqa: F811 - the composed refresh, PREREG-EVL-7's rows unchanged
+    rows = _refresh_7_alone()
+    refresh_8()
+    return rows
+
+
+__all__ += ["REGISTERED_AT_8", "FROZEN_SHA256_8", "REGISTERED_AT_6_FOR_8", "FILE_8", "PX_SEAT_FAMILIES", "PX_CONTROL_FAMILIES",
+            "PX_FAMILIES", "META_FAMILIES", "FAMILIES_8", "Program8", "ROWS_8", "registers_8", "rows_8", "is_8",
+            "is_px8", "is_meta8", "refresh_8"]

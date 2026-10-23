@@ -28,14 +28,21 @@ from league.events import programs as P
 @contextlib.contextmanager
 def unpinned_7() -> Iterator[None]:
     """The registries without the learners for the block (REGISTERED_AT_7 None, rebuilt by `refresh_7` with R3's births
-    as loaded), restored and rebuilt on exit."""
-    patch = mock.patch.object(P, "REGISTERED_AT_7", None)
-    patch.start()
+    as loaded), restored and rebuilt on exit. They stood so before A125 pinned the learners, and PREREG-EVL-8's rows
+    were in no registry then either (REGISTERED_AT_8 was pinned by A122's release 1019n, after it): the block holds
+    REGISTERED_AT_8 None too (`refresh_7` composes `refresh_8`), so these tests run on exactly the registries they were
+    written on. PREREG-EVL-8's own effects on these paths are league/tests/test_events_evl8*.py's."""
+    patches = [mock.patch.object(P, "REGISTERED_AT_7", None)]
+    if hasattr(P, "REGISTERED_AT_8"):
+        patches.append(mock.patch.object(P, "REGISTERED_AT_8", None))
+    for patch in patches:
+        patch.start()
     P.refresh_7()
     try:
         yield
     finally:
-        patch.stop()
+        for patch in reversed(patches):
+            patch.stop()
         P.refresh_7()
 
 
@@ -68,4 +75,31 @@ def tearDownModule() -> None:  # noqa: N802 - unittest's name
         _HELD.pop().__exit__(None, None, None)
 
 
-__all__ = ["unpinned_7", "off_7", "setUpModule", "tearDownModule"]
+@contextlib.contextmanager
+def unpinned_8() -> Iterator[None]:
+    """THE LEARNERS' OWN REGISTRIES for the block: PREREG-EVL-8 unpinned (REGISTERED_AT_8 None, rebuilt by `refresh_8`),
+    the learners as each test pins them. PREREG-EVL-7's own tests (league/tests/test_events_evl7.py, -_fix.py) were
+    written on registries whose last file was PREREG-EVL-7; A122's pin (release 1019n) puts PREREG-EVL-8's rows after
+    them in ROOM, its close-entry seats among the book's instances and its lead in the House's plan. Its proof that
+    every learner's intents and picks are the same with and without it is league/tests/test_events_evl8_proof.py's."""
+    if not hasattr(P, "REGISTERED_AT_8"):
+        yield
+        return
+    patch = mock.patch.object(P, "REGISTERED_AT_8", None)
+    patch.start()
+    P.refresh_8()
+    try:
+        yield
+    finally:
+        patch.stop()
+        P.refresh_8()
+
+
+def setUpModule_8() -> None:  # noqa: N802 - unittest's name
+    """A module's tests on the learners' own registries (PREREG-EVL-8 unpinned: `unpinned_8`)."""
+    ctx = unpinned_8()
+    ctx.__enter__()
+    _HELD.append(ctx)
+
+
+__all__ = ["unpinned_7", "off_7", "setUpModule", "tearDownModule", "unpinned_8", "setUpModule_8"]

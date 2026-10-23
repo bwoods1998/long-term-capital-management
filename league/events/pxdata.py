@@ -138,13 +138,19 @@ class TokenBucket:
 
 class PxGateway:
     """The gateway as a PX recorder reads it: the SIP bars route only (any other path or feed raises ValueError), each
-    request a PX token of `bucket` (`take_px`, no later than `until`) and refused once `late()` says the job's bound
-    passed (`PxCut` either way), or once `room()` names a line the store crossed (`PxRoom`: the page a request would
-    bring is never written); counted (`requests`)."""
+    request SPACED ON THE LANE'S ONE SLOT (`space`: league/events/house.py `EventLane.space`, DATA_INTERVAL 0.5 s
+    after the slot's last market-data read, the lane's own included; PREREG-EVL-8 section 4.6: "every lane read, this
+    file's included, goes through the lane's one slot at DATA_INTERVAL (at most 120 a minute) ... when it ships this
+    file's reads keep the slot's spacing", the captain's A128), then a PX token of `bucket` (`take_px`, no later than
+    `until`), and refused once `late()` says the job's bound passed (`PxCut` either way), or once `room()` names a line
+    the store crossed (`PxRoom`: the page a request would bring is never written); counted (`requests`). The spacing
+    comes first, so the bound and the room are judged at the moment the request would go."""
 
     def __init__(self, inner: Any, bucket: TokenBucket, *, until: float | None = None,
-                 late: Callable[[], bool] | None = None, room: Callable[[], str | None] | None = None):
+                 late: Callable[[], bool] | None = None, room: Callable[[], str | None] | None = None,
+                 space: Callable[[], None] | None = None):
         self.inner, self.bucket, self.until, self.late, self.room = inner, bucket, until, late, room
+        self.space = space
         self.requests = 0
 
     def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -153,6 +159,8 @@ class PxGateway:
             raise ValueError(f"the PX recorders read only {BARS_PATH}, not {path}")
         if params.get("feed") != "sip":
             raise ValueError("the PX recorders read SIP only")
+        if self.space is not None:
+            self.space()
         if self.late is not None and self.late():
             raise PxCut("the job's bound passed")
         why = self.room() if self.room is not None else None
@@ -236,6 +244,17 @@ def span_pm(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
             dt.datetime.combine(day, dt.time(8, 59), tzinfo=C.NY).astimezone(dt.timezone.utc))
 
 
+def span_o0930(session: C.Session) -> tuple[dt.datetime, dt.datetime]:
+    """THE 09:30 MINUTE (PREREG-EVL-8 section 3.3's OPENGAP o_D, PREREG-EVL-5's gap minute): the regular-session bar
+    starting at the open (09:30:00 ET), as [start, end) of bar starts."""
+    return session.open_at, session.open_at + dt.timedelta(minutes=1)
+
+
+def first_open(bars: Sequence[Mapping[str, Any]]) -> float | None:
+    """o_D: the OPEN of the span's first bar (the bar starting at 09:30:00 ET), None without one."""
+    return _positive(bars[0].get("o")) if bars else None
+
+
 def span_v1530(session: C.Session) -> tuple[dt.datetime, dt.datetime]:
     """V_D's span: the session's regular minute bars through the bar ending at 15:30 ET (close - 30 on an early close)."""
     return session.open_at, span_1530(session)[1]
@@ -282,7 +301,7 @@ def minutes(px: PS.PxStore, gw: Any, symbols: Sequence[str], session: C.Session,
     once its span is whole on the tape (else {"waiting": ...}, nothing written): WRITE-ONCE, a symbol with no bar in
     the span stored as no value (read once). Returns {written, kept, waiting}."""
     span = {"px1530": lambda: span_1530(session), "pm": lambda: span_pm(session.day),
-            "v1530": lambda: span_v1530(session)}[label]()
+            "v1530": lambda: span_v1530(session), "o0930": lambda: span_o0930(session)}[label]()
     todo = [s for s in sorted({str(x).upper() for x in symbols}) if px.minute(s, session.day, label) is None]
     if not todo:
         return {"written": 0, "kept": len(set(symbols)), "waiting": None}
@@ -292,7 +311,7 @@ def minutes(px: PS.PxStore, gw: Any, symbols: Sequence[str], session: C.Session,
     written = 0
     for sym in todo:
         bars = _in(got.get(sym) or [], *span)
-        value = {"px1530": last_close, "pm": pm_value, "v1530": volume}[label](bars)
+        value = {"px1530": last_close, "pm": pm_value, "v1530": volume, "o0930": first_open}[label](bars)
         written += px.put_minute(sym, session.day, label, value if bars else None, bars=len(bars),
                                  first_t=str(bars[0]["t"]) if bars else None, last_t=str(bars[-1]["t"]) if bars else None,
                                  run=run, now=now)
@@ -496,6 +515,7 @@ def names(px: PS.PxStore, day: dt.date, rule: str = S.LIVE_RULE) -> list[str]:
 
 
 __all__ = ["TokenBucket", "PxGateway", "PxCut", "PxRoom", "daily_bars", "minute_bars", "span_1530", "span_pm", "span_v1530",
+           "span_o0930", "first_open",
            "pm_value", "last_close", "volume", "minutes", "backfill", "daily", "flags", "listed_tickers",
            "operating_fill", "cached_operating", "universe", "pm_names", "names", "BARS_PATH", "RATE_PER_MINUTE",
            "LANE_RESERVE", "BACKFILL_SESSIONS", "NIGHTLY_SESSIONS", "ADJUSTED_SESSIONS", "PX_MIN_PRICE", "PX_MIN_ADV",

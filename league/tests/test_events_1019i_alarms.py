@@ -106,7 +106,7 @@ class TheFillRateAlarm(LaneCase):
     def test_the_stall_job_names_both_and_the_gateway_words_them(self):
         self.assertIn("evl_fill_rate", ST.CAUSES)
         self.assertIn("evl_attempts", ST.CAUSES)
-        self.assertEqual(ST.CAUSES[-8:-4], ("evl_fill_rate", "evl_attempts", "evl_score_parity", "evl_px_store"))
+        self.assertEqual(ST.CAUSES[-9:-5], ("evl_fill_rate", "evl_attempts", "evl_score_parity", "evl_px_store"))
         source = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "email.mjs").read_text()
         for cause in ("evl_fill_rate", "evl_attempts"):
             self.assertIn(f"\n  {cause}: '", source)

@@ -158,6 +158,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from . import calendar as C
 from . import gw as G
 from . import programs as P
+from . import meta as MT
+from . import px as PXL
 from . import pxstore as PXS
 from . import screen as SN
 from . import store as S
@@ -256,6 +258,22 @@ BUDGET_HUNDREDTHS = SN.V6_BUDGET_HUNDREDTHS
 CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
+#: GOAL V3'S WEEKLY LINE ON SEATABLE BIRTHS A NIGHT (the captain's A156, with A155's restatement): (the first session it
+#: holds for, the night's cap). Before any line, `SEATABLE_A_NIGHT`; a later line replaces an earlier one from its own
+#: session. Every seatable birth is still charged and still needs the budget's room.
+NIGHT_CAPS = (("2026-10-23", 6),)
+
+
+def seatable_a_night(night: dt.date | None = None) -> int:
+    """The seatable births night `night` may register (today's New York date when None): the latest `NIGHT_CAPS` line
+    whose session has come, else `SEATABLE_A_NIGHT`."""
+    if night is None:
+        night = dt.datetime.now(dt.timezone.utc).astimezone(C.NY).date()
+    cap = SEATABLE_A_NIGHT
+    for d, n in sorted(NIGHT_CAPS):
+        if dt.date.fromisoformat(d) <= night:
+            cap = int(n)
+    return cap
 #: THE CHARGES OF FROZEN FILES WHOSE CODE IS NOT LIVE YET (the captain's A137): (file, its pin in league/events/programs.py,
 #: hundredths). The screen's own sum (`budget6`) counts only what this code registers, so without this a frozen file's
 #: reservation (PREREG-EVL-8's five seats at 0.13 a run, A122; PREREG-EVL-9's 0.30 reserved at registration, A127)
@@ -265,6 +283,27 @@ SEATABLE_A_NIGHT = 3
 #: seatable births). Records stay free.
 RESERVED = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
             ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
+#: GOAL V3'S WEEKLY RESTATEMENT OF THE FALSE-PASS BUDGET (item 3: "births ... under a false-pass budget you state and may
+#: restate each week"; the captain's A155): (the first session it holds for, hundredths added to the births' limit, why).
+#: The births' limit is the screen's own lifetime figure (V6_BUDGET_HUNDREDTHS, PREREG-EVL-6 section 5, unchanged in the
+#: screen) plus every restatement whose session has come; it never falls (a test that was run is never refunded) and it
+#: rations births only (a run's own start still reads the screen's figure). Each line is written before any birth it
+#: admits, from outcome-free reasons only, and never edited: a later week adds a line.
+RESTATED = (("2026-10-23", 260, "A155: goal V3's first week (twenty seatable births at 0.13; under V3's rows a false "
+                                "pass buys at learning size until PREREG-EVL-12 backs it, so its money cost is a "
+                                "learning lot's)"),)
+
+
+def restated_hundredths(day: dt.date | None = None) -> int:
+    """The hundredths `RESTATED` adds to the births' limit on session `day` (today's New York date when None)."""
+    if day is None:
+        day = dt.datetime.now(dt.timezone.utc).astimezone(C.NY).date()
+    return sum(int(h) for d, h, _ in RESTATED if dt.date.fromisoformat(d) <= day)
+
+
+def budget_limit_hundredths(day: dt.date | None = None) -> int:
+    """The births' limit on `day`: the screen's lifetime figure plus goal V3's weekly restatements (A155)."""
+    return BUDGET_HUNDREDTHS + restated_hundredths(day)
 
 #: THE PROPOSER (R3-SPEC section 2). THE ARCHITECT (the captain's A109, 06:05Z Oct 22, 2026; release 1019h): Claude
 #: Opus 5.5, in the gateway's CLAUDE_MODELS allowlist (gateway/wrangler.jsonc; a model absent from it is a 403). Release
@@ -347,6 +386,13 @@ FACTS_DENY = FACTS_DENY | frozenset({"real_attempts", "score_parity"})
 #: the PX universe's prices and the decided values): px.sqlite is a file of its own, which the facts never open, and
 #: each of its tables is refused by name as well.
 FACTS_DENY = FACTS_DENY | PXS.TABLES
+#: ... and (release 1019j, PREREG-EVL-8 section 10, F8) every px.sqlite table PREREG-EVL-8 adds (league/events/px.py
+#: `TABLES_8`: the morning values, the decisions, the panel, the record days, the basis, the prints, the placebos) and
+#: every mrl_* table of its meta-learners (league/events/meta.py `TABLES`: the members, the state, the walk, the
+#: decisions): machine-only figures no designer, judge, captain or birth reads. The facts read no intent at all, the
+#: meta-learners' included, and its programs are EXCLUDED from the facts' selection counts and the validator's Jaccard
+#: (its section 4.4); px.sqlite is never attached to a births connection.
+FACTS_DENY = FACTS_DENY | PXL.TABLES_8 | MT.TABLES
 #: THE CLOSE-ENTRY FAMILIES OF PREREG-EVL-4 AND -5 (release 1019h, the module docstring's "PREREG-EVL-4'S AND
 #: PREREG-EVL-5'S FAMILIES"): no birth names one (the grammar's `FAMILIES` stay R3's), but the facts window them, so each
 #: of their programs has a selection count and every candidate a Jaccard against them.
@@ -1022,7 +1068,9 @@ class Facts:
 
     def facts(self, programs: Sequence[P.Program] | None = None) -> dict[str, Any]:
         """The architect's facts (JSON-ready; counts only): the module docstring's list."""
-        progs = list(P.PROGRAMS if programs is None else programs)
+        # (PREREG-EVL-8 section 4.4, re-check 1's minor 6, its rule (1): its programs, controls, records and placebos,
+        # EVL-META-* included, are EXCLUDED from the facts' selection counts: births never read a row of that file)
+        progs = [p for p in (P.PROGRAMS if programs is None else programs) if not P.is_8(p)]
         n = len(self.days)
         fam: dict[str, dict[str, Any]] = {}
         items: dict[str, int] = {}
@@ -1152,9 +1200,17 @@ def budget_used_hundredths(store: Any) -> int:
 
 
 def budget_waiting_hundredths(store: Any) -> int:
-    """What the runs waiting for the lane's budget would charge (0.13 each, league/events/screen.py `waiting_runs`):
+    """What the runs waiting for the lane's budget would charge (0.13 each, league/events/screen.py `waiting_runs`, and
+    PREREG-EVL-8's, league/events/screen8.py `waiting_runs`):
     PREREG-EVL-6 section 3, a birth registers only when the room left after every waiting run holds its charge."""
-    return CHARGE_HUNDREDTHS * len(SN.waiting_runs(store))
+    n = len(SN.waiting_runs(store))
+    if P.registers_8():
+        # (PREREG-EVL-8 section 6.6: its versions' runs wait for the same budget, drawn in registration order after
+        # PREREG-EVL-6's; a birth registers only once the room after every waiting run holds its charge)
+        from . import screen8 as S8
+
+        n += len(S8.waiting_runs(store))
+    return CHARGE_HUNDREDTHS * n
 
 
 def budget_reserved_hundredths() -> int:
@@ -1184,10 +1240,11 @@ def budget(store: Any, night: dt.date | None = None) -> dict[str, Any]:
     waiting = budget_waiting_hundredths(store)
     reserved = budget_reserved_hundredths()
     tonight = _tonight(store, night)
-    room = BUDGET_HUNDREDTHS - used - waiting - reserved
-    return {"used": used / 100, "limit": BUDGET_HUNDREDTHS / 100, "left": (BUDGET_HUNDREDTHS - used) / 100,
+    limit = budget_limit_hundredths(night)
+    room = limit - used - waiting - reserved
+    return {"used": used / 100, "limit": limit / 100, "left": (limit - used) / 100,
             "waiting_runs": waiting / 100, "reserved": reserved / 100, "left_for_births": room / 100,
-            "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, room // CHARGE_HUNDREDTHS)),
+            "seatable_left_tonight": max(0, min(seatable_a_night(night) - tonight, room // CHARGE_HUNDREDTHS)),
             "charge": CHARGE_HUNDREDTHS / 100}
 
 
@@ -1214,7 +1271,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
     used = budget_used_hundredths(store) + budget_waiting_hundredths(store) + budget_reserved_hundredths()
     # (the waiting runs come first: section 3; then the frozen files' reservations, A137)
     tonight_used = _tonight(store, night)
-    registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS]
+    # (PREREG-EVL-8 section 4.4: its rows are EXCLUDED from the Jaccard "against every registered program")
+    registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS if not P.is_8(p)]
     accepted: list[tuple[str, set[str]]] = []
     out: list[dict[str, Any]] = []
     for seq, proposal in enumerate(proposals):
@@ -1269,10 +1327,11 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             why.append(f"a duplicate of {worst[1]}: Jaccard {worst[0]:.2f} >= {JACCARD_MAX} over the last {SESSIONS} "
                        "sessions' selected events")
         if spec["seatable"] and not why:
-            if tonight_used + 1 > SEATABLE_A_NIGHT:
-                why.append(f"{SEATABLE_A_NIGHT} seatable births a night at most")
-            elif used + CHARGE_HUNDREDTHS > BUDGET_HUNDREDTHS:
-                why.append(f"the false-pass budget: {used / 100:.2f} of {BUDGET_HUNDREDTHS / 100:.2f} used or held for "
+            if tonight_used + 1 > seatable_a_night(night):
+                why.append(f"{seatable_a_night(night)} seatable births a night at most")
+            elif used + CHARGE_HUNDREDTHS > budget_limit_hundredths(night):
+                limit = budget_limit_hundredths(night)
+                why.append(f"the false-pass budget: {used / 100:.2f} of {limit / 100:.2f} used or held for "
                            f"the runs waiting for it, a seatable birth adds {CHARGE_HUNDREDTHS / 100:.2f} "
                            "(PREREG-EVL-6 section 5)" + (f"; {budget_reserved_hundredths() / 100:.2f} of it held for the "
                            "frozen files whose code is not live (A137)" if budget_reserved_hundredths() else ""))
@@ -1811,9 +1870,10 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "select", "unread_reaction", "outcome_free", "Facts", "jaccard", "budget", "budget_used_tenths", "validate",
            "SYSTEM", "USER", "prompt_sha", "render", "request_body", "worst_usd", "parse_answer", "propose", "path_of",
            "line_of", "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED",
-           "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT",
+           "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "NIGHT_CAPS", "seatable_a_night",
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
            "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
            "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED", "ASKED", "CHARGE_HUNDREDTHS",
-           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED",
+           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED", "RESTATED",
+           "restated_hundredths", "budget_limit_hundredths",
            "budget_reserved_hundredths"]
