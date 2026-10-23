@@ -2254,15 +2254,23 @@ def start_runs_r2(store: Any, now: dt.datetime) -> list[dict[str, Any]]:
     """PREREG-EVL-10 SECTION 3's RUNS, which FOR THIS FILE'S VERSION REPLACE PREREG-EVL-6 SECTION 3's WAIT FOR ROOM: a
     due run (`_r2_due`) reads the lane's budget ONCE, at the close at which it would start (this, the night's start of
     runs after every earlier waiting run was drawn): it starts, charged 0.13 (the version's start record, `V6_RUN_KEY`),
-    when the lane's count with every earlier run still waiting held ahead (`budget6`'s used + 0.13 each waiting) holds
-    0.13 more of 3.9; else it NEVER STARTS (meta league/events/reader2.py `NORUN_KEY`, written once: no later restatement
-    revives it, the version continues as a shadow record and READER-2 asks nothing more), as is a fourth run (at most
-    three runs over the id's life). Returns the runs started (a refused one is not)."""
+    when THE LANE'S COUNT holds 0.13 more of 3.9; else it NEVER STARTS (meta league/events/reader2.py `NORUN_KEY`, written
+    once: no later restatement revives it, the version continues as a shadow record and READER-2 asks nothing more), as
+    is a fourth run (at most three runs over the id's life). Returns the runs started (a refused one is not).
+
+    THE LANE'S COUNT IS R3's VALIDATOR'S SUM (sections 3 and 4 as frozen: "USED_before_this_file (the sum R3's validator
+    reads, the reservations of EVL-8 and EVL-9 in it)"; release 1019n-r2's judges review): `budget6`'s used, 0.13 for
+    every earlier run still waiting, AND births.RESERVED's holds of the frozen files whose pins are unset
+    (league/events/births.py `budget_reserved_hundredths`: PREREG-EVL-8's 0.65 and PREREG-EVL-9's 0.30 on release
+    1019n-r2; this file's own 0.13 is released at its pin, REGISTERED_AT_10), the same three terms `births.validate`
+    adds. A run that fits only by leaving a reservation out is refused for good."""
+    from . import births as BI
     from .reader2 import NORUN_KEY, RUNS_MAX
 
     out: list[dict[str, Any]] = []
     budget = budget6(store)
-    room = int(budget["used"]) + V6_CHARGE_HUNDREDTHS * int(budget["waiting"])
+    reserved = BI.budget_reserved_hundredths()
+    room = int(budget["used"]) + V6_CHARGE_HUNDREDTHS * int(budget["waiting"]) + reserved
     close = last_close(store, now)
     for p in _v6_programs():
         if getattr(p, "prereg", None) != R2_FILE:
@@ -2277,8 +2285,8 @@ def start_runs_r2(store: Any, now: dt.datetime) -> list[dict[str, Any]]:
         n = item["n"]
         if n > RUNS_MAX or room + V6_CHARGE_HUNDREDTHS > V6_BUDGET_HUNDREDTHS:
             why = (f"a run {n} would be due: the id's {RUNS_MAX} runs are spent" if n > RUNS_MAX else
-                   f"the lane's count {room / 100:.2f} (with every earlier waiting run held) cannot hold 0.13 more of "
-                   f"{V6_BUDGET_HUNDREDTHS / 100:.2f} at this close")
+                   f"the lane's count {room / 100:.2f} (with every earlier waiting run held and births.RESERVED's "
+                   f"{reserved / 100:.2f}) cannot hold 0.13 more of {V6_BUDGET_HUNDREDTHS / 100:.2f} at this close")
             store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                              (NORUN_KEY.format(program=p.id, version=int(p.version), n=n),
                               json.dumps({"n": n, "why": why, "at": S.iso(now), "after": item["why"]}, sort_keys=True)))

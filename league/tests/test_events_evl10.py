@@ -1320,6 +1320,52 @@ class TheJudge(Case):
                          "no later restatement revives it")
         self.assertEqual(R2.stopped(self.st)["kind"], "seat", "a shadow record only: R2 asks nothing more")
 
+    def test_the_lanes_count_is_r3s_validators_sum_with_births_reserved_so_run_2_is_refused_for_good(self):
+        """Sections 3 and 4 (release 1019n-r2's judges review): the lane's count a run start reads is R3's validator's
+        sum, births.RESERVED's holds of the files whose pins are unset in it (PREREG-EVL-8's 0.65 and PREREG-EVL-9's
+        0.30 here; this file's 0.13 released at its pin). On section 4's 2.86 (fifteen PREREG-EVL-6 versions 1.95, two
+        learners 0.26, four births 0.52, EVL-R2-ON 0.13) that is 2.86 + 0.95 = 3.81, LEFT 0.09: run 2 never starts
+        and R2 asks nothing more. The same store with no reservation (both pins set) holds it."""
+        from league.events import births as BI
+
+        self.end(1)
+        # (births.RESERVED as section 4 reads it, its two pins unset whatever this tree's are: the test of the rule)
+        held = mock.patch.object(BI, "RESERVED", (("PREREG-EVL-8", "REGISTERED_AT_8_UNSET", 65),
+                                                  ("PREREG-EVL-9", "REGISTERED_AT_9_UNSET", 30),
+                                                  ("PREREG-EVL-10", "REGISTERED_AT_10", 13)))
+        held.start()
+        self.addCleanup(held.stop)
+        self.assertEqual(BI.budget_reserved_hundredths(), 95, "EVL-8's 65 and EVL-9's 30; this file's 13 released")
+        real = SN.budget6
+        live = lambda store: real(store) | {"used": 286, "waiting": 0}  # noqa: E731
+        with mock.patch.object(SN, "budget6", live):
+            self.assertEqual([r for r in SN.start_runs(self.st, et(D_DAY, 20, 40)) if r["program"] == P.R2_ON], [],
+                             "2.86 + 0.95 + 0.13 = 3.94 > 3.90: refused")
+        refused = R2._meta_json(self.st, R2.NORUN_KEY.format(program=P.R2_ON, version=1, n=2))
+        self.assertIn("cannot hold 0.13", refused["why"])
+        self.assertIn("births.RESERVED's 0.95", refused["why"])
+        self.assertIn("3.81", refused["why"])
+        with mock.patch.object(SN, "budget6", lambda store: real(store) | {"used": 100, "waiting": 0}), \
+                mock.patch.object(BI, "RESERVED", ()):
+            self.assertEqual(SN.start_runs(self.st, et(N_DAY, 20, 40)), [], "no later restatement revives it")
+        self.assertEqual(R2.stopped(self.st)["kind"], "seat", "a shadow record only: R2 asks nothing more")
+
+    def test_with_no_reservation_left_the_same_count_holds_run_2(self):
+        from league.events import births as BI
+
+        self.end(1)
+        real = SN.budget6
+        with mock.patch.object(SN, "budget6", lambda store: real(store) | {"used": 286, "waiting": 0}), \
+                mock.patch.object(BI, "RESERVED", ()):
+            got = SN.start_runs(self.st, et(D_DAY, 20, 40))
+        self.assertIn((P.R2_ON, 1, 2), [(r["program"], r["version"], r["n"]) for r in got], "2.86 + 0.13 <= 3.90")
+        with mock.patch.object(SN, "budget6", lambda store: real(store) | {"used": 286, "waiting": 0}), \
+                mock.patch.object(BI, "RESERVED", (("PREREG-EVL-8", "REGISTERED_AT_8_UNSET", 65),
+                                                   ("PREREG-EVL-9", "REGISTERED_AT_9_UNSET", 30))):
+            self.end(2)
+            self.assertEqual([r for r in SN.start_runs(self.st, et(N_DAY, 20, 40)) if r["program"] == P.R2_ON], [],
+                             "run 3 at 2.86 + 0.95 reserved: refused")
+
     def test_never_more_than_three_runs(self):
         for n in (1, 2, 3):
             if n > 1:
