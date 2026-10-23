@@ -333,6 +333,22 @@ whole re-decision decides them; the earlier rows' looks never wait on it. A time
 test_events_evl4.py decides a synthetic week (league/tests/evl4_world.py) with and without these rows, and the same
 week decided by release 1019b's code gives every earlier program the same intents and real-money picks.
 
+THE EARLIER ROWS' 15:30 MARKS ARE READ TOGETHER (release 1019m-hotfix, the captain's A140; league/events/run.py
+`decide_close`, `_react_marks`): before it, the close decision read C1's 15:30 mark of each REACT row's name ONE NAME A
+REQUEST (`_mark_1530`, inside each row's reaction) at the House's data interval (0.5 s a request), so a close of several
+hundred names finished its receipt after the book's 15:49:00 ET send line, and everything that waits on that receipt
+lost its close entry: PREREG-EVL-5's buys (`book.part_hold`), EVL-LRN-ON's live part (which runs after the receipt) and
+R3's births held behind it. Now, before the earlier rows are decided, the names their REACT rows may read (the eligible
+issuer of each row of every close-entry ern-react and news-react program the decision decides, a news row's by its own
+symbol; never a program a written look keeps, so A66's "fetched nothing" stays literal) are read in `_marks_1530`'s
+batches of `MARK_BATCH` (100) names: first from 15:00 ET (`MARK_SINCE`, 30 minutes before the mark's time: one page a
+request), then from the open for the names that span gave no bar; a name neither pass gives a mark is read alone by
+`_mark_1530` as before. The rule (the close of the last SIP minute bar ending by 15:30 ET), the stored row (`marks`,
+label `1530`, `sip-1min`) and every intent are the same (league/tests/test_events_close_marks.py: byte-identical to the
+per-name path; 300 names in a few requests, the receipt within seconds of 15:47:00 at the House's interval). A batch that
+fails other than by the task's time bound costs only time: the summary's `marks_error` says why and every name is read
+alone, as before; the task's own bound (`Deadline`) still stops the task.
+
 THE CLOSES BEFORE THE DEPLOY (release 1019c's review; section 2: "for every event after the registration time that
 comes before it (backfill included), the programs are decided by the same rules in shadow only"): releases 1019b and
 1019c decide the closes from 16:01:05Z Oct 19 until release 1019d runs, and their receipts name none of these rows. The judge reads such
@@ -1290,7 +1306,8 @@ LEARNERS IN ROOM (`book.learner_cut` over the learners that may take a name ther
 gate open; `book.after_learners`: at learning every birth at learning, with a Probe learner its band's births and every
 birth at learning) have their picks read as of that decision and their names held back (A113's birth behind a waiting
 buy). The learners' own decision of the auction (`_event_decide_lrn`, row `"<at>-lrn"` of `eq_event_decisions`) is
-tried each minute of the window, with no other bound, until each learner's live receipt has finished: a learner it names
+tried each minute of the window until each learner's live receipt has finished (at the close, until the window's last
+book minute: A140, below): a learner it names
 is asked for its picks (book.py `learner_picks`: its LIVE decision's intents in rank order; a catch-up's or a late
 decision's are never traded), one it does not name takes nothing at the auction; those births and the learners are
 given their names together by `book.allocate` in ROOM's order (the learner before R3's births; in Probe and Sized before
@@ -1318,6 +1335,16 @@ takes the name from an earlier close row by the sale gate, ON's sale at the next
 at the auction they are sold in; ON's sales at D+1's open are exits on D+1's line, which no line stops; at the close
 the House's decision (up to 150 s from 15:46 ET) and ON's part (up to 120 s after it) can finish after the 15:49 ET
 cut-off, so some ON picks, and the births behind them, miss the auction.
+
+THE LATE LEARNER AT THE CLOSE (the captain's A140, release 1019m-hotfix; league/equity/live.py `LEARNER_LATE`,
+`_event_decide_lrn`): from the close window's last book minute (`HELD_OVERDUE_S`, one minute, before the close's cut-off:
+15:48:00 ET on a full day, the minute `HeldAhead` already calls overdue) a learner whose own live receipt is STILL
+PENDING takes nothing at that auction, and the births held back for it are given their names and sent as they would be
+without it (a learner that late could not send anyway, so ROOM gives it nothing it could use); ROOM's order is otherwise
+unchanged, and the open waits as before. No pick of it is read, so none is planned and no attempts-ledger row is written
+(the ledger's bindings have no `window`): the `-lrn` row and the auction's own row name it (`late`, its programs entry
+`picks` None), the book raises a warning and writes an `equity.alert` record (`learners_late`). With the batched marks
+above, the House's receipt lands within seconds of 15:47:00 ET and ON's part soon after, so this is a safety net.
 
 **The judge** (league/events/judge7.py, sections 1.10 and 3.1), each night in the House's screen step after the earlier
 files' looks (house.py `_screen`, its receipt's `learners`): with no `cost_basis` row for the night every look of these
