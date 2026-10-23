@@ -792,6 +792,12 @@ class TheScreenStep(TH.LaneCase):
         self.assertEqual((calls, "learners" in out), ([], False))
 
 
+# PREREG-EVL-8 (A122 pinned REGISTERED_AT_8, release 1019n): these are the learners' own tests, on the registries
+# whose last file is PREREG-EVL-7 (league/tests/evl7_fakes.py `unpinned_8`); PREREG-EVL-8's rows after them are
+# league/tests/test_events_evl8*.py's.
+from league.tests.evl7_fakes import setUpModule_8 as setUpModule, tearDownModule  # noqa: E402,F401
+
+
 if __name__ == "__main__":
     unittest.main()
 
