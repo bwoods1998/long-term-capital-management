@@ -696,9 +696,11 @@ def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Seque
     "terminal"}) when its RAW ENTRY PRINT was above 1.25 x the raw SIP close of the session before D (PREREG-EVL-2's
     LIMIT AT ENTRY) or that cannot be read, or not TRADABLE, or when no tag will ever hold one (every tag's intent of the
     issuer skipped, or none); {status: "pending"} while one may still come. Only a TRADABLE outcome is {status:
-    "settled", a, tradable}."""
+    "settled", a, tradable}. ONE READING (release 1019n's second judges review), for the POOL (`pool_record`) and the
+    state (section 7.4) alike: a tag AHEAD whose intent of the issuer may still settle (planned or entered, or settled
+    only at or after `before`) makes the member PENDING; the next tag's settled outcome is never read in its place,
+    since the first tag that holds one may yet be that tag. A tag whose intent ended with none (skipped) is passed."""
     entry, exit_ = ("open", "close") if auction == "o1" else ("close", "open")
-    pending = False
     for tag in tags:
         pid, _, ver = tag.rpartition(":")
         intent = store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND cik=? AND entry_day=? AND "
@@ -710,7 +712,7 @@ def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Seque
                                (pid, int(ver), str(intent["event"]))).fetchone()
         if row is None or S.parse_iso(str(row["settled_at"])) >= before:
             if str(intent["status"]) in ("planned", "entered") or row is not None:
-                pending = True
+                return {"status": "pending", "program": pid, "version": int(ver)}
             continue
         if not _within_limit(store, dict(intent), dict(row)):
             return {"status": "terminal", "why": "limit at entry"}
@@ -719,7 +721,7 @@ def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Seque
         return {"status": "settled", "a": float(row["a"]), "r": None if row["r"] is None else float(row["r"]),
                 "tradable": True, "program": pid, "version": int(ver), "event": str(intent["event"]),
                 "exit_day": None if intent["exit_day"] is None else str(intent["exit_day"])}
-    return {"status": "pending"} if pending else {"status": "terminal", "why": "no outcome"}
+    return {"status": "terminal", "why": "no outcome"}
 
 
 def _within_limit(store: Any, intent: Mapping[str, Any], outcome: Mapping[str, Any]) -> bool:

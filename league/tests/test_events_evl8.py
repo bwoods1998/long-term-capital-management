@@ -1213,6 +1213,56 @@ class TheMetaLook(unittest.TestCase):
             finally:
                 st.close()
 
+    def test_a_members_first_tag_still_pending_holds_it_pending(self):
+        """F9, ONE READING (section 7.2; release 1019n's second judges review): a member's outcome is the settled row
+        under the FIRST of its tags (PROGRAMS order) that holds one. While that tag's intent of the issuer may still
+        settle (entered, or settled only after the reading's time), the member is PENDING, never the next tag's settled
+        outcome: the POOL holds its look as of a close it exits by, and the state counts it unsettled."""
+        days = self.days(24)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                cal = self.build(st, days, now_day)
+                day, cik = days[3], str(40000 + 300 + 2)
+                nxt = cal[cal.index(day) + 1]
+                order = [p.id for p in P.PROGRAMS]
+                first = next(p.id for p in P.PROGRAMS if p.version == 1 and p.entry_at == "close" and p.exit_at == "open"
+                             and order.index(p.id) < order.index(self.SRC) and not P.is_8(p))
+                tags = [f"{first}:1", f"{self.SRC}:1"]
+                ev = f"news:first-{cik}"
+                st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                              "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, ?, ?, ?, ?, ?, 'close', ?, "
+                              "'open', NULL, 'shadow', 'entered', 'x')",
+                              (first, ev, f"S{cik}", cik, S.iso(et(day, 15, 46)), day.isoformat(), nxt.isoformat()))
+                st.db.execute("UPDATE mrl_pool SET tags=? WHERE program='EVL-META-ON' AND day=? AND cik=?",
+                              (json.dumps(tags), day.isoformat(), cik))
+                # (a lane event's LIMIT AT ENTRY reads the lane's own print and previous close: inside it)
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, 'close', 20, "
+                              "'t', 'sip', 'x')", (f"S{cik}", day.isoformat()))
+                st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
+                              "VALUES(?, ?, ?, 'n', 'NASDAQ', 20, 2e7, 'IWM', NULL)", (day.isoformat(), f"S{cik}", cik))
+                self.assertEqual(MT.member_outcome(st, cik, day, "on", tags, now)["status"], "pending",
+                                 "the first tag's intent may still settle")
+                prog = P.BY_KEY[("EVL-META-ON", 1)]
+                rows, pending = MT.pool_record(st, prog, before=now)
+                self.assertEqual((len(rows), pending), (95, [(day, nxt)]))
+                self.assertEqual(S8.run_looks(st, prog, now_day, now=now, draws=999)["written"], [],
+                                 "the look waits for the first tag's outcome")
+                # (settled only after the reading's time: still pending; settled before it: the FIRST tag's outcome)
+                st.db.execute("UPDATE intents SET status='exited' WHERE program=? AND event=?", (first, ev))
+                st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                              "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, 1, "
+                              "?, 20, 21, 'SPY', 1, 1, 7, 7, 0.5, 0, 0.5, 1, ?, 'settled')",
+                              (first, ev, S.iso(now + dt.timedelta(hours=1))))
+                self.assertEqual(MT.member_outcome(st, cik, day, "on", tags, now)["status"], "pending")
+                later = now + dt.timedelta(hours=2)
+                got = MT.member_outcome(st, cik, day, "on", tags, later)
+                self.assertEqual((got["status"], got["program"], got["a"]), ("settled", first, 0.5))
+            finally:
+                st.close()
+
 
 class TheAudit(unittest.TestCase):
     def test_an_edge_no_selection_made_alarms_the_canary_and_the_placebos_and_moves_no_band(self):
