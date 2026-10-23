@@ -82,11 +82,62 @@ class WorldCase(Pinned):
 
 
 # ================================================================================================ the rows and the pin
+class TheFreeze(unittest.TestCase):
+    def test_the_constant_is_a122s_and_names_the_frozen_file(self):
+        """THE FREEZE (A122): REGISTERED_AT_8 is the latest of the commit's 18:43:17Z, GitHub's 18:43:20Z and the
+        client's 18:43:24Z after the tag push returned; the tag's file is in the tree byte for byte
+        (docs/prereg/PREREG-EVL-8.md, sha256 37150fac, `FROZEN_SHA256_8`) with its calibration record (every file its
+        SHA256SUMS lists: A122's 160 files with SHA256SUMS itself), the pinned grid among them equal to the code's
+        (league/events/px_grid8.json, canonical sha256 bb0d50e4); PREREG-EVL-6's time is earlier."""
+        import hashlib
+
+        self.assertEqual(P.REGISTERED_AT_8, "2026-10-22T18:43:24Z")
+        self.assertTrue(P.registers_8())
+        self.assertLess(S.parse_iso(P.REGISTERED_AT_6_FOR_8), S.parse_iso(P.REGISTERED_AT_8))
+        root = Path(__file__).resolve().parents[2] / "docs" / "prereg"
+        text = (root / "PREREG-EVL-8.md").read_bytes()
+        self.assertEqual(hashlib.sha256(text).hexdigest(), P.FROZEN_SHA256_8)
+        self.assertEqual(P.FROZEN_SHA256_8, "37150facab4ca727ef06ae5522689b81096c156872184f7ebe1e28be09f43ed0")
+        self.assertIn(b"REGISTRATION TIME: the latest of three times", text, "the text names the pin's method")
+        sums = (root / "evl-8" / "SHA256SUMS").read_text().split("\n")
+        listed = {name.strip().lstrip("*"): digest for digest, name in
+                  (line.split(None, 1) for line in sums if line.strip())}
+        for name, digest in listed.items():
+            self.assertEqual(hashlib.sha256((root / "evl-8" / name).read_bytes()).hexdigest(), digest, name)
+        files = {f.name for f in (root / "evl-8").iterdir() if f.is_file()}
+        self.assertEqual(files, set(listed) | {"SHA256SUMS"}, "every file listed, no other")
+        self.assertEqual(len(files), 160, "A122: 160 files (159 listed and SHA256SUMS)")
+        self.assertEqual((root / "evl-8" / "px_grid8.json").read_bytes(), PXL.GRID_FILE.read_bytes())
+        self.assertEqual(PXL.grid_sha(PXL.grid()), PXL.GRID_SHA256)
+        self.assertEqual(PXL.GRID_SHA256, "bb0d50e47d94e73f677a22bb612ef3f1cf7d23b23e5a51375fe965cf57e3e5a1")
+
+    def test_pinned_the_five_seats_follow_prereg_evl_7_and_precede_the_births(self):
+        """Section 4.2 and A101: in the registries as pinned, this file's five seats come after every earlier file's
+        row (PREREG-EVL-7's learners included, whatever the order of the freezes: A122 froze before A125) and before
+        R3's births; a refresh of the learners' registries keeps them (`refresh_7` composed with `refresh_8`)."""
+        mine = [p.id for p in P.SEATING if P.is_8(p)]
+        self.assertEqual(mine, ["PX-DROP-ON", "PX-SURGE-ON", "PX-GAP-O1", "EVL-META-O1", "EVL-META-ON"])
+        seating = list(P.SEATING)
+        last_earlier = max(i for i, p in enumerate(seating) if not P.is_8(p) and p.spec is None)
+        first_birth = min((i for i, p in enumerate(seating) if p.spec is not None), default=len(seating))
+        first_mine = min(i for i, p in enumerate(seating) if P.is_8(p))
+        self.assertLess(last_earlier, first_mine)
+        self.assertLess(max(i for i, p in enumerate(seating) if P.is_8(p)), first_birth)
+        self.assertTrue(any(P.is_learner(p) for p in seating[:first_mine]))
+        P.refresh_7()
+        self.assertEqual([p.id for p in P.SEATING if P.is_8(p)], mine, "a learners' refresh keeps this file's rows")
+
+
 class TheRowsUnpinned(unittest.TestCase):
     """With REGISTERED_AT_8 None nothing of this file decides, trades or is charged: no row, no seat, no task."""
 
+    def setUp(self):
+        ctx = W.pinned(None)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
     def test_none_ships_and_no_registry_holds_a_row(self):
-        self.assertIsNone(P.REGISTERED_AT_8, "the tree ships unpinned: the freeze sets the one constant")
+        self.assertIsNone(P.REGISTERED_AT_8, "None refuses every decision of this file")
         self.assertFalse(P.registers_8())
         self.assertEqual(P.rows_8(), ())
         for table in (P.PROGRAMS, P.PREREG_PROGRAMS, P.SEATING, P.PREREG_SEATING):

@@ -1341,10 +1341,16 @@ __all__ += ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "PREREG_PROGRAMS", "PREREG
 # ---------------------------------------------------------------------------------------------------- PREREG-EVL-8
 #: PREREG-EVL-8's REGISTRATION TIME (its preamble, A92's method: the latest of its commit's time, the pushing client's
 #: clock after the push of the tag `prereg-evl-8` returned and GitHub's activity time for the branch `prereg/evl-8`),
-#: THE ONE CONSTANT THE FREEZE SETS (the captain's amendment that pins it as REGISTERED_AT_8). NONE UNTIL THEN: this
-#: file's programs are in no registry (`rows_8`), so nothing of it decides, trades or is charged, and nothing of the
-#: lane moves (league/events/px.py and meta.py check `registers_8` before every write).
-REGISTERED_AT_8: str | None = None
+#: THE ONE CONSTANT THE FREEZE SETS: A122 (the latest of the commit's 18:43:17Z, GitHub's 18:43:20Z and the client's
+#: 18:43:24Z after the tag push returned; tag prereg-evl-8, commit a5eea816, docs/prereg/PREREG-EVL-8.md sha256
+#: 37150fac..., docs/prereg/evl-8/ 160 files with SHA256SUMS). None refuses every decision of this file: its programs
+#: are then in no registry (`rows_8`), so nothing of it decides, trades or is charged, and nothing of the lane moves
+#: (league/events/px.py and meta.py check `registers_8` before every write). Pinned, the five seats and two controls
+#: start with the first release that carries this code (section 8: real money and every judged record from the
+#: release's first live decision; the meta-learners' state from Oct 20 is decided once by the catch-ups, never judged).
+REGISTERED_AT_8: str | None = "2026-10-22T18:43:24Z"  # A122: tag prereg-evl-8, commit a5eea816
+#: The frozen text's sha256 (A122), which league/tests/test_events_evl8.py holds equal to docs/prereg/PREREG-EVL-8.md.
+FROZEN_SHA256_8 = "37150facab4ca727ef06ae5522689b81096c156872184f7ebe1e28be09f43ed0"
 #: PREREG-EVL-6's registration time as the captain's A116 records it (tag prereg-evl-6, commit 4ae9017a): PREREG-EVL-8
 #: registers anything only when it is EARLIER than REGISTERED_AT_8 (its preamble: "This file is frozen only after
 #: PREREG-EVL-6 (REGISTERED_AT_6 < REGISTERED_AT_8)"; `registers_8`). Kept here beside this file's rows so they read no
@@ -1471,6 +1477,18 @@ def refresh_8() -> tuple[Program8, ...]:
 
 refresh_8()
 
-__all__ += ["REGISTERED_AT_8", "REGISTERED_AT_6_FOR_8", "FILE_8", "PX_SEAT_FAMILIES", "PX_CONTROL_FAMILIES",
+#: PREREG-EVL-7's `refresh_7` rebuilds the registries from its own snapshot of the files before it (`_BEFORE_7`), which
+#: holds none of this file's rows; every later call of it (league/tests/evl7_fakes.py `unpinned_7`, at entry and at exit)
+#: is followed by `refresh_8`, so this file's rows stay after PREREG-EVL-7's and before R3's births whoever refreshes.
+_refresh_7_alone = refresh_7
+
+
+def refresh_7() -> tuple[Learner, ...]:  # noqa: F811 - the composed refresh, PREREG-EVL-7's rows unchanged
+    rows = _refresh_7_alone()
+    refresh_8()
+    return rows
+
+
+__all__ += ["REGISTERED_AT_8", "FROZEN_SHA256_8", "REGISTERED_AT_6_FOR_8", "FILE_8", "PX_SEAT_FAMILIES", "PX_CONTROL_FAMILIES",
             "PX_FAMILIES", "META_FAMILIES", "FAMILIES_8", "Program8", "ROWS_8", "registers_8", "rows_8", "is_8",
             "is_px8", "is_meta8", "refresh_8"]
