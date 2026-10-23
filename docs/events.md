@@ -334,7 +334,7 @@ test_events_evl4.py decides a synthetic week (league/tests/evl4_world.py) with a
 week decided by release 1019b's code gives every earlier program the same intents and real-money picks.
 
 THE EARLIER ROWS' 15:30 MARKS ARE READ TOGETHER (release 1019m-hotfix, the captain's A140; league/events/run.py
-`decide_close`, `_react_marks`): until it, the close decision read C1's 15:30 mark of each REACT row's name ONE NAME A
+`decide_close`, `_react_marks`): before it, the close decision read C1's 15:30 mark of each REACT row's name ONE NAME A
 REQUEST (`_mark_1530`, inside each row's reaction) at the House's data interval (0.5 s a request), so a close of several
 hundred names finished its receipt after the book's 15:49:00 ET send line, and everything that waits on that receipt
 lost its close entry: PREREG-EVL-5's buys (`book.part_hold`), EVL-LRN-ON's live part (which runs after the receipt) and
@@ -342,7 +342,7 @@ R3's births held behind it. Now, before the earlier rows are decided, the names 
 issuer of each row of every close-entry ern-react and news-react program the decision decides, a news row's by its own
 symbol; never a program a written look keeps, so A66's "fetched nothing" stays literal) are read in `_marks_1530`'s
 batches of `MARK_BATCH` (100) names: first from 15:00 ET (`MARK_SINCE`, 30 minutes before the mark's time: one page a
-request), then from the open for the names that span gave no bar; a name neither gives a mark is read alone by
+request), then from the open for the names that span gave no bar; a name neither pass gives a mark is read alone by
 `_mark_1530` as before. The rule (the close of the last SIP minute bar ending by 15:30 ET), the stored row (`marks`,
 label `1530`, `sip-1min`) and every intent are the same (league/tests/test_events_close_marks.py: byte-identical to the
 per-name path; 300 names in a few requests, the receipt within seconds of 15:47:00 at the House's interval). A batch that
