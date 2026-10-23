@@ -1414,26 +1414,36 @@ def placebo_ids(window: str) -> list[str]:
     return [f"PLC-PX-{window}-{j}" for j in range(1, PLACEBOS + 1)]
 
 
+#: The intents of a control that are no event of it (section 3.2-3.4): an issuer A72's rule skips at the decision, and
+#: one the hourly re-decision removed (an item knowable in the span, stored after the decision). Every other intent of
+#: the control is one of its events, settled or not (a settlement's own skip, at the limit or with no print, keeps it).
+NOT_EVENTS = ("skipped:issuer-held", WHY_REMOVED)
+
+
 def placebo_rows(store: Any, window: str, j: int, *, judged: set[str] | None = None) -> list[dict[str, Any]]:
-    """PLACEBO j's record (section 3.3): for each entry session, the 8 events of its window's control (CTRL-PX-ALL-ON for
-    ON, CTRL-PX-ALL-O1 for O1) with the smallest sha256("PX-PLACEBO|<window>|<j>|<D>|<cik>"), among the control's
-    shadow events of D (not skipped), with the control's settled outcomes (a subset: no new intent). `judged`: the
-    sessions a live run decided (the record counts no catch-up's)."""
+    """PLACEBO j's record (section 3.3): for each entry session D, THE 8 EVENTS OF ITS WINDOW'S CONTROL ON D
+    (CTRL-PX-ALL-ON for ON, CTRL-PX-ALL-O1 for O1) WITH THE SMALLEST sha256("PX-PLACEBO|<window>|<j>|<D>|<cik>"), among
+    every event of the control on D (`NOT_EVENTS` aside), then those of them with a settled outcome (a subset of the
+    control's settled outcomes: no new intent). An event of the eight that never settles leaves its slot empty that
+    session; the ninth never takes it. `judged`: the sessions a live run decided (the record counts no catch-up's)."""
     ctl = "CTRL-PX-ALL-ON" if window == "ON" else "CTRL-PX-ALL-O1"
     from . import screen as SN
 
-    rows = SN.settled_rows(store, ctl, 1)
-    by_day: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
-        day = r["entry_day"].isoformat()
+    settled = {str(r["event"]): r for r in SN.settled_rows(store, ctl, 1)}
+    by_day: dict[str, list[tuple[str, str]]] = {}
+    for r in store.db.execute("SELECT entry_day, cik, symbol, event, status FROM intents WHERE program=? AND version=1",
+                              (ctl,)):
+        if str(r["status"]) in NOT_EVENTS:
+            continue
+        day = str(r["entry_day"])
         if judged is not None and day not in judged:
             continue
-        by_day.setdefault(day, []).append(r)
+        by_day.setdefault(day, []).append((str(r["cik"] or r["symbol"]), str(r["event"])))
     out = []
-    for day, rs in sorted(by_day.items()):
+    for day, evs in sorted(by_day.items()):
         d = dt.date.fromisoformat(day)
-        rs.sort(key=lambda r: placebo_hash(window, j, d, str(r["issuer"])))
-        out += rs[:PLACEBO_EVENTS]
+        evs.sort(key=lambda x: placebo_hash(window, j, d, x[0]))
+        out += [settled[e] for _, e in evs[:PLACEBO_EVENTS] if e in settled]
     return out
 
 
@@ -1532,4 +1542,4 @@ __all__ = ["K", "CONTROL_N", "Z_SEAT", "DROP_MOVE", "SURGE_MOVE", "SURGE_VOLUME"
            "decide", "redecide", "live_picks", "universe_row", "judged_days", "features", "grid_sha", "grid",
            "FAMILY_VALUE", "select_record", "records", "window_auction", "seat_events", "panel_row", "exit_day",
            "settle_panel",
-           "record_days", "write_basis", "placebo_ids", "placebo_rows", "pivot_count", "report_lines"]
+           "record_days", "write_basis", "NOT_EVENTS", "placebo_ids", "placebo_rows", "pivot_count", "report_lines"]

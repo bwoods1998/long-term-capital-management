@@ -772,6 +772,176 @@ class TheFamily(Pinned):
 
 
 # ================================================================================================ the money row
+class ThePlacebos(unittest.TestCase):
+    def test_the_eight_smallest_hashes_among_the_controls_events_then_their_settled_outcomes(self):
+        """Section 3.3: placebo j takes THE 8 EVENTS OF ITS CONTROL ON D with the smallest sha256("PX-PLACEBO|<window>|
+        <j>|<D>|<cik>"), a subset of the control's settled outcomes: an event of the eight whose outcome never settled
+        leaves its slot empty that session (the ninth never takes it), and an issuer A72's rule skipped, or one the
+        re-decision removed, is no event at all."""
+        day = dt.date(2026, 10, 27)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                ciks = [str(9000 + i) for i in range(14)]
+                order = sorted(ciks, key=lambda c: PXL.placebo_hash("ON", 1, day, c))
+                status = {order[0]: "skipped:issuer-held", order[1]: "skipped:limit", order[2]: PXL.WHY_REMOVED}
+                for cik in ciks:
+                    event = PXL.event_id("CTRL-PX-ALL-ON", day, cik)
+                    st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                  "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('CTRL-PX-ALL-ON', 1, ?, "
+                                  "?, ?, 'x', ?, 'close', '2026-10-28', 'open', NULL, 'shadow', ?, NULL)",
+                                  (event, f"S{cik}", cik, day.isoformat(), status.get(cik, "exited")))
+                    if cik not in status:
+                        st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                                      "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) "
+                                      "VALUES('CTRL-PX-ALL-ON', 1, ?, 20, 20, 'SPY', 1, 1, 7, 7, 0, 0, 0, 1, 'x', "
+                                      "'settled')", (event,))
+                got = [r["issuer"] for r in PXL.placebo_rows(st, "ON", 1)]
+                events = [c for c in order if status.get(c) not in PXL.NOT_EVENTS]
+                self.assertEqual(got, [c for c in events[:8] if c not in status], "seven: the unsettled one's slot empty")
+                self.assertEqual(len(got), 7)
+                self.assertNotIn(order[8 + 2], got, "the ninth event never takes the empty slot")
+                self.assertEqual(PXL.placebo_rows(st, "ON", 1, judged=set()), [], "a session no live run decided: none")
+            finally:
+                st.close()
+
+
+class TheAudit(unittest.TestCase):
+    def test_an_edge_no_selection_made_alarms_the_canary_and_the_placebos_and_moves_no_band(self):
+        """Section 3.3's AUDIT (screen8 `audit`, records only): a control whose own no-news pool earns (an invented +5%
+        an event over 25 live sessions) passes THE PX SCREEN without its control condition (THE CANARY), its placebos
+        (8 of its events a session each) pass too, 3 or more of a window's 8 is the audit's alarm; every look is in
+        px.sqlite's px_placebo only, and no band moves."""
+        days = []
+        d = dt.date(2026, 10, 26)
+        while len(days) < 25:
+            if d.weekday() < 5:
+                days.append(d)
+            d += dt.timedelta(days=1)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            px = PXL.open_px(st.root)
+            try:
+                rng = random.Random(33)
+                with st.tx() as db:
+                    for k, day in enumerate(days):
+                        db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                                   (day.isoformat(), S.iso(et(day, 9, 30)), S.iso(et(day, 16, 0))))
+                        for i in range(12):
+                            cik = str(20000 + 100 * k + i)
+                            event = PXL.event_id("CTRL-PX-ALL-ON", day, cik)
+                            a = 0.05 + rng.gauss(0, 0.002)
+                            db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                       "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('CTRL-PX-ALL-ON', "
+                                       "1, ?, ?, ?, 'x', ?, 'close', ?, 'open', NULL, 'shadow', 'exited', NULL)",
+                                       (event, f"S{cik}", cik, day.isoformat(), day.isoformat()))
+                            db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, "
+                                       "bench_entry, bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, "
+                                       "status) VALUES('CTRL-PX-ALL-ON', 1, ?, 20, 21, 'SPY', 1, 1, 7, 7, ?, 0, ?, 1, 'x', "
+                                       "'settled')", (event, a, a))
+                        px.set_meta(PXL.DECIDED_KEY.format(auction="on", day=day.isoformat()),
+                                    json.dumps({"run": f"r{k}", "kind": "live", "receipt": k, "at": "x"}))
+                bands0 = [tuple(r) for r in st.db.execute("SELECT * FROM bands")]
+                got = S8.audit(st, days[-1], now=et(days[-1], 21, 0), draws=999)
+                self.assertEqual(got["canary"], ["CTRL-PX-ALL-ON"])
+                self.assertGreaterEqual(got["passed"].get("ON", 0), PXL.PLACEBO_ALARM)
+                self.assertTrue(any("THE CANARY" in why for why in got["alarm"]))
+                self.assertTrue(any("of the 8 ON placebos" in why for why in got["alarm"]))
+                self.assertEqual([tuple(r) for r in st.db.execute("SELECT * FROM bands")], bands0, "no band moves")
+                looks = px.db.execute("SELECT COUNT(*) FROM px_placebo").fetchone()[0]
+                self.assertGreater(looks, 0)
+                self.assertFalse(st.db.execute("SELECT 1 FROM looks WHERE program LIKE 'PLC-%' OR program LIKE "
+                                               "'CTRL-PX-%'").fetchone(), "the audit's looks are px.sqlite's alone")
+            finally:
+                px.close()
+                st.close()
+
+
+class TheAlarms(unittest.TestCase):
+    """Section 10's alarms (league/ops/evl_price.py, the stall cause `evl_price`): a part not decided live (never traded
+    at that auction; whether its catch-up came), a recorder that lags, the placebo audit; not judged while unpinned."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.lane = self.root / "events"
+        self.day = dt.date(2026, 10, 26)
+        with S.Store(self.lane) as st:
+            with st.tx() as db:
+                for d in (dt.date(2026, 10, 23), self.day, dt.date(2026, 10, 27)):
+                    db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                               (d.isoformat(), S.iso(et(d, 9, 30)), S.iso(et(d, 16, 0))))
+            st.set_meta(PXL.RELEASE_KEY, S.iso(et(self.day, 8, 0)))
+
+    def check(self, hh: int, mm: int, day: dt.date | None = None) -> dict:
+        from league.ops import evl_price as EP
+
+        return EP.check(self.root, et(day or self.day, hh, mm).timestamp())
+
+    def test_not_judged_while_unpinned(self):
+        with W.pinned(None):
+            got = self.check(17, 0)
+        self.assertEqual((got["judged"], got["stalled"]), (False, False))
+
+    def test_a_part_not_decided_live_its_catch_up_named(self):
+        with W.pinned():
+            px = PXL.open_px(self.lane)
+            try:
+                px.set_meta(PXL.AM_KEY.format(day=self.day.isoformat()), json.dumps({"run": "am", "at": "x"}))
+            finally:
+                px.close()
+            got = self.check(17, 0)
+            self.assertTrue(got["stalled"], got)
+            self.assertIn("the PX run of the ON auction of 2026-10-26 was not decided live (no catch-up yet)", got["what"])
+            self.assertIn("EVL-META-ON's part of 2026-10-26 was not decided live", got["what"])
+            px = PXL.open_px(self.lane)
+            try:
+                for auction in ("o1", "on"):
+                    px.set_meta(PXL.DECIDED_KEY.format(auction=auction, day=self.day.isoformat()),
+                                json.dumps({"run": "r", "kind": "catchup", "receipt": 1, "at": "x"}))
+            finally:
+                px.close()
+            got = self.check(17, 0)
+            self.assertIn("ON auction of 2026-10-26 was not decided live (decided since by its catch-up)", got["what"])
+            px = PXL.open_px(self.lane)
+            try:
+                for auction in ("o1", "on"):
+                    px.db.execute("UPDATE px_meta SET value=? WHERE key=?",
+                                  (json.dumps({"run": "r", "kind": "live", "receipt": 1, "at": "x"}),
+                                   PXL.DECIDED_KEY.format(auction=auction, day=self.day.isoformat())))
+            finally:
+                px.close()
+            got = self.check(17, 0)
+            self.assertNotIn("PX run", got["what"], "decided live: no PX alarm")
+            self.assertEqual(got["numbers"]["failed"], 2, "the two meta-learners' parts alone")
+
+    def test_a_recorder_that_lags(self):
+        with W.pinned():
+            px = PXL.open_px(self.lane)
+            try:
+                px.set_meta("px:backfill:done", "x")
+                px.set_meta("px:bars:2026-10-23", "x")
+            finally:
+                px.close()
+            got = self.check(9, 10)
+            self.assertNotIn("morning pass", got["what"], "before 09:13 ET")
+            got = self.check(9, 14)
+            self.assertIn("the morning pass of 2026-10-26 is not done by 09:13 ET", got["what"])
+            self.assertEqual(got["numbers"]["lag"], 1)
+            got = self.check(6, 30, dt.date(2026, 10, 27))
+            self.assertIn("the nightly bars of 2026-10-26 are not stored by 06:00 ET", got["what"])
+
+    def test_the_placebo_audit(self):
+        with W.pinned():
+            with S.Store(self.lane) as st:
+                rid = st.start_receipt("screen", now=et(self.day, 21, 0))
+                st.finish_receipt(rid, "ok", {"audit8": {"alarm": 1, "canary": 0}}, now=et(self.day, 21, 1))
+            got = self.check(21, 30)
+            self.assertIn("the placebo audit alarms", got["what"])
+            self.assertEqual(got["numbers"]["audit"], 1)
+
+
 class TheBirthsBudget(unittest.TestCase):
     def test_reserved_releases_its_065_as_the_screen_counts_the_five_seats_and_a_waiting_run_is_held(self):
         """A137's births.RESERVED holds PREREG-EVL-8's 0.65 while REGISTERED_AT_8 is unset; pinned, it is released and
