@@ -38,6 +38,7 @@ from league.live import money as M
 from league.swarm import bands, elane
 from league.swarm.gate import run_sha
 from league.swarm.store import SwarmStore
+from league.tests.v2_walls import in_force
 from league.tests import equity_design as X
 from league.tests import test_equity_book as T
 from league.tests.swarm_fakes import Clock as SwarmClock
@@ -235,6 +236,7 @@ class TheBookAtEveryPair(RealMoney):
                 self.assertEqual([s for s in h.venue.sent if s["side"] != "buy"], [], "nothing is ever sold for a size")
 
 
+@in_force    # (release 1019m, A139: the docs' guard reads the table in force, never release 1019i's)
 class TheDesignBlocks(unittest.TestCase):
     def test_every_document_states_the_rows_in_force(self):
         """The design block of each of the four documents is `equity_design.block` of the constitution in force, line

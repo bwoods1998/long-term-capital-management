@@ -26,8 +26,10 @@ activity. The lane's page is [docs/events.md](docs/events.md).
   lines of `docs/births/`, judged by the same screen and rationed by a stated budget: 0.10 expected false pass a
   seatable birth, at most the lane's stated 3.0 in all, counted from every seatable version (1.5 before any birth: the
   fifteen seatable versions of PREREG-EVL-1 to -5), three a night (A81; [docs/events.md](docs/events.md), "Births").
-- **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
-  sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
+- **Money** (goal V3's rows, release 1019l): at most 10% of equity in one name, at most 100% invested, no margin; 5%
+  of equity a position at learning; a loss budget of $1,900 net in any 20 sessions and in total (about the balance);
+  the kill switch, the drawdown stop and the bug stop (the 25% daily stop, latched until the captain reads why:
+  league/equity/bugstop.py, release 1019m) are never weakened.
 - **Cost follows profit**: metered compute at most $10 a day plus half the trailing week's realized net profit, never
   above $50 a day (the owner's goal V3, item 5, from release 1019m-cost: budget rule 4; goal V2's $5 and $25 before it);
   prepaid credit first.
