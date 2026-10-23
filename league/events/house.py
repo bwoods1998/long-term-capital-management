@@ -2255,9 +2255,11 @@ class EventLane:
             # read to any other lane task due; what they stored stays)
             def late() -> bool:
                 return self.late(deadline) or self._eight_yield(ctx.store, f"px-{name}")
+        # (A128's major, closed in release 1019n: every recorder read is spaced on the lane's one slot, DATA_INTERVAL
+        # after its last market-data read, as PREREG-EVL-8 section 4.6 requires; the bucket's token after it)
         gw = PX.PxGateway(self.gateway(), self._bucket or PX.TokenBucket(clock=self._mono, sleep=self._sleep),
                           until=deadline, late=late or (lambda: self.late(deadline)),
-                          room=lambda: PXS.room(self.root)["why"])
+                          room=lambda: PXS.room(self.root)["why"], space=self.space)
         status, out = "ok", {}
         px = None
         run = None

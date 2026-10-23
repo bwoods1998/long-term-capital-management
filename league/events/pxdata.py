@@ -138,13 +138,19 @@ class TokenBucket:
 
 class PxGateway:
     """The gateway as a PX recorder reads it: the SIP bars route only (any other path or feed raises ValueError), each
-    request a PX token of `bucket` (`take_px`, no later than `until`) and refused once `late()` says the job's bound
-    passed (`PxCut` either way), or once `room()` names a line the store crossed (`PxRoom`: the page a request would
-    bring is never written); counted (`requests`)."""
+    request SPACED ON THE LANE'S ONE SLOT (`space`: league/events/house.py `EventLane.space`, DATA_INTERVAL 0.5 s
+    after the slot's last market-data read, the lane's own included; PREREG-EVL-8 section 4.6: "every lane read, this
+    file's included, goes through the lane's one slot at DATA_INTERVAL (at most 120 a minute) ... when it ships this
+    file's reads keep the slot's spacing", the captain's A128), then a PX token of `bucket` (`take_px`, no later than
+    `until`), and refused once `late()` says the job's bound passed (`PxCut` either way), or once `room()` names a line
+    the store crossed (`PxRoom`: the page a request would bring is never written); counted (`requests`). The spacing
+    comes first, so the bound and the room are judged at the moment the request would go."""
 
     def __init__(self, inner: Any, bucket: TokenBucket, *, until: float | None = None,
-                 late: Callable[[], bool] | None = None, room: Callable[[], str | None] | None = None):
+                 late: Callable[[], bool] | None = None, room: Callable[[], str | None] | None = None,
+                 space: Callable[[], None] | None = None):
         self.inner, self.bucket, self.until, self.late, self.room = inner, bucket, until, late, room
+        self.space = space
         self.requests = 0
 
     def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -153,6 +159,8 @@ class PxGateway:
             raise ValueError(f"the PX recorders read only {BARS_PATH}, not {path}")
         if params.get("feed") != "sip":
             raise ValueError("the PX recorders read SIP only")
+        if self.space is not None:
+            self.space()
         if self.late is not None and self.late():
             raise PxCut("the job's bound passed")
         why = self.room() if self.room is not None else None

@@ -404,6 +404,9 @@ class HouseCase(unittest.TestCase):
         lane = H.EventLane(self.house, root, settings=settings, monotonic=self.mono, sleep=self.mono.advance)
         lane._redecide_next = dt.datetime(2100, 1, 1, tzinfo=UTC)
         lane._open_checked = dt.datetime(2100, 1, 1, tzinfo=UTC)
+        # (these are the recorders' own mechanics, release 1019i's; PREREG-EVL-8's yield of the night's bars to any
+        # other lane task due, once REGISTERED_AT_8 is pinned, is league/tests/test_events_evl8_proof.py's)
+        lane._eight_yield = lambda st, me: False
         return lane
 
     def setUp(self):
@@ -487,6 +490,35 @@ class TheHouse(HouseCase):
             self.assertEqual(cut["_status"], "cut")
             self.assertNotIn("px-flags", lane._failed, "a cut is no failure")
 
+    def test_every_recorder_read_keeps_the_lanes_one_slot_spacing(self):
+        """A128's major (closed in release 1019n): PREREG-EVL-8 section 4.6 puts every lane read, the PX recorders'
+        included, on the lane's ONE SLOT at DATA_INTERVAL (0.5 s, at most 120 a minute). A recorder's three requests
+        go DATA_INTERVAL apart, and the first one DATA_INTERVAL after the lane's own read just before it; the
+        bucket's token is taken after the spacing (the lane's first)."""
+        lane = self.lane(self.root, px_data=True)
+        sent: list[float] = []
+
+        class Inner:
+            def get_json(_, path, params=None):
+                sent.append(self.mono())
+                return {"bars": {}, "next_page_token": None}
+        lane.gateway = lambda: Inner()
+        lane.throttle()                                   # (the lane's own read, at t0)
+        t0 = self.mono()
+
+        def three(ctx, px, gw, run, deadline):
+            for sym in ("AAA", "BBB", "CCC"):
+                gw.get_json(PX.BARS_PATH, {"symbols": sym, "timeframe": "1Day", "feed": "sip"})
+            return {"rows": 0}
+        with S.Store(self.root) as st:
+            ctx = H.LaneContext(lane, st, H.LaneGateway(object(), lane, None, cut=False), lambda url: b"", lane.now)
+            out = lane._px(ctx, None, "daily", three)
+        self.assertEqual(out["_status"], "ok")
+        self.assertEqual(len(sent), 3)
+        gaps = [b - a for a, b in zip([t0] + sent, sent)]
+        self.assertTrue(all(g >= H.DATA_INTERVAL - 1e-9 for g in gaps), gaps)
+        self.assertEqual(lane._bucket.taken, {"lane": 1, "px": 3})
+
     def test_the_lane_takes_its_token_first(self):
         lane = self.lane(self.root, px_data=True)
         lane.throttle()
@@ -511,6 +543,7 @@ class TheRoom(HouseCase):
         lane = H.EventLane(FakeHouse(wall(D, "22:00")), self.root, settings={"px_data": True}, monotonic=Mono(),
                            sleep=lambda s: None)
         lane.gateway = lambda: Market()
+        lane._eight_yield = lambda st, me: False      # (as `HouseCase.lane`: the recorders' own mechanics)
         return lane
 
     def test_the_lines(self):
