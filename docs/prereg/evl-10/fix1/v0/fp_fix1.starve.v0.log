@@ -1,0 +1,16 @@
+starve: knife mu / line pilots done for 9 cells
+starve: 8/48 13s
+starve: 16/48 25s
+starve: 24/48 37s
+starve: 32/48 57s
+starve: 40/48 76s
+starve: 48/48 93s
+S|NV|corner|AR20|n8|cnt|finf|f0.3|L3|V1.42       R  4000 run1 0.0823 (+-0.0043) version 0.0885 picks/s 1.26 mean a +10.90 bp mu +19.21 line0 0.3051
+S|NV|corner|AR20|n14|cnt|finf|L3|V1.42           R  2000 run1 0.1015 (+-0.0068) version 0.1485 picks/s 3.69 mean a +10.48 bp mu +11.37 line0 0.3051
+S|NV|corner|AR20|n8|cnt|finf|f0.3|L3|V1.6        R  4000 run1 0.0887 (+-0.0045) version 0.0890 picks/s 1.03 mean a +9.66 bp mu +18.17 line0 0.3767
+S|NV|corner|AR20|n14|cnt|finf|L3|V1.6            R  2000 run1 0.0825 (+-0.0062) version 0.1055 picks/s 3.15 mean a +11.25 bp mu +10.94 line0 0.3767
+S|NV|corner|AR20|n5|cnt|finf|f0.3|L3|V1.6        R  4000 run1 0.0875 (+-0.0045) version 0.0875 picks/s 0.62 mean a +15.20 bp mu +18.03 line0 0.3767
+S|NK|corner|AR20|n8|cnt|finf|f0.3|L3|V1.6        R  2000 run1 0.0865 (+-0.0063) version 0.0875 picks/s 1.03 mean a +8.16 bp mu -22.67 line0 0.3767
+S|NS|corner|AR20|n8|cnt|finf|f0.3|L3|V1.6        R  2000 run1 0.0810 (+-0.0061) version 0.0840 picks/s 1.12 mean a +8.59 bp mu +12.19 line0 0.3767
+S|NV|corner|AR20|n8|cnt|finf|f0.3|L3.75|V1.6     R  2000 run1 0.0945 (+-0.0065) version 0.1080 picks/s 1.44 mean a +9.59 bp mu +19.86 line0 0.2438
+S|NV|corner|AR20|n8|cnt|finf|f0.3|noline(ref)    R  2000 run1 0.1085 (+-0.0070) version 0.2155 picks/s 2.25 mean a +1.24 bp mu +44.72

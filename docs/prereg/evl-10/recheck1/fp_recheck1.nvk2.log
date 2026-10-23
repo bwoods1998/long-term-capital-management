@@ -1,0 +1,16 @@
+surface: knife mu for 6 cells
+surface: pilot 24/144 45s
+surface: pilot 48/144 95s
+surface: pilot 72/144 140s
+surface: pilot 96/144 178s
+surface: pilot 120/144 221s
+surface: pilot 144/144 260s
+surface: eval 24/56 47s
+surface: eval 48/56 92s
+surface: eval 56/56 106s
+NVK2|NVK b0.5 sda0.01|corner|AR20|n5|cnt|finf|f0.3         R  8000 run1 0.1184 (+-0.0036) ver 0.1606 pps 1.45 ma -0.74+-1.11 mu -2.96 (knife +52.94, pilot +55.90+-0.89)
+NVK2|NVK b0.5 sda0.01|corner|AR20|n16|cnt|finf|f0.1        R  4000 run1 0.1165 (+-0.0051) ver 0.1698 pps 1.54 ma +2.05+-1.31 mu -26.23 (knife +55.13, pilot +81.36+-0.53)
+NVK2|NVK b0.5 sda0.01|corner|AR20|n10|cnt|finf|f0.15       R  4000 run1 0.1197 (+-0.0051) ver 0.1670 pps 1.46 ma +2.88+-1.23 mu -15.44 (knife +56.91, pilot +72.34+-0.92)
+NVK2|NVK b0.5 sda0.01|corner|AR20|n8|cnt|finf|f0.15        R  4000 run1 0.1110 (+-0.0050) ver 0.1172 pps 1.17 ma -1.27+-2.15 mu -15.05 (knife +58.87, pilot +73.92+-0.95)
+NVK2|NVK b0.5 sda0.01|corner|AR10|n5|cnt|finf|f0.3         R  4000 run1 0.1165 (+-0.0051) ver 0.1625 pps 1.45 ma -0.68+-2.13 mu -2.40 (knife +52.94, pilot +55.34+-0.81)
+NVK2|NVK b1.0 sda0.01|corner|AR20|n5|cnt|finf|f0.3         R  4000 run1 0.1258 (+-0.0052) ver 0.1603 pps 1.44 ma +1.54+-1.39 mu -35.13 (knife +52.94, pilot +88.07+-0.70)

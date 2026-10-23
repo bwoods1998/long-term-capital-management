@@ -1,0 +1,28 @@
+sparse: 1/24 6s
+sparse: 2/24 6s
+sparse: 3/24 6s
+sparse: 4/24 6s
+sparse: 5/24 11s
+sparse: 6/24 12s
+sparse: 7/24 12s
+sparse: 8/24 12s
+sparse: 9/24 16s
+sparse: 10/24 17s
+sparse: 11/24 17s
+sparse: 12/24 17s
+sparse: 13/24 22s
+sparse: 14/24 22s
+sparse: 15/24 23s
+sparse: 16/24 23s
+sparse: 17/24 27s
+sparse: 18/24 28s
+sparse: 19/24 28s
+sparse: 20/24 28s
+sparse: 21/24 32s
+sparse: 22/24 33s
+sparse: 23/24 34s
+sparse: 24/24 34s
+{"cell": "idn|TC-skew|AR10|cnt|n2", "R": 2000, "run1_120": 0.1275, "se": 0.0075, "by30": 0.0705, "by60": 0.127, "two_runs_120": 0.2185, "retire_120": 0.0095, "mw_mean_a_bp": 2.7, "mean_n": 2.0}
+{"cell": "idn|TC-skew|AR20|cnt|n1.5", "R": 4000, "run1_120": 0.118, "se": 0.0051, "by30": 0.033, "by60": 0.116, "two_runs_120": 0.1747, "retire_120": 0.01, "mw_mean_a_bp": 0.12, "mean_n": 1.5}
+{"cell": "idn|TC-skew|AR20|cnt|n2", "R": 4000, "run1_120": 0.1278, "se": 0.0053, "by30": 0.07, "by60": 0.1255, "two_runs_120": 0.227, "retire_120": 0.01, "mw_mean_a_bp": -0.83, "mean_n": 2.0}
+{"cell": "idn|TC-skew|AR20|cnt|n3(ref)", "R": 2000, "run1_120": 0.1155, "se": 0.0071, "by30": 0.0895, "by60": 0.1145, "two_runs_120": 0.2245, "retire_120": 0.0095, "mw_mean_a_bp": 0.49, "mean_n": 3.0}

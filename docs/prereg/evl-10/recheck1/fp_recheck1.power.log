@@ -1,0 +1,8 @@
+power: knife mu for 6 cells
+power: eval 24/24 33s
+PW|alt|base|n42|cnt|finf|f0.15|sda0.008|c0.5               R  2000 run1 0.1985 (+-0.0089) ver 0.3405 pps 4.87 ma +49.39+-0.43 mu -14.00 (knife -14.00)
+PW|alt|base|n42|cnt|finf|f0.3|sda0.008|c0.5                R  2000 run1 0.1615 (+-0.0082) ver 0.3030 pps 6.72 ma +41.12+-0.58 mu -14.00 (knife -14.00)
+PW|alt|base|n42|cnt|finf|f0.6|sda0.008|c0.5                R  2000 run1 0.1275 (+-0.0075) ver 0.2435 pps 7.65 ma +34.19+-0.75 mu -14.00 (knife -14.00)
+PW|alt|base|n42|cnt|finf|f0.15|sda0.008|c0.7               R  2000 run1 0.3785 (+-0.0108) ver 0.5890 pps 4.87 ma +74.08+-0.71 mu -14.00 (knife -14.00)
+PW|alt|base|n42|cnt|finf|f0.3|sda0.008|c0.7                R  2000 run1 0.3300 (+-0.0105) ver 0.5465 pps 6.74 ma +63.03+-0.62 mu -14.00 (knife -14.00)
+PW|alt|base|n42|cnt|finf|f0.6|sda0.008|c0.7                R  2000 run1 0.2705 (+-0.0099) ver 0.4795 pps 7.65 ma +53.91+-0.41 mu -14.00 (knife -14.00)

@@ -1,0 +1,330 @@
+{
+ "E": 1906.0,
+ "lots": {
+  "from $3": {
+   "price_law": "log-uniform [$3, $76.24]",
+   "learning_lot_fill_mean": 66.74,
+   "learning_lot_limit_mean": 83.42,
+   "learning_lot_fill_q10_q90": [
+    51.77,
+    75.26
+   ],
+   "probe_skip_share": 0.2211,
+   "probe_lot_fill_mean_when_bought": 66.14,
+   "probe_skip_bands_prev_close": [
+    [
+     38.12,
+     60.99
+    ],
+    [
+     25.41,
+     30.5
+    ],
+    [
+     19.06,
+     20.33
+    ]
+   ]
+  },
+  "from $10": {
+   "price_law": "log-uniform [$10, $76.24]",
+   "learning_lot_fill_mean": 62.85,
+   "learning_lot_limit_mean": 78.56,
+   "learning_lot_fill_q10_q90": [
+    46.7,
+    74.05
+   ],
+   "probe_skip_share": 0.353,
+   "probe_lot_fill_mean_when_bought": 68.16,
+   "probe_skip_bands_prev_close": [
+    [
+     38.12,
+     60.99
+    ],
+    [
+     25.41,
+     30.5
+    ],
+    [
+     19.06,
+     20.33
+    ]
+   ]
+  }
+ },
+ "per_traded_event_bp": {
+  "lo": {
+   "learning_6_buys": 3.5,
+   "probe_7_buys_less_skips": 3.9
+  },
+  "mid": {
+   "learning_6_buys": 10.3,
+   "probe_7_buys_less_skips": 11.4
+  },
+  "caps_mid": {
+   "learning_6_buys": 15.0,
+   "probe_7_buys_less_skips": 16.7
+  },
+  "line_max": {
+   "learning_6_buys": 18.7,
+   "probe_7_buys_less_skips": 20.8
+  }
+ },
+ "break_even_pick_edge_bp": {
+  "lo": {
+   "5_buys": 4.2,
+   "6_buys": 3.5,
+   "7_buys": 3.0
+  },
+  "mid": {
+   "5_buys": 12.3,
+   "6_buys": 10.3,
+   "7_buys": 8.8
+  },
+  "caps_mid": {
+   "5_buys": 18.0,
+   "6_buys": 15.0,
+   "7_buys": 12.9
+  },
+  "line_max": {
+   "5_buys": 22.5,
+   "6_buys": 18.7,
+   "7_buys": 16.1
+  }
+ },
+ "ev": {
+  "no starvation": {
+   "cells": {
+    "c0": {
+     "pick_mean_a_bp": 0.0,
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0,
+     "net_lo_usd": -16.8,
+     "net_mid_usd": -49.3,
+     "net_caps_mid_usd": -72.2,
+     "net_line_max_usd": -90.0
+    },
+    "c0.3|sd0.8": {
+     "pick_mean_a_bp": 16.6,
+     "P_pass_by120": 0.0515,
+     "pnl_120_usd": 79.2,
+     "net_lo_usd": 62.4,
+     "net_mid_usd": 29.9,
+     "net_caps_mid_usd": 7.0,
+     "net_line_max_usd": -10.8
+    },
+    "c0.5|sd0.8": {
+     "pick_mean_a_bp": 35.7,
+     "P_pass_by120": 0.1495,
+     "pnl_120_usd": 169.7,
+     "net_lo_usd": 152.9,
+     "net_mid_usd": 120.3,
+     "net_caps_mid_usd": 97.4,
+     "net_line_max_usd": 79.7
+    },
+    "c0.7|sd0.8": {
+     "pick_mean_a_bp": 55.2,
+     "P_pass_by120": 0.2985,
+     "pnl_120_usd": 259.1,
+     "net_lo_usd": 242.3,
+     "net_mid_usd": 209.8,
+     "net_caps_mid_usd": 186.9,
+     "net_line_max_usd": 169.1
+    },
+    "c0.5|sd1.5": {
+     "pick_mean_a_bp": 78.7,
+     "P_pass_by120": 0.5215,
+     "pnl_120_usd": 362.8,
+     "net_lo_usd": 346.0,
+     "net_mid_usd": 313.5,
+     "net_caps_mid_usd": 290.6,
+     "net_line_max_usd": 272.8
+    }
+   },
+   "expected": {
+    "pnl_120_usd": 99.86,
+    "net_lo_usd": 83.06,
+    "net_mid_usd": 50.54,
+    "net_caps_mid_usd": 27.64,
+    "net_line_max_usd": 9.86,
+    "pnl_per_metered_usd_mid": 2.02,
+    "true_promotions_per_charge": 0.103
+   }
+  },
+  "L3.0|V1.42": {
+   "cells": {
+    "c0": {
+     "pick_mean_a_bp": 0.0,
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0,
+     "net_lo_usd": -13.3,
+     "net_mid_usd": -39.0,
+     "net_caps_mid_usd": -57.1,
+     "net_line_max_usd": -71.2
+    },
+    "c0.3|sd0.8": {
+     "pick_mean_a_bp": 16.6,
+     "P_pass_by120": 0.056,
+     "pnl_120_usd": 62.6,
+     "net_lo_usd": 49.3,
+     "net_mid_usd": 23.6,
+     "net_caps_mid_usd": 5.5,
+     "net_line_max_usd": -8.6
+    },
+    "c0.5|sd0.8": {
+     "pick_mean_a_bp": 35.7,
+     "P_pass_by120": 0.1625,
+     "pnl_120_usd": 134.0,
+     "net_lo_usd": 120.8,
+     "net_mid_usd": 95.0,
+     "net_caps_mid_usd": 76.9,
+     "net_line_max_usd": 62.9
+    },
+    "c0.7|sd0.8": {
+     "pick_mean_a_bp": 55.2,
+     "P_pass_by120": 0.3011,
+     "pnl_120_usd": 203.9,
+     "net_lo_usd": 190.7,
+     "net_mid_usd": 165.1,
+     "net_caps_mid_usd": 147.0,
+     "net_line_max_usd": 133.1
+    },
+    "c0.5|sd1.5": {
+     "pick_mean_a_bp": 78.7,
+     "P_pass_by120": 0.5669,
+     "pnl_120_usd": 285.9,
+     "net_lo_usd": 272.6,
+     "net_mid_usd": 246.9,
+     "net_caps_mid_usd": 228.7,
+     "net_line_max_usd": 214.7
+    }
+   },
+   "expected": {
+    "pnl_120_usd": 78.78,
+    "net_lo_usd": 65.5,
+    "net_mid_usd": 39.79,
+    "net_caps_mid_usd": 21.68,
+    "net_line_max_usd": 7.63,
+    "pnl_per_metered_usd_mid": 1.6,
+    "true_promotions_per_charge": 0.11
+   }
+  },
+  "L3.0|V1.6": {
+   "cells": {
+    "c0": {
+     "pick_mean_a_bp": 0.0,
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0,
+     "net_lo_usd": -11.2,
+     "net_mid_usd": -33.0,
+     "net_caps_mid_usd": -48.3,
+     "net_line_max_usd": -60.2
+    },
+    "c0.3|sd0.8": {
+     "pick_mean_a_bp": 16.6,
+     "P_pass_by120": 0.0538,
+     "pnl_120_usd": 53.0,
+     "net_lo_usd": 41.8,
+     "net_mid_usd": 20.0,
+     "net_caps_mid_usd": 4.7,
+     "net_line_max_usd": -7.2
+    },
+    "c0.5|sd0.8": {
+     "pick_mean_a_bp": 35.7,
+     "P_pass_by120": 0.1563,
+     "pnl_120_usd": 113.5,
+     "net_lo_usd": 102.2,
+     "net_mid_usd": 80.5,
+     "net_caps_mid_usd": 65.1,
+     "net_line_max_usd": 53.3
+    },
+    "c0.7|sd0.8": {
+     "pick_mean_a_bp": 55.2,
+     "P_pass_by120": 0.3017,
+     "pnl_120_usd": 173.4,
+     "net_lo_usd": 162.2,
+     "net_mid_usd": 140.4,
+     "net_caps_mid_usd": 125.0,
+     "net_line_max_usd": 113.2
+    },
+    "c0.5|sd1.5": {
+     "pick_mean_a_bp": 78.7,
+     "P_pass_by120": 0.5452,
+     "pnl_120_usd": 242.4,
+     "net_lo_usd": 231.1,
+     "net_mid_usd": 209.3,
+     "net_caps_mid_usd": 194.0,
+     "net_line_max_usd": 182.1
+    }
+   },
+   "expected": {
+    "pnl_120_usd": 66.79,
+    "net_lo_usd": 55.56,
+    "net_mid_usd": 33.78,
+    "net_caps_mid_usd": 18.46,
+    "net_line_max_usd": 6.58,
+    "pnl_per_metered_usd_mid": 1.35,
+    "true_promotions_per_charge": 0.107
+   }
+  },
+  "L3.75|V1.6": {
+   "cells": {
+    "c0": {
+     "pick_mean_a_bp": 0.0,
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0,
+     "net_lo_usd": -14.5,
+     "net_mid_usd": -42.7,
+     "net_caps_mid_usd": -62.5,
+     "net_line_max_usd": -77.9
+    },
+    "c0.3|sd0.8": {
+     "pick_mean_a_bp": 16.6,
+     "P_pass_by120": 0.0519,
+     "pnl_120_usd": 68.5,
+     "net_lo_usd": 54.0,
+     "net_mid_usd": 25.9,
+     "net_caps_mid_usd": 6.0,
+     "net_line_max_usd": -9.3
+    },
+    "c0.5|sd0.8": {
+     "pick_mean_a_bp": 35.7,
+     "P_pass_by120": 0.1506,
+     "pnl_120_usd": 146.8,
+     "net_lo_usd": 132.3,
+     "net_mid_usd": 104.1,
+     "net_caps_mid_usd": 84.3,
+     "net_line_max_usd": 68.9
+    },
+    "c0.7|sd0.8": {
+     "pick_mean_a_bp": 55.2,
+     "P_pass_by120": 0.3228,
+     "pnl_120_usd": 223.5,
+     "net_lo_usd": 209.0,
+     "net_mid_usd": 180.9,
+     "net_caps_mid_usd": 161.1,
+     "net_line_max_usd": 145.7
+    },
+    "c0.5|sd1.5": {
+     "pick_mean_a_bp": 78.7,
+     "P_pass_by120": 0.5255,
+     "pnl_120_usd": 313.9,
+     "net_lo_usd": 299.3,
+     "net_mid_usd": 271.2,
+     "net_caps_mid_usd": 251.3,
+     "net_line_max_usd": 236.0
+    }
+   },
+   "expected": {
+    "pnl_120_usd": 86.34,
+    "net_lo_usd": 71.83,
+    "net_mid_usd": 43.67,
+    "net_caps_mid_usd": 23.84,
+    "net_line_max_usd": 8.47,
+    "pnl_per_metered_usd_mid": 1.75,
+    "true_promotions_per_charge": 0.106
+   }
+  }
+ },
+ "note": "At V3's rows a Probe lot of this seat is about a learning lot (both 5% targets; Probe takes only the counts inside [0.8, 1.0] x 5% at the limit and skips the rest), so promotion adds slots (14 open) this seat's 8 picks a decision cannot use and skips some names: P&L is mostly learning P&L. Sized (10%) is not reached within 120 sessions in this model. The cost line's share: R2's $0.411 mid day is 4.1% of goal V3's $10 and 8.2% of release 1019l's $5 rule."
+}

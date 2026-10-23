@@ -1,0 +1,57 @@
+{
+ "basis": 3.9,
+ "charge": 0.13,
+ "births_registered": [
+  {
+   "night": "2026-10-22",
+   "id": "EVL-B-NEWSDAY-NEG-C1",
+   "seatable": true
+  },
+  {
+   "night": "2026-10-22",
+   "id": "EVL-B-NEWS-AFTERHRS-MILD-O1",
+   "seatable": true
+  },
+  {
+   "night": "2026-10-22",
+   "id": "EVL-B-8K-OFFICERS-REC",
+   "seatable": false
+  },
+  {
+   "night": "2026-10-23",
+   "id": "EVL-B-DAYNEWS-DROP-ON",
+   "seatable": true
+  },
+  {
+   "night": "2026-10-23",
+   "id": "EVL-B-DAYNEWS-S1-ON",
+   "seatable": true
+  }
+ ],
+ "screen_budget6_used": {
+  "PREREG-EVL-6 (15 versions in SEATING)": 1.95,
+  "PREREG-EVL-7 (2 learners, pinned live)": 0.26,
+  "seatable births since REGISTERED_AT_6 (4)": 0.52
+ },
+ "screen_budget6_used_total": 2.73,
+ "code_left_before_reservations": 1.17,
+ "births_RESERVED": {
+  "PREREG-EVL-8": 0.65,
+  "PREREG-EVL-9": 0.3,
+  "PREREG-EVL-10": 0.13
+ },
+ "USED_before_this_file (the sum R3's validator reads, the reservations of EVL-8 and EVL-9 in it)": 3.68,
+ "LEFT_before_this_file": 0.22,
+ "USED_after_this_file": 3.81,
+ "LEFT_after_this_file": 0.09,
+ "whole_charges_left_after": 0,
+ "the_births_room_now (RESERVED already holds this file's 0.13, A137)": 0.09,
+ "this_file_lifetime_draw_at_most": 0.39,
+ "owed_later_if_nothing_passes": {
+  "PREREG-EVL-6 second runs (15 x 0.13)": 1.95,
+  "PREREG-EVL-7 later runs (4 x 0.13)": 0.52,
+  "PREREG-EVL-8 one more run each (5 x 0.13)": 0.65,
+  "PREREG-EVL-9 later runs (4 x 0.15)": 0.6
+ },
+ "note": "A run that the budget cannot hold waits (PREREG-EVL-6 s3) or, for this file's version, never starts (section 3 of the file). With LEFT 0.09 after this file, no later run of any file starts until the captain restates the budget (goal V3 item 3: a false-pass budget he states and may restate each week), each 0.13 one more expected false pass."
+}

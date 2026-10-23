@@ -1,0 +1,23 @@
+r2sparse: 1/20 4s
+r2sparse: 2/20 4s
+r2sparse: 3/20 4s
+r2sparse: 4/20 4s
+r2sparse: 5/20 7s
+r2sparse: 6/20 7s
+r2sparse: 7/20 7s
+r2sparse: 8/20 7s
+r2sparse: 9/20 10s
+r2sparse: 10/20 11s
+r2sparse: 11/20 11s
+r2sparse: 12/20 11s
+r2sparse: 13/20 14s
+r2sparse: 14/20 14s
+r2sparse: 15/20 14s
+r2sparse: 16/20 14s
+r2sparse: 17/20 18s
+r2sparse: 18/20 18s
+r2sparse: 19/20 18s
+r2sparse: 20/20 18s
+{"cell": "r2|NK|corner|AR20|n3|cnt|finf", "R": 2000, "pass_run1_120": 0.106, "se": 0.0069, "per_version_120": 0.189, "by_session": {"25": 0.009, "30": 0.049, "40": 0.09, "60": 0.103, "90": 0.106, "120": 0.106}, "retired_120": 0.013, "picks_per_session": 1.73, "realized_mean_a_bp": -0.63, "mu_bp": 14.33}
+{"cell": "r2|NV|corner|AR20|n3|cnt|finf", "R": 4000, "pass_run1_120": 0.103, "se": 0.0048, "per_version_120": 0.1742, "by_session": {"25": 0.002, "30": 0.03975, "40": 0.08275, "60": 0.10025, "90": 0.103, "120": 0.103}, "retired_120": 0.01225, "picks_per_session": 1.71, "realized_mean_a_bp": 1.05, "mu_bp": 43.69}
+{"cell": "r2|NV|corner|AR20|n5|cnt|finf|f0.3", "R": 4000, "pass_run1_120": 0.125, "se": 0.0052, "per_version_120": 0.1688, "by_session": {"25": 0.001, "30": 0.03125, "40": 0.0985, "60": 0.1215, "90": 0.12475, "120": 0.125}, "retired_120": 0.01175, "picks_per_session": 1.46, "realized_mean_a_bp": -0.22, "mu_bp": 52.94}

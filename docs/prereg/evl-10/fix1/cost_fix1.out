@@ -1,0 +1,269 @@
+{
+ "source": "cost_r2.py's model on fix1/r2_spec.py's texts",
+ "shas": {
+  "R2-NEWS": "a82396145a28dd4d98d6878e515cc26c26fd70c6c29f2642d4e1c4241642d694",
+  "R2-DOC": "127c19f36f3811afaf4401c35e7620618a27ca0eb32795d0b19ba45a87522c5b"
+ },
+ "per_read_sonnet55": {
+  "lo": {
+   "news": 0.00232,
+   "doc": 0.00896,
+   "tokens": {
+    "news": [
+     781,
+     55
+    ],
+    "8k": [
+     3123,
+     190
+    ]
+   }
+  },
+  "mid": {
+   "news": 0.00711,
+   "doc": 0.01837,
+   "tokens": {
+    "news": [
+     1356,
+     375
+    ],
+    "8k": [
+     5276,
+     615
+    ]
+   }
+  },
+  "hi": {
+   "news": 0.01712,
+   "doc": 0.03109,
+   "tokens": {
+    "news": [
+     3232,
+     910
+    ],
+    "8k": [
+     7332,
+     1360
+    ]
+   }
+  }
+ },
+ "hold_worst_case": {
+  "news": 0.0552,
+  "doc": 0.1036,
+  "news_body_bytes_max": 11190,
+  "doc_body_bytes_max": 27161
+ },
+ "day_designer_counts": {
+  "lo": {
+   "reads": {
+    "news": 31.8,
+    "8k": 7.4
+   },
+   "usd": 0.14
+  },
+  "mid": {
+   "reads": {
+    "news": 37.2,
+    "8k": 8.0
+   },
+   "usd": 0.411
+  },
+  "hi": {
+   "reads": {
+    "news": 42.0,
+    "8k": 8.0
+   },
+   "usd": 0.968
+  }
+ },
+ "day_at_caps": {
+  "lo": {
+   "reads": {
+    "news": 64,
+    "doc": 8
+   },
+   "usd": 0.22
+  },
+  "mid": {
+   "reads": {
+    "news": 64,
+    "doc": 8
+   },
+   "usd": 0.602
+  },
+  "hi": {
+   "reads": {
+    "news": 64,
+    "doc": 8
+   },
+   "usd": 1.344
+  },
+  "worst_if_every_call_lost_at_its_hold": 4.36
+ },
+ "r2_line": {
+  "V=1.00": {
+   "R2_LINE": 0.75,
+   "v1_keeps": 1.5,
+   "births_keep": 0.25,
+   "reads_bought_lo": 245,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 89,
+   "share_of_caps_day_mid": 1.0,
+   "share_of_designer_day_mid": 1.0,
+   "reads_bought_hi": 40,
+   "share_of_caps_day_hi": 0.558,
+   "share_of_designer_day_hi": 0.775
+  },
+  "V=1.20": {
+   "R2_LINE": 0.75,
+   "v1_keeps": 1.8,
+   "births_keep": 0.25,
+   "reads_bought_lo": 245,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 89,
+   "share_of_caps_day_mid": 1.0,
+   "share_of_designer_day_mid": 1.0,
+   "reads_bought_hi": 40,
+   "share_of_caps_day_hi": 0.558,
+   "share_of_designer_day_hi": 0.775
+  },
+  "V=1.30": {
+   "R2_LINE": 0.75,
+   "v1_keeps": 1.95,
+   "births_keep": 0.25,
+   "reads_bought_lo": 245,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 89,
+   "share_of_caps_day_mid": 1.0,
+   "share_of_designer_day_mid": 1.0,
+   "reads_bought_hi": 40,
+   "share_of_caps_day_hi": 0.558,
+   "share_of_designer_day_hi": 0.775
+  },
+  "V=1.42": {
+   "R2_LINE": 0.62,
+   "v1_keeps": 2.13,
+   "births_keep": 0.25,
+   "reads_bought_lo": 202,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 74,
+   "share_of_caps_day_mid": 1.0,
+   "share_of_designer_day_mid": 1.0,
+   "reads_bought_hi": 33,
+   "share_of_caps_day_hi": 0.461,
+   "share_of_designer_day_hi": 0.64
+  },
+  "V=1.50": {
+   "R2_LINE": 0.5,
+   "v1_keeps": 2.25,
+   "births_keep": 0.25,
+   "reads_bought_lo": 163,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 59,
+   "share_of_caps_day_mid": 0.831,
+   "share_of_designer_day_mid": 1.0,
+   "reads_bought_hi": 26,
+   "share_of_caps_day_hi": 0.372,
+   "share_of_designer_day_hi": 0.517
+  },
+  "V=1.60": {
+   "R2_LINE": 0.35,
+   "v1_keeps": 2.4,
+   "births_keep": 0.25,
+   "reads_bought_lo": 114,
+   "share_of_caps_day_lo": 1.0,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 41,
+   "share_of_caps_day_mid": 0.581,
+   "share_of_designer_day_mid": 0.852,
+   "reads_bought_hi": 18,
+   "share_of_caps_day_hi": 0.26,
+   "share_of_designer_day_hi": 0.362
+  },
+  "V=1.70": {
+   "R2_LINE": 0.2,
+   "v1_keeps": 2.55,
+   "births_keep": 0.25,
+   "reads_bought_lo": 65,
+   "share_of_caps_day_lo": 0.909,
+   "share_of_designer_day_lo": 1.0,
+   "reads_bought_mid": 23,
+   "share_of_caps_day_mid": 0.332,
+   "share_of_designer_day_mid": 0.487,
+   "reads_bought_hi": 10,
+   "share_of_caps_day_hi": 0.149,
+   "share_of_designer_day_hi": 0.207
+  },
+  "V=1.83": {
+   "R2_LINE": 0.005,
+   "v1_keeps": 2.745,
+   "births_keep": 0.25,
+   "reads_bought_lo": 1,
+   "share_of_caps_day_lo": 0.023,
+   "share_of_designer_day_lo": 0.036,
+   "reads_bought_mid": 0,
+   "share_of_caps_day_mid": 0.008,
+   "share_of_designer_day_mid": 0.012,
+   "reads_bought_hi": 0,
+   "share_of_caps_day_hi": 0.004,
+   "share_of_designer_day_hi": 0.005
+  },
+  "V=2.00": {
+   "R2_LINE": 0.0,
+   "v1_keeps": 3.0,
+   "births_keep": 0.25,
+   "reads_bought_lo": 0,
+   "share_of_caps_day_lo": 0.0,
+   "share_of_designer_day_lo": 0.0,
+   "reads_bought_mid": 0,
+   "share_of_caps_day_mid": 0.0,
+   "share_of_designer_day_mid": 0.0,
+   "reads_bought_hi": 0,
+   "share_of_caps_day_hi": 0.0,
+   "share_of_designer_day_hi": 0.0
+  }
+ },
+ "cost_rule": {
+  "release 1019l (RULE_VERSION 3, the goal of Oct 19)": {
+   "cap_no_profit": 5.0,
+   "ceiling": 25.0,
+   "fixed": 1.6644,
+   "lane_line_L": 3.0,
+   "research_rest": 0.3356,
+   "sum": 5.0,
+   "R2_inside_the_lane": "yes: R2 + v1 + births <= L, so no R2 dollar can make a cap breach"
+  },
+  "goal V3 (Oct 23; not yet the code's rule)": {
+   "cap_no_profit": 10.0,
+   "ceiling": 50.0,
+   "fixed": 1.6644,
+   "lane_line_L": 3.0,
+   "research_rest": 5.3356,
+   "sum": 10.0,
+   "R2_inside_the_lane": "yes: R2 + v1 + births <= L, so no R2 dollar can make a cap breach"
+  }
+ },
+ "smoke_worst": {
+  "doc": {
+   "max_tokens": 400,
+   "worst_usd": 0.00774,
+   "expected_usd": 0.00433
+  },
+  "news": {
+   "max_tokens": 300,
+   "worst_usd": 0.00605,
+   "expected_usd": 0.00374
+  },
+  "worst_total": 0.01379,
+  "fix1_WORST_constants_bound_it": {
+   "doc": true,
+   "news": true
+  }
+ }
+}

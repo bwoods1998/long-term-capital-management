@@ -1,0 +1,35 @@
+{
+ "1_seat_0_births": {
+  "used_before": 3.12,
+  "evl10_adds": 0.13,
+  "used_after": 3.25,
+  "left_after": 0.65,
+  "charges_left_after": 5,
+  "evl10_lifetime_max (3 runs a seat)": 0.39
+ },
+ "1_seat_3_births": {
+  "used_before": 3.51,
+  "evl10_adds": 0.13,
+  "used_after": 3.64,
+  "left_after": 0.26,
+  "charges_left_after": 2,
+  "evl10_lifetime_max (3 runs a seat)": 0.39
+ },
+ "2_seat_0_births": {
+  "used_before": 3.12,
+  "evl10_adds": 0.26,
+  "used_after": 3.38,
+  "left_after": 0.52,
+  "charges_left_after": 4,
+  "evl10_lifetime_max (3 runs a seat)": 0.78
+ },
+ "2_seat_3_births": {
+  "used_before": 3.51,
+  "evl10_adds": 0.26,
+  "used_after": 3.77,
+  "left_after": 0.13,
+  "charges_left_after": 1,
+  "evl10_lifetime_max (3 runs a seat)": 0.78
+ },
+ "c10": 0.13
+}

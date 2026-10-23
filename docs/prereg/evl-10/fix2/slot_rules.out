@@ -1,0 +1,12 @@
+release 1019l settings: max_open {'learning': 8, 'probe': 6, 'sized': 8} max_open_v6 {'probe': 14} share probe 0.05
+
+(1) EVL-R2-ON as a plain PREREG row (prereg 10, regfile None, born_at None): evl6 = False; max_open('probe', row) = 6; max_open('probe') = 6
+    a row whose evl6 reads True: max_open('probe', row) = 14; max_open('learning', row) = 8; max_open('sized', row) = 8
+
+(2) A85's reservation at the next open (book.reservation, E = $1,906, Probe share 0.05):
+    room 14 (evl6 True), history found (summary in the main row), picks 5, 6, 6, 7, 5: cash and invested room $571.80 = 30% of E; loss budget $228.72
+    room 14 (evl6 True), history not found (summary only in (day, 'close-evl10')): cash and invested room $1334.20 = 70% of E; loss budget $533.68
+    room 6 (evl6 False), history found (summary in the main row), picks 5, 6, 6, 7, 5: cash and invested room $571.80 = 30% of E; loss budget $228.72
+    room 6 (evl6 False), history not found (summary only in (day, 'close-evl10')): cash and invested room $571.80 = 30% of E; loss budget $228.72
+
+(3) PREREG-EVL-7's learner rows on release 1019l: EVL-LRN-O1 evl6=False max_open(probe)=6, EVL-LRN-ON evl6=False max_open(probe)=6

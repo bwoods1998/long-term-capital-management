@@ -1,0 +1,15 @@
+(1) grid: 326 scans 07:31:10 .. 15:38:40 every 90 s -> COMPLETE True (literal rule False)
+    a gap of exactly 5 minutes (12:01:10 -> 12:06:10, none between; gaps [60, 90, 300] s): COMPLETE True
+    one gap of 5 minutes 1 second (12:01:10 -> 12:06:11, none between; gaps [59, 90, 301] s): COMPLETE False
+    first scan 07:35:40 (more than 5 minutes after 07:30:00): COMPLETE False
+    last scan 15:34:10 (more than 5 minutes before tau - 30 s = 15:39:30): COMPLETE False
+    a scan before 07:30:00 does not shorten the first gap (07:29:59 added to the late-first case): COMPLETE False
+
+(2) the House's cadence, 20,000 sessions a cell (seed 202610232):
+    a call due at 100% of jobs, House stall 0 s: COMPLETE 1.0000 (literal rule 0.0000); the largest gap seen 211 s
+    a call due at 30% of jobs, House stall 0 s: COMPLETE 1.0000 (literal rule 0.0000); the largest gap seen 211 s
+    a call due at 0% of jobs, House stall 0 s: COMPLETE 1.0000 (literal rule 0.0000); the largest gap seen 121 s
+    a call due at 100% of jobs, House stall 240 s: COMPLETE 0.3116 (literal rule 0.0000); the largest gap seen 490 s
+    a call due at 100% of jobs, House stall 361 s: COMPLETE 0.0000 (literal rule 0.0000); the largest gap seen 599 s
+
+(3) r2_spec.share: no complete session 0.5; five complete sessions [80, 95, 102, 88, 110] -> q = 0.4211 (40 / 95.0)

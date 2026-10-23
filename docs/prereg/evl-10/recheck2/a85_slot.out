@@ -1,0 +1,5 @@
+probe share 0.05 max_open probe (no program) 6
+history found (median picks): cash and invested room reserved $571.80 = 30% of E; loss budget $228.72
+history not found (feat/scheduler's key): cash and invested room reserved $1334.20 = 70% of E; loss budget $533.68
+sessions with a scan at or before 07:30:00: 0/100000; with one at or after tau - 30 s: 0/100000
+so q(D) = Q_DEFAULT 0.5 on every session under the literal COMPLETE

@@ -1,0 +1,15 @@
+r2: knife mu done {'J|NV|corner|AR20|n5|cnt|finf': 36.32, 'J|NK|corner|AR20|n5|cnt|finf': 6.53, 'J|NV|corner|AR20|n8|cnt|finf': 25.72, 'J|NI|corner|AR20|n8|cnt|finf': 16.84, 'J|NS|corner|AR20|n8|cnt|finf': 11.64, 'J|NV|corner|AR20|n14|finf': -0.0, 'J|NV|base|n14|finf': -0.09}
+r2: 8/56 jobs 9s
+r2: 16/56 jobs 19s
+r2: 24/56 jobs 29s
+r2: 32/56 jobs 40s
+r2: 40/56 jobs 50s
+r2: 48/56 jobs 58s
+r2: 56/56 jobs 66s
+J|NI|corner|AR20|n8|cnt|finf     R  4000 run1 0.0803 (+-0.0043) version 0.1442 by40 0.076 picks/s 3.99 mean a -1.4 bp mu +16.8
+J|NK|corner|AR20|n5|cnt|finf     R  4000 run1 0.0965 (+-0.0047) version 0.1812 by40 0.089 picks/s 2.75 mean a -0.4 bp mu +6.5
+J|NS|corner|AR20|n8|cnt|finf     R  4000 run1 0.0663 (+-0.0039) version 0.1300 by40 0.064 picks/s 4.87 mean a -0.0 bp mu +11.6
+J|NV|base|n14|finf               R  2000 run1 0.0250 (+-0.0035) version 0.0510 by40 0.025 picks/s 5.76 mean a +1.5 bp mu -0.1
+J|NV|corner|AR20|n14|finf        R  4000 run1 0.0828 (+-0.0044) version 0.1560 by40 0.079 picks/s 5.75 mean a +0.5 bp mu -0.0
+J|NV|corner|AR20|n5|cnt|finf     R  6000 run1 0.1172 (+-0.0042) version 0.2137 by40 0.109 picks/s 2.72 mean a +2.9 bp mu +36.3
+J|NV|corner|AR20|n8|cnt|finf     R  4000 run1 0.1100 (+-0.0049) version 0.2045 by40 0.102 picks/s 3.98 mean a -0.1 bp mu +25.7

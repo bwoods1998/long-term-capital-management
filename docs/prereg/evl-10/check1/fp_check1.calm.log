@@ -1,0 +1,28 @@
+calm: 1/24 6s
+calm: 2/24 6s
+calm: 3/24 6s
+calm: 4/24 6s
+calm: 5/24 11s
+calm: 6/24 12s
+calm: 7/24 12s
+calm: 8/24 12s
+calm: 9/24 17s
+calm: 10/24 18s
+calm: 11/24 18s
+calm: 12/24 18s
+calm: 13/24 23s
+calm: 14/24 24s
+calm: 15/24 24s
+calm: 16/24 24s
+calm: 17/24 29s
+calm: 18/24 29s
+calm: 19/24 30s
+calm: 20/24 30s
+calm: 21/24 34s
+calm: 22/24 35s
+calm: 23/24 35s
+calm: 24/24 36s
+{"cell": "idn|TC-skew|AR20|cnt|n5|x0-0.3", "R": 4000, "run1_120": 0.1185, "se": 0.0051, "by30": 0.0968, "by60": 0.1168, "two_runs_120": 0.2248, "retire_120": 0.0145, "mw_mean_a_bp": 1.24, "mean_n": 5.0}
+{"cell": "idn|TC-skew|AR20|cnt|n5|x0-0.6", "R": 4000, "run1_120": 0.129, "se": 0.0053, "by30": 0.1042, "by60": 0.1275, "two_runs_120": 0.235, "retire_120": 0.0112, "mw_mean_a_bp": 3.29, "mean_n": 5.01}
+{"cell": "idn|TC-skew|AR20|cnt|n5|x0stat(ref)", "R": 2000, "run1_120": 0.124, "se": 0.0074, "by30": 0.104, "by60": 0.1225, "two_runs_120": 0.2395, "retire_120": 0.012, "mw_mean_a_bp": 2.02, "mean_n": 5.01}
+{"cell": "idn|TC-skew|AR20|n14|x0-0.6", "R": 2000, "run1_120": 0.08, "se": 0.0061, "by30": 0.0715, "by60": 0.079, "two_runs_120": 0.1595, "retire_120": 0.049, "mw_mean_a_bp": 0.57, "mean_n": 13.99}
