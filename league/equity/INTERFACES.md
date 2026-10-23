@@ -597,6 +597,14 @@ Nothing above changes; these are added beside it.
 - league/live/__main__.py (book, a pure addition): `--flatten-equity WHY`, `--clear-equity-freeze WHY`,
   `EQUITY_FLATTEN`, `EQUITY_CLEAR_FREEZE`, `equity_ask(why)`, and the status's `equity` block {freeze, reconciliation,
   pending_owner_actions}.
+- THE DECISION SCHEDULER (release 1019i, A120; league/events/scheduler.py, docs/SCHEDULER.md), additive in live.py:
+  `EVENT_MAIN_SLOT` ("main"), `EVENT_SLOT_WAIT`, `_slot_of(adapter, program)`, `_send_window(adapter, file, at,
+  open_at, close_at)`; `EquityBook._event_decide_slots` (after `_event_decide` in `_event_step`) and
+  `_event_decide_slot` (one file's pass: the row `(day, "<at>-<file>")` of `eq_event_decisions`, planned once the
+  main pass is done and the file's live receipt is made, inside the file's own send window); `_event_decide` skips a
+  program whose `adapter.slot_of` is not "main"; `_event_send` sends a file's buy only inside its own window (its
+  `until` the window's end). The adapter (league/events/book.py) adds `slot_of`, `slot_files`, `send_window` and
+  `slot_receipt`; an adapter without them has the main file alone (today's path).
 
 ---
 

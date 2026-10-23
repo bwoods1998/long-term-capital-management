@@ -508,6 +508,59 @@ def _has_table(rows: Callable[..., list], name: str) -> bool:
         return False
 
 
+#: THE DECISION SCHEDULER (release 1019n-r2, A120; league/events/scheduler.py, league/events/book.py `slot_of`): the
+#: file whose slot decides every row of PREREG-EVL-1 to -6, PREREG-EVL-7's learners (their own pass, `_event_decide_lrn`,
+#: as live since release 1019j: PREREG-EVL-7 section 1.9's ROOM) and R3's births: the book's main pass (`_event_decide`)
+#: and the learners' pass, as today. A LATER FILE'S rows (a file with a registered part: PREREG-EVL-10 first) are
+#: planned by their own pass (`_event_decide_slot`) once every earlier pass is decided and their live receipt is made,
+#: sent inside their own window (`_event_send`) after every earlier row's buy; an adapter without `slot_of` has only the
+#: main file.
+EVENT_MAIN_SLOT = "main"
+#: What a file's pass says while it waits (decided again next minute).
+EVENT_SLOT_WAIT = "waiting for the lane's slot receipt"
+#: The binding a file's pass writes when the window's last book minute came and it still waited (PREREG-EVL-10 section
+#: 2.5 (e)): its programs' picks read, none planned, both decision rows written with planned 0.
+EVENT_SLOT_WINDOW = "window"
+
+
+def _slot_of(adapter: Any, program: Any) -> str:
+    """Which file's slot decides `program` (`book.slot_of`); the main file when the adapter cannot say."""
+    slot_of = getattr(adapter, "slot_of", None)
+    if slot_of is None:
+        return EVENT_MAIN_SLOT
+    try:
+        return str(slot_of(program) or EVENT_MAIN_SLOT)
+    except Exception:  # noqa: BLE001 - the reading that keeps today's path
+        return EVENT_MAIN_SLOT
+
+
+def _send_window(adapter: Any, file: str, at: str, open_at: float, close_at: float) -> tuple[float, float] | None:
+    """A file's send window at the auction (`book.send_window`), None when the adapter cannot say (nothing is sent)."""
+    fn = getattr(adapter, "send_window", None)
+    if fn is None:
+        return None
+    try:
+        got = fn(file, at, open_at, close_at)
+    except Exception:  # noqa: BLE001
+        return None
+    return None if got is None else (float(got[0]), float(got[1]))
+
+
+def _file_rank(adapter: Any, file: str, at: str) -> int:
+    """THE SEND ORDER ACROSS FILES (PREREG-EVL-10 section 2.5's ROOM: "after every buy planned before it"): 0 for the
+    main file (its own order inside it is ROOM's, `book.send_key`, unchanged), else 1 + the file's place in the timing
+    table's rows of `at` (`book.slot_files`), so every later file's buys go after every main row's, the learners' and
+    R3's births' included; a file the table does not list goes last."""
+    if file == EVENT_MAIN_SLOT:
+        return 0
+    files = getattr(adapter, "slot_files", None)
+    try:
+        listed = list(files(at)) if files is not None else []
+    except Exception:  # noqa: BLE001
+        listed = []
+    return 1 + (listed.index(file) if file in listed else len(listed))
+
+
 def _room_free(adapter: Any, program: Any, version: Any) -> bool:
     """Whether a waiting PREREG-EVL-5 buy keeps no room from (program, version) once the lane's close receipt is overdue
     (`book.room_free_overdue`: a row of PREREG-EVL-1 to -4; release 1019h, `HELD_OVERDUE_S`); False when the event
@@ -5296,6 +5349,10 @@ class EquityBook:
                     self._event_decide_lrn(now, em, at, s, adapter, out)
                 except Exception as exc:  # noqa: BLE001 - decided again next minute; no earlier row waits on it
                     self._error(f"event decide {at} learners", exc, out)
+                try:    # (release 1019n-r2, the decision scheduler: each later file's own pass, after every earlier one)
+                    self._event_decide_slots(now, em, at, s, adapter, out)
+                except Exception as exc:  # noqa: BLE001 - decided again next minute; no earlier row waits on it
+                    self._error(f"event decide {at} slots", exc, out)
                 if sending:
                     self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",))
         try:
@@ -5464,6 +5521,8 @@ class EquityBook:
                 program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
                 if program is None or not inst.live or program.entry_at != at:
                     continue
+                if _slot_of(adapter, program) != EVENT_MAIN_SLOT:
+                    continue    # (release 1019n-r2: a later file's program is its own pass's, `_event_decide_slot`)
                 # (PREREG-EVL-6 section 6: a version it judges holds up to `event.max_open_v6` at Probe; its seat's
                 # count includes the superseded version's lots still open, section 1.1: the seat is the new version's)
                 room = s.max_open(inst.band, program) - self._event_seat_count(inst, adapter)
@@ -5659,14 +5718,25 @@ class EquityBook:
         - plus one for the last entry's own exit as `_count_refusal` counts it (a close entry's exit is a later day's).
         An exit is never stopped by the line; a later day's line is not this one's (EVL-LRN-ON's sales at D+1's open
         are exits there, which the line never stops: section 1.9). `intent` None (release 1019m, `_event_line_refuses`):
-        an entry not planned yet, so no buy of the auction is its own."""
+        an entry not planned yet, so no buy of the auction is its own.
+
+        RELEASE 1019n-r2 (the decision scheduler; PREREG-EVL-10 section 2.5: "the event kind's day order line ... refuses
+        this file's entries after every earlier PREREG row's"): an entry of A LATER FILE'S row (`_slot_of` not main)
+        keeps, at its own auction, every order EVERY main row may still send there after it (PREREG-EVL-1 to -6's rows,
+        the learners and R3's births alike: all of them come before it in ROOM), counted as above for this auction; a
+        later file's entry is never an earlier row of a learner's (its keep is unchanged by this file)."""
         test = getattr(adapter, "is_learner", None)
-        if test is None or not test(inst.family):
+        later = _slot_of(adapter, inst.family) != EVENT_MAIN_SLOT
+        if not later and (test is None or not test(inst.family)):
             return 0
         own = int(intent.iid) if intent is not None else -1
 
         def earlier(o: Instance) -> bool:
-            if o.kind != EVENT_KIND or test(o.family) or not o.live:
+            if o.kind != EVENT_KIND or not o.live or _slot_of(adapter, o.family) != EVENT_MAIN_SLOT:
+                return False
+            if later:
+                return adapter.program_of(o.family, o.version) is not None
+            if test(o.family):
                 return False
             program = adapter.program_of(o.family, o.version)
             return program is not None and getattr(program, "spec", None) is None
@@ -5871,6 +5941,248 @@ class EquityBook:
             self.record("equity.alert", {"what": what, "day": day, "at": at, "learners_late": list(late),
                                          "planned": len(planned)})
             self.alert("warning", f"equity: {what}")
+        if planned:
+            self._event_publish(em.day, adapter, lane, out)
+        self.record("equity.event_decide", {"day": day, "at": key, "exits": 0, "buys": len(planned),
+                                            "programs": {k: v.get("planned", 0) for k, v in summary["programs"].items()},
+                                            **({"sale_to_later": taken} if taken else {})})
+
+    # ---------------------------------------------------------------- the decision scheduler's per-file passes
+    def _event_decide_slots(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any, out: dict) -> None:
+        """THE LATER FILES' OWN PASSES AT THIS AUCTION (release 1019n-r2, the decision scheduler, A120): for each file with
+        a live slot here (`book.slot_files`, the timing table's order), once the auction's main decision is made, its
+        pass (`_event_decide_slot`), which waits itself for every pass before it. Nothing while no part is registered."""
+        files = getattr(adapter, "slot_files", None)
+        if files is None:
+            return
+        try:
+            listed = list(files(at))
+        except Exception:  # noqa: BLE001 - no file's pass this minute
+            return
+        if not listed or not self._event_decided(em.day.isoformat(), at):
+            return      # (every main row first: a file's pass never plans before the main pass has)
+        for file in listed:
+            try:
+                self._event_decide_slot(now, em, at, file, listed, s, adapter, out)
+            except Exception as exc:  # noqa: BLE001 - that file's pass again next minute; the others go on
+                self._error(f"event decide {at} {file}", exc, out)
+
+    def _event_slot_programs(self, at: str, file: str, adapter: Any) -> list[tuple[Instance, Any]]:
+        """The live event instances of `file` whose entry is this auction, with their program rows (tables' order)."""
+        out = []
+        for inst in self._instances(alive=True):
+            program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
+            if program is None or not inst.live or program.entry_at != at or _slot_of(adapter, program) != file:
+                continue
+            out.append((inst, program))
+        return out
+
+    def _event_slot_waits(self, day: str, at: str, file: str, listed: Sequence[str], adapter: Any) -> str | None:
+        """WHY A FILE'S PASS STILL WAITS, None when every pass before it is DECIDED (PREREG-EVL-10 section 2.5's ROOM,
+        (i) and (ii); the release's reading of the scheduler for every later file): (i) the auction's main pass is made
+        (the caller holds it) AND, when the auction's own summary held names back for PREREG-EVL-7's learners or a
+        learner is live at this auction, the learners' pass (`(day, "<at>-lrn")`: R3's births held behind them are
+        given their names there; PREREG-EVL-7 section 1.9's ROOM as live) is made too; (ii) the pass of every file
+        before this one in the timing table that has a live program here is decided (planned, or decided with no buy).
+        A LEARNERS' PASS DECIDED BY A140'S LAST-MINUTE RULE (a learner whose live receipt was still pending at the
+        window's last book minute: its summary's `late`) is read as a pass that was STILL WAITING at that minute, so a
+        later file buys nothing at that auction (PREREG-EVL-10 section 2.5's TEST: with evl7's receipt at 15:48:20 no
+        EVL-R2-ON buy that close; the reading that trades less)."""
+        main = self._event_summary(day, at)
+        held = main.get("learners") if isinstance(main.get("learners"), Mapping) else {}
+        if (held or self._event_learners(at, adapter)) and not self._event_decided(day, f"{at}-lrn"):
+            return "the learners' pass of this auction (PREREG-EVL-7) is not decided yet"
+        lrn = self._event_summary(day, f"{at}-lrn")
+        if lrn.get("late"):
+            return f"the learners' pass was decided at the window's last book minute without {', '.join(lrn['late'])}"
+        for other in listed:
+            if other == file:
+                break
+            if self._event_slot_programs(at, other, adapter) and not self._event_decided(day, f"{at}-{other}"):
+                return f"{other}'s pass of this auction is not decided yet"
+        return None
+
+    def _event_decide_slot(self, now: float, em: S.EventMoments, at: str, file: str, listed: Sequence[str], s: Any,
+                           adapter: Any, out: dict) -> None:
+        """ONE LATER FILE'S DECISION AT THIS AUCTION (`eq_event_decisions` row (day, "<at>-<file>"), once a session and
+        auction; release 1019n-r2, the decision scheduler, carrying release 1019l's per-program rules: PREREG-EVL-10
+        section 2.5 (a)-(e), F18):
+
+        - IT PLANS ONLY AFTER EVERY BUY PLANNED BEFORE IT AND KEEPS NO ROOM: at the first book tick inside the file's
+          own send window (`book.send_window`) at which (i) the auction's main pass, and the learners' pass when it has
+          one, are made, (ii) every earlier file's pass is decided (`_event_slot_waits`) and (iii) the file's own live
+          slot receipt is MADE (`book.slot_receipt`: `ok`, or `pending`), its programs' picks are read (`book.picks`:
+          for PREREG-EVL-10's rows section 2.4's ONE READING, the live receipt's own intents), every name given at this
+          auction passed over, `_event_gate`'s skips applied, and planned as buys in ROOM's order inside the pass
+          (Sized, then Probe, then learning, then rank: `book.allocate`), sent after every earlier row's
+          (`_event_send`'s file rank). While any of (i)-(iii) waits the pass waits (decided again next minute), keeping
+          nothing.
+        - (a) ROOM is `max_open(band, program)` less the seat's count (`_event_seat_count`); (b) the program row's own
+          `evl6` flag picks its Probe slots (14 for a version PREREG-EVL-6 judges); (c) PREREG-EVL-6 section 3's
+          unsettled-stay hold (`_event_unsettled`) holds a Probe or Sized version's buys (picks None, room 0, held
+          "unsettled"); (d) THE SUMMARY GOES INTO THE AUCTION'S OWN ROW too: its programs' entries and its
+          sale_to_later (`_event_sale_takers`) merged into (day, at) in the same transaction as its intents, so A85's
+          reservation (`_event_recent`), the daily report, evl_health and the alarms read them where they read every
+          program's; (e) THE WINDOW ROW: from the window's last book minute (`HELD_OVERDUE_S` before the auction's
+          cut-off, 15:48:00 at a full day's close) a pass that still waits reads its programs' picks, plans none, and
+          writes both rows with planned 0 and binding "window".
+        - A receipt final without being made (`failed`, `cut`, `missed`), or a window that closed first, decides the
+          file with no buy: picks None in the auction's row, which `_event_recent` passes over.
+        Nothing while the file has no live program here."""
+        day = em.day.isoformat()
+        key = f"{at}-{file}"
+        if self._event_decided(day, key):
+            return
+        lane = self._event_lane_store()
+        if lane is None or not s.enabled:
+            return
+        programs = self._event_slot_programs(at, file, adapter)
+        if not programs:
+            return
+        decided_at = em.open_decide if at == "open" else em.close_decide
+        until = em.open_until if at == "open" else em.close_until
+        window = _send_window(adapter, file, at, em.open_at, em.close_at)
+        summary: dict[str, Any] = {"file": file, "programs": {}, "after": at}
+        moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
+
+        def write(status: str, planned: list[tuple[Any, Any, Any]], sigmas: Mapping[str, float | None],
+                  taken: Mapping[str, Any] | None = None) -> None:
+            main = self._event_summary(day, at)
+            merged = dict(main)
+            merged["programs"] = dict(main.get("programs") or {}) | summary["programs"]
+            if taken:
+                later = dict(main.get("sale_to_later") or {})
+                for family, row in taken.items():
+                    later[family] = dict(later.get(family) or {}) | dict(row)
+                merged["sale_to_later"] = later
+            with self.state.transaction():
+                for inst, program, pick in planned:
+                    self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
+                self.state.upsert("eq_event_decisions", {"day": day, "at": key, "decided_at": _iso(decided_at),
+                                                         "status": status, "summary": dumps(summary), "created_at": now},
+                                  "day, at")
+                if status == "done":
+                    self.state.execute("UPDATE eq_event_decisions SET summary=? WHERE day=? AND at=?",
+                                       (dumps(merged), day, at))
+
+        def nothing(why: str, binding: str | None = None, *, read: bool = False) -> None:
+            for inst, program in programs:
+                row: dict[str, Any] = {"picks": None, "room": 0, "planned": 0}
+                if read:
+                    # ((e) THE WINDOW ROW: its picks read by the file's one reading, none planned)
+                    try:
+                        held = self._event_held(inst, em.day, adapter)
+                        got = adapter.picks(lane, program, em.day, decided_at=moment,
+                                            held=lambda cik, held=held: cik in held)
+                        row["picks"] = len(got)
+                    except Exception as exc:  # noqa: BLE001 - its picks unread: none planned either way
+                        row["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+                if binding:
+                    row["binding"] = binding
+                summary["programs"][inst.family] = row
+            summary["why"] = why
+            write("done", [], {})
+            out[f"event_decide_{file}"] = f"{at} {day}: {why}"
+
+        if window is None or now >= window[1]:
+            nothing("the file's send window closed before its pass could plan: no buy of it at this auction")
+            return
+        if now < window[0]:
+            out[f"event_decide_{file}"] = f"{at} {day}: before the file's send window"
+            return
+        status = adapter.slot_receipt(lane, file, at, em.day)
+        if status in ("failed", "cut", "missed"):
+            later = adapter.slot_catchup(file, at) if hasattr(adapter, "slot_catchup") else True
+            nothing(f"the lane's slot receipt of {file} at the {at} of {day} is {status}: "
+                    + ("its rows are decided later by themselves and never traded at this auction" if later else
+                       "no decision of its rows at this auction (its file has no catch-up), never traded"))
+            return
+        waits = self._event_slot_waits(day, at, file, listed, adapter)
+        if waits is None and status not in ("ok", "pending"):
+            waits = f"{EVENT_SLOT_WAIT} of {file} ({status or 'none yet'})"
+        if waits is not None:
+            if now >= until - HELD_OVERDUE_S:
+                # ((e) THE WINDOW'S LAST BOOK MINUTE: a pass that still waits plans none at this auction)
+                nothing(f"still waiting at the window's last book minute ({waits}): none planned", EVENT_SLOT_WINDOW,
+                        read=status in ("ok", "pending"))
+                return
+            out[f"event_decide_{file}"] = f"{at} {day}: waiting ({waits})"
+            return
+        given_names = {str(r["symbol"]).upper() for r in self.state.rows(
+            "SELECT symbol FROM eq_event_intents WHERE side='buy' AND day=? AND at=?", (day, at))}
+        stop = window[1]
+        reaction = adapter.reaction_reader(
+            lane, em.day, daily=self._event_daily_close,
+            minutes=lambda symbol, session: self._event_minute_close(symbol, session, until=stop),
+            minutes_many=lambda names, session: self._event_minute_closes(names, session, until=stop))
+        gap = adapter.gap_reader(
+            lane, em.day, opens=lambda symbol, session: self._event_open_minute(symbol, session, until=stop),
+            opens_many=lambda names, session: self._event_open_minutes(names, session, until=stop))
+        wanted: dict[str, list[Any]] = {}
+        rooms: dict[str, int] = {}
+        insts: dict[str, tuple[Instance, Any]] = {}
+        for inst, program in programs:
+            insts[inst.family] = (inst, program)
+            # ((a) and (b): the version's own Probe slots, its seat's count)
+            room = s.max_open(inst.band, program) - self._event_seat_count(inst, adapter)
+            stuck = self._event_unsettled(inst, em.day, adapter) \
+                if inst.band in adapter.PROBE_UP and getattr(program, "evl6", False) else []
+            if stuck:
+                # ((c) PREREG-EVL-6 section 3's unsettled-stay hold)
+                wanted[inst.family], rooms[inst.family] = [], 0
+                summary["programs"][inst.family] = {"picks": None, "room": 0, "held": "unsettled",
+                                                    "why": self._event_unsettled_hold(inst, stuck, em.day)[:300]}
+                continue
+            if room <= 0:
+                wanted[inst.family], rooms[inst.family] = [], 0
+                summary["programs"][inst.family] = {"picks": None, "room": 0}
+                continue
+            held = self._event_held(inst, em.day, adapter)
+            try:
+                got = adapter.picks(lane, program, em.day, decided_at=moment, reaction=reaction,
+                                    held=lambda cik, held=held: cik in held, gap=gap)
+            except Exception as exc:  # noqa: BLE001 - that program plans nothing this auction
+                self._error(f"event picks {inst.family}", exc, out)
+                summary["programs"][inst.family] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+                continue
+            wanted[inst.family], rooms[inst.family] = list(got), room
+            summary["programs"][inst.family] = {"picks": len(got), "room": room}
+        planned: list[tuple[Any, Any, Any]] = []
+        sigmas: dict[str, float | None] = {}
+        taken: dict[str, dict[str, int]] = {}
+        if any(wanted.values()):
+            gate, unreadable = self._event_gate(day, at, s, adapter)
+            if unreadable:
+                summary["errors"] = [unreadable]
+                write("failed", [], {})
+                out[f"event_decide_{file}"] = f"{at} {day}: not decided ({unreadable[:160]}); decided again next minute"
+                return
+            lost: list[tuple[str, str]] = []
+
+            def skip(family: str, pick: Any) -> str | None:
+                if str(pick.symbol).upper() in given_names:
+                    return "name_given"
+                why = gate(insts[family][0].band, pick) if gate else None
+                if why == "sale":
+                    lost.append((family, str(pick.symbol).upper()))
+                return why
+            given, passed = adapter.allocate(wanted, rooms, {family: insts[family][0].band for family in wanted}, skip)
+            symbols = sorted({p.symbol for picks in given.values() for p in picks})
+            sigmas = self._event_sigmas(symbols, em.day, s) if symbols else {}
+            for family, picks in given.items():
+                inst, program = insts[family]
+                for pick in picks:
+                    planned.append((inst, program, pick))
+                summary["programs"][family]["planned"] = len(picks)
+                if passed.get(family):
+                    summary["programs"][family]["skipped"] = dict(passed[family])
+                    if passed[family].get("name_given"):
+                        summary["programs"][family]["binding"] = "given"
+            taken = self._event_sale_takers(day, at, lost, adapter) if lost else {}
+            if taken:
+                summary["sale_to_later"] = taken
+        write("done", planned, sigmas, taken)
+        out[f"event_decide_{file}"] = f"{at} {day}: {len(planned)} buys of {file} planned"
         if planned:
             self._event_publish(em.day, adapter, lane, out)
         self.record("equity.event_decide", {"day": day, "at": key, "exits": 0, "buys": len(planned),
@@ -6538,27 +6850,46 @@ class EquityBook:
         # program's second); learning in the tables' order; within a program its own ranking (the decision planned
         # them in it, so its iids are in it).
         buys = []
+        files: dict[str, str] = {}
+
+        def file_of(family: Any) -> str:
+            if str(family) not in files:
+                files[str(family)] = _slot_of(adapter, str(family))
+            return files[str(family)]
         if "buy" in sides:
             nth: dict[str, int] = {}
             ranked = []
             for r in sorted((r for r in rows if r["e_side"] == "buy"), key=lambda r: int(r["iid"])):
                 n = nth.get(str(r["family"]), 0)
                 nth[str(r["family"])] = n + 1
-                ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
+                # (release 1019n-r2, the decision scheduler: a later file's buys go after every main row's, the
+                # learners' and R3's births' included, `_file_rank`; inside the main file ROOM's order is unchanged)
+                ranked.append(((_file_rank(adapter, file_of(r["family"]), at),
+                                *adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
             buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
         until = em.open_until if at == "open" else em.close_until
         # (PREREG-EVL-5 section 1.3: a buy that waits for the lane's close decision keeps its room from every buy after
         # it in this order, `HeldAhead`, made afresh each minute; release 1019h, the captain's option 1: from one book
         # minute before the close's cut-off, `HELD_OVERDUE_S`, from R3's births only)
         ahead = HeldAhead(overdue=at == "close" and now >= until - HELD_OVERDUE_S)
+        windows: dict[str, tuple[float, float] | None] = {}
         for r in sells + buys:
             try:
                 side = self._event_row(r["iid"])
                 if r["e_side"] == "sell":
                     self._event_work_exit(Intent.of(r), side, now, day, at, until, killed)
                 else:
-                    self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out,
-                                           ahead=ahead)
+                    # (release 1019n-r2, the decision scheduler: a later file's buy goes only inside ITS OWN send window
+                    # of the timing table, `book.send_window`; a main row's window is the auction's, as today)
+                    file = file_of(r["family"])
+                    if file not in windows:
+                        windows[file] = None if file == EVENT_MAIN_SLOT else \
+                            _send_window(adapter, file, at, em.open_at, em.close_at)
+                    own = windows[file]
+                    if file != EVENT_MAIN_SLOT and (own is None or now < own[0]):
+                        continue        # (no window of its own here, or before it: not sent now)
+                    self._event_work_entry(Intent.of(r), side, now, day, at, until if own is None else min(until, own[1]),
+                                           s, adapter, real_block, killed, out, ahead=ahead)
             except Exception as exc:  # noqa: BLE001 - the next intent goes on
                 self._error(f"event {r['e_side']} {r['iid']}", exc, out)
 
