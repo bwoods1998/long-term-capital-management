@@ -1235,7 +1235,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `8e63ce64`, full digest `c3026eba` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba9e6341` / `50f572ae`.
+Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of
@@ -1606,7 +1606,10 @@ path.
   program, version, event, side, kind, day, at, band, rung, resend, replaces, sent, accepted, state, final,
   venue_status, qty, filled_qty, avg_px, limit_px, cancel_ms, sent_at, submitted_at, filled_at, canceled_at,
   expired_at, binding, first_seen, updated_at)` (`store.SCHEMA_1019I`, made by the lane's `Store`; additive, schema
-  version 1; refused to the births' facts). league/tests/test_events_book.py `TheRealLane` runs
+  version 1; refused to the births' facts). The lane's `bars`, which `reaction_reader` reads for a base close (and
+  league/events/run.py for its missing bars), are written by the lane's score exactly as under release 1019h whatever
+  `events.score_batch` says (release 1019i's review: the batched score's prefetch is a cache of its pass, and an intent
+  writes only the rows its own two fetches would have). league/tests/test_events_book.py `TheRealLane` runs
   the lane's own decision (edgar, run, programs) into a real store and the book on it.
 - **The auction paper proof** (league/events/proof.py): `AuctionProof(state, account, market, *, clock, record,
   alert)`: `step(now, moments)`, `buy_passed()`, `sell_failed()`, `passed()`, `status()`; built by the book on the
@@ -1886,7 +1889,89 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   waits and its alert stays info; a PREREG row that waited and ended unsent, no book minute in the overdue minute, is a
   warning the first time; the rows freed are files 1 to 4 alone).
 
-## 27. PREREG-EVL-8's late passes, by time (release 1019j, `feat/evl-8`; PREREG-EVL-8 sections 4.1-4.6; money row and book, as built; after section 26)
+## 27. PREREG-EVL-6's seats in the book (release 1019i, `feat/evl-6`; PREREG-EVL-6 sections 1.1 and 6, A116; money and book, as built; after section 26)
+
+- **The seats** (league/events/programs.py `Program.regfile` 6, `can_seat`, `superseded_of`, `successor_of`): from
+  release 1019i the seating version of each seatable id is its PREREG-EVL-6 version (version 3 of files 1 and 2's nine,
+  version 2 of files 4 and 5's three, version 2 of a seatable birth registered before REGISTERED_AT_6, 2026-10-22T12:24:50Z);
+  the superseded version never seats. ROOM's order (`book.room_key`) is the ids' order, unchanged: a new version keeps its
+  file (`Program.prereg`) and its place. The band sync (league/equity/live.py `_event_sync`) retires an alive instance
+  of a superseded version ("superseded: its new version holds the seat (PREREG-EVL-6 section 1.1)"); its open lots exit
+  by their own plans.
+- **One seat's room and issuers** (live.py `_event_seat_keys`, `_event_seat_count`, `_event_held`): the seat's count
+  of held and ordered positions, its one position per issuer and its cooldown read the new version's lots AND the
+  superseded version's still open, so a seat never holds twice its room across the release. D12 in the book
+  (league/events/book.py `held_recently`, `programs.superseded_held`): the issuer cooldown counts the superseded
+  version's intents of the sessions decided before THE RELEASE (the store's meta `evl6:release`), never one it writes
+  from the release on.
+- **The Probe slots** (league/constitution.py `equity_money.event.max_open_v6.probe` 14, bound ('0', '14'), its own
+  commit; `book.Settings.max_opens_v6`, `Settings.max_open(band, program)`): a PREREG-EVL-6 version (`Program.evl6`) at
+  Probe holds up to 14; every other version's Probe and every Sized and learning row read `event.max_open` as before
+  (`max_open.probe` stays 6). At "0" no PREREG-EVL-6 version buys at Probe (the tighten-only switch, `51625225` /
+  `f288d8ec`).
+- **At-size buys** (`book.under_bar(band, target, limit, walls, *, bar)`, `book.at_size_count(...)`; live.py
+  `_event_gate`, `_size_event`): a Probe or Sized pick of a PREREG-EVL-6 version that no whole-share count brings to
+  Done's size bar (clause 2's own 0.8, live.py `V6_SIZE_BAR` = done.PROBE_SIZE_SHARE, x its band target; NEVER the
+  `reach_bar` row: that row below 0.8 switches these versions' Probe and Sized buys OFF, skipped `reach_bar_off`,
+  A123/A134, release 1019k) inside the band's frozen envelope of the walls' equity is skipped
+  `under_bar` before it takes a slot; a pick that remains buys THE FEWEST whole shares that reach the bar (section 6,
+  clause 2's words: 11 shares at $5.00 of a $66.43 target, where release 1019h's S2 floor took 13), asked of
+  `size_entry` at those dollars so every cap judges them; a cap that cuts the ask under the bar refuses the buy
+  (`sizing: the at-size ask ... was cut under Done's size bar`, its binding recorded). The target stays the band's.
+  Release 1019h's S2 round-up sizes every other version's buys (unchanged); at the band's `reach_bar` row "0" (S2's
+  switch) a PREREG-EVL-6 version's buys floor the target as release 1019f's did, with no skip.
+- **A stay's lot unsettled past the ladder** (live.py `_event_unsettled`, `_event_unsettled_hold`): a PREREG-EVL-6
+  version at Probe or Sized with one of its own Probe+ event lots still held `book.LADDER_CLOSES` + 1 or more sessions
+  after its planned exit (`info.evl_exit.first`, else its `day`) reads no picks at its decisions (`room` 0, `held`
+  "unsettled" in the decision's summary) until the lot is sold, with an error alert once a session (kv
+  `eq_event_unsettled_said`); the lane judges its stay without the lot (league/events/bands.py `review6`,
+  `STUCK_AFTER`).
+- **Identities**: the money digest `8e63ce64` -> `d52a5af5` and the constitution `c3026eba` -> `9c8b2221` (the one
+  row); the options execution fingerprint, the equity identity, the xs identity and the gate contract do not move
+  (live.py and book.py are the book's plumbing, outside the equity identity).
+- **Tests**: league/tests/test_events_evl6.py `TheMoney`, `TheMoneyInTheBook` (14 slots for a PREREG-EVL-6 version at
+  Probe, 6 for an earlier one; a Probe pick under the bar skipped before its slot; the fewest whole shares that reach
+  the bar, a cap's cut under it refused; a lot unsold past the ladder holding the version's Probe buys; the superseded
+  lots counted in the seat), `TheIssuerRule` (D12 in the shadow and the book), `TheProof` (an invented week's real-money picks identical with
+  and without the change while no version is promoted, the release before the week and inside it).
+
+## 28. PREREG-EVL-7's learners in the event book (release 1019i; `feat/evl-7`; book, as built; after section 27, PREREG-EVL-6's)
+
+The two learners (league/events/learner.py; nothing of them exists while league/events/programs.py `REGISTERED_AT_7`
+is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's own path with these additions, each additive:
+
+- `book.picks(lane, program, ...)` for a learner returns `book.learner_picks`: the intents of its LIVE decision of the
+  session ONLY ONCE ITS OWN LIVE RECEIPT `decide-<at>-lrnlive:<D>` HAS FINISHED `ok` NAMING IT (`learner.live_picks`,
+  `learner.live_state`; none for a catch-up, a late decision, a receipt running or not naming it) in its
+  rank order, less EVL-LRN-O1's ERN guard (`book.ern_issuer`), EVL-LRN-ON's per-issuer 8-K guard
+  (`book.issuer_8k_guard`), one position per issuer (`held_recently` and `held`). Each `Pick.rank` is the pick's place
+  counted down from 8: no fitted figure reaches live.sqlite.
+- `book.is_learner`, `book.learner_pending` (its own live receipt of the auction not finished, no other decision and
+  no recorded failure), `book.learner_gate` (the
+  learner's real-money gate, league/events/judge7.py `gate`: a reason, or None when it may buy; unreadable is a
+  reason), `book.learner_cut` (the learners' earliest ROOM key at the auction), `book.after_learners` (an R3 birth after
+  that key: the only programs whose names wait for the learners), `book.pick_record` / `book.pick_of` (a `Pick` as JSON
+  and back, exactly).
+- `book.universe_rows(lane, day)` reads, for a lane view carrying `eligible_by` (the learner's own `learner.AsOf`), only
+  the live results decided at or before it (E5); every other caller's reading is unchanged.
+- `EquityBook._event_decide` passes over a learner's instance (`live._learner`) and, when a learner of the auction may
+  take a name (`_event_learner_cut`: live, with room, its gate open), gives every PREREG-EVL-1 to -6 row its names at
+  once whatever its band and keeps the picks of each R3 birth after the learners (`book.after_learners`), read as of its
+  decision time, in its summary (`learners.deferred`: `book.pick_record`s, the program's room and band), naming them
+  `"after": "learners"`. With no such learner nothing is held back and the decision is exactly release 1019h's.
+  `EquityBook._event_decide_lrn` decides once, after it (row `"<at>-lrn"` in `eq_event_decisions`), tried each minute of
+  the window until each learner's own live receipt has finished (`book.learner_pending`, no other bound): the learners'
+  picks (a learner its receipt does not name takes nothing) and the held-back births' (`book.pick_of`) given their names
+  together by `book.allocate` in ROOM's order, passing over every name the
+  auction's decision gave; the buys planned with their side rows as any event buy's and sent by `_event_send` in
+  `send_key`'s order; the summaries merged into the auction's own row (`programs`, `sale_to_later`, `learners.decided`),
+  so `_event_recent` (A85), the daily report and the alarms read them as every program's. `_event_work_entry` passes a
+  learner entry's `_event_line_keep` (the orders the earlier PREREG rows may still send that day: this auction's buys not
+  sent and A80's re-sends, at the open the close's remaining room x 2 while `book.LINE_ACROSS_AUCTIONS` holds, plus one)
+  to a `_count_refusal(..., keep=)` of its own, before the count every entry meets (whose call is release 1019h's), kept
+  on the event line and the House-wide line; an exit never meets it. Nothing here changes for any other program.
+
+## 29. PREREG-EVL-8's late passes, by time (release 1019j, `feat/evl-8`; PREREG-EVL-8 sections 4.1-4.6; money row and book, as built; after section 28, PREREG-EVL-7's)
 
 - **The rule** (league/equity/live.py `EIGHT_PASSES`, `_event_decide_8`, `_event_decide_8_pass`, `_event_made`;
   league/events/book.py `ready_8`, `picks_8`, `max_open_8`, `line_keep_8`, `EIGHT_ROOM`): the auction's main pass

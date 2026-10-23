@@ -263,6 +263,13 @@ PENDING_GATEWAY += ("league/events/done.py",)
 #: decision reads them): rule inputs like universe.py and store.py, so no main commit the in-box updater would ship can
 #: change them without the owner's deploy. They wait here for the gateway's merge-list follow-up, as the lane's do.
 PENDING_GATEWAY += ("league/events/attempts.py", "league/events/pxstore.py", "league/events/pxdata.py")
+#: PREREG-EVL-7's LEARNERS AND COST-7 (release 1019i): league/events/learner.py is two programs' pinned rule (what they
+#: read as of tau, their training rows, their fit and their picks, which real money buys) and league/events/costs7.py the
+#: cost basis their judge reads (a7, r7, the measured terms that only rise, the judged record): a program's rule and a
+#: judge's input, so no main commit the in-box updater would ship can change either without the owner's deploy. They
+#: wait here for the gateway's merge-list follow-up, as the lane's judges do. league/events/judge7.py (the review round)
+#: is their judge's runner: their looks, band moves, runs and the real-money gate.
+PENDING_GATEWAY += ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
 #: RELEASE 1019j'S NEW MODULES (PREREG-EVL-8): the price lane's programs, its pinned record grid and its decisions
 #: (league/events/px.py, px_grid8.json: which prices make an event, which names a seat or a record takes, what real money
 #: buys), the meta-learners (league/events/meta.py: the algorithm and constants that fill real-money slots) and this

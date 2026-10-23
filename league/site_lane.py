@@ -7,14 +7,20 @@ module READS what that takes, read-only, from the House's state root, and the pu
 
 - PROGRAMS (`read_programs`, the lane's store `<state>/events/events.sqlite`, its registered births loaded by
   league/events/book.py `open_lane`): one row per registered program, the SEATING version of each seatable program
-  (`Program.can_seat`: version 2 of PREREG-EVL-1's and -2's nine, version 1 of PREREG-EVL-4's and PREREG-EVL-5's three
-  and of each seatable birth of R3; real money at learning size from its first event; its band is the lane's,
+  (`Program.can_seat`: version 3 of PREREG-EVL-1's and -2's nine, version 2 of PREREG-EVL-4's and PREREG-EVL-5's three
+  and of each seatable birth of R3 registered before REGISTERED_AT_6, version 1 of a later birth: PREREG-EVL-6's
+  versions; real money at learning size from its first event; its band is the lane's,
   league/events/bands.py) and version 1 of every program that never seats (the records and controls of PREREG-EVL-1,
   -2, -4 and -5, and R3's records and its READ births' controls: band "shadow"). Each row: a short plain name (`NAMES`, a
   fixed table, or for a birth its family's name and its place among the births: never a program's code or parameters),
   its band, its settled events with real money (both sides filled, any band) and in shadow (the lane's settled
   outcomes), and its next look's events to go (league/events/screen.py `next_look_v2`: the look's threshold of settled
   TRADABLE events less those it has; None for a shadow-only program, a retired one, or one whose looks are all used).
+  RELEASE 1019i (PREREG-EVL-6 section 1.1): the seating version of every seatable id is its PREREG-EVL-6 version
+  (version 3 of the nine, version 2 of PREREG-EVL-4's and -5's three and of each seatable birth registered before
+  REGISTERED_AT_6), the row's real events its own and its superseded version's (the seat's real money before the
+  release), its shadow its own record; its `look` is null (PREREG-EVL-6 counts looks in settled session blocks, which
+  this contract's ring reads as events: lane_v1 is unchanged).
 - THE FUNNEL: how many programs ever stood on each step since PREREG-EVL-1's registration: every registered program on
   Shadow (each has its shadow record), every seating version on Learning (its band at birth), and Probe, Sized and
   Retired from the lane's band history (and the bands now).
@@ -110,6 +116,9 @@ NAMES = {
     "EVL-ERN-UNDER-ON": "Muted earnings read overnight",
     "EVL-NEWS-NIGHT2-ON": "News second night",
     "EVL-CTRL-ERN-UNDER-ON": "All muted earnings overnight",
+    # PREREG-EVL-7's (registered 2026-10-22T20:14:13Z, A125; two online learners over the controls' candidates)
+    "EVL-LRN-O1": "Learner, open to close",
+    "EVL-LRN-ON": "Learner overnight",
 }
 FAMILY_NAMES = {"ern": "Earnings", "ern-react": "Earnings reaction", "8k": "8-K", "news": "Morning news", "news-day": "Day news",
                 "news-react": "News reaction", "ins": "Insider cluster", "ins-buy": "Insider buy",
@@ -277,15 +286,28 @@ def read_programs(lane: Any, today: dt.date) -> dict[str, Any]:
         shadow = int(lane.db.execute("SELECT COUNT(*) FROM outcomes WHERE program=? AND version=? AND status='settled'",
                                      (p.id, p.version)).fetchone()[0])
         real = _real_events(lane, p.id, p.version, REAL_BANDS) if band != "shadow" else 0
+        key = getattr(p, "superseded_key", None)
+        if band != "shadow" and key is not None:
+            # PREREG-EVL-6 section 1.1: the seat's real money before the release was its superseded version's (its
+            # lots, its fills): the row of the seat counts both, never one twice (the superseded version bought only
+            # before the release)
+            real += _real_events(lane, key[0], key[1], REAL_BANDS)
         look = None
-        if band in REAL_BANDS:
+        if band in REAL_BANDS and not getattr(p, "evl6", False):
             nxt = SC.next_look_v2(lane, p.id, p.version, today)
             if nxt.get("k") is not None:
                 need = int(nxt["events_needed"])
                 look = {"need": need, "to_go": max(0, need - int(nxt["events"]))}
+        # (PREREG-EVL-6's versions: their looks are counted in settled SESSION BLOCKS, which lane_v1's ring reads as
+        # settled events ({need, to_go}, the page's "events to the next look"), so their `look` is null: lane_v1's
+        # contract unchanged, never a figure in the wrong unit; a versioned key with the unit is the page's follow-up)
         if p.can_seat:
             probe_events += _real_events(lane, p.id, p.version, PROBE_PLUS)
         rows.append({"id": slug_of(p.id), "name": name_of(p), "band": band, "real": real, "shadow": shadow, "look": look})
+    learners = {slug_of(p.id) for p in P.PROGRAMS if P.is_learner(p)}
+    for row in rows:        # (PREREG-EVL-7's learners: judged in settled session blocks, league/events/judge7.py, which
+        if row["id"] in learners:       # lane_v1's ring cannot read; PREREG-EVL-3's next look is never theirs)
+            row["look"] = None
     now_in = lambda wanted: {p.id for p in P.SEATING if bands.get((p.id, p.version)) in wanted}  # noqa: E731
     reached = lambda wanted: len(now_in(wanted) | set().union(*(ever.get(b, set()) for b in wanted)))  # noqa: E731
     funnel = {"since": P.REGISTERED_AT, "shadow": len(P.BY_ID), "learning": len(P.SEATING),

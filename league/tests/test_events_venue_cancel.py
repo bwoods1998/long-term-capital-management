@@ -15,6 +15,7 @@ import datetime as dt
 import unittest
 from decimal import Decimal as D
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.live.venue import Submitted
 from league.tests import test_events_book as EB
@@ -147,6 +148,7 @@ class TheRule(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------------- the day
+@on_1019h
 class TheResend(VenueCancelTest):
     def test_a_buy_the_venue_cancelled_5_ms_after_its_submission_goes_again_once_and_fills(self):
         """(a) The venue cancels the first buy 5 ms after it accepted it; the next minute reads the cancel and the buy
@@ -383,6 +385,10 @@ class TheResend(VenueCancelTest):
         h.tick(16, 3)
         self.assertEqual(self.said(h), [])
 
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

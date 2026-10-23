@@ -471,6 +471,29 @@ HOPED = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
 BIRTHS_FAILED = "births_failed"
 
 
+def _copied(st: S.Store, prog: P.Program, day: dt.date, out: dict[str, Any], *, ask_only: bool = False) -> bool:
+    """PREREG-EVL-6 section 1.1, THE NEW VERSIONS' RECORD BEFORE THE RELEASE (D8): whether this decision's part for the
+    new version `prog` is its COPY. On an entry session decided before the release (league/events/programs.py
+    `before_release`) a new version is never decided by itself: its intents are the superseded version's of that session
+    whose events are knowable after REGISTERED_AT_6, copied as decided (`programs.copy_before_release`); the superseded
+    version is decided first in the same run (PROGRAMS' order), so the copy reads what it wrote. While the superseded
+    version is pending on its verdicts, the new version is pending with it (its copy waits); `ask_only` asks and writes
+    nothing for it (the superseded version's asks cover its events). From the release on: False (decided by itself)."""
+    if prog.regfile != P.FILE_6 or not P.before_release(st, prog, day):
+        return False
+    sup = P.superseded_of(prog)
+    if sup is None:
+        return False
+    key, skey = _key(prog), SN.program_key(sup.id, sup.version)
+    if skey in out["pending"]:
+        out["pending"][key] = out["pending"][skey]
+        return True
+    if ask_only:
+        return True
+    out[key] = P.copy_before_release(st, prog, day) | {"copied_from": skey}
+    return True
+
+
 def _decide_one(prog: P.Program, one: Callable[[P.Program], None], out: dict[str, Any]) -> None:
     """One program's part of a decision. A PREREG program's failure fails the decision, as before; a registered
     birth's (R3, league/events/births.py) is its own: kept in the summary's `births_failed` (league/events/screen.py
@@ -598,6 +621,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
             out.setdefault("kept", {})[_key(prog)] = frozen
             later.append((prog, rows))
             return
+        if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release, copied)
+            return
         waiting = pending(prog, rows)
         if ask_only:
             if waiting:
@@ -610,8 +635,11 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
 
     for prog in P.PROGRAMS:
-        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.FAMILIES_8:
-            continue        # (PREREG-EVL-8's rows decide in their own runs: league/events/px.py, meta.py)
+        # (PREREG-EVL-7's learners decide after the receipt, by themselves: `learner_part`; PREREG-EVL-8's rows decide in
+        # their own runs: league/events/px.py, meta.py)
+        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.LEARNER_FAMILIES or \
+                prog.family in P.FAMILIES_8:
+            continue
         _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
         def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows) -> None:
@@ -622,6 +650,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+        if not births_only:
+            learner_part(ctx, day, "open", rid, backfill_run=backfill_run)
     return out
 
 
@@ -1164,6 +1194,33 @@ def five_programs() -> list[P.Program]:
     return [p for p in P.PROGRAMS if p.prereg == 5 and p.entry_at == "close" and p.family in P.CLOSE_FAMILIES_5]
 
 
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
+def learner_part(ctx: Context, day: dt.date, at: str, rid: int, *, backfill_run: bool) -> dict[str, Any]:
+    """PREREG-EVL-7 SECTION 1.7'S LEARNER PART AS ITS OWN LIVE RECEIPT: run in the House's turn AFTER its own `at`
+    decision of `day` has finished (so no earlier file's row, its receipt, a `part_hold` wait or the book's
+    `EVENT_DECIDE_WAIT_S` wait ever includes it: league/events/book.py `decided` reads that receipt), only by a LIVE
+    decision (a backfill run decides no learner: its auction is decided later by the learner by itself), for each
+    learner of the auction pinned (league/events/programs.py `learners`; none while REGISTERED_AT_7 is None), each
+    under its own receipt `decide-<at>-lrnlive:<D>` and bound (league/events/learner.py `live_part`: 90 s at the open,
+    120 s at the close, never past the task's bound less EVL5_FINISH). It never raises: a failure or an expiry finishes
+    that receipt `error` and that auction is decided for the learner by itself later, shadow only. The House's own
+    receipt is never touched: it names no learner. Returns {learner key: what its part did}."""
+    out: dict[str, Any] = {}
+    if backfill_run:
+        return out
+    try:
+        learners = [p for p in P.learners() if p.entry_at == at]
+    except Exception:  # noqa: BLE001 - no learner row is readable: no part
+        return out
+    if not learners:
+        return out
+    from . import learner as LR
+
+    for prog in learners:
+        out[_key(prog)] = LR.live_part(ctx, prog, day, house_receipt_id=rid)
+    return out
+
+
 def _pre_tails(st: S.Store, day: dt.date, survivors: set[str]) -> dict[str, Any] | None:
     """What the close decision added to the session's pre-pass (meta `evl5:pre:<day>`): its cut, and the attention
     issuers that survive NO NEW INFORMATION now and did not then (`added`: an attention article stored after the cut)
@@ -1400,6 +1457,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
             out.setdefault("kept", {})[_key(prog)] = frozen
             later.append((prog, rows, table))
             return
+        if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release, copied)
+            return
         waiting = wait(prog, rows)
         if ask_only:
             if waiting:
@@ -1499,6 +1558,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                     out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: table.get(c),
                                                          guidance=guidance5, reaction=react5, gap=gap5)
                 continue
+            if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release)
+                continue
             waiting = int(f["pending"].get(prog.id) or 0)
             if waiting:
                 out["pending"][_key(prog)] = waiting   # decided by a later pass, once every answer it waits for is stored
@@ -1521,7 +1582,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
                     prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None) and \
-                    prog.family not in P.FAMILIES_8:     # (PREREG-EVL-8's: their own runs, league/events/px.py, meta.py)
+                    prog.family not in P.LEARNER_FAMILIES and prog.family not in P.FAMILIES_8:
+                # (PREREG-EVL-7's: after the receipt, `learner_part`; PREREG-EVL-8's: their own runs, px.py and meta.py)
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
         if not births_only and not evl5_only:     # (the births, or PREREG-EVL-5's rows, by themselves: no PREREG-EVL-4 row)
@@ -1564,9 +1626,12 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     out["verdicts"] = {"needed": len(needed), "answered": len(needed - unanswered)}
     if rid is not None:
         st.finish_receipt(rid, "pending" if out["pending"] else "ok", out, now=ctx.now())
+        if kind == "close":
+            learner_part(ctx, day, "close", rid, backfill_run=backfill_run)
     return out
 
 
 __all__ = ["Context", "record_pass", "backfill", "eligibility", "decide_open", "decide_close", "LIVE_WITHIN", "live_run",
            "waits_on_open", "Deadline", "PM_ASKER", "PartDeadline", "EVL5_BUDGET", "EVL5_PRE_BUDGET", "EVL5_FINISH",
-           "EVL5_PRE_URGENT", "PRE_KEY", "GAP_LABEL", "part_until", "bounded", "pre_from", "five_programs"]
+           "EVL5_PRE_URGENT", "PRE_KEY", "GAP_LABEL", "part_until", "bounded", "pre_from", "five_programs",
+           "learner_part"]

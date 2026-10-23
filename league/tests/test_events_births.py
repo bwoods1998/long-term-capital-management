@@ -250,6 +250,11 @@ class TheGrammar(unittest.TestCase):
 
 
 # ======================================================================================================== the loader
+def count(efp: dict) -> dict:
+    """The four figures of the lane's count the loader's test reads (league/events/screen.py `expected_false_passes`)."""
+    return {k: efp[k] for k in ("versions", "expected", "budget", "left")}
+
+
 class TheLoader(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -259,8 +264,10 @@ class TheLoader(unittest.TestCase):
         self.addCleanup(self.s.st.close)
 
     def test_births_come_after_every_prereg_program_and_the_screen_counts_each_seatable_one(self):
-        # (release 1019g: PREREG-EVL-5's three seatable programs too: fifteen seatable versions)
-        self.assertEqual(SN.expected_false_passes(self.s.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
+        # (release 1019g: PREREG-EVL-5's three seatable programs too: fifteen seatable versions; release 1019i:
+        # PREREG-EVL-6 section 5, 0.13 each of the restated 3.9)
+        self.assertEqual(count(SN.expected_false_passes(self.s.st)),
+                         {"versions": 15, "expected": 1.95, "budget": 3.9, "left": 1.95})
         self.s.register(spec("EVL-B-ERN-TOP", "ern", {"score_min": 3}, rank="score"), "2026-11-03T01:00:00Z", seq=1)
         self.s.register(spec("EVL-B-8K-502", "8k", {"items": ["5.02"]}), "2026-11-03T01:00:00Z", seq=0)
         self.s.register(spec("EVL-B-NEWSDAY", "news-day", {"sources": ["benzinga"]}, seatable=False, exit_="open"),
@@ -272,7 +279,8 @@ class TheLoader(unittest.TestCase):
         self.assertEqual(P.SEATING[:15], P.PREREG_SEATING)
         self.assertEqual([p.id for p in P.SEATING[15:]], ["EVL-B-8K-502", "EVL-B-ERN-TOP"], "records and controls never seat")
         self.assertIs(P.BY_KEY[("EVL-B-ERN-TOP-CTRL", 1)], born[2])
-        self.assertEqual(SN.expected_false_passes(self.s.st), {"versions": 17, "expected": 1.7, "budget": 3.0, "left": 1.3})
+        self.assertEqual(count(SN.expected_false_passes(self.s.st)),
+                         {"versions": 17, "expected": 2.21, "budget": 3.9, "left": 1.69})
         self.assertEqual(SN.control_of("EVL-B-ERN-TOP"), "EVL-B-ERN-TOP-CTRL")
         self.assertIsNone(SN.control_of("EVL-B-8K-502"))
         for prog in ("EVL-ERN-READ-O1", "EVL-ERN-GUIDE-O1", "EVL-NEWS-READ-ON", "EVL-INS-BUY-O1"):
@@ -498,6 +506,10 @@ class Validation(unittest.TestCase):
     AS_OF = dt.date(2026, 11, 6)
 
     def setUp(self):
+        # (the mechanics as they stand without A137's reservations; `TheReservations` below holds them)
+        patch = mock.patch.object(BI, "RESERVED", ())
+        patch.start()
+        self.addCleanup(patch.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(unload)
@@ -596,7 +608,8 @@ class Validation(unittest.TestCase):
             self.candidate("EVL-B-8K-102-502", ["1.02", "5.02"]),                  # Jaccard 0.5 with each: accepted
         ], night=self.AS_OF)
         self.assertEqual([c["ok"] for c in out], [True, False, False, False, False, False, True])
-        self.assertEqual((out[0]["selected"], out[0]["per_session"], out[0]["charge"]), (80, 4.0, 1))
+        self.assertEqual((out[0]["selected"], out[0]["per_session"], out[0]["charge"]), (80, 4.0, 13),
+                         "PREREG-EVL-6 section 5: 0.13 a seatable birth, in hundredths")
         self.assertIn("40 selected events over the 20 sessions of the last 20 with a complete record pass: under 3 a "
                       "session", out[1]["reasons"][0])
         self.assertEqual(out[2]["jaccard"], {"max": 1.0, "with": "EVL-B-8K-502"})
@@ -606,10 +619,13 @@ class Validation(unittest.TestCase):
         self.assertIn("fields outside the grammar", out[5]["reasons"][0])
         self.assertEqual(out[6]["jaccard"]["max"], 0.5)
 
-    def test_the_budget_charges_a_tenth_a_seatable_birth_to_three_and_three_a_night_records_free(self):
+    def test_the_budget_charges_013_a_seatable_birth_to_39_and_three_a_night_records_free(self):
+        """PREREG-EVL-6 section 5 (release 1019i): 0.13 a seatable birth, the lane's restated 3.9 (15 x 0.13 used by the
+        fifteen new versions), three a night, records free."""
         st = self.s.st
-        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.5, "limit": 3.0, "left": 1.5,
-                                                     "seatable_left_tonight": 3, "charge": 0.1})
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.95, "limit": 3.9, "left": 1.95, "waiting_runs": 0.0, "reserved": 0.0,
+                                                     "left_for_births": 1.95, "seatable_left_tonight": 3,
+                                                     "charge": 0.13})
         four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
         out = BI.validate(st, BI.Facts(st, self.AS_OF), four, night=self.AS_OF)
         self.assertEqual([c["ok"] for c in out], [True, True, True, False])
@@ -617,49 +633,54 @@ class Validation(unittest.TestCase):
         record = self.candidate("EVL-B-8K-REC", ["3.01"], seatable=False)
         self.assertTrue(BI.validate(st, BI.Facts(st, self.AS_OF), four[:3] + [record], night=self.AS_OF)[3]["ok"],
                         "records are free")
-        for i in range(14):     # fourteen seatable births registered on earlier nights: 1.5 + 1.4 = 2.9 (release 1019g)
+        # fourteen seatable births registered on earlier nights, before REGISTERED_AT_6: each seats at its PREREG-EVL-6
+        # version 2 (section 1.1), 0.13 each: 1.95 + 1.82 = 3.77
+        for i in range(14):
             self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
                             night=f"2026-09-{10 + i}", seq=i)
         P.load_births(st)
         self.assertEqual(SN.expected_false_passes(st)["versions"], 29)
-        self.assertAlmostEqual(BI.budget(st, self.AS_OF)["left"], 0.1)
+        self.assertAlmostEqual(BI.budget(st, self.AS_OF)["left"], 0.13)
         out = BI.validate(st, BI.Facts(st, self.AS_OF), four[:2] + [record], night=self.AS_OF)
         self.assertEqual([c["ok"] for c in out], [True, False, True])
-        self.assertIn("the false-pass budget: 3.0 of 3.0 used", out[1]["reasons"][0])
-        self.assertEqual([c["charge"] for c in out], [1, 0, 0])
+        self.assertIn("the false-pass budget: 3.90 of 3.90 used", out[1]["reasons"][0])
+        self.assertEqual([c["charge"] for c in out], [13, 0, 0])
 
-    def test_a81_the_budget_is_the_lanes_stated_three_counted_from_seatings_own_sum(self):
-        """A81 (16:25Z Oct 21, 2026): the validator's lifetime cap is A71's stated 3.0 (the screen's LANE_BUDGET, never
-        R3's draft 2.0), counted from SEATING's own sum (PREREG-EVL-1 to -4: 1.2; never a written 0.9), 0.10 a seatable
-        birth, at most 3 a night: at most 18 seatable births ever; a retired program's looks stay counted."""
+    def test_a81_the_budget_is_the_lanes_restated_39_counted_from_the_screens_own_sum(self):
+        """A81 as PREREG-EVL-6 section 5 restates it (D6, D11; release 1019i): the validator's lifetime cap is the
+        lane's restated 3.9 (the screen's V6_BUDGET, 30 x 0.13), counted from the screen's own sum (the fifteen new
+        versions: 1.95; never a written figure), 0.13 a seatable birth, at most 3 a night: at most fifteen seatable
+        births after the new versions; a retired program's looks stay counted."""
         st = self.s.st
-        self.assertEqual((BI.BUDGET_TENTHS, BI.CHARGE_TENTHS, BI.SEATABLE_A_NIGHT), (30, 1, 3))
-        self.assertEqual((BI.BUDGET_TENTHS, BI.CHARGE_TENTHS), (round(SN.LANE_BUDGET * 10), round(SN.FALSE_PASS_RATE * 10)),
-                         "read from the screen, never restated")
-        self.assertEqual(SN.LANE_BUDGET, 3.0)
-        self.assertEqual(len(P.PREREG_SEATING), 15, "the nine version 2 rows, PREREG-EVL-4's three and -5's three")
-        self.assertEqual({p.prereg for p in P.PREREG_SEATING}, {3, 4, 5})
-        self.assertEqual(BI.budget_used_tenths(st), 15)
+        self.assertEqual((BI.BUDGET_HUNDREDTHS, BI.CHARGE_HUNDREDTHS, BI.SEATABLE_A_NIGHT), (390, 13, 3))
+        self.assertEqual((BI.BUDGET_HUNDREDTHS, BI.CHARGE_HUNDREDTHS),
+                         (SN.V6_BUDGET_HUNDREDTHS, SN.V6_CHARGE_HUNDREDTHS), "read from the screen, never restated")
+        self.assertEqual((SN.V6_BUDGET, SN.V6_CHARGE), (3.9, 0.13))
+        self.assertEqual(len(P.PREREG_SEATING), 15, "the new versions: the nine at 3, PREREG-EVL-4's and -5's three at 2")
+        self.assertEqual({p.regfile for p in P.PREREG_SEATING}, {6})
+        self.assertEqual(BI.budget_used_hundredths(st), 195)
         self.assertEqual(BI.budget(st, self.AS_OF)["used"], SN.expected_false_passes(st)["expected"])
-        # SEATING's own sum, whatever it holds: without PREREG-EVL-4's and -5's three it would read 0.9; with them 1.5.
+        # The screen's own sum, whatever SEATING holds: without PREREG-EVL-4's and -5's three it would read 1.17.
         with mock.patch.object(P, "SEATING", tuple(p for p in P.PREREG_SEATING if p.prereg not in (4, 5))):
-            self.assertEqual(BI.budget_used_tenths(st), 9)
-        self.assertEqual(BI.budget_used_tenths(st), 15)
+            self.assertEqual(BI.budget_used_hundredths(st), 117)
+        self.assertEqual(BI.budget_used_hundredths(st), 195)
         # A retired program stays counted (a test that was run is never refunded).
         from league.events import bands as BA
 
-        BA.set_band(st, "EVL-ERN-READ-O1", 2, "retired", since="2026-11-01T21:00:00Z", why="invented")
-        self.assertEqual(BI.budget_used_tenths(st), 15)
-        # 15 seatable births exhaust it: 1.5 + 1.5 = 3.0, and the 16th is refused (release 1019g: PREREG-EVL-5 section 3).
+        BA.set_band(st, "EVL-ERN-READ-O1", 3, "retired", since="2026-11-01T21:00:00Z", why="invented")
+        self.assertEqual(BI.budget_used_hundredths(st), 195)
+        # 15 seatable births exhaust it: 1.95 + 1.95 = 3.9, and the 16th is refused (PREREG-EVL-6 section 5).
         for i in range(15):
             self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
                             night=f"2026-09-{10 + i}", seq=i)
         P.load_births(st)
-        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 3.0, "limit": 3.0, "left": 0.0,
-                                                     "seatable_left_tonight": 0, "charge": 0.1})
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 3.9, "limit": 3.9, "left": 0.0, "waiting_runs": 0.0, "reserved": 0.0,
+                                                     "left_for_births": 0.0, "seatable_left_tonight": 0,
+                                                     "charge": 0.13})
         [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])], night=self.AS_OF)
         self.assertFalse(out["ok"])
-        self.assertIn("the false-pass budget: 3.0 of 3.0 used, a seatable birth adds 0.1", out["reasons"][0])
+        self.assertIn("the false-pass budget: 3.90 of 3.90 used or held for the runs waiting for it, a seatable birth "
+                      "adds 0.13", out["reasons"][0])
         [rec] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"], seatable=False)],
                             night=self.AS_OF)
         self.assertTrue(rec["ok"], "records are free")
@@ -673,6 +694,43 @@ class Validation(unittest.TestCase):
         [seat] = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10), [self.candidate("EVL-B-8K-102", ["1.02"])])
         self.assertTrue(seat["ok"], "a seatable birth: its rate over the sessions holding a complete record pass")
         self.assertEqual(seat["per_session"], 4.0)
+
+
+class TheReservations(Validation):
+    """A137: the charges of frozen files whose code is not live are held from the births' room (PREREG-EVL-8 0.65,
+    PREREG-EVL-9 0.30, PREREG-EVL-10 0.13 in A129's order), released as each file's pin appears; records stay free."""
+
+    def test_the_frozen_files_hold_their_charges_until_their_pins_and_the_births_see_only_what_is_left(self):
+        st = self.s.st
+        held = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
+                ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
+        with mock.patch.object(BI, "RESERVED", held):
+            self.assertEqual(BI.budget_reserved_hundredths(), 108, "none of the three is pinned in this code")
+            got = BI.budget(st, self.AS_OF)
+            self.assertEqual((got["used"], got["reserved"], got["left_for_births"]), (1.95, 1.08, 0.87))
+            for i in range(6):          # 1.95 + 0.78 + 1.08 = 3.81: a seventh seatable birth would pass 3.9
+                self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
+                                night=f"2026-09-{10 + i}", seq=i)
+            P.load_births(st)
+            self.assertEqual(BI.budget(st, self.AS_OF)["seatable_left_tonight"], 0)
+            [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                night=self.AS_OF)
+            self.assertFalse(out["ok"])
+            self.assertIn("1.08 of it held for the frozen files whose code is not live (A137)", out["reasons"][0])
+            [rec] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"], seatable=False)],
+                                night=self.AS_OF)
+            self.assertTrue(rec["ok"], "records are free")
+            with mock.patch.object(P, "REGISTERED_AT_8", "2026-10-22T18:43:24Z", create=True):
+                self.assertEqual(BI.budget_reserved_hundredths(), 43, "PREREG-EVL-8 pinned: its 0.65 released")
+                [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                    night=self.AS_OF)
+                self.assertTrue(out["ok"], "3.9 - 2.73 - 0.43 holds one more")
+
+
+class TheLiveReservations(unittest.TestCase):
+    def test_the_live_tree_holds_all_three(self):
+        self.assertEqual([f for f, pin, _ in BI.RESERVED if getattr(P, pin, None) is None],
+                         ["PREREG-EVL-8", "PREREG-EVL-9", "PREREG-EVL-10"])
 
 
 class SeatableRate(unittest.TestCase):
@@ -850,7 +908,7 @@ class TheProposer(Validation):
         self.assertTrue(headers[V.REQUEST_HEADER].startswith("evl-births:2026-11-06:"))
         user = body["messages"][0]["content"]
         self.assertIn(json.dumps(sheet, sort_keys=True, separators=(",", ":")), user, "the facts, whole")
-        self.assertIn("1.5 of 3.0 used", user)
+        self.assertIn("1.95 of 3.90 used", user)
         row = dict(st.db.execute("SELECT * FROM birth_calls").fetchone())
         self.assertEqual((row["prompt_sha"], row["model"], row["status"], row["answer"], row["usd"]),
                          (BI.prompt_sha(), BI.MODEL, "ok", answer, 0.0042))
@@ -913,7 +971,7 @@ class Registration(Validation):
                           ("EVL-B-8K-203", "2026-11-07T02:15:09Z", "2026-11-07T02:15:09Z", "2026-11-07T02:15:03Z", "d" * 40)],
                          "GitHub's commit time, later than the House's receipt here")
         self.assertEqual([p.id for p in P.BIRTHS], ["EVL-B-8K-102", "EVL-B-8K-203"])
-        self.assertEqual(out["budget"]["used"], 1.6)
+        self.assertEqual(out["budget"]["used"], 2.08, "1.95 and the one seatable birth's 0.13 (PREREG-EVL-6 section 5)")
         statuses = {r["id"]: r["status"] for r in st.db.execute("SELECT id, status FROM birth_candidates")}
         self.assertEqual(statuses, {"EVL-B-8K-102": "registered", "EVL-B-8K-105": "refused",
                                     "EVL-B-8K-203": "registered"})
@@ -972,7 +1030,10 @@ class Registration(Validation):
 
 # ======================================================================================================== the screen
 class TheScreen(unittest.TestCase):
-    def test_a_seatable_birth_is_judged_by_prereg_evl_3s_looks_and_a_record_or_control_never(self):
+    def test_a_seatable_birth_is_judged_by_preregevl6_and_a_superseded_version_by_preregevl3s_looks(self):
+        """PREREG-EVL-6 section 1.1 (release 1019i): a seatable birth registered after REGISTERED_AT_6 is judged by
+        PREREG-EVL-6 alone (`_run_v6`); a version it supersedes keeps PREREG-EVL-3's looks as a shadow record
+        (`_run_v2`, moving no band: D7); a record or a control is never screened."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.addCleanup(unload)
@@ -983,9 +1044,11 @@ class TheScreen(unittest.TestCase):
         P.load_births(s.st)
         keys = [("EVL-B-ERN-TOP", 1), ("EVL-B-ERN-TOP-CTRL", 1), ("EVL-B-REC", 1), ("EVL-ERN-READ-O1", 2)]
         with mock.patch.object(SN, "_run_v2", return_value={"written": [], "waiting": []}) as v2, \
+                mock.patch.object(SN, "_run_v6", return_value={"written": [], "waiting": []}) as v6, \
                 mock.patch.object(SN, "_run_v1", return_value={"written": [], "waiting": []}) as v1:
             SN.run(s.st, dt.date(2026, 11, 20), programs=keys, now=dt.datetime(2026, 11, 21, tzinfo=UTC))
-        self.assertEqual([c.args[1:3] for c in v2.call_args_list], [("EVL-B-ERN-TOP", 1), ("EVL-ERN-READ-O1", 2)])
+        self.assertEqual([c.args[1:3] for c in v6.call_args_list], [("EVL-B-ERN-TOP", 1)])
+        self.assertEqual([c.args[1:3] for c in v2.call_args_list], [("EVL-ERN-READ-O1", 2)])
         self.assertEqual(v1.call_args_list, [])
         self.assertEqual(SN.V2_ALPHA, 0.018, "the judge is PREREG-EVL-3's, unchanged")
 
@@ -1079,6 +1142,12 @@ class TheNight(TH.LaneCase):
         self.assertNotIn("births", self.night())
         self.assertEqual(self.receipts("births"), [])
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

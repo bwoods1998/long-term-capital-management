@@ -214,10 +214,14 @@ CONTROL_SUFFIX = "-CTRL"
 #: holds fewer than 20 sessions may accept one) and tells the proposer both rates and "no earnings-only family after Nov
 #: 6"; 4 (release 1019h too, the captain's A109) asks Claude Opus 5.5 (`MODEL`), a new architect whose answer may be
 #: accepted where Haiku 4.5's was refused, and the model is part of `prompt_sha`'s spec, so the sha moved again (3 was
-#: never live: release 1019h ships both). A night whose receipt is older than this and accepted and registered none is
-#: run ONCE more (`rerun_due`). It moves with any change of `parse`, of the validator, of the prompt or of the model that
-#: could turn a refused answer into an accepted one.
-PARSE_VERSION = 4
+#: never live: release 1019h ships both); 5 (release 1019i, PREREG-EVL-6 section 5) tells the proposer the restated
+#: charge from the budget (`<<CHARGE>>`: 0.13 a seatable spec, where version 4's text said 0.10) and the validator
+#: charges 0.13 of the restated 3.9, a birth only with room left after every run waiting for the budget. A night whose
+#: receipt is older than this and accepted and registered none is run ONCE more (`rerun_due`). It moves with any change
+#: of `parse`, of the validator, of the prompt or of the model that could turn a refused answer into an accepted one,
+#: and with any change of the prompt's text (the prompt's sha and this version are pinned together:
+#: league/tests/test_events_births_names.py).
+PARSE_VERSION = 5
 PARSE_VERSION_BEFORE = 1
 #: A night's one re-run starts before this UTC time of the session day after the night (A95): the start of the
 #: deploy-blocked session window (12:55Z, 08:55 ET in daylight time and 07:55 ET in standard time), at least 5 (65)
@@ -239,13 +243,30 @@ MIN_RECORDED = 3
 #: calendar's last `SESSIONS` sessions (the store must hold them all).
 RECORD_MIN_RATE = 3
 JACCARD_MAX = 0.8
-#: The false-pass budget (A81), in tenths of an expected false pass (integers: no float drift): each seatable birth the
-#: screen's FALSE_PASS_RATE, 1 (0.10); every seatable version ever registered at most the lane's stated lifetime budget,
-#: LANE_BUDGET, 30 (3.0), read from the screen and never restated here; what is used is SEATING's own sum
-#: (`budget_used_tenths`: PREREG-EVL-1 to -5's fifteen, 15, before any birth); at most 3 seatable births a night.
+#: The false-pass budget (A81 as PREREG-EVL-6 section 5 restates it, D6 and D11), in HUNDREDTHS of an expected false
+#: pass (integers: no float drift), read from the screen and never restated here: each seatable birth the screen's
+#: charge, V6_CHARGE_HUNDREDTHS, 13 (0.13: every birth registered from REGISTERED_AT_6 on is judged by PREREG-EVL-6,
+#: section 1.1's LATER VERSIONS); every charge the lane ever makes (each PREREG-EVL-6 version's run 1 and each fresh run
+#: when it starts) at most the lane's restated lifetime budget, V6_BUDGET_HUNDREDTHS, 390 (3.9); what is used is the
+#: screen's own count (`budget_used_hundredths`: the fifteen new versions, 195, before any birth or fresh run); a birth
+#: registers only when the room left AFTER EVERY RUN WAITING FOR THE BUDGET holds its charge (section 3); at most 3
+#: seatable births a night. (PREREG-EVL-3's and -4's 0.10 a version and 3.0 are the record before PREREG-EVL-6.)
+CHARGE_HUNDREDTHS = SN.V6_CHARGE_HUNDREDTHS
+BUDGET_HUNDREDTHS = SN.V6_BUDGET_HUNDREDTHS
+#: (the earlier names, in tenths, kept for readers of release 1019h's receipts: 0.13 and 3.9 are not whole tenths, so
+#: nothing here charges in them)
 CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
+#: THE CHARGES OF FROZEN FILES WHOSE CODE IS NOT LIVE YET (the captain's A137): (file, its pin in league/events/programs.py,
+#: hundredths). The screen's own sum (`budget6`) counts only what this code registers, so without this a frozen file's
+#: reservation (PREREG-EVL-8's five seats at 0.13 a run, A122; PREREG-EVL-9's 0.30 reserved at registration, A127)
+#: would be spent by births before its code ships, and the lane's stated 3.9 overrun. Each is held from the births'
+#: room while its pin is unset and released when its release pins it (its own versions are then counted by the
+#: screen). PREREG-EVL-10's 0.13 is held in A129's order (the captain's budget order: READER-2's seat before more
+#: seatable births). Records stay free.
+RESERVED = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
+            ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
 
 #: THE PROPOSER (R3-SPEC section 2). THE ARCHITECT (the captain's A109, 06:05Z Oct 22, 2026; release 1019h): Claude
 #: Opus 5.5, in the gateway's CLAUDE_MODELS allowlist (gateway/wrangler.jsonc; a model absent from it is a 403). Release
@@ -293,7 +314,13 @@ STREAM_GAP = 60.0
 #: once more. A night whose call ended `no answer`, `lost`, `cut` or `refused` finishes its receipt `unanswered`
 #: (`night`): the House warns (league/events/house.py `_births`) and the report lists it among the failed jobs.
 LOST = "lost"
-UNANSWERED = ("no answer", LOST, "cut", "refused")
+#: A CALL WRITTEN AHEAD OF ITS SEND (release 1019h's re-review, a minor fixed in release 1019i): `propose` writes the
+#: night's `birth_calls` row BEFORE the call goes out, `asked` at the call's worst case (its `answered_at` the asking
+#: time, so every reader of the day's spend counts it), and turns it into the call's end by an UPDATE. A House that
+#: restarts mid-call leaves the row `asked`: counted at its worst case, never $0, and never asked again that night (a
+#: later run reads it as stored, `stored:asked`). A call refused before it went out deletes its row (nothing billed).
+ASKED = "asked"
+UNANSWERED = ("no answer", LOST, "cut", "refused", ASKED)
 K = 6
 NIGHT_USD = 0.25
 #: THE MODEL'S OWN PRICES (A109): USD a million tokens, the gateway's CLAUDE_MODELS row of `MODEL`
@@ -337,6 +364,11 @@ FILE_FAMILIES = tuple(P.CLOSE_FAMILIES_4) + tuple(P.CLOSE_FAMILIES_5)
 #: inside each row's own band, so every event passes it (an upper bound, as `unread_reaction` is for the react
 #: families): EVL-ERN-DROP-ON's <= 0.96; EVL-ERN-UNDER-ON's and its control's above 0.96 and below 1.04.
 UNREAD_IN_BAND = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
+#: PREREG-EVL-7 (section 9, the task's item 5): the learners' outcome-derived state and COST-7's tables never reach the
+#: facts (league/events/learner.py `TABLES`: learner_fits, learner_cands and the per-session sums; league/events/
+#: costs7.py `TABLES`: costs7 and cost_basis), nor the intents, whose `rank_key` holds a learner's fitted ahat (check
+#: 2's minor 10 (3): the facts never read intents).
+FACTS_DENY = FACTS_DENY | frozenset({"learner_fits", "learner_cands", "learner_stats", "costs7", "cost_basis", "intents"})
 
 
 class SpecError(ValueError):
@@ -1122,12 +1154,29 @@ def _events(selected: Mapping[dt.date, Sequence[str]]) -> set[str]:
 
 
 # ----------------------------------------------------------------------------------------------------------- the budget
+def budget_used_hundredths(store: Any) -> int:
+    """Hundredths of an expected false pass already charged (PREREG-EVL-6 section 5): the screen's own count
+    (league/events/screen.py `budget6`, after `load_births`: 0.13 for every PREREG-EVL-6 version in SEATING, its fifteen
+    new versions and every seatable birth's, retired ones included, any later version of a seatable id the store has
+    seen, and every fresh run started). Never a figure written here."""
+    return int(SN.budget6(store)["used"])
+
+
+def budget_waiting_hundredths(store: Any) -> int:
+    """What the runs waiting for the lane's budget would charge (0.13 each, league/events/screen.py `waiting_runs`):
+    PREREG-EVL-6 section 3, a birth registers only when the room left after every waiting run holds its charge."""
+    return CHARGE_HUNDREDTHS * len(SN.waiting_runs(store))
+
+
+def budget_reserved_hundredths() -> int:
+    """What the frozen files whose code is not live hold from the births' room (`RESERVED`, A137)."""
+    return sum(int(h) for _, pin, h in RESERVED if getattr(P, pin, None) is None)
+
+
 def budget_used_tenths(store: Any) -> int:
-    """Tenths of an expected false pass already charged (A81): SEATING's own sum as the report counts it
-    (league/events/screen.py `expected_false_passes`, after `load_births`: 0.10 for every seatable version ever
-    registered in the lane, PREREG-EVL-1 to -5's fifteen and every seatable birth, retired ones included, and any later
-    version of a seatable program the store has seen). Never a figure written here."""
-    return int(round(float(SN.expected_false_passes(store)["expected"]) * 10))
+    """(Release 1019h's name: the charges in tenths, rounded up, for its readers. The validator reads
+    `budget_used_hundredths`.)"""
+    return -(-budget_used_hundredths(store) // 10)
 
 
 def _tonight(store: Any, night: dt.date | None) -> int:
@@ -1142,11 +1191,15 @@ def _tonight(store: Any, night: dt.date | None) -> int:
 def budget(store: Any, night: dt.date | None = None) -> dict[str, Any]:
     """The stated budget as it stands: tenths used (every seatable version ever registered), the limit, what is left,
     and the seatable births `night` may still register."""
-    used = budget_used_tenths(store)
+    used = budget_used_hundredths(store)
+    waiting = budget_waiting_hundredths(store)
+    reserved = budget_reserved_hundredths()
     tonight = _tonight(store, night)
-    return {"used": used / 10, "limit": BUDGET_TENTHS / 10, "left": (BUDGET_TENTHS - used) / 10,
-            "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, (BUDGET_TENTHS - used) // CHARGE_TENTHS)),
-            "charge": CHARGE_TENTHS / 10}
+    room = BUDGET_HUNDREDTHS - used - waiting - reserved
+    return {"used": used / 100, "limit": BUDGET_HUNDREDTHS / 100, "left": (BUDGET_HUNDREDTHS - used) / 100,
+            "waiting_runs": waiting / 100, "reserved": reserved / 100, "left_for_births": room / 100,
+            "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, room // CHARGE_HUNDREDTHS)),
+            "charge": CHARGE_HUNDREDTHS / 100}
 
 
 # ----------------------------------------------------------------------------------------------------------- validator
@@ -1169,7 +1222,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             known_ids.add(str(r["id"]))
             known_ids.add(control_id(str(r["id"])))
             known_sha.add(str(r["sha"]))
-    used = budget_used_tenths(store)
+    used = budget_used_hundredths(store) + budget_waiting_hundredths(store) + budget_reserved_hundredths()
+    # (the waiting runs come first: section 3; then the frozen files' reservations, A137)
     tonight_used = _tonight(store, night)
     # (PREREG-EVL-8 section 4.4: its rows are EXCLUDED from the Jaccard "against every registered program")
     registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS if not P.is_8(p)]
@@ -1229,17 +1283,19 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
         if spec["seatable"] and not why:
             if tonight_used + 1 > SEATABLE_A_NIGHT:
                 why.append(f"{SEATABLE_A_NIGHT} seatable births a night at most")
-            elif used + CHARGE_TENTHS > BUDGET_TENTHS:
-                why.append(f"the false-pass budget: {used / 10:.1f} of {BUDGET_TENTHS / 10:.1f} used, a seatable birth "
-                           f"adds {CHARGE_TENTHS / 10:.1f}")
+            elif used + CHARGE_HUNDREDTHS > BUDGET_HUNDREDTHS:
+                why.append(f"the false-pass budget: {used / 100:.2f} of {BUDGET_HUNDREDTHS / 100:.2f} used or held for "
+                           f"the runs waiting for it, a seatable birth adds {CHARGE_HUNDREDTHS / 100:.2f} "
+                           "(PREREG-EVL-6 section 5)" + (f"; {budget_reserved_hundredths() / 100:.2f} of it held for the "
+                           "frozen files whose code is not live (A137)" if budget_reserved_hundredths() else ""))
         if why:
             entry["reasons"] = why
             out.append(entry)
             continue
         entry["ok"] = True
         if spec["seatable"]:
-            entry["charge"] = CHARGE_TENTHS
-            used += CHARGE_TENTHS
+            entry["charge"] = CHARGE_HUNDREDTHS
+            used += CHARGE_HUNDREDTHS
             tonight_used += 1
         known_ids |= {spec["id"], control_id(spec["id"])}
         known_sha.add(digest)
@@ -1296,7 +1352,7 @@ THE VALIDATOR refuses a seatable spec that selects fewer than <<MIN_RATE>> event
 last <<SESSIONS>> that hold a complete record pass ("recorded_sessions" in the facts, at least <<MIN_RECORDED>>; each
 count's "per_recorded_session"), a record spec that selects fewer than <<RECORD_MIN_RATE>> a session over the last
 <<SESSIONS>> sessions, and any spec whose selected events overlap any existing program's with a Jaccard of <<JACCARD>>
-or more. Each seatable spec costs 0.10 of the false-pass budget: <<BUDGET>>. Propose at most <<K>> specs, at most
+or more. Each seatable spec costs <<CHARGE>> of the false-pass budget: <<BUDGET>>. Propose at most <<K>> specs, at most
 <<SEATABLE>> of them seatable. Prefer rules a reader could explain in one line, over events and items no program covers
 yet. Propose no spec of an earnings-only family (ern, ern-react) after Nov 6, 2026 (the facts' "as_of"): the earnings
 season ends and such a rule would not fill its slots.
@@ -1322,7 +1378,8 @@ def render(facts: Mapping[str, Any], budget_: Mapping[str, Any], *, k: int = K) 
     return (USER.replace("<<READ_ITEMS>>", ", ".join(READ_ITEMS_8K)).replace("<<MIN_RATE>>", str(MIN_RATE))
             .replace("<<MIN_RECORDED>>", str(MIN_RECORDED)).replace("<<RECORD_MIN_RATE>>", str(RECORD_MIN_RATE))
             .replace("<<SESSIONS>>", str(SESSIONS)).replace("<<JACCARD>>", str(JACCARD_MAX))
-            .replace("<<BUDGET>>", f"{budget_['used']:.1f} of {budget_['limit']:.1f} used")
+            .replace("<<BUDGET>>", f"{budget_['used']:.2f} of {budget_['limit']:.2f} used")
+            .replace("<<CHARGE>>", f"{float(budget_.get('charge', CHARGE_HUNDREDTHS / 100)):.2f}")
             .replace("<<K>>", str(k)).replace("<<SEATABLE>>", str(left)).replace("<<FACTS>>", text))
 
 
@@ -1421,62 +1478,78 @@ def propose(store: Any, gw: Any, facts: Mapping[str, Any], *, night: dt.date, no
     body = request_body(user)
     user_sha = hashlib.sha256(user.encode("utf-8")).hexdigest()
     asked = now()
+    key = (night.isoformat(), psha, MODEL)
+    # (release 1019h's re-review, fixed in release 1019i: THE ROW AHEAD OF THE CALL, `ASKED` at the call's worst case,
+    # its answered_at the asking time so the day's spend counts it; the call's end is an UPDATE of it)
+    with store.tx() as db:
+        db.execute("INSERT OR IGNORE INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, "
+                   "status, user_sha, facts_sha, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                   (*key, request_id, S.iso(asked), S.iso(asked), ASKED, user_sha, fsha, worst))
 
     def store_row(status: str, text: str | None, usd: float) -> dict[str, Any]:
         answered = now()
         with store.tx() as db:
-            db.execute("INSERT OR IGNORE INTO birth_calls(night, prompt_sha, model, request_id, asked_at, answered_at, "
-                       "status, user_sha, facts_sha, answer, usd) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                       (night.isoformat(), psha, MODEL, request_id, S.iso(asked), S.iso(answered), status, user_sha,
-                        fsha, text, usd))
+            db.execute("UPDATE birth_calls SET answered_at=?, status=?, answer=?, usd=? WHERE night=? AND prompt_sha=? "
+                       "AND model=?", (S.iso(answered), status, text, usd, *key))
         return {"usd": usd, "seconds": round(max(0.0, (answered - asked).total_seconds()), 3)}
+
+    def drop_row() -> None:
+        """A call that never went out (the lane refused it, or the gateway never had it): nothing was billed."""
+        with store.tx() as db:
+            db.execute("DELETE FROM birth_calls WHERE night=? AND prompt_sha=? AND model=? AND status=?", (*key, ASKED))
 
     billed = 0.0            # what the gateway settled for errors that carried no answer (a 429 or a 5xx it settled)
     last = "no call"
-    for _ in range(2):
-        try:
-            code, payload = gw.post_stream(V.PATH, body, headers={V.REQUEST_HEADER: request_id}, limit=CALL_LIMIT,
-                                           gap=STREAM_GAP)
-        except G.NotSent as exc:            # (the lane refused it: it never went out)
-            last = f"{type(exc).__name__}: {str(exc)[:120]}"
-            break
-        except urllib.error.URLError as exc:   # (sending failed: the gateway never had the whole request)
-            last = f"{type(exc).__name__}: {str(exc)[:120]}"
-            continue
-        except OSError as exc:              # (it went out: lost while waiting for the answer, or its stream lost)
-            last = f"{type(exc).__name__}: {str(exc)[:120]}"
-            told = exc.cost if isinstance(exc, G.StreamLost) and exc.known else None
-            kept = store_row(LOST, None, billed + (worst if told is None else told))
-            return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
-        stated = _stated(gw)
-        if not 200 <= code < 300:
-            last = f"HTTP {code}"
-            refusal = isinstance(payload, Mapping) and payload.get("cap") is not None   # (the gateway's own, unsent)
-            if stated is None and code >= 500 and not refusal:
-                # (a 5xx the gateway did not settle: the call may have gone out and run; unknown is not free)
-                kept = store_row(LOST, None, billed + worst)
-                return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
-            billed += stated or 0.0
-            if 400 <= code < 500 and code != 429:
+    try:
+        for _ in range(2):
+            try:
+                code, payload = gw.post_stream(V.PATH, body, headers={V.REQUEST_HEADER: request_id}, limit=CALL_LIMIT,
+                                               gap=STREAM_GAP)
+            except G.NotSent as exc:            # (the lane refused it: it never went out)
+                last = f"{type(exc).__name__}: {str(exc)[:120]}"
                 break
-            if already + billed + worst > cap or (line_left is not None and billed + worst > line_left):
-                last += f" (no second ask: ${billed:.4f} settled and the worst case ${worst:.4f} over what is left)"
-                break       # (asked again only inside the night's cap and the lane's line, the first ask's cost counted)
-            continue
-        if not isinstance(payload, Mapping):
-            last = f"HTTP {code}: no answer read"
-            kept = store_row(LOST, None, billed + (worst if stated is None else stated))
-            return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
-        text = "".join(b.get("text") or "" for b in payload.get("content") or []
-                       if isinstance(b, Mapping) and b.get("type") == "text")
-        stop = payload.get("stop_reason")
-        status = "refused" if stop == "refusal" else "cut" if stop == "max_tokens" else "ok"
-        kept = store_row(status, text, billed + (worst if stated is None else stated))     # (no stated cost: the worst)
-        props, offered = parse_answer(text, k=k) if status == "ok" else ([], 0)
-        return base | {"status": status, "proposals": props, "offered": offered} | kept
+            except urllib.error.URLError as exc:   # (sending failed: the gateway never had the whole request)
+                last = f"{type(exc).__name__}: {str(exc)[:120]}"
+                continue
+            except OSError as exc:              # (it went out: lost while waiting for the answer, or its stream lost)
+                last = f"{type(exc).__name__}: {str(exc)[:120]}"
+                told = exc.cost if isinstance(exc, G.StreamLost) and exc.known else None
+                kept = store_row(LOST, None, billed + (worst if told is None else told))
+                return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+            stated = _stated(gw)
+            if not 200 <= code < 300:
+                last = f"HTTP {code}"
+                refusal = isinstance(payload, Mapping) and payload.get("cap") is not None   # (the gateway's own, unsent)
+                if stated is None and code >= 500 and not refusal:
+                    # (a 5xx the gateway did not settle: the call may have gone out and run; unknown is not free)
+                    kept = store_row(LOST, None, billed + worst)
+                    return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+                billed += stated or 0.0
+                if 400 <= code < 500 and code != 429:
+                    break
+                if already + billed + worst > cap or (line_left is not None and billed + worst > line_left):
+                    last += f" (no second ask: ${billed:.4f} settled and the worst case ${worst:.4f} over what is left)"
+                    break       # (asked again only inside the night's cap and the lane's line, the first ask counted)
+                continue
+            if not isinstance(payload, Mapping):
+                last = f"HTTP {code}: no answer read"
+                kept = store_row(LOST, None, billed + (worst if stated is None else stated))
+                return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+            text = "".join(b.get("text") or "" for b in payload.get("content") or []
+                           if isinstance(b, Mapping) and b.get("type") == "text")
+            stop = payload.get("stop_reason")
+            status = "refused" if stop == "refusal" else "cut" if stop == "max_tokens" else "ok"
+            kept = store_row(status, text, billed + (worst if stated is None else stated))   # (no stated cost: the worst)
+            props, offered = parse_answer(text, k=k) if status == "ok" else ([], 0)
+            return base | {"status": status, "proposals": props, "offered": offered} | kept
+    except Exception as exc:  # noqa: BLE001 - release 1019i: ANY failure after the send is a LOST call at its worst
+        last = f"{type(exc).__name__}: {str(exc)[:120]}"
+        kept = store_row(LOST, None, billed + worst)
+        return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
     if billed > 0:
         kept = store_row(LOST, None, billed)
         return base | {"status": LOST, "proposals": [], "offered": 0, "why": last} | kept
+    drop_row()
     return base | {"status": "no answer", "proposals": [], "offered": 0, "usd": 0.0, "why": last}
 
 
@@ -1585,9 +1658,6 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
     status = "ok"
     try:
         store.db.execute("UPDATE receipts SET summary=? WHERE id=?", (json.dumps(out, sort_keys=True, default=str), rid))
-        if not dry_run:
-            out["reconciled"] = reconcile(store, gw, now=now)
-            P.load_births(store)
         facts = Facts(store, today)
         sheet = facts.facts()
         fsha = hashlib.sha256(json.dumps(sheet, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -1597,11 +1667,19 @@ def night(store: Any, gw: Any, *, today: dt.date, now: Callable[[], dt.datetime]
             proposals = call["proposals"]
             out["call"] = {key: call.get(key) for key in ("status", "offered", "usd", "why", "prompt_sha", "seconds")}
             psha = call.get("prompt_sha")
-            if call.get("status") in UNANSWERED:
+            # (release 1019i: a night's STORED call that ended without an answer, `stored:lost` or `stored:asked`,
+            # is unanswered too, as the call itself was)
+            if str(call.get("status") or "").removeprefix("stored:") in UNANSWERED:
                 status = "unanswered"     # (`LOST`'s comment: the House warns, the report lists it)
         else:
             proposals = [dict(p) | {"by": (p.get("by") or "captain")} for p in proposals]
             psha = None
+        if not dry_run:
+            # (release 1019h's re-review, fixed in release 1019i: the earlier nights' unknown registrations are posted
+            # again AFTER the architect's call, so their network reads never eat the call's room inside the job's bound;
+            # the births loaded again before the validator reads the registered ids and the budget)
+            out["reconciled"] = reconcile(store, gw, now=now)
+            P.load_births(store)
         checked = validate(store, facts, proposals, night=today)
         out["counts"] = {c["id"] or f"#{c['seq']}": {"selected": c["selected"], "per_session": c["per_session"],
                                                       "jaccard": c["jaccard"]} for c in checked}
@@ -1748,4 +1826,6 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT",
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
            "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
-           "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED"]
+           "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED", "ASKED", "CHARGE_HUNDREDTHS",
+           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED",
+           "budget_reserved_hundredths"]

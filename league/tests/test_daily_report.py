@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import programs as P
 from league.events import store as ES
@@ -157,6 +158,7 @@ class ReportCase(StallHarness):
         return [c for c in self.notify.calls if c.get("kind") == "report"]
 
 
+@on_1019h
 class DailyReport(ReportCase):
 
     def test_once_a_day_after_the_lanes_report_job_figures_only(self):
@@ -210,9 +212,12 @@ class DailyReport(ReportCase):
         self.assertEqual(facts["events"], {"8k_202": 1, "8k_other": 1, "form4": 1, "news": 1, "failed": 0})
         self.assertEqual(facts["verdicts"], {"ok": 2, "unparsed": 1, "refused": 0, "usd": 0.01})
         self.assertIn({"id": "EVL-ERN-READ-O1", "version": 1, "n": 3, "skipped": 0}, facts["intents"])
-        self.assertEqual((facts["expected_false_passes"], facts["seatable_versions"], facts["alarms"]), (1.5, 15, []),
-                         "0.10 x the fifteen seatable versions (release 1019d: PREREG-EVL-4's three join the nine; "
-                         "release 1019g: PREREG-EVL-5's three)")
+        self.assertEqual((facts["expected_false_passes"], facts["seatable_versions"], facts["alarms"]), (1.95, 15, []),
+                         "the fifteen seatable versions (release 1019d: PREREG-EVL-4's three join the nine; release "
+                         "1019g: PREREG-EVL-5's three), at PREREG-EVL-6 section 5's restated 0.13 (release 1019i)")
+        self.assertEqual(facts["false_passes"], {"count": 1.95, "charge": 0.13, "versions": 15, "runs": 0, "waiting": 0,
+                                                 "budget": 3.9, "left": 1.95, "base": 0.45, "stress": 2.55,
+                                                 "per_version": 0.24}, "three ways and the per-version figure")
         # No symbol, headline, summary or price in the facts; no figure in the receipt or stall.json.
         sent = json.dumps(facts)
         for banned in ("ACME", "MIRACLE", "secret summary", "123.45", "124.56", "BETA", "DELT", "SPY", "51.0", "39.5"):
@@ -326,6 +331,7 @@ class DailyReport(ReportCase):
         self.assertTrue(out["report"]["sent"])
 
 
+@on_1019h
 class TheBirths(ReportCase):
     """Release 1019f's review (lens alarms, a major): a seatable birth trades real money at learning size from its first
     event (A81; births on since A93), so its settled real round trips are in the report like any seating program's:
@@ -383,9 +389,9 @@ class TheBirths(ReportCase):
         self.assertEqual((born["version"], born["band"], born["real"], born["shown_usd"]), (1, "learning", 1, 50.0))
         self.assertEqual([(b["band"], b["n"], b["shown_usd"]) for b in born["by_band"]], [("learning", 1, 50.0)])
         self.assertIn("buy_hold_usd", born)
-        # THE EXPECTED FALSE PASSES: one more seatable version at 0.10
+        # THE EXPECTED FALSE PASSES: one more seatable version (release 1019i: at PREREG-EVL-6 section 5's 0.13)
         self.assertEqual(facts["seatable_versions"], len(prereg) + 1)
-        self.assertAlmostEqual(facts["expected_false_passes"], round(0.1 * (len(prereg) + 1), 2), places=2)
+        self.assertAlmostEqual(facts["expected_false_passes"], round(0.13 * (len(prereg) + 1), 2), places=2)
         self.assertEqual([r["id"] for r in facts["done"]["by_program"]][-1], self.BIRTH, "the Done line by program")
 
     def test_births_this_process_loaded_already_stay_loaded(self):
@@ -424,6 +430,7 @@ class OverTheCap(ReportCase):
         self.assertEqual([c["cause"] for c in stall[0]["causes"]], ["cap_breach"], "the cause keys its own stall notice")
 
 
+@on_1019h
 class CostsToDate(StallHarness):
     """COSTS TO DATE AS FAR AS THE METERS COVER THEM (the review of r2/alarms, its major 2): release 1019b trades real money
     before release 1019c, which starts metered.json, can be deployed. Net to date and every program's Net are measured
@@ -508,6 +515,7 @@ class BuyAndHold(unittest.TestCase):
                 store.close()
 
 
+@on_1019h
 class DoneSupply(ReportCase):
     """RELEASE 1019h, SUP-4 (the captain's A97; report only, no money, judge or digest moves): THE DONE SUPPLY LINE. Per
     program at Probe or Sized: its counted Probe+ events (done.json), its MEASURED real picks a session over the last 5
@@ -602,6 +610,11 @@ class DoneSupply(ReportCase):
                          "f4:b at $80 of $66.43 is at size; the old buy with no record reads as under")
         self.assertEqual(DR._most(under[("EVL-INS-BUY-O1", 2)]["by"]), "cash")
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

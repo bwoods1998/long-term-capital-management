@@ -21,6 +21,7 @@ import unittest
 from decimal import Decimal as D
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import bands as BA
 from league.events import book as EB
 from league.events import calendar as C
@@ -93,6 +94,7 @@ def passes(st: S.Store, start: dt.datetime, end: dt.datetime, every=dt.timedelta
 
 
 # --------------------------------------------------------------------------------------------- the House's lane
+@on_1019h
 class ScreenAfterTheOpen(TH.LaneCase):
     """EVL-INS-BUY-O1 v2 (an open-entry program, one session held): 10 events a session at +1% on the eight sessions
     Oct 20-29, 2026, so its look 1 (80 events, 80 issuers, 8 blocks) falls due as of Oct 29's close. Every decision is
@@ -352,6 +354,7 @@ class TheNightIsTheSessions(TH.LaneCase):
 
 
 # --------------------------------------------------------------------------------------------- the House's event book
+@on_1019h
 class TheCloseDecisionReadsTheBandsAgain(EventTest):
     """EVL-ERN-REACT-ON v2 (close entry, exit at the next open): its look 1 falls due as of Fri Oct 30's close (80
     invented events entered Oct 20-29) and A66 makes that close final once Wed Nov 4's open decision is made. On Nov 4
@@ -451,6 +454,7 @@ class TheCloseDecisionReadsTheBandsAgain(EventTest):
         self.assertEqual(h.book._event_bands_due(NEXT.isoformat(), "open", EB, h.book._event_lane_store()), "first")
 
 
+@on_1019h
 class TheBandMark(EventTest):
     def test_the_newest_band_history_id_or_zero_or_none(self):
         h = self.harness()
@@ -573,6 +577,12 @@ class TheIndexAfterAnSecHoliday(unittest.TestCase):
         horizon, why = SN.final_until(self.st, self.P, 2, tuesday, now)
         self.assertEqual(horizon, dt.date(2026, 11, 10), why)
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

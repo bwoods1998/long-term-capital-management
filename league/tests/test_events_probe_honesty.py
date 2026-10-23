@@ -26,6 +26,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.events import bands as BA
 from league.events import book as EB
@@ -107,6 +108,7 @@ class Base(TB.EventTest):
 
 
 # ------------------------------------------------------------------------------------------------------- (a) the record
+@on_1019h
 class TheProbeSizeRecord(Base):
     """Release 1019f's integration: worked at PREREG-EVL-1's 5% Probe share (`TB.at_prereg_probe_share`: a $100 target at
     a $20.00 limit); `TheSentDollars` reads the table in force."""
@@ -215,6 +217,7 @@ class TheProbeSizeRecord(Base):
 
 
 # ---------------------------------------------------------------------------------- the dollars the send asked
+@on_1019h
 class TheSentDollars(Base):
     """RELEASE 1019f's INTEGRATION (the honesty branch's independent check, its major): the record's `target_usd` is the
     dollars the sizing asked AT THE LIMIT (1.25 x the previous close) while `real_fills.price` is the fill's, so a full,
@@ -414,6 +417,7 @@ class TheColumns(Base):
 
 
 # ------------------------------------------------------------------------------------------------------- (b) the equity
+@on_1019h
 class TheWallsEquity(Base):
     def test_wall_equity_is_the_lower_of_e_and_the_current_equity(self):
         E = D("2000")
@@ -465,6 +469,10 @@ class TheWallsEquity(Base):
         self.assertEqual(body["qty"], "10", "the walls never rise above E at the previous close")
         self.assertEqual((D(self.buy_row(h)["target_usd"]), self.buy_row(h)["binding"]), (D("200"), None))
 
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

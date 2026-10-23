@@ -12,7 +12,8 @@ THE TABLES (every one `px_*` but the cache, each refused to the births' facts: l
 `TABLES`):
 - `px_meta` (key, value): the schema version and the recorders' progress (the backfill's chunks, the nights done).
 - `px_runs`: ONE ROW A RECORDER RUN (`start_run`, `finish_run`): its id (`run`: `<job>:<UTC time>:<n>`), job, start and
-  end, status, requests and rows, and a summary of counts. Every row any run writes carries its run id.
+  end, status, requests and rows, the state disk's free bytes at its start and px.sqlite's size (its WAL included) at
+  its end, and a summary of counts. Every row any run writes carries its run id.
 - `px_bars`: SIP daily bars (`adj` raw or all) as last read, with the bar's own time (`t`) and when it was fetched; an
   upsert like the lane's `bars`, except that a stored close the vendor later changed is first kept in `px_bar_moves`
   (symbol, day, adj, the close before and after, both reading times, the run): an adjustment published after a read
@@ -36,6 +37,15 @@ THE TABLES (every one `px_*` but the cache, each refused to the births' facts: l
   its `source` (live | backfill) and its run. INSERT OR IGNORE: a value is written once at its decision and never
   recomputed; the bars' upsert can never move it.
 
+THE STORE'S ROOM (release 1019i's review; PREREG-EVL-8's harness plan H2, its risk list: "a size line and a 2 GB
+alarm"): px.sqlite sits on the House's state disk beside live.sqlite and events.sqlite, so a recorder writes only while
+px.sqlite and its WAL hold under `MAX_BYTES` (2 GiB) AND the state disk keeps at least `FREE_FLOOR_BYTES` free: the
+swarm guard's own floor (league/swarm/guard.py `min_free_disk_gb`, 3 GB, which brakes research only) plus 2 GB, so the
+recorders stop long before the lane's or the book's ledgers could meet a full disk (`room`). A free space that cannot be
+read is no room (the reading that writes less). league/events/house.py checks it before every PX run (a run without
+room is `disk`, and opens nothing) and before every request of one (league/events/pxdata.py `PxRoom`);
+league/ops/evl_health.py raises `evl_px_store` while either line is crossed.
+
 Standard library only.
 """
 
@@ -45,6 +55,7 @@ import datetime as dt
 import itertools
 import json
 import os
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,11 +70,16 @@ FLAG_TOLERANCE = 0.001
 SOURCES = ("live", "backfill")
 RULES = (S.LIVE_RULE, S.BACKFILL_RULE)
 LABELS = ("px1530", "v1530", "pm", "o0930")      # (o0930: PREREG-EVL-8 section 3.3's OPENGAP, D's 09:30 minute's open)
+#: THE STORE'S ROOM (the module docstring): px.sqlite's size line, the swarm guard's floor and the PX floor above it.
+MAX_BYTES = 2 * 1024 ** 3
+GUARD_FREE_GB = 3.0
+FREE_FLOOR_BYTES = int((GUARD_FREE_GB + 2.0) * 1024 ** 3)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS px_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS px_runs(run TEXT PRIMARY KEY, job TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
-  status TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, rows INTEGER NOT NULL DEFAULT 0, summary TEXT);
+  status TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, rows INTEGER NOT NULL DEFAULT 0, free_bytes INTEGER,
+  size_bytes INTEGER, summary TEXT);
 CREATE TABLE IF NOT EXISTS px_bars(symbol TEXT NOT NULL, day TEXT NOT NULL, adj TEXT NOT NULL, o REAL, h REAL, l REAL,
   c REAL, v REAL, n INTEGER, vw REAL, t TEXT NOT NULL, fetched_at TEXT NOT NULL, run TEXT NOT NULL,
   PRIMARY KEY(symbol, day, adj));
@@ -96,6 +112,43 @@ _RUNS = itertools.count(1)
 def path_of(root: str | os.PathLike[str]) -> Path:
     """px.sqlite under the lane's state root (`<state>/events/`)."""
     return Path(root) / DB_NAME
+
+
+def stored_bytes(root: str | os.PathLike[str]) -> int:
+    """px.sqlite's size on disk, its WAL included (0 when it does not exist), read by `stat` alone: nothing opened."""
+    total = 0
+    for suffix in ("", "-wal"):
+        try:
+            total += os.path.getsize(str(path_of(root)) + suffix)
+        except OSError:
+            pass
+    return total
+
+
+def disk_free(root: str | os.PathLike[str]) -> int | None:
+    """The free bytes of the disk `root` is on (None when it cannot be read)."""
+    try:
+        return int(shutil.disk_usage(str(root)).free)
+    except OSError:
+        return None
+
+
+def room(root: str | os.PathLike[str]) -> dict[str, Any]:
+    """THE STORE'S ROOM (the module docstring) under the lane's state root: {size_bytes, free_bytes, line_bytes,
+    floor_bytes, over (px.sqlite at or over its line), low (the disk under the floor, or its free space unread), ok,
+    why (None when ok, else the line crossed, in words)}. Reads `stat` and the disk's usage only."""
+    size, free = stored_bytes(root), disk_free(root)
+    over, low = size >= MAX_BYTES, free is None or free < FREE_FLOOR_BYTES
+    why = None
+    if over:
+        why = f"px.sqlite holds {size / 2 ** 20:.0f} MB, at or over its {MAX_BYTES / 2 ** 30:.0f} GB line"
+    elif free is None:
+        why = "the state disk's free space could not be read"
+    elif low:
+        why = (f"the state disk has {free / 2 ** 30:.1f} GB free, under the PX floor of "
+               f"{FREE_FLOOR_BYTES / 2 ** 30:.1f} GB (the swarm guard's {GUARD_FREE_GB:.0f} GB and 2 GB more)")
+    return {"size_bytes": size, "free_bytes": free, "line_bytes": MAX_BYTES, "floor_bytes": FREE_FLOOR_BYTES,
+            "over": over, "low": low, "ok": why is None, "why": why}
 
 
 class PxStore:
@@ -143,18 +196,19 @@ class PxStore:
         self.db.execute("INSERT INTO px_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                         (key, value))
 
-    def start_run(self, job: str, *, now: dt.datetime) -> str:
-        """A new run of recorder `job`: its id, kept in `px_runs` as running."""
+    def start_run(self, job: str, *, now: dt.datetime, free_bytes: int | None = None) -> str:
+        """A new run of recorder `job`: its id, kept in `px_runs` as running, with the disk's free bytes at its start."""
         run = f"{job}:{S.iso(now)}:{os.getpid()}-{next(_RUNS)}"
-        self.db.execute("INSERT INTO px_runs(run, job, started_at, status) VALUES(?, ?, ?, 'running')",
-                        (run, job, S.iso(now)))
+        self.db.execute("INSERT INTO px_runs(run, job, started_at, status, free_bytes) VALUES(?, ?, ?, 'running', ?)",
+                        (run, job, S.iso(now), free_bytes))
         return run
 
     def finish_run(self, run: str, status: str, *, now: dt.datetime, requests: int = 0, rows: int = 0,
                    summary: Mapping[str, Any] | None = None) -> None:
-        self.db.execute("UPDATE px_runs SET finished_at=?, status=?, requests=?, rows=?, summary=? WHERE run=?",
-                        (S.iso(now), status, int(requests), int(rows), json.dumps(summary or {}, sort_keys=True,
-                                                                                    default=str), run))
+        """The run's end: its status, requests, rows and summary, and px.sqlite's size as the run leaves it."""
+        self.db.execute("UPDATE px_runs SET finished_at=?, status=?, requests=?, rows=?, size_bytes=?, summary=? WHERE "
+                        "run=?", (S.iso(now), status, int(requests), int(rows), self.size_bytes(),
+                                  json.dumps(summary or {}, sort_keys=True, default=str), run))
 
     def last_run(self, job: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM px_runs WHERE job=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
@@ -289,15 +343,9 @@ class PxStore:
 
     # -- size -------------------------------------------------------------------------------------------------------
     def size_bytes(self) -> int:
-        """px.sqlite's size on disk (its WAL included)."""
-        total = 0
-        for suffix in ("", "-wal"):
-            try:
-                total += os.path.getsize(str(path_of(self.root)) + suffix)
-            except OSError:
-                pass
-        return total
+        """px.sqlite's size on disk (its WAL included): `stored_bytes`."""
+        return stored_bytes(self.root)
 
 
 __all__ = ["PxStore", "DB_NAME", "SCHEMA", "SCHEMA_VERSION", "TABLES", "FLAG_TOLERANCE", "SOURCES", "RULES", "LABELS",
-           "path_of"]
+           "path_of", "stored_bytes", "disk_free", "room", "MAX_BYTES", "GUARD_FREE_GB", "FREE_FLOOR_BYTES"]

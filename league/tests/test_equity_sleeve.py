@@ -412,5 +412,21 @@ class ASizedProgram(unittest.TestCase):
         self.assertEqual(book.held("SPY"), D("0.50") * book.E)
 
 
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests import v2_walls as _V2  # noqa: E402
+from league.tests.v2_walls import tearDownModule  # noqa: E402,F401
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    """Release 1019i's table (league/tests/v2_walls.py), and this module's tables built again on it."""
+    _V2.setUpModule()
+    global TABLE, EQ, A20, WEIGHT, PAIRS
+    TABLE = M.Table.from_constitution()
+    EQ = TABLE.equity
+    A20 = X.table_at(*X.REFERENCE)
+    WEIGHT = EQ.open_risk_weight["etf"]
+    PAIRS = tuple(dict.fromkeys((*X.CANDIDATES, X.in_force())))
+
 if __name__ == "__main__":
     unittest.main()

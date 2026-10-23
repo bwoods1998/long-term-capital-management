@@ -1,0 +1,3 @@
+edge 60 bp: P(demoted within N Probe events) (rolling, fixed reads): {150: (0.313, 0.132), 300: (0.619, 0.154), 500: (0.832, 0.162)}
+edge 100 bp: P(demoted within N Probe events) (rolling, fixed reads): {150: (0.105, 0.033), 300: (0.271, 0.038), 500: (0.451, 0.038)}
+edge 0 bp: P(demoted within N Probe events) (rolling, fixed reads): {150: (0.748, 0.473), 300: (0.967, 0.649), 500: (0.998, 0.715)}

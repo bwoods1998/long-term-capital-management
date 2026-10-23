@@ -23,6 +23,7 @@ import json
 from decimal import Decimal as D
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.constitution import CONSTITUTION
 from league.equity import live as L
 from league.equity import schedule as ES
@@ -115,6 +116,7 @@ class AtPreregProbeShare(EventTest):
         TB.at_prereg_probe_share(self)
 
 
+@on_1019h
 class TheRoundRobin(AtPreregProbeShare):
     def test_inside_probe_one_pick_a_program_a_pass_and_learning_keeps_the_tables_order(self):
         a, b = "EVL-ERN-READ-O1", "EVL-8K-READ-O1"                 # the tables' order: a before b
@@ -176,6 +178,7 @@ class TheRoundRobin(AtPreregProbeShare):
         self.assertEqual(refused, {"BETA": "refused", "OTHS": "refused"}, "no cash left for either second pick")
 
 
+@on_1019h
 class TheReservation(AtPreregProbeShare):
     def overnight(self, *, band: str | None, cash: str = "550", n_on: int = 8, history=(3, 3, 3, 3, 3)):
         """THE TWO-AUCTION CASE: EVL-NEWS-READ-ON at learning buys at DAY's close (n_on picks, $40 each at their limit);
@@ -348,12 +351,17 @@ class TheReservation(AtPreregProbeShare):
         self.assertEqual(got[0], D(0), "no budget left above the reservation: skipped, the shadow keeps the event")
 
 
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
+
 if __name__ == "__main__":
     import unittest
 
     unittest.main()
 
 
+@on_1019h
 class TheReservationInForce(EventTest):
     """A85 ON THE TABLE IN FORCE (release 1019f's integration: the captain's A86 REVISED, Probe 3.5% of E with at most 6
     open): the same two auctions as `TheReservation.overnight`, every figure read from `book.settings()`."""

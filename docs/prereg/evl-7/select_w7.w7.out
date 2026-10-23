@@ -1,0 +1,11 @@
+fresh seeds: 8 cells of 8 selected
+  fresh 0.0870 (se 0.0045, R 4000) | search 0.0980 | pooled 0.0882 (se 0.0042) | version by 120 0.1638 | true cm<=0 0.0210 <=10bp 0.0360 | N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57
+  fresh 0.0860 (se 0.0044, R 4000) | search 0.0960 | pooled 0.0871 (se 0.0042) | version by 120 0.1678 | true cm<=0 0.0187 <=10bp 0.0357 | N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-D57
+  fresh 0.0835 (se 0.0044, R 4000) | search 0.0960 | pooled 0.0849 (se 0.0042) | version by 120 0.1450 | true cm<=0 0.0235 <=10bp 0.0432 | N1-crashcl-skew-rho15-phi20-dr20-tau0-n300-lag1-D57
+  fresh 0.0830 (se 0.0044, R 4000) | search 0.0940 | pooled 0.0842 (se 0.0041) | version by 120 0.1527 | true cm<=0 0.0190 <=10bp 0.0333 | N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag2-cnt-D57
+  fresh 0.0793 (se 0.0043, R 4000) | search 0.0960 | pooled 0.0811 (se 0.0041) | version by 120 0.1430 | true cm<=0 0.0190 <=10bp 0.0352 | N1-crasht3-skew-rho15-phi15-dr20-tau1-n300-lag2-D57
+  fresh 0.0727 (se 0.0041, R 4000) | search 0.0960 | pooled 0.0753 (se 0.0039) | version by 120 0.1437 | true cm<=0 0.0222 <=10bp 0.0393 | N1-crashcl-skew-rho15-phi20-dr20-tau0-n300-lag2-D57
+  fresh 0.0707 (se 0.0041, R 4000) | search 0.1000 | pooled 0.0740 (se 0.0039) | version by 120 0.1323 | true cm<=0 0.0138 <=10bp 0.0250 | N1-crasht3-skew-rho05-phi20-dr20-tau1-n300-lag1-D57
+  fresh 0.0602 (se 0.0038, R 4000) | search 0.0940 | pooled 0.0640 (se 0.0036) | version by 120 0.1268 | true cm<=0 0.0200 <=10bp 0.0452 | N1-crashcl-skew-rho15-phi15-dr00-tau1-n300-lag2-D57
+W7 (the maximum fresh per-run rate) = 0.0870 at N1-crasht3cl-skew-rho15-phi20-dr20-tau1-n300-lag1-D57; its pooled figure 0.0882
+c7 = max(0.13, W7 rounded up to two decimals) = 0.13

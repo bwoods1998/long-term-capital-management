@@ -731,3 +731,7 @@ class ThePolicyStaysTheOwners(TestCase):
         # The owner's --ratify and the standing grant write the same policy for the same inputs.
         self.assertEqual(policy(EQUITY, CEILING)["capital_usd"], "700.00")
         self.assertEqual(policy(EQUITY, CEILING)["constitution_digest"], money_digest())
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401

@@ -1,0 +1,221 @@
+"""PREREG-EVL-7's LEARNER ALARMS (the judge's H5; league/ops/evl_health.py's cause `evl_learner`), read-only from the
+lane's store: a learner fails quietly (it trains on old rows, or picks nothing), so the stall job says when
+
+- A LIVE PART FAILED OR EXPIRED (league/events/learner.py `PART_KEY`): that auction is decided later by the learner by
+  itself (shadow only, never traded, never judged), and the alarm says whether it has been;
+- A DECISION IS OWED: a session whose House decision finished more than `OWED_HOURS` ago with no learner decision on
+  record (the catch-up did not run);
+- THE TRAINING LAGS: the latest live decision trained on no row of the session it should have (EVL-LRN-O1 at D's open
+  reads D-1's settled outcomes, EVL-LRN-ON at D's close reads D-2's: section 1.5's lag 1 and lag 2), as when the
+  evening score chain ran late (A95);
+- THE NIGHTLY RECOMPUTE MISMATCHED (`RECOMPUTE_KEY`): a decision re-decided on unchanged inputs gave other picks or
+  another beta;
+- THE WARM-UP IS UNMET after `WARM_SESSIONS_MAX` live decisions;
+- A LOOK IS OVERDUE (league/events/judge7.py `blocked`, kinds `ALARM_KINDS`): the current run's record holds the blocks
+  of its next look (or 60 and no end) and none is written (as with no PREREG-EVL-6 screen in the tree), or the learner
+  is at Probe or Sized with no stay judge for COST-7's versions: its real money buys nothing until it is (fail closed).
+
+Counts and dates only: no fitted figure (beta, e, z, ahat) is read into the alarm. Nothing is judged while
+REGISTERED_AT_7 is None (no learner exists)."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+from pathlib import Path
+from typing import Any
+
+from . import guard
+
+CAUSE = "evl_learner"
+STORE = Path("events") / "events.sqlite"
+OWED_HOURS = 2.0
+LOOK_SESSIONS = 5
+WARM_SESSIONS_MAX = 5
+#: The real-money gate's kinds this alarm raises (league/events/judge7.py `ALARM_KINDS`, held equal by a test; an
+#: unreadable gate too): a look or a run's end overdue, a learner at Probe or Sized with no stay judge.
+ALARM_GATES = ("look_overdue", "end_overdue", "no_stay_judge", "unreadable")
+#: A look (or a run's end) normally waits a few sessions for its close to be final (A66's reach) and its intents to
+#: settle, the gate shut meanwhile: the alarm says so once the block that made it due is this many sessions old.
+OVERDUE_SESSIONS = 5
+DOING = ("A learner's part of each live decision runs after the House's own decision of the auction, under its own "
+         "bound (90 s at the open, 120 s at the close); one that fails or runs past its bound is never traded at that "
+         "auction and is decided later by the learner by itself (the lane's learner task, shadow only); the nightly "
+         "recompute re-decides each live decision and alarms on any mismatch on unchanged inputs; the training lag "
+         "follows the evening score. Each stall here is the captain's to read (a release, or the score chain).")
+
+
+class _View:
+    """A read-only connection in the shape league/events/learner.py reads (`.db`, `.meta`)."""
+
+    def __init__(self, db: Any):
+        self.db = db
+
+    def meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row[0])
+
+
+def facts(root: str | Path, now: float) -> dict[str, Any] | None:
+    """What the alarm reads, in one read-only transaction; None while no learner is pinned or the store is missing."""
+    from ..events import calendar as C
+    from ..events import learner as LR
+    from ..events import programs as P
+    from ..events import store as S
+
+    learners = P.learners()
+    path = Path(root) / STORE
+    if not learners or not path.exists():
+        return None
+    moment = dt.datetime.fromtimestamp(now, dt.timezone.utc)
+    today = moment.astimezone(C.NY).date()
+
+    def read(db: Any) -> dict[str, Any]:
+        view = _View(db)
+        tables = {str(r[0]) for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        out: dict[str, Any] = {"learners": {}}
+        for learner in learners:
+            sessions = [s for s in C.sessions(view, today - dt.timedelta(days=14), today)]
+            mine: dict[str, Any] = {"parts": [], "owed": [], "lag": None, "warm": None, "recompute": []}
+            for s in sessions[-LOOK_SESSIONS:]:
+                key = LR.PART_KEY.format(program=learner.id, version=learner.version, day=s.day.isoformat())
+                raw = view.meta(key)
+                rec = LR.decided(view, learner, s.day) if "learner_fits" in tables else None
+                if raw is not None:
+                    try:
+                        part = json.loads(raw)
+                    except ValueError:
+                        part = {"status": "unreadable"}
+                    mine["parts"].append({"day": s.day.isoformat(), "status": part.get("status"),
+                                          "decided_since": rec is not None})
+                tau = LR.tau_of(view, learner, s.day)
+                first = LR.house_receipt(view, learner, s.day)
+                if rec is None and first is not None and tau is not None and tau > S.parse_iso(P.REGISTERED_AT_7):
+                    try:
+                        finished = S.parse_iso(str(first["finished_at"]))
+                    except (TypeError, ValueError):
+                        continue
+                    if moment - finished > dt.timedelta(hours=OWED_HOURS):
+                        mine["owed"].append(s.day.isoformat())
+            if "learner_fits" in tables:
+                live = [dict(r) for r in db.execute("SELECT day, status, n_rows, n_sessions, train_last FROM learner_fits "
+                                                    "WHERE program=? AND version=? AND kind='live' ORDER BY day DESC "
+                                                    "LIMIT ?", (learner.id, learner.version, WARM_SESSIONS_MAX))]
+                if live:
+                    last = live[0]
+                    day = dt.date.fromisoformat(str(last["day"]))
+                    back = C.previous(view, day, 1 if learner.entry_at == "open" else 2)
+                    want = back[0].day.isoformat() if back else None
+                    mine["lag"] = {"day": last["day"], "want": want, "trained_through": last.get("train_last"),
+                                   "lagging": want is not None and (last.get("train_last") or "") < want}
+                    mine["warm"] = {"live": len(live), "unmet": sum(1 for r in live if r["status"] == "warmup")}
+            for s in sessions[-2:]:
+                raw = view.meta(LR.RECOMPUTE_KEY.format(day=s.day.isoformat()))
+                if raw is None:
+                    continue
+                try:
+                    got = json.loads(raw).get(f"{learner.id}@v{learner.version}") or {}
+                except ValueError:
+                    got = {"status": "unreadable"}
+                mine["recompute"].append({"day": s.day.isoformat(), "status": got.get("status"),
+                                          "cause": str(got.get("cause") or "")[:200]})
+            try:        # (PREREG-EVL-7 sections 1.10 and 3.1: the learner's real-money gate, league/events/judge7.py)
+                from ..events import judge7 as J7
+
+                mine["gate"] = J7.blocked(view, learner)
+                since = (mine["gate"] or {}).get("since")
+                if since:
+                    mine["gate"]["sessions"] = len(C.sessions(view, dt.date.fromisoformat(since), today))
+            except Exception as exc:  # noqa: BLE001 - said as unreadable
+                mine["gate"] = {"kind": "unreadable", "why": f"the learner's gate could not be read ({type(exc).__name__})"}
+            out["learners"][learner.id] = mine
+        # COST-7 (section 2.2 (c) and (d)): the latest night's row, its incomplete sessions, and whether a night whose
+        # score is in has none (every look of these versions then waits)
+        basis = None
+        if "cost_basis" in tables:
+            got = db.execute("SELECT night, incomplete, why FROM cost_basis ORDER BY id DESC LIMIT 1").fetchone()
+            basis = None if got is None else dict(got)
+        score = db.execute("SELECT MAX(started_at) FROM receipts WHERE job='score' AND status='ok'").fetchone()[0]
+        night = None
+        if score is not None:
+            night = S.parse_iso(str(score)).astimezone(C.NY).date()
+            if S.parse_iso(str(score)).astimezone(C.NY).time() < dt.time(12, 0):
+                prior = C.previous(view, night, 1)
+                night = prior[0].day if prior else night
+        try:
+            incomplete = json.loads((basis or {}).get("incomplete") or "[]")
+        except ValueError:
+            incomplete = ["unreadable"]
+        out["cost_basis"] = {"night": None if basis is None else basis["night"], "incomplete": len(incomplete),
+                             "why": None if basis is None else basis.get("why"),
+                             "missing": night is not None and (basis is None or str(basis["night"]) < night.isoformat()),
+                             "scored_night": None if night is None else night.isoformat()}
+        return out
+    with guard.readonly():
+        return guard.read(path, read)
+
+
+def judge(now: float, f: dict[str, Any] | None) -> dict[str, Any]:
+    """The cause's answer in league/ops/evl_health.py's shape."""
+    if f is None:
+        return {"stalled": False, "judged": False, "what": "Not judged: no PREREG-EVL-7 learner is registered "
+                "(REGISTERED_AT_7 is None) or the lane has no store.", "numbers": {"judged": False}, "doing": DOING,
+                "owner_step": None, "onset": None}
+    said: list[str] = []
+    numbers: dict[str, Any] = {"judged": True}
+    for pid, m in f["learners"].items():
+        open_parts = [p for p in m["parts"] if not p["decided_since"]]
+        for p in m["parts"]:
+            said.append(f"{pid}'s part of {p['day']} {p['status']} (never traded at that auction; "
+                        f"{'decided since by itself' if p['decided_since'] else 'not decided by itself yet'})")
+        if m["owed"]:
+            said.append(f"{pid} owes its own decision of {', '.join(m['owed'])} (the House's decision finished over "
+                        f"{OWED_HOURS:g} h ago)")
+        lag = m.get("lag") or {}
+        if lag.get("lagging"):
+            said.append(f"{pid}'s live decision of {lag['day']} trained through {lag.get('trained_through') or 'no row'}, "
+                        f"not {lag['want']} (its training lags: the evening score?)")
+        warm = m.get("warm") or {}
+        if warm.get("live", 0) >= WARM_SESSIONS_MAX and warm.get("unmet", 0) >= WARM_SESSIONS_MAX:
+            said.append(f"{pid} is still in its warm-up after {warm['live']} live decisions")
+        for r in m["recompute"]:
+            if r["status"] == "mismatch":
+                said.append(f"{pid}'s nightly recompute of {r['day']} MISMATCHED on unchanged inputs: {r['cause']}")
+        gate = m.get("gate") or {}
+        if gate.get("kind") in ALARM_GATES and ("since" not in gate or int(gate.get("sessions") or 0) > OVERDUE_SESSIONS):
+            said.append(f"{pid}: {gate.get('why')}" + (f" (due since {gate['since']})" if gate.get("since") else ""))
+        numbers[pid] = {"gate": gate.get("kind"), "parts_failed": len(m["parts"]), "parts_open": len(open_parts),
+                        "owed": len(m["owed"]),
+                        "lagging": bool(lag.get("lagging")), "warmup": warm,
+                        "mismatch": sum(1 for r in m["recompute"] if r["status"] == "mismatch")}
+    cb = f.get("cost_basis") or {}
+    if cb.get("missing") and moment_after(now, cb.get("scored_night")):
+        said.append(f"COST-7 has no cost_basis row for the night of {cb.get('scored_night')} after its score (every "
+                    "look of the learners waits: section 2.2 (d))")
+    if cb.get("incomplete"):
+        said.append(f"COST-7's attempt record is incomplete for {cb['incomplete']} sessions, left out of its measured "
+                    "terms (section 2.2 (c))" + (f": {str(cb.get('why'))[:160]}" if cb.get("why") else ""))
+    numbers["cost_basis"] = {"missing": bool(cb.get("missing")), "incomplete": int(cb.get("incomplete") or 0)}
+    stalled = bool(said)
+    what = ("PREREG-EVL-7's learners: " + "; ".join(said) + ".") if stalled else \
+        "PREREG-EVL-7's learners decided every auction they owe, on fresh training rows, with no recompute mismatch."
+    return {"stalled": stalled, "judged": True, "what": what[:1200], "numbers": numbers, "doing": DOING,
+            "owner_step": None, "onset": None}
+
+
+def moment_after(now: float, night: str | None) -> bool:
+    """Whether `now` is past the 00:30 ET after the night `night` (the cost basis step runs right after its score)."""
+    if not night:
+        return False
+    from ..events import calendar as C
+
+    day = dt.date.fromisoformat(str(night)) + dt.timedelta(days=1)
+    return now >= dt.datetime.combine(day, dt.time(0, 30), tzinfo=C.NY).timestamp()
+
+
+def check(root: str | Path, now: float) -> dict[str, Any]:
+    return judge(now, facts(root, now))
+
+
+__all__ = ["CAUSE", "DOING", "check", "facts", "judge", "OWED_HOURS", "LOOK_SESSIONS", "WARM_SESSIONS_MAX", "ALARM_GATES",
+           "OVERDUE_SESSIONS"]

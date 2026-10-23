@@ -1,0 +1,157 @@
+[
+{
+"lab": "N3|both|AR10|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.001,
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|both|AR20|phi0.15",
+"gen": {
+"day": "crash",
+"drift_sd": 0.002,
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.15,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|both|AR20|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.002,
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 30,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|both|AR20|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.002,
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.05,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|both|AR20|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.002,
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|both|nodrift|phi0.20",
+"gen": {
+"day": "crash",
+"ev_left": 1.4,
+"ev_right": 0.6,
+"jump_left": 0.8,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|dayskew|AR10|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.001,
+"jump_left": 0.5,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+},
+{
+"lab": "N3|dayskew|AR20|phi0.20",
+"gen": {
+"day": "crash",
+"drift_sd": 0.002,
+"jump_left": 0.5,
+"mu_family": -0.006,
+"nbar": 85,
+"phi_day": 0.2,
+"rho_day": 0.15,
+"skill": 0.006
+},
+"R": 4000,
+"T": 120,
+"opts": {
+"run2": true
+}
+}
+]

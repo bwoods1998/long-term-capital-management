@@ -7,7 +7,10 @@ rows of every close a release without them decided or whose part for them failed
 older decision a release without them made) | births [--day D] [--specs
 FILE] [--dry-run] (R3's births job: the architect's one call, or the captain's own specs from FILE, a JSON list of
 {spec, why}, with no call; validated and registered through the gateway's docs route, `--dry-run` validated only) |
-facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts). Prints one JSON summary.
+facts [--day D] [--specs FILE] (R3's outcome-free facts, with each spec's selection counts) | learners (PREREG-EVL-7's
+owed decisions, nothing while REGISTERED_AT_7 is None) | score-unlatch (release 1019i: the captain's clearing of the
+batched score's parity latch, league/events/score.py `unlatch`, once its flag 0 is explained; no gateway is read).
+Prints one JSON summary.
 """
 
 from __future__ import annotations
@@ -49,9 +52,13 @@ def catchup(ctx: R.Context) -> dict:
     those closes are never decided again. Then PREREG-EVL-5'S ROWS the same way (its section 3: `made_without(prereg=5)`,
     `decide_evl5`, oldest first, once), and R3'S REGISTERED BIRTHS the same way (release 1019e's review): every
     decision a release or a turn without them made last (`births_made_without`) gets the births' own decision
-    (`births_only`), as a backfill, and no PREREG row of it is decided again."""
+    (`births_only`), as a backfill, and no PREREG row of it is decided again. PREREG-EVL-6 (section 1.1, D8): the
+    release's mark is written first (once: `programs.mark_release`), and last every new version's copy of its
+    superseded version's record of the sessions decided before the release (`programs.copy_all_before_release`), as
+    the House's lane makes them."""
     st = ctx.store
     now = ctx.now()
+    P.mark_release(st, now)
     start = P.registered().astimezone(C.NY).date()
     done = {r[0] for r in st.db.execute("SELECT job FROM receipts WHERE status='ok' AND job LIKE 'decide-%'")}
     due = [s for s in C.sessions(st, start, now.astimezone(C.NY).date()) if s.open_decide <= now]
@@ -71,6 +78,7 @@ def catchup(ctx: R.Context) -> dict:
     for kind, day in SN.births_made_without(st, now.astimezone(C.NY).date()):
         decide = R.decide_open if kind == "open" else R.decide_close
         out[f"{SN.BIRTHS_KIND[kind]}:{day}"] = decide(ctx, day, backfill_run=True, births_only=True)
+    out["copy-evl6"] = P.copy_all_before_release(st, through=now.astimezone(C.NY).date())
     return out
 
 
@@ -119,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("score")
     sub.add_parser("screen")
     sub.add_parser("bands")
+    sub.add_parser("learners", help="PREREG-EVL-7's owed decisions (the reconstruction, the catch-up, late decisions), "
+                                    "oldest first, as the House's learner task makes them")
     rp = sub.add_parser("report")
     rp.add_argument("--day", type=_day, default=None)
     bi = sub.add_parser("births")
@@ -128,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     fa = sub.add_parser("facts")
     fa.add_argument("--day", type=_day, default=None)
     fa.add_argument("--specs", default=None)
+    sub.add_parser("score-unlatch")
     args = ap.parse_args(argv)
+    if args.cmd == "score-unlatch":     # (release 1019i: the parity latch, cleared with no gateway and no program read)
+        with S.Store(args.state) as st:
+            out = {"cleared": SC.unlatch(st)}
+        json.dump(out, sys.stdout, default=str, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
     with S.Store(args.state) as st:
         P.load_births(st)       # (R3: the registered births, after every PREREG program)
         gw = G.Gateway(G.token_from_env(), min_interval=0.05)
@@ -160,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
 
             out = {"bands": {f"{p}@v{v}": b for (p, v), b in sorted(BA.bands(st).items())},
                    "review": BA.review(st, now=ctx.now())}
+        elif args.cmd == "learners":
+            from . import learner as LR
+
+            out = {"catchup": LR.catchup(st, ctx.now), "still_owed": len(LR.due(st, ctx.now()))}
         elif args.cmd in ("births", "facts"):
             from . import births as BI
 

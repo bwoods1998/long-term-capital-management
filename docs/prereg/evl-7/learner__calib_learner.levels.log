@@ -1,0 +1,18 @@
+levels: 5/60 jobs, 79s (last 40s)
+levels: 10/60 jobs, 128s (last 46s)
+levels: 15/60 jobs, 159s (last 29s)
+levels: 20/60 jobs, 176s (last 17s)
+levels: 25/60 jobs, 202s (last 16s)
+levels: 30/60 jobs, 223s (last 16s)
+levels: 35/60 jobs, 241s (last 16s)
+levels: 40/60 jobs, 260s (last 18s)
+levels: 45/60 jobs, 280s (last 14s)
+levels: 50/60 jobs, 300s (last 13s)
+levels: 55/60 jobs, 315s (last 15s)
+levels: 60/60 jobs, 331s (last 13s)
+{"cell": "N1-worst-n300-V0", "EVL3": {"pass": 0.176, "retired": 0.138, "by20": 0.063, "by40": 0.109, "by60": 0.142, "by120": 0.176, "median_pass_session": 29.5}, "L12": {"pass": 0.083, "retired": 0.029, "by20": 0.051, "by40": 0.083, "by60": 0.083, "by120": 0.083, "median_pass_session": 17.0}, "E840": {"pass": 0.089, "retired": 0.032, "by20": 0.059, "by40": 0.083, "by60": 0.089, "by120": 0.089, "median_pass_session": 16.0}, "ev": 7.65, "mean_a_bp": 4.402672568016677}
+{"cell": "N2-ic05-worst-n300-V0", "EVL3": {"pass": 0.127, "retired": 0.237, "by20": 0.057, "by40": 0.086, "by60": 0.107, "by120": 0.127, "median_pass_session": 22.0}, "L12": {"pass": 0.057, "retired": 0.065, "by20": 0.039, "by40": 0.057, "by60": 0.057, "by120": 0.057, "median_pass_session": 16.0}, "E840": {"pass": 0.065, "retired": 0.063, "by20": 0.051, "by40": 0.063, "by60": 0.065, "by120": 0.065, "median_pass_session": 15.0}, "ev": 7.65, "mean_a_bp": -7.568890988493814}
+{"cell": "N1-worst-n300-V2", "EVL3": {"pass": 0.156, "retired": 0.141, "by20": 0.072, "by40": 0.11, "by60": 0.129, "by120": 0.156, "median_pass_session": 22.0}, "L12": {"pass": 0.092, "retired": 0.03, "by20": 0.063, "by40": 0.092, "by60": 0.092, "by120": 0.092, "median_pass_session": 17.0}, "E840": {"pass": 0.088, "retired": 0.029, "by20": 0.064, "by40": 0.084, "by60": 0.088, "by120": 0.088, "median_pass_session": 16.0}, "ev": 7.6, "mean_a_bp": 4.240064106135298}
+{"cell": "N2-ic05-worst-n300-V2", "EVL3": {"pass": 0.11, "retired": 0.246, "by20": 0.047, "by40": 0.074, "by60": 0.094, "by120": 0.11, "median_pass_session": 22.5}, "L12": {"pass": 0.052, "retired": 0.057, "by20": 0.038, "by40": 0.052, "by60": 0.052, "by120": 0.052, "median_pass_session": 15.0}, "E840": {"pass": 0.051, "retired": 0.054, "by20": 0.034, "by40": 0.051, "by60": 0.051, "by120": 0.051, "median_pass_session": 15.0}, "ev": 7.55, "mean_a_bp": -9.113287888215414}
+{"cell": "N1-worst-n300-V3", "EVL3": {"pass": 0.173, "retired": 0.126, "by20": 0.072, "by40": 0.112, "by60": 0.14, "by120": 0.173, "median_pass_session": 28.0}, "L12": {"pass": 0.086, "retired": 0.035, "by20": 0.056, "by40": 0.086, "by60": 0.086, "by120": 0.086, "median_pass_session": 17.0}, "E840": {"pass": 0.091, "retired": 0.035, "by20": 0.065, "by40": 0.087, "by60": 0.091, "by120": 0.091, "median_pass_session": 16.0}, "ev": 7.25, "mean_a_bp": 5.3321610895414375}
+{"cell": "N2-ic05-worst-n300-V3", "EVL3": {"pass": 0.123, "retired": 0.168, "by20": 0.047, "by40": 0.077, "by60": 0.098, "by120": 0.123, "median_pass_session": 28.0}, "L12": {"pass": 0.059, "retired": 0.032, "by20": 0.044, "by40": 0.059, "by60": 0.059, "by120": 0.059, "median_pass_session": 16.0}, "E840": {"pass": 0.058, "retired": 0.032, "by20": 0.046, "by40": 0.055, "by60": 0.058, "by120": 0.058, "median_pass_session": 15.5}, "ev": 6.67, "mean_a_bp": -9.097111817968434}

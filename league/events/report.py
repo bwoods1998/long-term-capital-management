@@ -4,9 +4,11 @@ For one New York day: the events recorded by family (8-K with item 2.02, other 8
 failed counts; the verdicts by status and their cost; each program's intents (planned / entered / skipped / exited)
 entering that day and to date; its settled outcomes to date (n, issuers, sessions, mean r, mean a, mean a of the
 TRADABLE events, the market direction); for a seatable program its next look and its last look's result; the gap
-between the auction prints and the daily bars of the day's settled events; the expected false passes (0.10 x every
-seatable version registered, of the lane's stated budget); the events its decisions KEPT OUT of each program's record
-(release 1019c: a session a look of its group stands over is decided again for nothing, and its decision receipt lists
+between the auction prints and the daily bars of the day's settled events; the expected false passes (PREREG-EVL-6
+section 5: 0.13 for every version it registers or judges and every fresh run, of the lane's restated 3.9, shown three
+ways with the per-version figure beside; a PREREG-EVL-6 version's runs, its per-run and per-version figures, its next
+look in settled blocks and its last look's tag, S, q and issuer p; a superseded version named as a shadow record);
+the events its decisions KEPT OUT of each program's record (release 1019c: a session a look of its group stands over is decided again for nothing, and its decision receipt lists
 what it left out, PREREG-EVL-4's and PREREG-EVL-5's rows' own decisions `decide-close-evl4` and `decide-close-evl5`
 included; PREREG-EVL-1 section 3's late share); the shadow's difference from real money by storage time (`late_rows`:
 events whose row was stored after their decision, intents a later row excluded or, PREREG-EVL-5, put in a set that
@@ -241,23 +243,39 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
         last_out["issuer"] = detail.get("issuer")
         last_out["control"] = detail.get("control")
     from .bands import bands as _bands
+    from .programs import BY_KEY
 
     v2 = SC._seating(program, version)
+    prog = BY_KEY.get((program, int(version)))
+    v6 = bool(prog is not None and prog.evl6)
     left = kept_out(store, day) if left is None else left
     mine = left.get(program if int(version) == 1 else f"{program}@v{int(version)}") or {}
     held = {str(r[0]) for r in store.db.execute("SELECT event FROM intents WHERE program=? AND version=?",
                                                 (program, version))}
     out_events = set(mine.get("events") or ()) - held
-    return {
+    out = {
         "program": program, "version": version, "seatable": program in SC.SEATABLE or bool(v2),
         "band": _bands(store).get((program, int(version))) if v2 else None,
         "intents_today": today, "intents_all": every, "settled": settled,
         "kept_out": {"events": len(out_events), "unjudged": len(set(mine.get("unjudged") or ()) - held - out_events)},
         "settled_today": sum(1 for r in rows if r["exit_day"] == day),
-        "next_look": _next_look(store, program, version, day, v2),
+        "next_look": _next_look(store, program, version, day, v2, v6),
         "last_look": last_out, "held_looks": sum(1 for r in looks if r["held"]),
         "late_rows": late_rows(store, program, version, day),
     }
+    if prog is not None and prog.superseded6:
+        # (PREREG-EVL-6 section 1.1: a superseded version is a shadow record; its PREREG-EVL-3 looks are reported and
+        # move no band, D7)
+        out["superseded_by"] = int(version) + 1
+    if v6:
+        # PREREG-EVL-6 section 5: PER RUN (the unit the goal's 15% is read in) and PER VERSION (1 - 0.87^n after n runs)
+        runs = SC.runs6(store, program, version)
+        detail = (SC.look_detail(store, program, version, int(last["k"])) or {}).get("v6") if last is not None else None
+        if last_out is not None and detail:
+            last_out["v6"] = {k: detail.get(k) for k in ("tag", "S", "q", "p_issuer", "decision", "kind", "n")}
+        out["v6"] = {"runs": len(runs), "fresh_runs": len(runs) - 1, "stays": len(SC.stays6(store, program, version)),
+                     "per_run": SC.V6_CHARGE, "per_version": round(1 - (1 - SC.V6_CHARGE) ** len(runs), 3)}
+    return out
 
 
 def gaps(store: S.Store, day: dt.date) -> dict[str, Any]:
@@ -420,6 +438,11 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
     now = now or S.utc_now()
     left = kept_out(store, day)
     programs = [program_status(store, p, v, day, left=left) for p, v in _programs(store)]
+    from .programs import is_learner
+
+    for p in programs:      # (PREREG-EVL-7: its learners' looks are PREREG-EVL-6's on COST-7, never PREREG-EVL-3's)
+        if is_learner(p["program"]):
+            p["next_look"] = _learner_next(store, p["program"], p["version"])
     with_rows = {p["program"] for p in programs}
     return {
         "day": day.isoformat(), "generated_at": S.iso(now), "session": C.session(store, day) is not None,
@@ -428,6 +451,7 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "gaps": gaps(store, day), "expected_false_passes": SC.expected_false_passes(store),
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
         "settle": settle_pace(store, day), "fill_rates": _fill_rates(store, day), "eight": _eight(store, day),
+        "learners": _learners(store, day),
     }
 
 
@@ -507,7 +531,8 @@ def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
     (receipts `score` whose summary's `day` is the session `night`, league/events/house.py `_score`) added up: passes,
     whether the last finished the night (`complete`), intents tried, settled, skipped, waiting and failed, the passes'
     seconds and the settlements a minute over them (`pace`), the batched passes, the gateway requests by kind (bars,
-    trades, other) and the parity night's flags (checked, equal: counts only). None when no pass of the night is on
+    trades, other), the parity night's flags (checked, equal: counts only) and whether THE PARITY LATCH stands
+    (league/events/score.py `latched`: a flag 0 turned the batched score off). None when no pass of the night is on
     record."""
     passes = []
     for r in store.db.execute("SELECT status, summary FROM receipts WHERE job='score' ORDER BY id"):
@@ -534,6 +559,9 @@ def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
             out["parity"][kind] += int((x.get("parity") or {}).get(kind) or 0)
     out["seconds"] = round(out["seconds"], 1)
     out["pace"] = round(out["settled"] / (out["seconds"] / 60.0), 1) if out["seconds"] > 0 else None
+    from . import score as SCO
+
+    out["latched"] = SCO.latched(store) is not None
     return out
 
 
@@ -545,6 +573,34 @@ def _fill_rates(store: S.Store, day: dt.date) -> dict[str, Any] | None:
         return AT.fill_rates(store, day)
     except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
         return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+
+def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
+    """A learner's next look as the report reads it (league/events/judge7.py `next_look`): its current run, the next
+    look's threshold in blocks (PREREG-EVL-6's 22, 25, 30, 35, 40, 50, 60), the run's settled blocks over its LIVE
+    decisions' picks only (never a catch-up's), and what holds its real money when something does (the gate's why).
+    Counts only."""
+    from . import judge7 as J7
+    from .programs import BY_KEY
+
+    prog = BY_KEY.get((program, int(version)))
+    try:
+        if prog is None:
+            raise LookupError(f"{program} v{version} is in no registry")
+        return J7.next_look(store, prog)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"k": None, "at_sessions": None, "sessions": 0, "status": f"unreadable ({type(exc).__name__})"}
+
+
+def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:
+    """PREREG-EVL-7's learner lines (league/events/learner.py `report_lines`): each learner's decision of the day, its
+    candidates, picks and training rows (counts only: no fitted figure reaches the report); [] while none is pinned."""
+    from . import learner as LR
+
+    try:
+        return LR.report_lines(store, day)
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return [{"error": f"{type(exc).__name__}: {str(exc)[:120]}"}]
 
 
 def _births(store: S.Store) -> dict[str, Any]:
@@ -561,9 +617,9 @@ def _pct(x: float | None) -> str:
     return "n/a" if x is None else f"{x * 100:+.2f}%"
 
 
-def _next_look(store: S.Store, program: str, version: int, day: dt.date, v2: bool) -> dict[str, Any]:
+def _next_look(store: S.Store, program: str, version: int, day: dt.date, v2: bool, v6: bool = False) -> dict[str, Any]:
     """A program's next look: PREREG-EVL-8's versions by their own judge (league/events/screen8.py `next_look`, S_k
-    blocks), every other as before."""
+    blocks), PREREG-EVL-6's by its screen (`screen.next_look6`), every other as before."""
     from . import programs as P
 
     prog = P.BY_KEY.get((program, int(version)))
@@ -574,6 +630,8 @@ def _next_look(store: S.Store, program: str, version: int, day: dt.date, v2: boo
         if got.get("k") is None:
             return got
         return {"k": got["k"], "at_sessions": got["blocks_needed"], "sessions": got["blocks"], "status": got["status"]}
+    if v6:
+        return SC.next_look6(store, program, version, day)
     return SC.next_look_v2(store, program, version, day) if v2 else SC.next_look(store, program, version, day)
 
 
@@ -587,6 +645,10 @@ def render(report: Mapping[str, Any]) -> str:
     fam.append(f"news {ev['news']['total']} (live {ev['news']['live']})")
     lines.append("Events: " + " | ".join(fam) + f"; recorded today {ev['recorded_today']}")
     lines.append("Verdicts: " + " | ".join(f"{s} {v['n']} ${v['usd']:.2f}" for s, v in vd.items()))
+    for x in report.get("learners") or []:     # (PREREG-EVL-7: counts only)
+        from . import learner as LR
+
+        lines.extend(LR.render_lines([x]) if "error" not in x else [f"Learners: {x['error']}"])
     for p in report["programs"]:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)
@@ -602,10 +664,15 @@ def render(report: Mapping[str, Any]) -> str:
         if lr.get("stored_late") or lr.get("excluded_late"):
             line += (f"; stored after its decision {lr.get('stored_late', 0)} (today {lr.get('stored_late_today', 0)}), "
                      f"excluded by a later row {lr.get('excluded_late', 0)}")
+        if p.get("superseded_by"):
+            line += f"; superseded by v{p['superseded_by']} (PREREG-EVL-6: a shadow record, its looks move no band)"
         if p["seatable"]:
             nl, ll = p["next_look"], p["last_look"]
             if nl.get("k") is None:
-                nxt = "all written"
+                nxt = "all written" if "status" not in nl or nl["status"] == "all looks written" else nl["status"]
+            elif "blocks_needed" in nl:      # (PREREG-EVL-6: looks counted in settled session blocks, by run or stay)
+                nxt = (f"{nl['kind']} {nl['n']} look {nl['k']} at {nl['blocks_needed']} blocks (now {nl['blocks']}, "
+                       f"events {nl['events']}, issuers {nl['issuers']})")
             elif "events_needed" in nl:
                 nxt = (f"look {nl['k']} at {nl['events_needed']} events (now {nl['events']}, issuers {nl['issuers']}, "
                        f"blocks {nl['blocks']})")
@@ -613,6 +680,14 @@ def render(report: Mapping[str, Any]) -> str:
                 nxt = f"look {nl['k']} at session {nl['at_sessions']} (now {nl.get('sessions', 0)}, {nl['status']})"
             if ll is None:
                 last = "none"
+            elif ll.get("v6"):
+                d6 = ll["v6"]
+                verdict = {"pass": "PASS", "retire": "RETIRE"}.get(str(d6.get("decision")), "fail")
+                last = f"look {d6.get('tag') or ''}S{d6.get('S')} {verdict}"
+                if ll["p"] is not None:
+                    last += f" p {ll['p']:.4f}/{ll['alpha']:.3f}, q {float(d6.get('q') or 0):.4f}"
+                if d6.get("p_issuer") is not None:
+                    last += f", issuer p {float(d6['p_issuer']):.4f}/{SC.V6_ISSUER_P:.2f}"
             else:
                 last = f"look {ll['k']} " + ("PASS" if ll["passed"] else ("fail" if ll["held"] else "skipped"))
                 if ll["p"] is not None:
@@ -620,6 +695,10 @@ def render(report: Mapping[str, Any]) -> str:
                 if ll.get("issuer"):
                     last += f", issuer p {ll['issuer']['p']:.4f}/{ll['issuer']['alpha']:.3f}"
             line += f"; next {nxt}; last {last}"
+            if p.get("v6"):
+                v6 = p["v6"]
+                line += (f"; runs {v6['runs']} (each {v6['per_run']:.2f} worst plausible), per version "
+                         f"{v6['per_version']:.2f}")
         lines.append(line)
     if report["registered_without_intents"]:
         lines.append("No intents yet: " + ", ".join(report["registered_without_intents"]))
@@ -628,9 +707,13 @@ def render(report: Mapping[str, Any]) -> str:
         f"{side} n {g['n']}" + (f", mean {g['mean_bp']:+.1f} bp, size {g['mean_abs_bp']:.1f} bp" if g["n"] else "")
         for side, g in gp.items()))
     efp = report["expected_false_passes"]
-    line = f"Expected false passes: {efp['expected']:.1f} (0.10 x {efp['versions']} seatable versions)"
-    if efp.get("budget") is not None:
-        line += f" of the lane's stated {efp['budget']:.1f} (PREREG-EVL-4 section 3; {efp['left']:.1f} left)"
+    # PREREG-EVL-6 section 5: THREE WAYS (this file's count at 0.13 a version or run, the base model's 0.03, the
+    # stresses' worst 0.17) and the per-version figure beside them (0.24 within 120 sessions at the worst plausible cell)
+    line = (f"Expected false passes: {efp['expected']:.2f} ({efp.get('charge', 0.13):.2f} x {efp['versions']} versions "
+            f"and {efp.get('runs', 0)} fresh runs; base {efp.get('base', 0):.2f}, stresses' worst "
+            f"{efp.get('stress', 0):.2f}) of the lane's restated {efp['budget']:.1f} (PREREG-EVL-6 section 5; "
+            f"{efp['left']:.2f} left, {efp.get('waiting', 0)} runs waiting); per version "
+            f"{efp.get('per_version', 0.24):.2f} within 120 sessions")
     lines.append(line)
     e5 = report.get("evl5") or {}
     if e5.get("funnel") or e5.get("failed") or any((e5.get("room") or {}).values()):
@@ -677,6 +760,8 @@ def render(report: Mapping[str, Any]) -> str:
         par = pace.get("parity") or {}
         if par.get("checked"):
             line += f"; parity {par['equal']} of {par['checked']} equal"
+        if pace.get("latched"):
+            line += "; THE BATCHED SCORE IS OFF: a parity flag 0 latched it (score-unlatch once explained)"
         lines.append(line)
     fr = report.get("fill_rates")
     if fr and fr.get("auctions"):

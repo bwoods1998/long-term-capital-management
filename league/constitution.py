@@ -932,12 +932,12 @@ CONSTITUTION: dict[str, Any] = {
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 1, "family_share": "0.15", "floor_usd": "0",
-                  "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
+                  "max_open": 8, "loss_budget_usd": "1900", "loss_window_sessions": 20, "loss_total_usd": "1900",
                   "loss_basis": "net", "demotion": "dm1"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.90",
-        "daily_stop_share": "0.35",
+        "daily_stop_share": "0.25",
         "drawdown_stop_share": "0.60",
         "tuition": {"day_usd": "200", "week_usd": "300"},
         "calibration": {"day_usd": "50"},
@@ -1222,16 +1222,17 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   when that rounds to none, one share when it fits every wall and, at learning and at Probe, when one share at the
 #   limit is at most `one_share_max` of the band (0.05 each) of E; otherwise the event is skipped (the shadow keeps it).
 # - `max_open`: open positions a program may hold (learning 8, Probe 6, Sized 8).
-# - `max_open_v8` (release 1019j; PREREG-EVL-8 section 4.1, F4): THE PX SEATS' LEARNING ROOM. PREREG-EVL-8's three PX
-#   seats (PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1) hold AT MOST 4 OPEN LEARNING POSITIONS a program, read for them ALONE
-#   (league/events/book.py `max_open_8`; every other program, PREREG-EVL-8's meta-learners included, keeps
-#   `max_open.learning` 8). Its bound is 0-4: 4 is the registered loose end (the text's own number, so a change may only
-#   trade less) and 0 stops every PX learning buy. The red team's reason (goal-2026-10-19/evl8/redteam/rt_budget.py):
-#   five more programs' full learning books would hold loss-budget and cash room the Probe tier needs; the PX screen's
-#   money weights and top guard read the same 4 (F4). ITS COST, PLAINLY: at most 3 x 4 = 12 more learning lots at about
-#   2% of E each (0.24 x E at target), every lot under the name's 10%, the 100% book, the cash, the loss budget at the
-#   lot's weight and A85's reservation; no wall moves; this file's buys are planned and sent after every earlier row's
-#   (league/events/book.py `EIGHT_ROOM`), so no earlier row's room moves.
+# - `max_open_v6` (release 1019i; PREREG-EVL-6 section 6, the captain's A99 and A100, which names the row): PREREG-EVL-6'S
+#   PROBE BAND HOLDS AT MOST 14 OPEN for the versions registered at or after REGISTERED_AT_6 (2026-10-22T12:24:50Z: its
+#   fifteen new versions, every seatable birth's version 2 and every birth registered from then on; league/events/
+#   programs.py `Program.evl6`), read for them ALONE (league/events/book.py `Settings.max_open`); `max_open.probe` STAYS
+#   6 with its bound 0-6 for every version registered before it (PREREG-EVL-1 section 8's frozen 6, A86 REVISED: a
+#   superseded version never moves a band again and keeps it). Its bound is 0-14: 14 is the registered loose end (the
+#   frozen text's own number, so a change may only trade less) and 0 stops every PREREG-EVL-6 Probe buy. ITS COST,
+#   PLAINLY: a PREREG-EVL-6 program at Probe may hold 14 x 0.035 = 0.49 x E at target (A97: "14 holds one program to
+#   about 49% of E at target"; 6 x 0.035 = 0.21 before), its worst case 14 lots at the 5% envelope 0.70 x E, every lot
+#   still under the name's 10%, the 100% book, the cash, the loss budget at the lot's weight and A85's reservation; no
+#   wall moves and the book's open-risk ceiling is unchanged (cash binds: synth_sim's p95 peak open risk $156-157).
 # - A86 REVISED, PROBE SMALLER, INSIDE THE TRADE-LESS ENVELOPE (the captain's amendment of 20:30Z Oct 21, 2026,
 #   replacing A86's proposal; decided before any Probe event; a sizing rule inside the frozen envelope: no program's
 #   rule and no judge, look, alpha or Done rule moves): the Probe band was PREREG-EVL-1 section 8's 5% of E with at
@@ -1304,13 +1305,22 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # sold by it: every open event lot exits at its own scheduled auction). Its reader is league/events/book.py `settings`
 # (league/live/money.py's `EquityTable`, inside the options execution fingerprint, reads its rows by name and does not
 # read this one).
+# THE OWNER'S GOAL V3 (04:40Z Oct 23, 2026; the captain's A138, release 1019l): "I accept losing my entire Alpaca balance.
+# Use it. My only money walls: a cash account ..., a kill switch, a bug stop that pauses new entries after a 25% loss in
+# one session ... every seatable program trades real money from its first event at up to 5% of equity a position ...
+# up to 25% of equity a name; idle cash is a cost". So: learning 0.02 -> 0.05 (its bound with it), Probe 0.035 -> 0.05
+# (a learning position is never larger than a Probe one; Probe and Sized scale-up past PREREG-EVL-1 section 8's frozen
+# envelope is a later release with its own analysis; the name's wall stays 0.10 here and at the gateway's
+# STOCK_EVENT_SHARE_MAX until that release raises both toward V3's 25%); in the options
+# table the shared loss budget $400 a window and $800 in total -> $1,900 each (about the balance on Oct 23) and the
+# daily stop 0.35 -> 0.25 (V3's bug stop). The shadows, the screens and every judge are unchanged: only real-money size.
 CONSTITUTION["equity_money"]["event"] = {
     "enabled": True,
-    "position_share": {"learning": "0.02", "probe": "0.035", "sized": "0.10"},
+    "position_share": {"learning": "0.05", "probe": "0.05", "sized": "0.10"},
     "one_share_max": {"learning": "0.05", "probe": "0.05"},
     "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
-    "max_open_v8": {"learning": 4},
+    "max_open_v6": {"probe": 14},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
     "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
@@ -1366,9 +1376,9 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # since Oct 10). 2000 sessions is the CON-only rollback's window (every close since the fast lane); a longer window
     # is never looser, under either basis (the table's comment: under "net" the window's figure is its worst net
     # stretch).
-    "probe.loss_budget_usd": ("0", "400"),
+    "probe.loss_budget_usd": ("0", "1900"),
     "probe.loss_window_sessions": ("20", "2000"),
-    "probe.loss_total_usd": ("0", "800"),
+    "probe.loss_total_usd": ("0", "1900"),
     "probe.open_per_family": ("1", "5"),
     "probe.family_share": ("0.08", "0.15"),
     "probe.floor_usd": ("0", "100"),
@@ -1546,7 +1556,7 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # values are the loose end of each row (a lower share, a lower one-share cap, fewer open positions, a lower limit, a
     # stricter floor or z may only trade less); the moments the rules fix are exact. The captain's A86 REVISED moves the
     # Probe share's VALUE inside its row (0.035) and adds the Probe one-share row; no bound is loosened.
-    "event.position_share.learning": ("0", "0.02"),
+    "event.position_share.learning": ("0", "0.05"),
     "event.position_share.probe": ("0", "0.05"),
     "event.position_share.sized": ("0", "0.10"),
     "event.one_share_max.learning": ("0", "0.05"),
@@ -1561,9 +1571,9 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "event.max_open.learning": ("0", "8"),
     "event.max_open.probe": ("0", "6"),
     "event.max_open.sized": ("0", "8"),
-    # RELEASE 1019j (PREREG-EVL-8 section 4.1): the PX seats' learning room alone; every other program keeps
-    # `event.max_open.learning` 8 and its bound.
-    "event.max_open_v8.learning": ("0", "4"),
+    # RELEASE 1019i (PREREG-EVL-6 section 6, A99, A100): the Probe slots of the versions registered at or after
+    # REGISTERED_AT_6 alone; `event.max_open.probe` keeps 6 and its bound for every version before it.
+    "event.max_open_v6.probe": ("0", "14"),
     "event.per_name_share": ("0", "0.10"),
     "event.limit_ratio": ("1.00", "1.25"),
     "event.open_risk.floor": ("0.10", "1.00"),
@@ -1656,7 +1666,7 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
                   "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
-                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized", "event.max_open_v8.learning",
+                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized", "event.max_open_v6.probe",
                   "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS),
                   "event.max_orders_day")
 EQUITY_CLASSES = ("etf", "stock")
@@ -1816,4 +1826,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '84dc7041f2de5d7811698284cb7287a334cd341198c0e2b09f4f27f70c0c8fe2'
+PINNED_DIGEST = '3feab26da60f48ac72d156b81f02261ffb08556adeeb97ccb1f922ab74c12614'

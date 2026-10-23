@@ -35,6 +35,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import schedule as ES
 from league.events import bands as BA
 from league.events import book as EB
@@ -123,6 +124,7 @@ class WorldCase(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the rows
+@on_1019h
 class TheRows(unittest.TestCase):
     def test_the_five_rows_as_frozen(self):
         self.assertEqual(P.REGISTERED_AT_4, "2026-10-19T16:01:05Z")
@@ -186,6 +188,7 @@ class TheRows(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the judge
+@on_1019h
 class TheJudge(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -202,7 +205,9 @@ class TheJudge(unittest.TestCase):
         self.assertNotIn("EVL-8K-REACT-ON", SC.CONTROLS, "no control condition for the REACT row (section 4)")
         self.assertEqual({SC.HOLDS[p] for p in FOUR}, {1})
         self.assertEqual([SC._seating(p, 1) for p in FOUR], [True, True, True, False, False])
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
+        efp = SC.expected_false_passes(self.st)     # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version or run of 3.9)
+        self.assertEqual({k: efp[k] for k in ("versions", "expected", "budget", "left")},
+                         {"versions": 15, "expected": 1.95, "budget": 3.9, "left": 1.95})
 
     def _settle(self, program: str, per_day: int, days: list[dt.date], a: float, start: int = 0) -> int:
         """Synthetic settled close-to-next-open events of (program, version 1): `per_day` a session, each its own
@@ -379,6 +384,7 @@ class TheWindows(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the rules
+@on_1019h
 class TheRules(WorldCase):
     def test_8k_react_takes_a_rise_of_4_percent_and_ranks_by_it(self):
         g = self.w.gw
@@ -481,6 +487,7 @@ class TheRules(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- late rows
+@on_1019h
 class TheLateRows(WorldCase):
     def test_a_redecision_marks_an_unsettled_intent_excluded_by_a_row_stored_later(self):
         w = self.w
@@ -524,6 +531,7 @@ class TheLateRows(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- real money
+@on_1019h
 class TheBook(WorldCase):
     def lane(self) -> EB.Lane:
         lane = EB.Lane(self.w.root / S.DB_NAME)
@@ -609,6 +617,7 @@ class TheBook(WorldCase):
         self.assertEqual(V.PROMPTS["news"].sha, "4b5245a95835a32f37eaf79ebbd54cc9aa72e1c4608e3ad96e00d302463bcacf")
 
 
+@on_1019h
 class TheSaleGateCount(TB.EventTest):
     """Section 1.3's stated case, counted and never prevented: an earlier row's real-money buy at the next open lost to
     the sale gate because this file's overnight lot of the same name sells at that open."""
@@ -954,6 +963,11 @@ class TheProof(unittest.TestCase):
             ("EVL-CTRL-NEWSPM-ON", "EEE", "planned"), ("EVL-CTRL-NEWSPM-ON", "JJJ", "planned")},
             "AAA (ERN), DDD (DAY) excluded; FFF's news skipped for its 8-K; HHH excluded by its late earnings 8-K")
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

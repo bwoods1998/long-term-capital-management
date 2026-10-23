@@ -75,6 +75,11 @@ class PxCut(Exception):
     before it. The job stops; what it stored stays, and the next run goes on from there."""
 
 
+class PxRoom(PxCut):
+    """A PX read refused before it went because the store has no room (league/events/pxstore.py `room`: px.sqlite at
+    its 2 GB line, or the state disk under the PX floor): the run stops (`disk`) and writes nothing more."""
+
+
 # ------------------------------------------------------------------------------------------------- the bucket
 class TokenBucket:
     """`rate_per_minute` tokens a minute, at most `capacity` held (THE LANE'S BUCKET, the module docstring). `take_lane`
@@ -134,11 +139,12 @@ class TokenBucket:
 class PxGateway:
     """The gateway as a PX recorder reads it: the SIP bars route only (any other path or feed raises ValueError), each
     request a PX token of `bucket` (`take_px`, no later than `until`) and refused once `late()` says the job's bound
-    passed (`PxCut` either way); counted (`requests`)."""
+    passed (`PxCut` either way), or once `room()` names a line the store crossed (`PxRoom`: the page a request would
+    bring is never written); counted (`requests`)."""
 
     def __init__(self, inner: Any, bucket: TokenBucket, *, until: float | None = None,
-                 late: Callable[[], bool] | None = None):
-        self.inner, self.bucket, self.until, self.late = inner, bucket, until, late
+                 late: Callable[[], bool] | None = None, room: Callable[[], str | None] | None = None):
+        self.inner, self.bucket, self.until, self.late, self.room = inner, bucket, until, late, room
         self.requests = 0
 
     def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -149,6 +155,9 @@ class PxGateway:
             raise ValueError("the PX recorders read SIP only")
         if self.late is not None and self.late():
             raise PxCut("the job's bound passed")
+        why = self.room() if self.room is not None else None
+        if why:
+            raise PxRoom(why)
         if not self.bucket.take_px(self.until):
             raise PxCut("the lane's bucket keeps its reserve past the job's bound")
         self.requests += 1
@@ -497,7 +506,7 @@ def names(px: PS.PxStore, day: dt.date, rule: str = S.LIVE_RULE) -> list[str]:
     return sorted(str(r["symbol"]) for r in px.universe(day, rule).values())
 
 
-__all__ = ["TokenBucket", "PxGateway", "PxCut", "daily_bars", "minute_bars", "span_1530", "span_pm", "span_v1530",
+__all__ = ["TokenBucket", "PxGateway", "PxCut", "PxRoom", "daily_bars", "minute_bars", "span_1530", "span_pm", "span_v1530",
            "span_o0930", "first_open",
            "pm_value", "last_close", "volume", "minutes", "backfill", "daily", "flags", "listed_tickers",
            "operating_fill", "cached_operating", "universe", "pm_names", "names", "BARS_PATH", "RATE_PER_MINUTE",

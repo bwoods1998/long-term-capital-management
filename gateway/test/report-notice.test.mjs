@@ -33,9 +33,11 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
   // One screen: 44 lines before release 1019f; the day's real buys add three (A80 (2)), the break-even edge a fourth once a
   // Probe buy exists, and the Done line (the goal V2) three; release 1019h's Done supply line its head, a line or two
   // of Probe+ rows and its reach (four for the fixture's two rows).
-  // Release 1019i: the attempts ledger's fill rates (two lines an auction) and the batched score's settle pace (two).
-  assert.ok(text.length <= 61, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2; no Probe buy: 60)
-  assert.equal(text.length, 60);
+  // Release 1019i: the attempts ledger's fill rates (two lines an auction), the batched score's settle pace (two) and,
+  // its review, the PX line (one).
+  // Release 1019j: PREREG-EVL-7's learner line (counts only) makes 62.
+  assert.ok(text.length <= 62, `one screen: ${text.length} lines`);   // (44 + 3 + 1 + 3 + 4 + 4 + 2 + 1 + 1; no Probe buy: 62)
+  assert.equal(text.length, 62);
   assert.deepEqual(text.slice(0, 7), [
     'The event lane, 2026-10-20 (New York day).', '',
     'Profit, real money (account-shown | net of costs):',
@@ -54,12 +56,13 @@ test('the report is its own notice kind, keyed by its day, and every line fits a
     'Real fills: 4 buys, 3 sells, fees $0.06',
     ' Fill gap vs the auction (worse +): entry +2.1 bp (3), exit',
     '   -0.5 bp (3)',
-    ' ERN-READ-O1 v2 learning: 38 | 2; +$1.47 | -$0.75',
-    '  look 1 in 22; market 35%, bench +4.1 bp; b&h +$0.42',
-    ' INS-BUY-O1 v2 probe: 61 | 1; +$1.47 | +$0.36',
-    '  look 2 in 29; market -12%, bench -2.5 bp',
+    ' ERN-READ-O1 v3 learning: 38 | 2; +$1.47 | -$0.75',
+    '  look 1 in 19 blocks; market 35%, bench +4.1 bp; b&h +$0.42',
+    ' INS-BUY-O1 v3 probe: 61 | 1; +$1.47 | +$0.36',
+    '  look 2 of stay 1 in 3 blocks; market -12%, bench -2.5 bp',
     'Same-risk buy-and-hold: +$0.42',
-    'Expected false passes: 0.9 (0.10 x 9 versions)',
+    'Expected false passes: 1.95 at 0.13 (15 versions, 0 runs) of',
+    '  3.9; base 0.45, stresses 2.55; per version 0.24',
   ]) assert.ok(text.includes(line), line);
   // Account-shown profit first; the costs (with the allowance labelled as such) after it; the alarms worded at the end.
   assert.ok(text.indexOf(' today:   +$2.94 | -$0.39') < text.findIndex(line => line.startsWith('Costs, UTC day')));
@@ -87,7 +90,7 @@ test('over the cap the report says so in its subject and its costs; with no real
   assert.equal(quiet.subject, 'LTCM daily 2026-10-20: no real fills yet; costs $3.33');
   const said = quiet.text.split('\n');
   for (const line of [' today:   +$0.00 | -$3.33', ' to date: n/a until real fills', 'Same-risk buy-and-hold: n/a until real fills',
-    ' ERN-READ-O1 v2 learning: 38 | 0; no real event', 'Alarms open: none']) assert.ok(said.includes(line), line);
+    ' ERN-READ-O1 v3 learning: 38 | 0; no real event', 'Alarms open: none']) assert.ok(said.includes(line), line);
   // A day whose readings cover it whole; a meter with no reading: at least; the floor's allowance said so.
   const partial = { ...REPORT, costs: { ...REPORT.costs, spent_usd: null, at_least_usd: 1.2, sail_usd: null, whole: true,
     allowance: { ...REPORT.costs.allowance, source: 'floor' } } };
@@ -141,7 +144,7 @@ test('figures only: House text where a figure goes is never echoed; a program, a
     assert.equal(text.includes(banned), false, banned);
   }
   for (const line of text.split('\n')) assert.ok(line.length <= REPORT_WIDTH, line);
-  assert.ok(text.includes(' OK v2 unknown: unknown | 2;'));
+  assert.ok(text.includes(' OK v3 unknown: unknown | 2;'));
   assert.ok(text.includes('Events: 8-K 2.02 unknown, other 8-K unknown, Form 4'));
   assert.ok(text.includes('Shadow intents today: none'));
   assert.ok(text.replace(/\s+/g, ' ').includes(`Alarms open: ${STALL_CAUSES.cap_breach}`) && !text.includes('toString'));
@@ -186,8 +189,12 @@ test('the composer reads every fact the House writes', () => {
   // `intents`, its `buy_hold_why` and the total's `why`: the gateway words n/a itself and echoes no House text).
   // (Release 1019f: `entries.why` and `break_even.why` likewise: the gateway words "none" and "n/a" itself.)
   // (Release 1019h: `supply.why` likewise: the gateway words "no Probe+ row yet" itself.)
+  // (Release 1019i: a PREREG-EVL-6 row's `events_to_go`, null, its looks counted in blocks; and release 1019h's count,
+  // `expected_false_passes` with `seatable_versions`, which an older gateway words and this one reads only when the
+  // House sends no `false_passes`, PREREG-EVL-6 section 5's.)
   const unread = ['kind', 'notice_id', 'programs.*.intents', 'programs.*.buy_hold_why', 'buy_hold.why', 'costs.allowance.cap_usd',
-    'entries.why', 'break_even.why', 'supply.why'];
+    'entries.why', 'break_even.why', 'supply.why', 'programs.*.events_to_go', 'expected_false_passes', 'seatable_versions',
+    'false_passes.left', 'false_passes.waiting'];
   const missed = [...want].filter(key => !seen.has(key) && !unread.includes(key));
   assert.deepEqual(missed, [], 'every fact the House writes is read');
 });
@@ -297,4 +304,26 @@ test('release 1019i: the fill rates by auction over 3 and 20 sessions (the attem
   const odd = lines({ ...REPORT, settle: { ...REPORT.settle, settled: 'ACME rallied' }, fill_rates: { ...REPORT.fill_rates,
     open: { ...REPORT.fill_rates.open, last3: { ...REPORT.fill_rates.open.last3, buys_filled: 'ACME' } } } });
   assert.ok(!odd.join('\n').includes('ACME'));
+});
+
+test('release 1019i\'s review: the parity latch on the Score lines and the PX line (sizes and counts only)', () => {
+  const text = lines(REPORT);
+  assert.ok(text.includes('PX store: 812/2048 MB, 41.2 GB free; runs 12 ok, 1 partial'), text.join('\n'));
+  assert.ok(!text.some(line => line.includes('BATCHED SCORE OFF')), 'no latch: nothing said');
+  const latched = lines({ ...REPORT, settle: { ...REPORT.settle, latched: true } });
+  assert.ok(latched.includes(' BATCHED SCORE OFF: a parity difference latched it'), latched.join('\n'));
+  // No room: said, with the floor; the recorders off but px.sqlite on disk: "(off)".
+  const full = lines({ ...REPORT, px_store: { ...REPORT.px_store, ok: false, free_gb: 3.2,
+    runs: { ...REPORT.px_store.runs, disk: 4 } } });
+  const said = full.join(' ').replace(/\s+/g, ' ');     // (the line wraps at the phone's width)
+  assert.ok(said.includes('3.2 GB free; runs 12 ok, 1 partial, 4 disk; NO ROOM (floor 5.0 GB): nothing written'), said);
+  const off = lines({ ...REPORT, px_store: { ...REPORT.px_store, on: false } });
+  assert.ok(off.some(line => line.startsWith('PX store (off): 812/2048 MB')), off.join('\n'));
+  // The recorders off and no px.sqlite (every figure null): no line at all.
+  const none = lines({ ...REPORT, px_store: { on: false, size_mb: null, line_mb: null, free_gb: null, floor_gb: null,
+    ok: null, runs: Object.fromEntries(Object.keys(REPORT.px_store.runs).map(k => [k, null])) } });
+  assert.ok(!none.some(line => line.startsWith('PX store')), none.join('\n'));
+  // Figures only: a word where a figure goes is never echoed.
+  const odd = lines({ ...REPORT, px_store: { ...REPORT.px_store, size_mb: 'ACME', runs: { ok: 'ACME', ACME: 3 } } });
+  assert.ok(!odd.join('\n').includes('ACME'), odd.join('\n'));
 });

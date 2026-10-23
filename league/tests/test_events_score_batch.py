@@ -4,12 +4,18 @@ A GOLDEN TAPE: one synthetic market (every symbol, print and bar invented) settl
 per-intent path and by the batched pass, into two stores built the same way: the outcome rows, the intents' moves, the
 late exits' meta and the prints kept are byte-identical, with a split inside a hold (Alpaca adjusts every bar to today's
 basis), a missing daily bar (its intent falls back to its own fetch), a ladder exit, a skip for no auction, a skip at the
-limit and a prefetch chunk that fails; the batched pass asks a fraction of the bar requests. Then the order (seating
-versions and their controls first), 200 symbols a request, the switch (`events.score_batch`), the parity night's
-equality flags (never a value) and the House's pass with the switch on and off.
+limit and a prefetch chunk that fails; the batched pass asks a fraction of the bar requests. THE `bars` TABLE ends each
+pass exactly as under release 1019h, in both directions (release 1019i's review: the prefetch is a cache of the pass,
+never the store), over two nights with a split between them, so Done's fill gaps (league/events/done.py `_enrich`)
+never move. Then the order (seating versions and their controls first), 200 symbols a request, the switch
+(`events.score_batch`), the parity night's equality flags (never a value; computed in memory BEFORE anything is
+written, on intents the cache served, writing no bar), a FLAG 0 THAT FAILS CLOSED on a vendor whose adjustment
+depends on the request's end (the latch: every intent by the per-intent path until the captain clears it), and the
+House's pass with the switch on and off.
 """
 
 import datetime as dt
+import io
 import json
 import tempfile
 import unittest
@@ -21,6 +27,7 @@ from league.events import house as H
 from league.events import score as SC
 from league.events import store as S
 from league.events.gw import GatewayError
+from league.tests.evl6_fakes import on_1019h
 
 UTC = dt.timezone.utc
 NY = C.NY
@@ -56,6 +63,9 @@ class Tape:
         self.missing = set()
         self.fail = set()
         self.calls = []
+        #: symbol -> (effective day, factor): adjusted bars before the day divided by the factor ONLY when the request
+        #: ends after it (a vendor whose adjustment depends on the request's END: the case the golden fake cannot be)
+        self.basis = {}
 
     def get_json(self, path, params=None):
         params = dict(params or {})
@@ -87,6 +97,9 @@ class Tape:
                     f = 1.0
                     if params["adjustment"] == "all" and sym in self.splits and day < self.splits[sym][0]:
                         f = 1.0 / self.splits[sym][1]
+                    if params["adjustment"] == "all" and sym in self.basis and day < self.basis[sym][0] and \
+                            end > dt.datetime.combine(self.basis[sym][0], dt.time(4, 0), tzinfo=UTC):
+                        f /= self.basis[sym][1]
                     got.append({"t": S.iso(t), "o": o * f, "h": o * f, "l": c * f, "c": c * f, "v": 1e6})
                 out[sym] = got
             return {"bars": out, "next_page_token": None}
@@ -190,7 +203,8 @@ class GoldenCase(unittest.TestCase):
         return {"outcomes": self.rows(st, "SELECT * FROM outcomes ORDER BY program, version, event"),
                 "intents": self.rows(st, "SELECT * FROM intents ORDER BY program, version, event"),
                 "exits": self.rows(st, "SELECT * FROM meta WHERE key LIKE 'exit:%' ORDER BY key"),
-                "marks": self.rows(st, "SELECT * FROM marks ORDER BY symbol, day, label")}
+                "marks": self.rows(st, "SELECT * FROM marks ORDER BY symbol, day, label"),
+                "bars": self.rows(st, "SELECT * FROM bars ORDER BY symbol, day, adj")}
 
     NOW = wall(D2, "16:30")
 
@@ -205,16 +219,10 @@ class TheGoldenTape(GoldenCase):
         self.assertEqual((a["due"], a["settled"], a["skipped"], a["waiting"]), (9, 7, 2, 0), a)
         self.assertEqual((b["due"], b["settled"], b["skipped"], b["waiting"]), (9, 7, 2, 0), b)
         mine, theirs = self.record(new), self.record(old)
-        for part in ("outcomes", "intents", "exits", "marks"):
+        for part in ("outcomes", "intents", "exits", "marks", "bars"):
             self.assertEqual(mine[part], theirs[part], part)
         self.assertEqual(len(mine["outcomes"]), 7)
         self.assertEqual(len(mine["exits"]), 1, "the ladder's later exit is on record")
-        # every bar the per-intent path stored is stored the same by the batched pass
-        for row in old.db.execute("SELECT * FROM bars"):
-            got = new.db.execute("SELECT * FROM bars WHERE symbol=? AND day=? AND adj=?",
-                                 (row["symbol"], row["day"], row["adj"])).fetchone()
-            self.assertIsNotNone(got, tuple(row))
-            self.assertEqual(tuple(got), tuple(row))
         # the split inside the hold applies through each day's ratio of adjusted to raw close, both ways alike
         spl = new.db.execute("SELECT entry_px, exit_px FROM outcomes WHERE event LIKE '8k:spl-%'").fetchone()
         self.assertAlmostEqual(spl["entry_px"], 50.0, places=9)
@@ -236,6 +244,15 @@ class TheGoldenTape(GoldenCase):
         SC.settle(old, old_tape, now=self.NOW, batch=False)
         b = SC.settle(new, new_tape, now=self.NOW, batch=True, parity=False)
         self.assertEqual(self.record(new), self.record(old))
+        # THE `bars` TABLE IN BOTH DIRECTIONS (release 1019i's review): the batched pass stores no bar the per-intent
+        # path does not (none of a skipped intent's symbol, none outside an intent's own [entry, exit] window, none
+        # of a day before every intent's entry), and overwrites none it leaves alone
+        self.assertEqual(self.record(new)["bars"], self.record(old)["bars"])
+        self.assertIsNone(new.db.execute("SELECT 1 FROM bars WHERE symbol IN ('NOA', 'LIM')").fetchone(),
+                          "an intent skipped before the bar step stores no bar")
+        self.assertIsNone(new.db.execute("SELECT 1 FROM bars WHERE day=? AND symbol='AAA'", (PREV.isoformat(),)
+                                         ).fetchone(), "no bar of a day outside the intent's own window")
+        self.assertEqual(b["prefetch"]["served"], 6, "every settled intent but the missing bar's")
         self.assertTrue(b["prefetch"]["done"])
         # two prefetch requests (raw, adjusted) and the missing bar's own fallback pair: 4 against 14
         self.assertEqual(len(new_tape.bar_requests()), 2 + 2)
@@ -263,6 +280,9 @@ class TheGoldenTape(GoldenCase):
         self.assertEqual(self.record(new)["outcomes"], first["outcomes"], "INSERT OR IGNORE: the first outcome stands")
 
 
+# (release 1019j's assembly: a mechanism test written on release 1019h's seats; PREREG-EVL-6 moved every seat to a new
+# version, so it runs on that table, as league/tests/test_events_book.py's do)
+@on_1019h
 class TheOrderAndTheRequests(GoldenCase):
     def test_seating_versions_and_their_controls_settle_first(self):
         rows = [{"program": "EVL-ERN-READ-O1", "version": 1, "event": "a"},
@@ -335,24 +355,58 @@ class TheOrderAndTheRequests(GoldenCase):
 class TheParityNight(GoldenCase):
     def test_flags_only_and_equal_on_an_honest_tape(self):
         st, tape = self.build("parity")
+        old, old_tape = self.build("parity-old")
         with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
             out = SC.settle(st, tape, now=self.NOW, batch=True)
-        self.assertEqual(out["parity"], {"checked": 7, "equal": 7})
+        SC.settle(old, old_tape, now=self.NOW, batch=False)
+        # every intent sampled; the six the cache served are checked (the missing bar's fell back to its own two
+        # fetches: the per-intent path compared with itself is no test of the batched one, so it has no flag), and the
+        # two skipped before any bar have nothing batched to compare
+        self.assertEqual(out["parity"], {"sampled": 9, "checked": 6, "equal": 6})
+        self.assertNotIn("latched", out)
+        flagged = {r[0].split("-")[0] for r in st.db.execute("SELECT event FROM score_parity")}
+        self.assertEqual(flagged, {"8k:aaa", "8k:bbb", "8k:ccc", "8k:lad", "8k:spl", "8k:flk"})
         cols = [r[1] for r in st.db.execute("PRAGMA table_info(score_parity)")]
         self.assertEqual(cols, ["program", "version", "event", "night", "equal", "checked_at"], "no value column")
         self.assertEqual(st.meta(SC.PARITY_FIRST), D2.isoformat())
-        self.assertEqual(SC.parity_counts(st, D2), {"checked": 7, "equal": 7})
+        self.assertEqual(SC.parity_counts(st, D2), {"checked": 6, "equal": 6})
+        self.assertEqual(self.record(st), self.record(old), "the parity night writes what release 1019h writes")
 
-    def test_a_difference_writes_zero(self):
+    def test_the_check_writes_no_bar_and_settles_nothing(self):
+        st, tape = self.build("dry")
+        intents = SC.order_due(SC.due(st, self.NOW))
+        pre = SC.prefetch(st, tape, intents, now=self.NOW)
+        before = self.record(st)
+        with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
+            got = SC.parity_window(st, tape, intents, pre, D2, now=self.NOW)
+        after = self.record(st)
+        self.assertEqual(got["checked"], 6)
+        self.assertEqual(after["bars"], before["bars"], "neither path of the check writes a bar")
+        self.assertEqual(after["bars"], [], "nothing was in `bars` and nothing is: the prefetch is the pass's cache")
+        self.assertEqual((after["outcomes"], after["intents"]), (before["outcomes"], before["intents"]),
+                         "nothing is settled by the check: it runs before any of the window settles")
+
+    def test_a_difference_writes_zero_and_latches(self):
         st, tape = self.build("differ")
-        SC.settle(st, tape, now=self.NOW, batch=True, parity=False)
-        intent = dict(st.db.execute("SELECT * FROM intents WHERE event LIKE '8k:aaa-%'").fetchone())
-        self.assertEqual(SC.check_parity(st, tape, intent, D2, now=self.NOW), 1)
-        st.db.execute("UPDATE outcomes SET r=r+1e-12 WHERE event=?", (intent["event"],))
-        self.assertEqual(SC.check_parity(st, tape, intent, D2, now=self.NOW), 0)
+        intents = SC.order_due(SC.due(st, self.NOW))
+        pre = SC.prefetch(st, tape, intents, now=self.NOW)
+        intent = next(i for i in intents if i["event"].startswith("8k:aaa-"))
+        self.assertEqual(SC.check_parity(st, tape, intent, D2, now=self.NOW, prefetched=pre), 1)
+        self.assertIsNone(SC.latched(st))
+        real = SC.Narrow.read
+
+        def off(self_, *a, **k):
+            ratio = real(self_, *a, **k)
+            return lambda sym, day: ratio(sym, day) * (1.0 + 1e-12)
+        with mock.patch.object(SC.Narrow, "read", off):
+            self.assertEqual(SC.check_parity(st, tape, intent, D2, now=self.NOW, prefetched=pre), 0)
         row = dict(st.db.execute("SELECT * FROM score_parity WHERE event=?", (intent["event"],)).fetchone())
         self.assertEqual(row["equal"], 0)
         self.assertNotIn("r", row)
+        held = SC.latched(st)
+        self.assertEqual((held["night"], held["program"], held["version"], held["event"]),
+                         (D2.isoformat(), "EVL-ERN-READ-O1", 2, intent["event"]))
+        self.assertEqual(set(held), {"night", "program", "version", "event", "at"}, "identifiers and a time, no value")
 
     def test_the_first_night_only_unless_switched(self):
         st, _ = self.build("nights")
@@ -376,6 +430,205 @@ class TheParityNight(GoldenCase):
         out = SC.settle(st, tape, now=self.NOW, batch=False, parity=True)
         self.assertNotIn("parity", out)
         self.assertIsNone(st.meta(SC.PARITY_FIRST))
+
+
+class TheParityNightIsTheFirstThatTests(GoldenCase):
+    """THE PARITY NIGHT IS THE FIRST NIGHT A FLAG IS WRITTEN (release 1019i's fix round): a first batched night that
+    tested nothing batched (its prefetch failed, so every intent settled by its own two fetches; or its 5% sample held
+    no intent the cache served) must not use up the parity night, or the batched path would settle every later night
+    unchecked while the report showed no difference."""
+
+    def only(self, events):
+        return lambda intent, share=SC.PARITY_SHARE: any(str(intent["event"]).startswith(e) for e in events)
+
+    def test_a_failed_prefetch_tests_nothing_and_the_next_night_is_the_parity_night(self):
+        st, tape = self.build("pf-failed")
+        tape.fail.add("AAA")        # the raw chunk fails: the cache serves no intent, each fetches its own two
+        with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertTrue(out["batched"])
+        self.assertEqual(out["settled"], 7)
+        self.assertEqual(out["prefetch"]["served"], 0)
+        self.assertEqual(out["parity"], {"sampled": 9, "checked": 0, "equal": 0})
+        self.assertIsNone(st.meta(SC.PARITY_FIRST), "nothing batched was tested: this was no parity night")
+        later = self.NOW + dt.timedelta(days=1)
+        self.assertTrue(SC.parity_due(st, later.astimezone(NY).date()))
+        # the next night the cache serves its intent: the check runs (unforced), and that night is the parity night
+        self.intent(st, "SPL", "EVL-ERN-READ-O3", 1, entry=D2, exit_=D2, prev_close=51.0)
+        with mock.patch.object(SC, "parity_sampled", lambda intent, share=SC.PARITY_SHARE: True):
+            nxt = SC.settle(st, tape, now=later, batch=True)
+        self.assertEqual(nxt["parity"], {"sampled": 1, "checked": 1, "equal": 1})
+        self.assertEqual(st.meta(SC.PARITY_FIRST), later.astimezone(NY).date().isoformat())
+        self.assertFalse(SC.parity_due(st, later.astimezone(NY).date() + dt.timedelta(days=1)))
+
+    def test_a_sample_the_cache_served_none_of_is_no_parity_night(self):
+        st, tape = self.build("pf-unserved")
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:mis-", "8k:noa-"])):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertEqual(out["prefetch"]["served"], 6)
+        self.assertEqual(out["parity"], {"sampled": 2, "checked": 0, "equal": 0},
+                         "the missing bar's intent fell back and the other skipped before any bar")
+        self.assertIsNone(st.meta(SC.PARITY_FIRST))
+        self.assertTrue(SC.parity_due(st, D2 + dt.timedelta(days=1)))
+
+    def test_the_first_flag_keeps_its_night(self):
+        st, tape = self.build("pf-flag")
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:aaa-"])):
+            out = SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertEqual(out["parity"], {"sampled": 1, "checked": 1, "equal": 1})
+        self.assertEqual(st.meta(SC.PARITY_FIRST), D2.isoformat())
+        self.assertTrue(SC.parity_due(st, D2), "every pass of that night checks")
+        self.assertFalse(SC.parity_due(st, D2 + dt.timedelta(days=1)))
+
+    def test_the_houses_pass_keeps_the_rule(self):
+        st, tape = self.build("pf-house")
+        lane = H.EventLane(FakeHouse(self.NOW), st.root, settings={}, monotonic=Mono(), sleep=lambda s: None)
+        lane.throttle = lambda: None
+        ctx = H.LaneContext(lane, st, H.LaneGateway(tape, lane, None, cut=False), lambda url: b"", lane.now)
+        with mock.patch.object(SC, "parity_sampled", self.only(["8k:mis-", "8k:noa-"])):
+            out = lane._score(ctx, lane._mono() + H.SCORE_BUDGET, D2)
+        self.assertTrue(out["batched"])
+        self.assertEqual(out["prefetch"]["served"], 6)
+        self.assertEqual(out["parity"], {"sampled": 2, "checked": 0, "equal": 0})
+        self.assertIsNone(st.meta(SC.PARITY_FIRST), "the House's pass tested nothing batched either")
+        self.assertTrue(SC.parity_due(st, D2 + dt.timedelta(days=1), lane.settings))
+
+
+class TheEndDependentVendor(GoldenCase):
+    """THE PARITY NIGHT FAILS CLOSED (release 1019i's review): a vendor whose adjusted bars depend on the request's END
+    (SPY's factor 1.01 effective D1, applied only to a window that reaches past it) is the one case the batched and
+    per-intent paths can differ. The sampled intent AAA (D0 to D0, on SPY) disagrees; the check runs before anything
+    is written, latches, and the whole pass settles by the per-intent path: SPL (D0 to D2, on SPY, NOT sampled) settles
+    exactly as under release 1019h, never on a mix of two bases."""
+
+    def sampled(self, events):
+        return lambda intent, share=SC.PARITY_SHARE: any(str(intent["event"]).startswith(e) for e in events)
+
+    def build_basis(self, name):
+        st, tape = self.build(name)
+        tape.basis["SPY"] = (D1, 1.01)
+        return st, tape
+
+    def test_a_difference_latches_and_the_pass_is_release_1019h(self):
+        old, old_tape = self.build_basis("e-old")
+        SC.settle(old, old_tape, now=self.NOW, batch=False)
+        bare, bare_tape = self.build_basis("e-bare")
+        SC.settle(bare, bare_tape, now=self.NOW, batch=True, parity=False)
+        aaa = "SELECT bench_entry, b FROM outcomes WHERE event LIKE '8k:aaa-%'"
+        self.assertNotEqual(tuple(bare.db.execute(aaa).fetchone()), tuple(old.db.execute(aaa).fetchone()),
+                            "this vendor is the case parity exists for: unchecked, the batched path differs")
+        new, new_tape = self.build_basis("e-new")
+        with mock.patch.object(SC, "parity_sampled", self.sampled(["8k:aaa-"])):
+            out = SC.settle(new, new_tape, now=self.NOW, batch=True)
+        spl = "SELECT b, bench_entry, bench_exit FROM outcomes WHERE event LIKE '8k:spl-%'"
+        self.assertEqual(tuple(new.db.execute(spl).fetchone()), tuple(old.db.execute(spl).fetchone()),
+                         "the unsampled intent on the same benchmark: release 1019h's value, not a mix of bases")
+        mine, theirs = self.record(new), self.record(old)
+        for part in ("outcomes", "intents", "exits", "marks", "bars"):
+            self.assertEqual(mine[part], theirs[part], part)
+        self.assertEqual(out["parity"], {"sampled": 1, "checked": 1, "equal": 0})
+        self.assertTrue(out["latched"])
+        self.assertEqual(out["prefetch"]["served"], 0, "after the latch no intent settles from the cache")
+        self.assertEqual(SC.parity_counts(new, D2), {"checked": 1, "equal": 0})
+
+    def test_the_latch_holds_every_later_pass_until_the_captain_clears_it(self):
+        st, tape = self.build_basis("latch")
+        with mock.patch.object(SC, "parity_sampled", self.sampled(["8k:aaa-"])):
+            SC.settle(st, tape, now=self.NOW, batch=True)
+        self.assertIsNotNone(SC.latched(st))
+        # a later pass, the switch on and the parity night over: still the per-intent path, nothing prefetched
+        self.intent(st, "SPL", "EVL-ERN-READ-O3", 1, entry=D2, exit_=D2, prev_close=51.0)
+        later = self.NOW + dt.timedelta(days=1)
+        tape.calls.clear()
+        out = SC.settle(st, tape, now=later, batch=True, parity=False)
+        self.assertFalse(out["batched"])
+        self.assertTrue(out["latched"])
+        self.assertNotIn("prefetch", out)
+        self.assertEqual(out["settled"], 1)
+        self.assertEqual(len(tape.bar_requests()), 2, "its own two fetches")
+        self.assertFalse(SC.parity_due(st, later.astimezone(NY).date()), "the latch's night was the parity night")
+        held = SC.unlatch(st)
+        self.assertEqual(held["event"].split("-")[0], "8k:aaa")
+        self.assertIsNone(SC.latched(st))
+        self.assertTrue(SC.parity_due(st, later.astimezone(NY).date()),
+                        "cleared, the batched path is checked again on its next night")
+        self.assertIsNone(SC.unlatch(st), "nothing to clear")
+        self.intent(st, "AAA", "EVL-ERN-READ-O1", 2, entry=D2, exit_=D2, prev_close=50.0)
+        again = SC.settle(st, tape, now=later + dt.timedelta(hours=1), batch=True, parity=False)
+        self.assertTrue(again["batched"])
+        self.assertIn("prefetch", again)
+
+    def test_the_cli_clears_it(self):
+        from league.events import __main__ as M
+
+        st, _ = self.build("cli")
+        SC.latch(st, D2, {"program": "EVL-ERN-READ-O1", "version": 2, "event": "8k:x"}, self.NOW)
+        st.close()
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.assertEqual(M.main(["--state", str(Path(self.tmp.name) / "cli"), "score-unlatch"]), 0)
+        said = json.loads(out.getvalue())
+        self.assertEqual(said["cleared"]["event"], "8k:x")
+        with S.Store(Path(self.tmp.name) / "cli") as again:
+            self.assertIsNone(SC.latched(again))
+
+
+class TwoNights(GoldenCase):
+    """A CORPORATE ACTION BETWEEN TWO NIGHTS (release 1019i's review, its first major): night 1 settles a real buy of
+    XYZ (D0 to D0) with its real fill at the print; a 2:1 split of XYZ takes effect D2; night 2 settles a new XYZ
+    intent (D2 to D2) and another symbol's D0 to D2 intent, so the union window starts at D0. The batched night must
+    leave XYZ's D0 bars as the per-intent path does (it never fetches them), so Done's fill gap of the night-1 event
+    (league/events/done.py `_enrich`, item 4.7, through `_ratio`) does not move."""
+
+    def two_nights(self, name, batch):
+        self.n = 0
+        st = S.Store(Path(self.tmp.name) / name)
+        self.addCleanup(st.close)
+        tape = Tape()
+        C.refresh(st, tape, dt.date(2026, 10, 1), dt.date(2026, 12, 31))
+        st.set_meta("equity:2026-10-19", repr(20000.0))
+        for day in (PREV, D0, D1, D2):
+            k = {PREV: 0, D0: 1, D1: 2, D2: 3}[day]
+            for bench, base in (("SPY", 600.0), ("IWM", 220.0)):
+                self.session(tape, st, day, bench, "P", base + k, base + k + 1.5)
+            # XYZ trades about half its price from D2 on (the split): its prints and raw bars are raw
+            self.session(tape, st, day, "XYZ", "N", *((80.0 + k, 80.5 + k) if day < D2 else (41.5, 41.75)))
+            self.session(tape, st, day, "OTH", "N", 30.0 + k, 30.2 + k)
+        tape.raw[("XYZ", PREV)] = (79.0, 79.0)
+        tape.raw[("OTH", PREV)] = (29.0, 29.0)
+        self.intent(st, "XYZ", "EVL-ERN-READ-O1", 2, prev_close=79.0)
+        night1 = SC.settle(st, tape, now=wall(D0, "16:30"), batch=batch, parity=False)
+        self.assertEqual(night1["settled"], 1)
+        event = st.db.execute("SELECT event FROM intents WHERE symbol='XYZ'").fetchone()[0]
+        with st.tx() as db:     # the real buy, filled at the opening print (an invented fill)
+            db.execute("INSERT INTO real_fills(program, version, event, side, qty, price, fee, filled_at, band) VALUES("
+                       "'EVL-ERN-READ-O1', 2, ?, 'buy', 2, 81.0, 0, ?, 'probe')", (event, S.iso(wall(D0, "09:30"))))
+        before = self.gap(st, event)
+        tape.splits["XYZ"] = (D2, 2.0)      # a 2:1 split effective D2: the vendor re-bases every earlier adjusted bar
+        self.intent(st, "XYZ", "EVL-ERN-READ-O1", 2, entry=D2, exit_=D2, prev_close=81.4)
+        self.intent(st, "OTH", "EVL-NEWS-READ-O1", 2, entry=D0, exit_=D2, prev_close=29.0)
+        night2 = SC.settle(st, tape, now=wall(D2, "16:30"), batch=batch, parity=False)
+        self.assertEqual(night2["settled"], 2, night2)
+        return st, event, before, night2
+
+    def gap(self, st, event):
+        from league.events import done as DN
+
+        r = st.db.execute("SELECT r FROM outcomes WHERE event=?", (event,)).fetchone()[0]
+        return DN._enrich(st, "EVL-ERN-READ-O1", 2, [{"event": event, "r": r}])[0]["entry_gap_bp"]
+
+    def test_dones_fill_gap_never_moves(self):
+        from league.events import done as DN
+
+        old, event, old_before, _ = self.two_nights("n-old", False)
+        new, _, new_before, night2 = self.two_nights("n-new", True)
+        self.assertEqual(night2["prefetch"]["first"], D0.isoformat(), "the union window reaches back to D0")
+        self.assertEqual(old_before, 0.0)
+        self.assertEqual(new_before, 0.0)
+        self.assertEqual(self.gap(old, event), 0.0, "release 1019h's path never fetches XYZ's D0 bars again")
+        self.assertEqual(self.gap(new, event), 0.0, "nor does the batched one: Done's item 4.7 reads the same gap")
+        self.assertEqual(DN._ratio(new, "XYZ", D0.isoformat()), DN._ratio(old, "XYZ", D0.isoformat()))
+        self.assertEqual(self.record(new), self.record(old), "every outcome, mark and bar the same, both ways")
 
 
 class FakeHouse:
@@ -431,6 +684,27 @@ class TheHousePass(GoldenCase):
     def test_the_parity_switch_off(self):
         _, _, _, receipt = self.run_pass("h-noparity", score_parity=False)
         self.assertNotIn("parity", receipt)
+
+    def test_a_flag_zero_on_the_house_latches_and_settles_as_release_1019h(self):
+        old, old_tape = self.build("h-e-old")
+        old_tape.basis["SPY"] = (D1, 1.01)
+        SC.settle(old, old_tape, now=self.NOW, batch=False)
+        st, tape = self.build("h-e-new")
+        tape.basis["SPY"] = (D1, 1.01)
+        lane = self.lane(st.root)
+        ctx = H.LaneContext(lane, st, H.LaneGateway(tape, lane, None, cut=False), lambda url: b"", lane.now)
+        with mock.patch.object(SC, "parity_sampled", lambda i, share=SC.PARITY_SHARE: str(i["event"]).startswith("8k:aaa")):
+            out = lane._score(ctx, lane._mono() + H.SCORE_BUDGET, D2)
+        self.assertEqual(out["parity"], {"sampled": 1, "checked": 1, "equal": 0})
+        self.assertTrue(out["latched"])
+        self.assertEqual(out["prefetch"]["served"], 0)
+        for part in ("outcomes", "intents", "bars"):
+            self.assertEqual(self.record(st)[part], self.record(old)[part], part)
+        self.assertEqual(lane._warnings, 1, "the latch is warned")
+        # the next night's pass: the per-intent path, whatever the switch says
+        nxt = lane._score(ctx, lane._mono() + H.SCORE_BUDGET, D2 + dt.timedelta(days=1))
+        self.assertFalse(nxt["batched"])
+        self.assertTrue(nxt["latched"])
 
 
 if __name__ == "__main__":

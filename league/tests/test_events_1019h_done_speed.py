@@ -33,6 +33,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league import constitution as K
 from league.constitution import EQUITY_MONEY_BOUNDS, equity_money_problems
 from league.events import births as BI
@@ -141,6 +142,7 @@ class TheRule(unittest.TestCase):
         self.assertEqual(EB.most_ask(EB.settings(), "learning", D(2000)), D("40.00"), "learning: its target")
 
 
+@on_1019h
 class TheRows(unittest.TestCase):
     """S2's money rows (the design's `at_size.probe` as the captain's A100 names them, `event.reach_bar.probe` and
     `.sized`) and the digests they move: the design's check, condition (4): "Ship the new row and its bound in one
@@ -180,18 +182,17 @@ class TheRows(unittest.TestCase):
         off["equity_money"]["event"]["reach_bar"] = {"probe": "0", "sized": "0"}
         self.assertEqual(equity_money_problems(off), [], "0 is inside the bound: the tighten-only switch")
         self.assertEqual(EB.settings(off).reach_bar("probe"), 0)
-        # (release 1019j's row moved every pair once more, `event.max_open_v8.learning`: release 1019h's switch pair is the
-        # one in force with that row left out, `before_1019j`; league/tests/test_events_evl8.py holds that move)
-        self.assertEqual((K.money_digest(X.before_1019j(off))[:8], K.digest(X.before_1019j(off))[:8]), X.S2_OFF,
-                         "one money-digest move")
+        self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_OFF_1019I, "one money-digest move")
+        self.assertEqual((K.money_digest(X.before_1019i(off))[:8], K.digest(X.before_1019i(off))[:8]), X.S2_OFF,
+                         "release 1019h's switch pair, with release 1019i's row left out")
 
     def test_the_digests_moved_once_with_the_two_rows_and_nothing_else(self):
         pair = X.in_force()
         self.assertEqual((K.money_digest(), K.digest()), X.DIGESTS[pair])
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
-        # (release 1019j's row moved them once more, `event.max_open_v8.learning`: release 1019h's table is the one in force
-        # with that row left out, `before_1019j`; league/tests/test_events_evl8.py holds that move)
-        at_1019h = X.before_1019j()
+        # (release 1019i's row moved them once more, `event.max_open_v6.probe`: release 1019h's table is the one in force
+        # with that row left out, `before_1019i`; league/tests/test_events_evl6.py holds that move)
+        at_1019h = X.before_1019i()
         self.assertEqual((K.money_digest(at_1019h)[:8], K.digest(at_1019h)[:8]), ("8e63ce64", "c3026eba"))
         self.assertEqual((K.money_digest(at_1019h), K.digest(at_1019h)), X.DIGESTS_1019H[pair])
         before = X.before_1019h()
@@ -206,7 +207,7 @@ class TheRows(unittest.TestCase):
             back = X.before_1019h(at)
             self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_A86[candidate], candidate)
         self.assertEqual(set(X.DIGESTS.values()) & set(X.DIGESTS_A86.values()), set())
-        off = X.before_1019j()
+        off = X.before_1019i()
         off["equity_money"]["event"]["enabled"] = False
         self.assertEqual((K.money_digest(off)[:8], K.digest(off)[:8]), X.S2_ROLLBACK,
                          "release 1019h's rollback: every event buy stopped, the rows kept")
@@ -225,6 +226,7 @@ def flat(c, prefix: str = "") -> dict:
 
 
 # ======================================================================================== S2, through the real book
+@on_1019h
 class AtDonesSize(TB.EventTest):
     """E $1,898 and cash $1,898 (the reserve $50); EVL-8K-READ-O1 at Probe on 8.01 filings, the limit 1.25 x the
     previous close."""
@@ -356,6 +358,7 @@ class AtDonesSize(TB.EventTest):
         self.assertTrue(DN.at_size(float(D(row["target_usd"])), float(D(row["sized_usd"]))))
 
 
+@on_1019h
 class TheWaitingBuysAhead(TB.EventTest):
     """PREREG-EVL-5 section 1.3's ROOM while a buy waits for the lane's close decision (release 1019g's `HeldAhead`,
     feat/evl-5's): `_event_keep_room` keeps, from every buy after the waiting one in ROOM's order, what `_size_event`
@@ -548,6 +551,12 @@ class PromotedBirths(unittest.TestCase):
             for prog in self.prereg:
                 self.assertLess(EB.room_key(prog, "probe"), EB.room_key(program, "probe"), "after the band's PREREG rows")
                 self.assertLess(EB.room_key(program, "probe"), EB.room_key(prog, "learning"), "before every learning row")
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

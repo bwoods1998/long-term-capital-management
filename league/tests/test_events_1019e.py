@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import programs as P
 from league.events import run as R
@@ -165,6 +166,7 @@ class PreregFourFailsAlone(Case):
 
 
 # ------------------------------------------------------------------------------------------------ A83 (3)(ii)
+@on_1019h
 class PmRowsAskWhenTheAskingGroupIsFrozen(Case):
     def look(self, w: W.World, program: str, version: int) -> None:
         """A written look of `program` as of NEXT's close: it covers D's intents of every program of its group."""

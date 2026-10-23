@@ -44,6 +44,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.constitution import CONSTITUTION
 from league.equity import live as L
 from league.events import births as BI
@@ -139,6 +140,7 @@ def sent(h: TB.Harness, symbols=None) -> list[tuple[str, str]]:
 
 
 # ============================================================================================ 1. ROOM's order (A85)
+@on_1019h
 class RoomOrder(unittest.TestCase):
     """A85's tiers, round-robin and send order (`book.room_key`, `send_key`, `allocate`, `reserved_for`, `leaves_room`)
     with PREREG-EVL-5's rows: after PREREG-EVL-4's in the tables' order, before R3's births whatever their bands; inside
@@ -206,6 +208,7 @@ class RoomOrder(unittest.TestCase):
         self.assertEqual(list(given), [FOUR_ON, "EVL-NEWS-NIGHT2-ON", DROP, BIRTH])
 
 
+@on_1019h
 class RoomCash(TB.EventTest):
     """A85's reservation and the order of an auction's sends, through the REAL book, with PREREG-EVL-5's buys."""
 
@@ -691,6 +694,7 @@ class EntriesWord(unittest.TestCase):
 
 
 # ================================================================================ 4. the 150-order line and A80
+@on_1019h
 class TheLine(TB.EventTest):
     """The event kind's line of 150 orders a day (A74 (7), A78) "refuses entries in ROOM's order, so on a day that would
     need more, this file's rows are refused first among the PREREG rows" (PREREG-EVL-5 section 1.3 (a)), and R3's births
@@ -762,6 +766,7 @@ class TheLine(TB.EventTest):
                 self.assertIsNone(h.book._count_refusal(DAY.isoformat(), exit_=True), "an exit still goes at the line")
 
 
+@on_1019h
 class TheResend(VC.VenueCancelTest):
     """A80 (release 1019e) with PREREG-EVL-5's rows: a DROP buy at D's close the venue cancelled at once goes again ONCE
     through every gate (the lane's close decision names its program, so `part_hold` lets it go again), the same shape
@@ -812,7 +817,8 @@ class TheBirthsRerunWithTheNewRows(BN.Replay):
 
         st = self.s.st
         self.first_night()
-        self.assertEqual(SC.expected_false_passes(st)["expected"], 1.5, "PREREG-EVL-1 to -5: fifteen seatable versions")
+        self.assertEqual(SC.expected_false_passes(st)["expected"], 1.95,
+                         "the fifteen seatable versions (release 1019i: PREREG-EVL-6's, 0.13 each)")
         now = dt.datetime(2026, 10, 22, 11, 30, 5, tzinfo=UTC)
         due = BI.rerun_due(st, now)
         self.assertEqual(due["night"], "2026-10-21")
@@ -821,9 +827,10 @@ class TheBirthsRerunWithTheNewRows(BN.Replay):
         out = BI.night(st, gw, today=BN.NIGHT, now=lambda: now, rerun=due)
         self.assertEqual(out["_status"], "ok", out)
         [(_, body, _)] = [c for c in gw.calls if c[0] == V.PATH]
-        self.assertIn("1.5 of 3.0 used", body["messages"][0]["content"])
+        self.assertIn("1.95 of 3.90 used", body["messages"][0]["content"])
         self.assertEqual(out["accepted"], ["EVL-B-ERN-NEGATIVE-O1", "EVL-B-NEWS-EARLY-MORNING-O1"])
-        self.assertEqual(SC.expected_false_passes(st)["expected"], 1.7, "0.10 each, on top of PREREG-EVL-5's 0.3")
+        self.assertEqual(SC.expected_false_passes(st)["expected"], 2.21,
+                         "0.13 each (registered before REGISTERED_AT_6: each seats at its PREREG-EVL-6 version 2)")
         self.assertEqual(BI.budget(st, BN.NIGHT)["seatable_left_tonight"], 1, "the night's three")
         prereg = {p.id for p in P.PROGRAMS if p.spec is None}
         self.assertFalse(set(out["accepted"]) & prereg)
@@ -858,6 +865,7 @@ class TheHeldTurn(unittest.TestCase):
 
 
 # ===================================================================================== 5. A86 and the new rows
+@on_1019h
 class ProbeSize(TB.EventTest):
     """A86 REVISED (`position_share.probe` 0.035, `one_share_max.probe` 0.05; release 1019f) moves the Probe band only:
     PREREG-EVL-5's rows at learning trade as frozen (a target of 2% of E, one share when that rounds to none and one
@@ -927,6 +935,12 @@ class ProbeSize(TB.EventTest):
         self.assertEqual(len(buys_of(h, DROP)), 8)
         self.assertEqual(len(sent(h)), 8)
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

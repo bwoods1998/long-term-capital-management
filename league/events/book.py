@@ -340,6 +340,70 @@ def round_up(band: str | None, target: Decimal, limit: Decimal, whole: Decimal, 
     return None
 
 
+def under_bar(band: str | None, target: Decimal, limit: Decimal, walls: Decimal, *,
+              bar: Decimal | str | None = None) -> bool:
+    """PREREG-EVL-6 SECTION 6, CLAUSE 2 (A99): "A Probe or Sized buy takes the fewest whole shares whose value at the
+    limit reaches 0.8 of its band's target ... It is never above 5% of equity at Probe, nor above the name's 10% wall at
+    Sized ... A pick that no such count reaches is skipped before it takes a slot; the shadow keeps it." True when NO
+    whole-share count reaches the bar inside the band's frozen envelope: the fewest whole shares n >= 1 whose dollars
+    at the limit reach `bar` x `target` (the Done reader's own `at_size` at the row in force) cost more than
+    `envelope_share(band)` x `walls` (Probe 5%, Sized 10%, the walls' equity). False at learning, with the round-up's
+    row at 0 (S2's switch off: no at-size buy), or when the figures are not positive (the caller's other rules judge
+    them). The caller (league/equity/live.py `_event_gate`) skips such a pick at the decision as `under_bar`, for the
+    versions PREREG-EVL-6 judges (`Program.evl6`) alone: release 1019h's S2 (`round_up`) buys a floored buy under the
+    bar as it is when no round-up fits, and skips nothing before a slot."""
+    if str(band) not in PROBE_UP:
+        return False
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return False
+    target, limit, walls = (Decimal(str(v)) for v in (target, limit, walls))
+    if not (target > 0 and limit > 0 and walls > 0):
+        return False
+    cap = envelope_share(band)
+    if cap is None:
+        return False
+    return _fewest(target, limit, share) * limit > cap * walls
+
+
+def _fewest(target: Decimal, limit: Decimal, share: Decimal) -> Decimal:
+    """The fewest whole shares n >= 1 whose dollars n x `limit` reach `share` x `target` by the Done reader's own float
+    comparison (`at_size`), for positive figures and a share above 0."""
+    n = max(Decimal(1), (share * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
+    while not at_size(target, n * limit, share):
+        n += 1
+    return n
+
+
+def at_size_count(band: str | None, target: Decimal, limit: Decimal, walls: Decimal, *,
+                  bar: Decimal | str | None = None) -> Decimal | None:
+    """PREREG-EVL-6 SECTION 6, CLAUSE 2 (A99), THE COUNT OF A PROBE OR SIZED BUY of a version it judges: "a Probe or
+    Sized buy takes the FEWEST whole shares whose value at the limit reaches 0.8 of its band's target ... never above 5%
+    of equity at Probe, nor above the name's 10% wall at Sized, and that ask is judged again by every cap". The fewest
+    whole shares n >= 1 whose dollars at `limit` reach `bar` x `target` (the Done reader's own `at_size` at the row in
+    force; `bar` None: the band's `reach_bar` row), when n x limit is at most `envelope_share(band)` x `walls` (Probe 5%,
+    Sized 10%, the walls' equity: so n <= floor(5% E / limit) at Probe, PREREG-EVL-1 section 8's own count); None when
+    no such count fits (`under_bar`: the pick is skipped before it takes a slot), at learning, with the band's row at 0
+    (S2's switch off: no at-size buy), or when the figures are not positive. It is never release 1019h's floor of the
+    target: a buy the floor would take to 13 shares at $5.00 of a $66.43 target takes 11 ($55.00 reaches $53.144), the
+    reading of the text's words, which trades less. The caller (league/equity/live.py `_size_event`) asks `size_entry`
+    for n x limit and buys n only when every cap gives all n; a cap that cuts the ask under the bar skips the buy (the
+    reading that trades less, section 7)."""
+    if str(band) not in PROBE_UP:
+        return None
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return None
+    target, limit, walls = (Decimal(str(v)) for v in (target, limit, walls))
+    if not (target > 0 and limit > 0 and walls > 0):
+        return None
+    cap = envelope_share(band)
+    if cap is None:
+        return None
+    n = _fewest(target, limit, share)
+    return None if n * limit > cap * walls else n
+
+
 def most_ask(s: "Settings", band: str | None, E: Decimal) -> Decimal:
     """THE MOST A BUY OF `band` MAY ASK at equity `E` before its figures are read (league/equity/live.py
     `_event_keep_room`'s keep when a sizing figure cannot be read this minute: the reading that keeps more): its target,
@@ -435,11 +499,20 @@ class Settings:
     #: A100; `round_up`): a share of the band target, 0.8 in force (the Done reader's `PROBE_SIZE_SHARE`). Empty (0 for
     #: every band) when unread: no round-up, release 1019f's floor rounding.
     reach_bars: Mapping[str, Decimal] = dataclasses.field(default_factory=dict)
+    #: PREREG-EVL-6 SECTION 6's PROBE SLOTS (`event.max_open_v6`, release 1019i, the captain's A99 and A100): read only
+    #: for the versions registered at or after REGISTERED_AT_6 (`max_open`'s `program`, league/events/programs.py
+    #: `Program.evl6`). Empty when unread (the table's FALLBACK: nothing opens anyway).
+    max_opens_v6: Mapping[str, int] = dataclasses.field(default_factory=dict)
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
 
-    def max_open(self, band: str) -> int:
+    def max_open(self, band: str, program: Any = None) -> int:
+        """The open positions a program may hold at `band`: `event.max_open` (learning 8, Probe 6, Sized 8), and for a
+        version registered at or after REGISTERED_AT_6 (`program.evl6`: PREREG-EVL-6 section 6, A100's row read by the
+        version's registration time) at Probe `event.max_open_v6.probe` (14)."""
+        if program is not None and getattr(program, "evl6", False) and str(band) in self.max_opens_v6:
+            return int(self.max_opens_v6[str(band)])
         return int(self.max_opens.get(str(band), 0))
 
     def reach_bar(self, band: str) -> Decimal:
@@ -477,7 +550,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
             offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
             max_orders_day=int(e["max_orders_day"]),
-            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP})
+            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP},
+            max_opens_v6={band: int(n) for band, n in dict(e["max_open_v6"]).items()})
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
@@ -791,6 +865,22 @@ class Pick:
     knowable_at: str
 
 
+def pick_record(pick: Pick) -> dict[str, Any]:
+    """A pick as JSON (PREREG-EVL-7 section 1.9: the picks the auction's own decision read for the programs whose names
+    wait for the learners, kept in its summary until the learners' decision gives them: league/equity/live.py
+    `_event_decide_lrn`); `pick_of` reads it back exactly (the previous close as its decimal text)."""
+    return {"program": pick.program, "version": int(pick.version), "event": pick.event, "symbol": pick.symbol,
+            "cik": pick.cik, "rank": pick.rank, "adv20": float(pick.adv20), "prev_close": str(pick.prev_close),
+            "knowable_at": pick.knowable_at}
+
+
+def pick_of(record: Mapping[str, Any]) -> Pick:
+    rank = record.get("rank")
+    return Pick(str(record["program"]), int(record["version"]), str(record["event"]), str(record["symbol"]),
+                str(record["cik"]), None if rank is None else float(rank), float(record.get("adv20") or 0.0),
+                Decimal(str(record["prev_close"])), str(record.get("knowable_at") or ""))
+
+
 def _stored_before(row: Mapping[str, Any], decided_at: dt.datetime, lane: Any = None) -> bool:
     """PREREG-EVL-1 section 3: a real-money decision reads only an event STORED before its decision time. A news article
     is stored whole when it is read (`received_at`); a FILING is stored when its documents are fetched (the latest
@@ -1011,6 +1101,12 @@ def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> boo
     row = lane.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE 'skipped%' "
                           "AND exit_day>=? AND entry_day<? LIMIT 1",
                           (program.id, program.version, str(cik), since.isoformat(), day.isoformat())).fetchone()
+    if row is None:
+        # PREREG-EVL-6 section 1.1 (D12): a new version's one position per issuer counts the superseded version's
+        # intents of every session decided BEFORE THE RELEASE too (league/events/programs.py `superseded_held`), as
+        # its shadow does; never one the superseded version writes from the release on
+        row = P.superseded_held(lane, program, str(cik), since.isoformat(),
+                                (day - dt.timedelta(days=1)).isoformat())
     return row is not None
 
 
@@ -1062,8 +1158,12 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     missing. For `NEXT_OPEN_GUARD`'s programs (PREREG-EVL-4 section 1.3) the issuer's one event is not bought when it is
     EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
     rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
-    price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`)."""
-    if P.is_8(program):     # (PREREG-EVL-8: its own decisions' picks, never `select`: `picks_8`)
+    price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`).
+    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`). PREREG-EVL-8's seats:
+    their own decisions' picks, `picks_8` (never `select`)."""
+    if P.is_learner(program):
+        return learner_picks(lane, program, day, decided_at=decided_at, held=held)
+    if P.is_8(program):
         return picks_8(lane, program, day, decided_at=decided_at, held=held)
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
@@ -1371,6 +1471,160 @@ def gap_reader(lane: Lane, day: dt.date, *, opens: Callable[[str, C.Session], fl
     return gap
 
 
+# ----------------------------------------------------------------------------------------------------- PREREG-EVL-7
+#: PREREG-EVL-7 section 1.9's DAY ORDER LINE ("refuses this file's entries after every earlier PREREG row's; an exit is
+#: never stopped by it"): a learner's entry keeps, on the event kind's line of its day, every order the earlier PREREG
+#: rows may still send that day after it (league/equity/live.py `_event_line_keep`, passed to `_count_refusal` as
+#: `keep`; the money review of release 1019i replaced a fixed keep of 32 slots). LINE_ACROSS_AUCTIONS True (section
+#: 1.11 (10), the reading that trades less): ACROSS THE DAY'S AUCTIONS, so an EVL-LRN-O1 open entry also keeps, for
+#: every earlier close-entry row, a send and an A80 re-send of each position its band may still open at that close.
+#: STATED EFFECT, for the captain's amendment: with release 1019h's ten close-entry rows at learning (8 positions each),
+#: that keep is 1 + 10 x 2 x 8 = 161 of the line's 150 on an empty day, so EVL-LRN-O1 BUYS NOTHING IN REAL MONEY while
+#: they hold room (its shadow, the record that alone promotes, is unchanged). False (an amendment): the keep holds
+#: inside the learner's own auction only (that auction's earlier buys not yet sent and their re-sends), and an O1 entry
+#: with its exit at the close can take a slot an earlier close entry needs once the day's line is nearly full.
+LINE_ACROSS_AUCTIONS = True
+
+
+def is_learner(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-7's learners (league/events/programs.py `is_learner`)."""
+    return P.is_learner(program)
+
+
+def ern_issuer(lane: Lane, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
+    """EVL-LRN-O1'S ERN GUARD (PREREG-EVL-7 section 1.9, E8), IN REAL MONEY ONLY: True when the issuer has an 8-K with
+    item 2.02 knowable in D's close window (programs.py `close_window`) and stored by the decision time (`_stored_before`,
+    the reading that trades less): an ERN(D) issuer, which earlier rows buy at D's close and which this learner's sale
+    there would take. Unreadable inputs read as barred (fail closed). The shadow keeps the pick."""
+    try:
+        lo, hi = P.close_window(lane, day)
+        for row in P.filings_window(lane, "8-K", lo, hi):
+            if str(row.get("cik")) == str(cik) and P.items_of(row) & P.ERN_ITEMS and _stored_before(row, decided_at, lane):
+                return True
+    except (LookupError, sqlite3.Error, TypeError, ValueError):
+        return True
+    return False
+
+
+def issuer_8k_guard(lane: Lane, cik: str, session: C.Session | None, decided_at: dt.datetime) -> bool:
+    """EVL-LRN-ON'S 8-K GUARD (PREREG-EVL-7 section 1.9, E10), IN REAL MONEY ONLY: True when the issuer is NOT bought.
+    It reads EVERY 8-K of the issuer (form exactly '8-K') knowable at or after 09:00 ET of D and stored by the decision
+    time, whatever the learner's primary event (never the primary event's accession): barred when any of them has a
+    stored PROMPT-DOC verdict `ok` with score >= 2, or `ok` with score >= 1 and guidance "raised", or no answer by the
+    decision time (PREREG-EVL-4 and -5 section 1.3 with A75 (1)'s readings): such a filing is an earlier row's event at
+    the next open, which this learner's sale there would take. An issuer with no such 8-K is not barred. Unreadable
+    inputs read as barred (fail closed). The shadow keeps every pick."""
+    if session is None:
+        return True
+    try:
+        # (section 1.9's words: knowable at or after 09:00 ET of D and stored before the decision; NO upper bound on
+        # the knowable time (release 1019i's money re-review): a filing listed and stored before tau whose knowable
+        # time falls after it is read like any other)
+        rows = lane.db.execute("SELECT * FROM filings WHERE form='8-K' AND status='fetched' AND cik=? AND knowable_at>=? "
+                               "ORDER BY knowable_at, accession", (str(cik), S.iso(session.open_cutoff))).fetchall()
+        for r in rows:
+            row = dict(r)
+            if not _stored_before(row, decided_at, lane):
+                continue
+            got = V.stored(lane, f"8k:{row['accession']}", V.PROMPTS["doc"])
+            if not got or not got.get("answered_at") or S.parse_iso(str(got["answered_at"])) > decided_at:
+                return True
+            score = None if got.get("score") is None else int(got["score"])
+            if got.get("status") != "ok" or score is None:
+                continue
+            if score >= P.READ_MIN_SCORE or (score >= P.GUIDE_MIN_SCORE and got.get("guidance") == "raised"):
+                return True
+    except (sqlite3.Error, TypeError, ValueError, KeyError):
+        return True
+    return False
+
+
+def learner_gate(lane: Lane, program: P.Program) -> str | None:
+    """Why a PREREG-EVL-7 learner's real money buys nothing now (league/events/judge7.py `gate`: retired; at Probe or
+    Sized with no stay judge for COST-7's versions; its run ended, refused or its three runs spent; a look due and not
+    written, failing closed), None when it may buy. Unreadable reads as a reason (fail closed)."""
+    from . import judge7 as J7
+
+    try:
+        return J7.gate(lane, program)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return f"the learner's gate could not be read ({type(exc).__name__})"
+
+
+def learner_cut(learners: Iterable[tuple[str, str]]) -> tuple[int, int] | None:
+    """PREREG-EVL-7 SECTION 1.9's ROOM WITH ITS LEARNERS AT ONE AUCTION ((family, band) of each learner there that may
+    take a name): the earliest learner's ROOM key (`room_key`), None with no learner. Every PREREG-EVL-1 to -6 row is
+    given its names by the auction's own decision WHATEVER ITS BAND (the learner's pick waits for its own live receipt
+    and keeps no room from any earlier row: the final text's section 1.9); only R3's BIRTHS AFTER THAT KEY in ROOM
+    (`after_learners`: at learning every birth at learning; with a Probe learner its band's births, last of each pass
+    after it, and every birth at learning) wait for the learners' decision of the auction (league/equity/live.py
+    `_event_decide_lrn`), as a birth waits behind a waiting PREREG-EVL-5 buy (A113)."""
+    keys = [tuple(room_key(family, band)) for family, band in learners]
+    return min(keys) if keys else None
+
+
+def after_learners(program: str, band: str | None, cut: Sequence[int] | None) -> bool:
+    """Whether `program` at `band` waits for the learners' decision of the auction (`learner_cut`): an R3 birth whose
+    ROOM key comes after the cut; never a PREREG row (they never wait on a learner) nor a learner."""
+    if cut is None or P.is_learner(program):
+        return False
+    found = next((p for p in seatable() if p.id == program), None)
+    return found is not None and found.spec is not None and tuple(room_key(program, band)) > tuple(cut)
+
+
+def learner_pending(lane: Lane, program: P.Program, day: dt.date) -> bool:
+    """Whether the learner's LIVE RECEIPT of `day`'s auction may still name it (PREREG-EVL-7 section 1.9): none of
+    `learner.live_job` has finished, no other decision of the session is on record and no part failure is recorded
+    (league/events/learner.py `live_state`, `PART_KEY`). The learners' decision of the auction waits on it each minute
+    of the window, with no other bound (league/equity/live.py `_event_decide_lrn`)."""
+    from . import learner as LR
+
+    if LR.live_state(lane, program, day)["state"] != "waiting":
+        return False
+    rec = LR.decided(lane, program, day)
+    if rec is not None and str(rec.get("kind")) != "live":
+        return False
+    return lane.meta(LR.PART_KEY.format(program=program.id, version=program.version, day=day.isoformat())) is None
+
+
+def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime,
+                  held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-7 LEARNER (section 1.9): its intents of its LIVE decision of `day`, only once
+    its own live receipt of the auction has finished `ok` naming it (league/events/learner.py `live_picks`,
+    `live_state`; none for an auction its part did not decide live, a receipt still running or not naming it, nor
+    before the release), only while its gate is open (`learner_gate`)
+    in its rank order, less the book's own skips: EVL-LRN-O1's ERN guard (E8, `ern_issuer`), EVL-LRN-ON's 8-K guard
+    (E10, `issuer_8k_guard`), one position per issuer on the learner's earlier intents (`held_recently`) and on real
+    lots (`held`). Each pick's `rank` is its place counted down from K (the first pick K), so the list's order is the
+    learner's: no fitted figure goes to the book."""
+    from . import learner as LR
+
+    if learner_gate(lane, program) is not None:
+        return []       # (PREREG-EVL-7 sections 1.9-1.10 and 3.1: no run, a look overdue, retired: `judge7.blocked`)
+    got = LR.live_picks(lane, program, day)
+    if not got:
+        return []
+    session = C.session(lane, day)
+    out: list[Pick] = []
+    for r in got:
+        cik = str(r["cik"])
+        if program.id == "EVL-LRN-O1" and ern_issuer(lane, cik, day, decided_at):
+            continue
+        if program.id == "EVL-LRN-ON" and issuer_8k_guard(lane, cik, session, decided_at):
+            continue
+        if held_recently(lane, program, cik, day) or (held is not None and held(cik)):
+            continue
+        try:
+            prev = Decimal(str(r["prev_close"]))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not prev.is_finite() or prev <= 0:
+            continue
+        out.append(Pick(program.id, program.version, str(r["event"]), str(r["symbol"]).upper(), cik,
+                        float(LR.K + 1 - int(r["rank"])), float(r["adv20"] or 0.0), prev, str(r["knowable_at"])))
+    return out
+
+
 #: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the
 #: book counts the buys that end unsent so (league/equity/live.py `_event_held_said`), and so does the lane's report
 #: (league/events/report.py `HELD_UNSENT`, the same words).
@@ -1419,7 +1673,8 @@ def prereg_row(program: str, version: int) -> bool:
 def room_free_overdue(program: str, version: int) -> bool:
     """PREREG-EVL-5 section 1.3's WAITING ROOM ONCE THE LANE'S CLOSE RECEIPT IS OVERDUE (THE CAPTAIN'S DECISION on the
     money re-review of PREREG-EVL-5, its option 1; release 1019h; league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead`):
-    True for a row of PREREG-EVL-1 to -4 (version 1 or 2 of the earlier files' programs, PREREG-EVL-4's rows), whose buy
+    True for a row of PREREG-EVL-1 to -4 (any version of the earlier files' programs and of PREREG-EVL-4's rows: their
+    PREREG-EVL-6 versions keep their file, `Program.prereg`), whose buy
     a waiting PREREG-EVL-5 buy no longer keeps its room from once the lane's close receipt is still unfinished one book
     minute before the close window's cut-off; False for PREREG-EVL-5's own rows, R3's births (the room is still kept
     from them) and a program this process does not know (the reading that keeps the room)."""
@@ -1499,6 +1754,10 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
            "minute_close", "last_session_before", "reaction_reader", "limit_price", "sigma", "weight", "exit_plan",
            "publish", "band_mark", "RAISED_GUARD", "rows_5", "lane_tickers", "opening_minute", "gap_reader",
            "part_hold", "PART_WAIT", "prereg_row", "room_free_overdue"]
+#: (PREREG-EVL-7, release 1019i: the learners' real money, their gate and their place in ROOM's order; listed here, not
+#: last, so release 1019i's other branches append below without touching these lines)
+__all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
+            "learner_pending", "learner_picks", "pick_record", "pick_of", "LINE_ACROSS_AUCTIONS"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)
@@ -1506,6 +1765,8 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
+#: (release 1019i: PREREG-EVL-6 section 6's skip of a pick no whole-share count brings to Done's size bar)
+__all__ += ["under_bar", "at_size_count"]
 
 
 # ----------------------------------------------------------------------------------------------------- PREREG-EVL-8

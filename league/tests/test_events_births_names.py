@@ -44,10 +44,12 @@ et = TB.et
 PROMPT_1019E = "2203fda336035feb3786317af09cee9f32b77353999a67e58c18911a41518a77"
 #: (Release 1019h, the captain's A97: SUP-3's rate rule moved the prompt's rate lines and added the Nov 6 line: version 3.
 #: Release 1019h too, the captain's A109: the architect on Claude Opus 5.5, with no temperature, effort low and 6000
-#: tokens, all in the sha's spec: version 4. Version 3 was never live.)
+#: tokens, all in the sha's spec: version 4. Version 3 was never live. Release 1019i, PREREG-EVL-6 section 5: the prompt
+#: tells the restated charge from the budget, 0.13 where version 4 said 0.10: version 5.)
 PROMPT_BY_VERSION = {2: "8294fe777c44b1cd06d04c48af9a60dade4f5443e9597a4f77fe853dd9affdce",
                      3: "890806ff38f09b7e810cbbfef1159ca85f39d568105537d8eca4d7e60c022b06",
-                     4: "0cae215b0cebb21e9313d392e358c443a4d2caf06554e593f32fbaba8cfe6c21"}
+                     4: "0cae215b0cebb21e9313d392e358c443a4d2caf06554e593f32fbaba8cfe6c21",
+                     5: "1442a2a23637e66158ad01b072b2df85f4c6d9fa60b2d7640c8ff98226a6914e"}
 
 NIGHT = dt.date(2026, 10, 21)           # Wed: the first births night
 RECEIPT_AT = dt.datetime(2026, 10, 22, 2, 11, 33, tzinfo=UTC)
@@ -182,7 +184,8 @@ class ThePrompt(unittest.TestCase):
 
     def test_the_prompt_sha_moved_and_a_prompt_change_is_a_new_parse_version(self):
         self.assertNotEqual(BI.prompt_sha(), PROMPT_1019E)
-        self.assertEqual(BI.PARSE_VERSION, 4, "release 1019h's SUP-3 (A97: 3) and its architect on Opus 5.5 (A109: 4)")
+        self.assertEqual(BI.PARSE_VERSION, 5, "release 1019h's SUP-3 (A97: 3) and its architect on Opus 5.5 (A109: 4); "
+                                              "release 1019i's restated charge (PREREG-EVL-6 section 5: 5)")
         self.assertEqual(BI.prompt_sha(), PROMPT_BY_VERSION[BI.PARSE_VERSION],
                          "the prompt changed: give it a new PARSE_VERSION (A95) and pin both here")
 
@@ -251,11 +254,11 @@ class TheSixOfTheFirstNight(Replay):
         ern, news, ins = out[3], out[4], out[5]
         self.assertEqual([ern["ok"], news["ok"]], [True, True], (ern["reasons"], news["reasons"]))
         self.assertEqual((ern["id"], ern["selected"], ern["per_session"], ern["charge"]),
-                         ("EVL-B-ERN-NEGATIVE-O1", 80, 4.0, 1))
+                         ("EVL-B-ERN-NEGATIVE-O1", 80, 4.0, 13))
         self.assertEqual(ern["jaccard"]["max"], round(80 / 120, 4),
                          "four of the six earnings 8-Ks a session: under the 0.8 duplicate line")
         self.assertIn(ern["jaccard"]["with"], ("EVL-CTRL-ERN-ALL-O1", "EVL-ERN-REACT-C1"), "a program of all six")
-        self.assertEqual((news["id"], news["selected"], news["charge"]), ("EVL-B-NEWS-EARLY-MORNING-O1", 80, 1))
+        self.assertEqual((news["id"], news["selected"], news["charge"]), ("EVL-B-NEWS-EARLY-MORNING-O1", 80, 13))
         self.assertEqual(news["jaccard"]["max"], round(80 / 120, 4))
         # The ins-buy's grammar passes now ("roles": ["officer"] reads as "officer"); the validator's count judges it.
         self.assertEqual((ins["ok"], ins["id"], ins["selected"]), (False, "EVL-B-INS-BUY-OFFICER-O1", 40))

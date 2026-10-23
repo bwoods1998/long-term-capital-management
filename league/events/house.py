@@ -142,6 +142,12 @@ SCORE_BUDGET = 120.0
 BACKFILL_BUDGET = 90.0
 #: A task never runs into a decision: it ends this long before one falls due.
 DECISION_MARGIN = 5.0
+#: PREREG-EVL-7: the learners' own task's bound (league/events/learner.py `catchup`, `recompute`) and the nightly cost
+#: basis step's job (league/events/costs7.py `nightly`, after the score and before the screen).
+LEARNER_BUDGET = 120.0
+COST_BASIS_JOB = "cost-basis"
+LEARNER_RECHECK = dt.timedelta(minutes=1)    # nothing owed: the learners' owed list is read again this soon
+RECOMPUTE_NEEDS = 60.0                       # the night's recompute starts only with this much of the task's bound left
 #: The verdict step of a record pass starts only with this much of its bound left.
 VERDICT_STEP_MIN = 10.0
 
@@ -228,11 +234,14 @@ PREFETCH_WINDOW = 400
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 #: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
 #: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
-#: starts only with its whole `CALL_LIMIT` (150 s) and one `STREAM_GAP` (60 s) left before the bound (`LaneGateway`
-#: `post_stream`, `room`), so its last read returns before it; a whole Haiku night took about 10 s on the House (A95,
-#: A109), so the facts before the call leave it its 210 s.
+#: starts only with its whole `CALL_LIMIT` (150 s) and TWO `STREAM_GAP`s (60 s each: the stream's last read may start
+#: just inside the limit and wait a whole gap, and the answer's own last read another) left before the bound
+#: (`LaneGateway` `post_stream`, `room`; release 1019h's re-review, a minor fixed in release 1019i: one gap left a read
+#: that could end past the bound), so its last read returns before it; a whole Haiku night took about 10 s on the House
+#: (A95, A109), the facts before the call leave it its 270 s inside 300 s, and the reconciliation of an earlier night's
+#: registrations runs AFTER the call (league/events/births.py `night`), so its network reads never eat the call's room.
 BIRTHS_AT = dt.time(21, 15)
-BIRTHS_BUDGET = 240.0
+BIRTHS_BUDGET = 300.0
 #: THE SCREEN AFTER THE OPEN (release 1019f; the audit's "bands move a session late"). The judge makes a close X final
 #: (league/events/screen.py `final_until`: A66's three sessions, A69's fast path once the session after X has had its
 #: open decision), and the intents a look as of X covers were settled by X's own score, so the look can be written the
@@ -299,6 +308,8 @@ FETCH_BACKOFF = tuple(dt.timedelta(minutes=2 ** k) for k in range(1, FETCH_TRIES
 #: close; the premarket marks from `PX_PM_AT` (after the open window's sends) and the 15:30 marks from `PX_1530_AFTER`
 #: after the close (each once its span is whole on the Basic plan's tape); the nightly bars once the night's score
 #: has run; the 270-session backfill and the operating-company cache at night (`PX_NIGHT`) and on days with no session.
+#: THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`): no run without it (`_px`: `disk`, nothing
+#: opened), no request of a run without it (`PX.PxRoom`), and every PX run waits FAIL_BACKOFF after one that found none.
 PX_BUDGET = 60.0
 PX_CLEAR = dt.timedelta(minutes=10)
 PX_EVERY = dt.timedelta(minutes=1)
@@ -438,12 +449,14 @@ class LaneGateway:
     def post_stream(self, path: str, body: Any, headers: Mapping[str, str] | None = None, *, limit: float,
                     gap: float) -> tuple[int, Any]:
         """A STREAMED Claude call (R3's births call, release 1019h's fix round; league/events/gw.py `post_stream`):
-        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and one `gap` (a read that
-        returns at the gap's end) are left before the task's bound, so it never runs past the bound. A stream lost
-        after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`), and
-        the next task's `_spend_today` reads it from the store."""
+        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and TWO `gap`s (a read that
+        starts just inside the limit and returns at its gap's end, then the answer's last read; release 1019h's
+        re-review, fixed in release 1019i) are left before the task's bound, so it never runs past the bound. A stream
+        lost after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`),
+        and the next task's `_spend_today` reads it from the store."""
         why = self.lane.claude_refusal(self.deadline)
-        if why is None and self.deadline is not None and self.deadline - self.lane._mono() < float(limit) + float(gap):
+        if why is None and self.deadline is not None and \
+                self.deadline - self.lane._mono() < float(limit) + 2 * float(gap):
             why = "room"
         if why:
             self.counts[f"cut_{why}"] += 1
@@ -509,6 +522,10 @@ class EventLane:
         self.px_on = self.settings.get("px_data") is True
         self._bucket = PX.TokenBucket(clock=monotonic, sleep=sleep) if self.px_on else None
         self._px_last: dt.datetime | None = None
+        #: ... THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`): the last check before a PX run
+        #: (lane.json `px_store`) and when a run last found none (`_px_due` then waits FAIL_BACKOFF before the next).
+        self._px_room: dict[str, Any] | None = None
+        self._px_disk: dt.datetime | None = None
         self._gateway = gateway
         self._sec_base = sec
         self._mono = monotonic
@@ -553,6 +570,8 @@ class EventLane:
         self._failed: dict[str, dt.datetime] = {}
         # accession -> (the fetches tried, when the first one failed), this process's (`_record_steps`)
         self._fetch_tries: dict[str, tuple[int, dt.datetime | None]] = {}
+        self._release_marked = False            # (PREREG-EVL-6: the release's mark, written at the first turn)
+        self._copied_next = self._born          # (PREREG-EVL-6: the copied record's catch-up, hourly from the first turn)
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -592,7 +611,8 @@ class EventLane:
                     "verdict_usd_today": round(float(self._usd["usd"]), 4), "verdict_usd_day": self.verdict_usd_day,
                     "verdict_line_usd": round(float(self._line["usd_day"]), 4), "verdict_line_source": self._line["source"],
                     "warnings": self._warnings, "px_data": self.px_on,
-                    "px_bucket": None if self._bucket is None else dict(self._bucket.taken)}
+                    "px_bucket": None if self._bucket is None else dict(self._bucket.taken),
+                    "px_store": None if self._px_room is None else dict(self._px_room)}
 
     def ready(self) -> bool:
         """The store exists (the migration, scripts/evl_migrate.py, made it, or the operator did; the lane never makes
@@ -761,6 +781,11 @@ class EventLane:
                 return
             with S.Store(self.root) as st:
                 P.load_births(st)       # (R3: the registered births, after every PREREG program, for every task)
+                if not self._release_marked:
+                    # PREREG-EVL-6 section 1.1 (D8): THE RELEASE carrying it is this code's first turn (written once;
+                    # a session decided before it is copied for the new versions, one from it on is their own)
+                    P.mark_release(st, self.now())
+                    self._release_marked = True
                 if P.registers_8():     # (PREREG-EVL-8: THE RELEASE, written once, the first turn under this code)
                     PXL.mark_release(st, self.now())
                 if not self._started_told:
@@ -1004,7 +1029,19 @@ class EventLane:
 
     # -- the calendar ----------------------------------------------------------------------------------------------
     def _maintain(self, st: S.Store, now: dt.datetime) -> None:
-        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead."""
+        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead; and, from the
+        first turn and hourly, PREREG-EVL-6's COPIED RECORD BEFORE THE RELEASE (section 1.1, D8;
+        league/events/programs.py `copy_all_before_release`): every new version's copy of its superseded version's
+        intents of the sessions decided before the release, those a release without the new versions decided too (its
+        own decisions copy theirs as they run; a look waits for the copy: `programs.uncopied`)."""
+        if now >= self._copied_next:
+            self._copied_next = now + REDECIDE_EVERY
+            try:
+                got = P.copy_all_before_release(st, through=now.astimezone(C.NY).date())
+                if got.get("copied") or got.get("moved"):
+                    self._note("copy-evl6", "ok", got, self._mono())
+            except Exception as exc:  # noqa: BLE001 - copied again next hour; a look waits for it meanwhile
+                self.warn("PREREG-EVL-6's copied record", exc)
         last = st.meta("evl:lane:sessions_at")
         tried = self._attempts.get("sessions")
         today = now.astimezone(C.NY).date()
@@ -1081,6 +1118,9 @@ class EventLane:
         backfill = self._backfill_due(st, now, today, soon)
         if backfill is not None and not self._quiet("backfill", now, soon):
             return Task("backfill", lambda ctx, deadline: self._backfill(ctx, backfill, deadline), BACKFILL_BUDGET), now
+        learner = self._learner_due(st, now, today, session, soon)
+        if learner is not None:
+            return learner, now
         px = self._px_due(st, now, today, session, soon)     # (release 1019i: the PX recorders, last of all)
         if px is not None:
             return px, now
@@ -1635,6 +1675,16 @@ class EventLane:
                 if not self._quiet("score", now, soon):
                     return Task("score", lambda ctx, deadline: self._score(ctx, deadline, night), SCORE_BUDGET)
                 return None
+            if P.learners() and not self._receipt_since(st, COST_BASIS_JOB, since) and \
+                    not self._receipt_since(st, "screen", since) and not self._quiet(COST_BASIS_JOB, now, soon):
+                # (PREREG-EVL-7 section 2.2: the night's cost_basis row after the score and BEFORE THE SCREEN, so only
+                # while that night's screen is owed (a night screened already, by a release before the learners, owes
+                # none); one that fails waits its back-off and the screen goes on: only the learners' looks wait for a
+                # row, 2.2 (d). Like the screen it never starts inside a decision's lead (`_clear_of_decision`), so a
+                # night's row owed in the morning never holds that morning's verdicts or decisions)
+                if not self._clear_of_decision(st, now, soon):
+                    return None
+                return Task(COST_BASIS_JOB, lambda ctx, deadline: self._cost_basis(ctx, deadline, night), LEARNER_BUDGET)
             if not self._receipt_since(st, "screen", since):
                 if not self._quiet("screen", now, soon) and self._clear_of_decision(st, now, soon):
                     return Task("screen", lambda ctx, deadline: self._screen(ctx, deadline, night), None)
@@ -1727,10 +1777,14 @@ class EventLane:
         league/config.json `events.score_batch` is not false (`score.batch_on`): the seating versions and their controls
         first (`score.order_due`), and before each `PREFETCH_WINDOW` intents of the pass the daily bars of their
         symbols and both benchmarks in one read (`score.prefetch`, stopped at the bound), so each settles with no bar
-        request of its own (`settle_one(prefetched=...)`); on the parity night (`score.parity_due`) a 5% sample is
-        settled again by the per-intent path and only its equality flag kept (`score_parity`). False: release 1019h's
-        per-intent path. The receipt carries the pass's requests by kind, its seconds and the flags (the daily report's
-        settle-pace line)."""
+        request of its own (`settle_one(prefetched=...)`: a cache that lives only for the pass; `bars` receives exactly
+        the rows release 1019h's two fetches an intent would have written); on the parity night (`score.parity_due`) a
+        5% sample of each prefetch's intents is settled twice in memory, before any of them is written, by the batched
+        and the per-intent path (`score.parity_window`), and only its equality flags kept (`score_parity`). A FLAG 0
+        FAILS CLOSED: it sets the parity latch (`score.latched`), and from that intent on every pass settles by the
+        per-intent path until the captain clears it (`evl_score_parity` stands meanwhile). False: release 1019h's
+        per-intent path. The receipt carries the pass's requests by kind, its seconds, the flags and the latch (the
+        daily report's settle-pace line)."""
         st, now = ctx.store, ctx.now()
         began = self._mono()
         day = night or now.astimezone(C.NY).date()
@@ -1740,54 +1794,66 @@ class EventLane:
         counts = {"due": 0, "settled": 0, "skipped": 0, "waiting": 0, "errors": 0}
         errors: list[str] = []
         complete = True
-        batch = SC.batch_on(self.settings)
+        batch = SC.batch_on(self.settings) and SC.latched(st) is None
         gw = SC.Counted(ctx.gw)
         pending = [i for i in SC.due(st, now)
                    if (str(i["program"]), int(i["version"]), str(i["event"])) not in seen]
         if batch:
             pending = SC.order_due(pending)
         check = batch and SC.parity_due(st, day, self.settings)
-        flags = {"checked": 0, "equal": 0}
+        flags = {"sampled": 0, "checked": 0, "equal": 0}
+        waits: dict[tuple[str, int, str], str] = {}
         pre: SC.Prefetch | None = None
-        fetched = {"requests": 0, "rows": 0, "windows": 0, "done": True}
+        fetched = {"requests": 0, "rows": 0, "windows": 0, "done": True, "served": 0}
+        on = batch      # (the batched path until the parity latch, if it is set in this pass)
         for n, intent in enumerate(pending):
             key = (str(intent["program"]), int(intent["version"]), str(intent["event"]))
             if self.late(deadline):
                 complete = False
                 break
-            if batch and n % PREFETCH_WINDOW == 0:
-                pre = SC.prefetch(st, gw, pending[n:n + PREFETCH_WINDOW], now=now, late=lambda: self.late(deadline))
+            if on and n % PREFETCH_WINDOW == 0:
+                window = pending[n:n + PREFETCH_WINDOW]
+                pre = SC.prefetch(st, gw, window, now=now, late=lambda: self.late(deadline))
                 fetched["requests"] += pre.requests
                 fetched["rows"] += pre.rows
                 fetched["windows"] += 1
                 fetched["done"] = fetched["done"] and pre.done
+                if check and pre.symbols:
+                    got = SC.parity_window(st, gw, window, pre, day, now=now, late=lambda: self.late(deadline))
+                    for k in flags:
+                        flags[k] += int(got[k])
+                    waits.update(got["waits"])
+                if SC.latched(st) is not None:
+                    on, pre = False, None       # (a flag 0: the rest of the pass by the per-intent path)
             seen.add(key)
             counts["due"] += 1
             try:
-                use = pre if pre is not None and pre.symbols else None     # (nothing prefetched: nothing to skip)
-                status = SC.settle_one(st, gw, intent, now=now, **({"prefetched": use} if use is not None else {}))
+                use = pre if on and pre is not None and pre.symbols else None    # (nothing prefetched: nothing to skip)
+                if key in waits:        # (a sampled intent the parity check saw wait: not read again this pass)
+                    status = f"waiting:{waits[key]}"
+                else:
+                    status = SC.settle_one(st, gw, intent, now=now, **({"prefetched": use} if use is not None else {}))
             except Exception as exc:  # noqa: BLE001 - one intent's failure is its own (as score.settle)
                 counts["errors"] += 1
                 errors.append(f"{key[0]}:{key[2]}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
             kind = status.split(":")[0]
             counts[kind] = counts.get(kind, 0) + 1
-            if kind == "settled" and batch:
-                SC.note_first_night(st, day)
-                if check and SC.parity_sampled(intent) and not self.late(deadline):
-                    try:
-                        flag = SC.check_parity(st, gw, intent, day, now=now)
-                    except Exception:  # noqa: BLE001 - a flag not written is a flag not counted
-                        flag = None
-                    if flag is not None:
-                        flags["checked"] += 1
-                        flags["equal"] += flag
+            if kind == "settled" and use is not None:
+                fetched["served"] += int(key in use.hits)
         summary = {"day": day.isoformat(), "complete": complete, **counts, "errors_seen": errors[:5],
                    "batched": batch, "requests": dict(gw.counts), "seconds": round(self._mono() - began, 3)}
         if batch:
             summary["prefetch"] = fetched
         if check:
             summary["parity"] = flags
+        held = SC.latched(st)
+        if held is not None:
+            summary["latched"] = True
+            if batch:
+                self.warn("score parity", f"the batched score's parity check found a difference ({held.get('program')} "
+                                          f"version {held.get('version')}, the night of {held.get('night')}): the "
+                                          "per-intent path settles every intent until the captain clears the latch")
         self._receipted(st, "score", "ok" if complete else "partial", summary)
         if errors:
             self.warn("score", f"{len(errors)} intents could not be settled this pass, the first: {errors[0]}")
@@ -1805,6 +1871,31 @@ class EventLane:
         day = night or now.astimezone(C.NY).date()
         status, summary = self._looks_pass(ctx.store, day, now, "screen", None, self._horizons(ctx.store, day, now))
         summary["run"] = "night"
+        if P.learners():
+            # PREREG-EVL-7 sections 1.10 and 3.1: the learners' looks, their run's end and their next runs, judged by
+            # PREREG-EVL-6's screen through COST-7's one interface (league/events/judge7.py), after every earlier
+            # file's looks and PREREG-EVL-6's own start of its waiting runs (registration order); nothing while no
+            # learner is pinned. A failure is the learners' own: the earlier looks are written, the receipt says so.
+            try:
+                from . import judge7 as J7
+
+                got = J7.run(ctx.store, day, now=now)
+            except Exception as exc:  # noqa: BLE001 - computed again next night; the learners' gate holds their money
+                status = "partial"
+                summary["learners"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+                self.warn("learner looks", exc)
+            else:
+                summary["learners"] = {
+                    "written": [{k: w.get(k) for k in ("program", "version", "k", "decision", "band", "end")}
+                                for w in got["written"]],
+                    "waits": [{"program": w.get("program"), "k": w.get("k"), "why": str(w.get("why") or "")[:WHY_CHARS]}
+                              for w in got["waiting"][:WAITS_KEPT]],
+                    "started": [{k: w.get(k) for k in ("program", "version", "n")} for w in got["started"]],
+                    "refused": [{k: w.get(k) for k in ("program", "version", "n", "why")} for w in got["refused"]]}
+                if got["errors"]:
+                    status = "partial"
+                    summary["learners"]["errors"] = got["errors"][:5]
+                    self.warn("learner looks", f"{len(got['errors'])} learner(s) could not be screened: {got['errors'][0]}")
         try:
             moved = BA.review(ctx.store, now=now)
         except Exception as exc:  # noqa: BLE001 - the looks are written; the review is read again next night
@@ -1838,6 +1929,77 @@ class EventLane:
         else:
             self._receipted(ctx.store, DN.JOB, "ok", done)
         return summary | {"_status": status}
+
+    # -- PREREG-EVL-7 -------------------------------------------------------------------------------------------------
+    def _learner_due(self, st: S.Store, now: dt.datetime, today: dt.date, session: C.Session | None,
+                     soon: list[dt.datetime]) -> Task | None:
+        """PREREG-EVL-7'S LEARNERS' OWN WORK (league/events/learner.py), after every other task of the plan and never
+        within SCREEN_CLEAR of a decision: the reconstruction of the candidate sets before REGISTERED_AT_7 (once), the
+        catch-up of the decisions before the release (E4) and the late decision of a live part that failed or expired
+        (both under `decide-open-lrn:<D>` / `decide-close-lrn:<D>`, shadow only), and the night's recompute once its
+        score is in. None while no learner is pinned (REGISTERED_AT_7 None: nothing of it ever runs)."""
+        if not P.learners() or self._quiet("learner", now, soon):
+            return None
+        if self._lead(st, now) is not None:
+            # (release 1019i's money re-review: inside today's live close decision's lead (`_lead`: a failed, cut or
+            # running live run keeps it) nothing of the learners' is planned, whatever is owed; a learner task there
+            # could do nothing and still use the held turn up before DECIDE_RETRY, so the retry left the turn, release
+            # 1019g's failure that 1019h fixed. The owed work waits for the lead's end.)
+            return None
+        checked = getattr(self, "_learner_next", None)
+        if checked is not None and now < checked:
+            return None         # (the owed list is read at most once a minute when nothing was owed)
+        from . import learner as LR
+
+        try:
+            owed = LR.due(st, now)
+            night = self._night(st, now, today, session, [])
+            recompute = night is not None and self._receipt_since(st, "score", _wall(night, SCORE_AT), status="ok") \
+                and st.meta(LR.RECOMPUTE_KEY.format(day=night.isoformat())) is None
+        except Exception as exc:  # noqa: BLE001 - a read error here never stops the plan's other tasks
+            self.warn("learner plan", exc)
+            return None
+        if not owed and not recompute:
+            self._learner_next = now + LEARNER_RECHECK
+            return None
+        self._learner_next = None
+        if not self._clear_of_decision(st, now, soon):
+            return None
+        return Task("learner", lambda ctx, deadline: self._learner(ctx, deadline, night if recompute else None),
+                    LEARNER_BUDGET)
+
+    def _learner(self, ctx: LaneContext, deadline: float | None, night: dt.date | None) -> dict[str, Any]:
+        """Run the learners' owed decisions oldest first under the task's bound (each a decision whole or nothing), then
+        the night's recompute when it is due (meta `learner.RECOMPUTE_KEY`; the alarm reads it)."""
+        from . import learner as LR
+
+        def check(where: str) -> None:
+            if deadline is not None and self._mono() >= deadline - DECISION_MARGIN:
+                raise LR.Expired(f"the learner task's bound before {where}")
+        out: dict[str, Any] = {}
+        try:
+            out["catchup"] = LR.catchup(ctx.store, ctx.now, check=check)
+        except LR.Expired as exc:
+            out["cut"] = str(exc)[:200]
+            return out | {"_status": "cut"}
+        if night is not None and (deadline is None or deadline - self._mono() > RECOMPUTE_NEEDS):
+            got = LR.recompute(ctx.store, night, ctx.now)
+            out["recompute"] = {k: v.get("status") for k, v in got.items()}
+            bad = {k: v for k, v in got.items() if v.get("status") == "mismatch"}
+            if bad:
+                self.warn("learner recompute", f"{night.isoformat()}: {json.dumps(bad, sort_keys=True)[:300]}")
+        return out
+
+    def _cost_basis(self, ctx: LaneContext, deadline: float | None, night: dt.date) -> dict[str, Any]:
+        """PREREG-EVL-7 section 2.2: the night's `cost_basis` row and the `costs7` rows of the newly settled outcomes of
+        its versions and their pools (league/events/costs7.py `nightly`), with its receipt."""
+        from . import costs7 as C7
+
+        got = C7.nightly(ctx.store, night, ctx.now())
+        summary = {k: got.get(k) for k in ("night", "m_in", "m_out", "g_bp", "fbar_in", "fbar_out", "n_att", "why",
+                                            "costs7_written", "kept")}
+        self._receipted(ctx.store, COST_BASIS_JOB, "ok", summary)
+        return summary
 
     def _births(self, ctx: LaneContext, deadline: float | None, night: dt.date | None = None,
                 rerun: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -2009,6 +2171,9 @@ class EventLane:
         if self._px_last is not None and now < self._px_last + PX_EVERY:
             soon.append(self._px_last + PX_EVERY)
             return None
+        if self._px_disk is not None and now < self._px_disk + FAIL_BACKOFF:     # (no room: looked at again later)
+            soon.append(self._px_disk + FAIL_BACKOFF)
+            return None
         job = self._px_job(st, now, today, session, soon)
         if job is None:
             return None
@@ -2070,24 +2235,41 @@ class EventLane:
         """ONE PX RECORDER RUN, ISOLATED: px.sqlite opened for it, a run id kept (`px_runs`), its reads through
         `PX.PxGateway` (the SIP bars route, the bucket after the lane, cut at the bound), its SEC reads through the
         lane's bounded reader. Never raises: a cut ends it `cut` (the next run goes on from what it stored), any failure
-        is `failed`, a warning at most once an hour, and that recorder waits FAIL_BACKOFF; nothing else waits on it."""
+        is `failed`, a warning at most once an hour, and that recorder waits FAIL_BACKOFF; nothing else waits on it.
+        THE STORE'S ROOM (release 1019i's review; league/events/pxstore.py `room`: px.sqlite under its 2 GB line and
+        the state disk above the PX floor) is checked BEFORE THE RUN, which without room is `disk` and opens nothing
+        (no row written, px.sqlite not even made), and before every request of it (`PX.PxRoom`: the run ends `disk`
+        before its next page); every PX run then waits FAIL_BACKOFF, a warning says why at most once an hour, the last
+        check is in lane.json (`px_store`), and league/ops/evl_health.py raises `evl_px_store`."""
         now = ctx.now()
         self._px_last = now
+        room = PXS.room(self.root)
+        self._px_room = {k: room[k] for k in ("size_bytes", "free_bytes", "ok", "why")} | {"at": S.iso(now)}
+        if not room["ok"]:
+            self._px_disk = now
+            self.warn("px store", f"the PX recorders write nothing: {room['why']}")
+            return {"why": room["why"], "size_bytes": room["size_bytes"], "free_bytes": room["free_bytes"],
+                    "requests": 0, "_status": "disk"}
         if late is None and name == "daily" and P.registers_8():
             # (PREREG-EVL-8 section 4.6: the night's bars `px-bars:<P>`, the House's lowest priority, YIELD before each
             # read to any other lane task due; what they stored stays)
             def late() -> bool:
                 return self.late(deadline) or self._eight_yield(ctx.store, f"px-{name}")
         gw = PX.PxGateway(self.gateway(), self._bucket or PX.TokenBucket(clock=self._mono, sleep=self._sleep),
-                          until=deadline, late=late or (lambda: self.late(deadline)))
+                          until=deadline, late=late or (lambda: self.late(deadline)),
+                          room=lambda: PXS.room(self.root)["why"])
         status, out = "ok", {}
         px = None
         run = None
         try:
             px = PXS.PxStore(self.root)
-            run = px.start_run(name, now=now)
+            run = px.start_run(name, now=now, free_bytes=room["free_bytes"])
             out = dict(fn(ctx, px, gw, run, deadline) or {})
             status = str(out.pop("_status", "ok"))
+        except PX.PxRoom as exc:
+            status, out = "disk", {"why": str(exc)[:200]}
+            self._px_disk = self.now()
+            self.warn("px store", f"the PX recorders stop: {exc}")
         except (PX.PxCut, LaneDeadline) as exc:
             status, out = "cut", {"cut": str(exc)[:200]}
         except Exception as exc:  # noqa: BLE001 - a recorder's failure is its own
@@ -2106,6 +2288,10 @@ class EventLane:
         brief = {k: v for k, v in out.items() if isinstance(v, (int, float, str, bool)) or v is None}
         return {**brief, "requests": gw.requests, "_status": status}
 
+    def _px_late(self, deadline: float | None) -> bool:
+        """A PX recorder's `late`: the bound passed, or the store has no room (`PXS.room`: its next write waits)."""
+        return self.late(deadline) or not PXS.room(self.root)["ok"]
+
     def _px_listed(self, ctx: LaneContext, day: dt.date | None = None) -> dict[str, list[str]] | None:
         """{cik: listed tickers} from the lane's ticker copy for `day` (the latest with None) and the live asset list;
         None when the lane holds no ticker copy yet (the recorder waits for the lane's own snapshot)."""
@@ -2119,7 +2305,7 @@ class EventLane:
         if listed is None:
             return {"why": "no ticker copy yet", "_status": "waiting"}
         out = PX.backfill(px, gw, {t for ts in listed.values() for t in ts}, ctx.store, today, now=ctx.now(), run=run,
-                          late=lambda: self.late(deadline))
+                          late=lambda: self._px_late(deadline))
         return out | {"_status": "ok" if out.get("done") else "partial"}
 
     def _px_daily(self, ctx: LaneContext, px: PXS.PxStore, gw: Any, run: str, night: dt.date) -> dict[str, Any]:
@@ -2133,7 +2319,7 @@ class EventLane:
         listed = self._px_listed(ctx)
         if listed is None:
             return {"why": "no ticker copy yet", "_status": "waiting"}
-        out = PX.operating_fill(px, listed, today, ctx.sec, now=ctx.now(), late=lambda: self.late(deadline))
+        out = PX.operating_fill(px, listed, today, ctx.sec, now=ctx.now(), late=lambda: self._px_late(deadline))
         if not out["left"]:
             px.set_meta(f"px:ops:{today.isoformat()}", S.iso(ctx.now()))
         return out | {"_status": "ok" if not out["left"] else "partial"}
@@ -2143,7 +2329,7 @@ class EventLane:
         if not ctx._snapshots():
             return {"why": "no ticker copy yet", "_status": "waiting"}
         out = PX.universe(px, ctx.store, day, tickers=ctx.tickers_for(day), assets=ctx.assets(True), now=ctx.now(),
-                          run=run, late=lambda: self.late(deadline))
+                          run=run, late=lambda: self._px_late(deadline))
         if "why" in out:
             return out | {"_status": "waiting"}
         if not out["left"]:

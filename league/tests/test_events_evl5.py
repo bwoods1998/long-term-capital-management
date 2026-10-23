@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Callable
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league import ci
 from league.equity import live as L
 from league.events import book as EB
@@ -130,6 +131,7 @@ class WorldCase(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------------------------------------- the rows
+@on_1019h
 class TheRows(unittest.TestCase):
     def test_the_four_rows_as_frozen(self):
         """Section 1.2's three seatable programs in its order, then section 4's control; each enters at the CLOSE of D
@@ -196,6 +198,7 @@ class TheRows(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------------------------------------- the judge
+@on_1019h
 class TheJudge(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -214,9 +217,11 @@ class TheJudge(unittest.TestCase):
         self.assertNotIn("EVL-ERN-DROP-ON", SC.CONTROLS)
         self.assertNotIn("EVL-NEWS-NIGHT2-ON", SC.CONTROLS, "no control condition for the two rows that read no model")
         self.assertEqual([SC._seating(p, 1) for p in ALL5], [True, True, True, False])
-        self.assertEqual(SC.expected_false_passes(self.st), {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5})
+        efp = SC.expected_false_passes(self.st)     # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version or run of 3.9)
+        self.assertEqual({k: efp[k] for k in ("versions", "expected", "budget", "left")},
+                         {"versions": 15, "expected": 1.95, "budget": 3.9, "left": 1.95})
         self.w.births()
-        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 1.7, "two seatable births: 0.10 each")
+        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 2.21, "two seatable births: 0.13 each")
         self.assertEqual(R._group("EVL-ERN-UNDER-ON"), frozenset({"EVL-ERN-UNDER-ON", CONTROL5}))
         self.assertEqual(R._group("EVL-NEWS-NIGHT2-ON"), frozenset({"EVL-NEWS-NIGHT2-ON"}))
 
@@ -347,6 +352,7 @@ def W4_weekdays(first: dt.date, last: dt.date) -> list[dt.date]:
 
 
 # ---------------------------------------------------------------------------------------------- the earnings rows
+@on_1019h
 class TheEarningsRows(WorldCase):
     def ern(self, accession: str, ticker: str, accepted: dt.datetime, *, items=("2.02",), text_len: int = 5000,
             stored: dt.datetime | None = None, form: str = "8-K") -> str:
@@ -494,6 +500,7 @@ class TheEarningsRows(WorldCase):
 
 
 # ---------------------------------------------------------------------------------------------- the second night
+@on_1019h
 class TheSecondNight(WorldCase):
     def setUp(self):
         super().setUp()
@@ -631,6 +638,7 @@ class TheSecondNight(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the verdicts
+@on_1019h
 class TheVerdicts(WorldCase):
     def test_no_new_prompt_and_no_second_verdict(self):
         """Section 1.2: a PROMPT-DOC verdict of an eligible ERN(D) filing, or a PROMPT-NEWS verdict of a DAY(D) article,
@@ -665,6 +673,7 @@ class TheVerdicts(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the pre-pass
+@on_1019h
 class ThePrePass(WorldCase):
     def test_the_pre_pass_reads_from_0947_and_stores_its_reads(self):
         """Section 1.3: EVL-NEWS-NIGHT2-ON's heavy reads (its attention articles of P, (ii) and (iii) so far, the
@@ -868,6 +877,7 @@ class ThePrePassSchedule(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------- the isolation
+@on_1019h
 class TheIsolation(WorldCase):
     def week(self, world: W.World) -> None:
         W.evl4_rows(world)
@@ -969,6 +979,7 @@ class TheIsolation(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------------- the book
+@on_1019h
 class TheBook(WorldCase):
     def lane(self) -> EB.Lane:
         lane = EB.Lane(self.w.root / S.DB_NAME)
@@ -1122,6 +1133,7 @@ class TheBook(WorldCase):
 NEW_TICKERS = ("KKK", "LLL", "MMM", "NNN", "OOO", "PPP", "QQQ", "RRR")
 
 
+@on_1019h
 class TheBookLive(TB.EventTest):
     """Through the REAL book (league/equity/live.py's event kind): a PREREG-EVL-5 buy is planned at the close decision
     in ROOM's order, at learning size, and goes only once the lane's own close decision names its program; a close
@@ -1177,6 +1189,7 @@ class TheBookLive(TB.EventTest):
         self.assertEqual(h.bodies(), [])
 
 
+@on_1019h
 class TheRoomWhileItWaits(TB.EventTest):
     """The money review of release 1019g (major): while a PREREG-EVL-5 buy waits for the lane's close decision
     (`book.part_hold`), ROOM's order holds at the close auction: every buy AFTER it in ROOM's order is sized and counted
@@ -1611,6 +1624,7 @@ class TheLanesTurnForItsCloseDecision(TH.LaneCase):
         self.assertLess(H.HOLD_LEAD, H.LIVE_WITHIN)
 
 
+@on_1019h
 class TheHeldTurnInTheWeek(unittest.TestCase):
     """The money re-review's fix in the invented week (league/tests/evl5_world.py): Tuesday's and Wednesday's live close
     decisions made by the House's lane in a held turn that begins at 15:44:40 ET with the hourly re-decision of
@@ -1911,16 +1925,18 @@ class TheReport(WorldCase):
 
 
 # ----------------------------------------------------------------------------------------------------------- the births
+@on_1019h
 class TheBirths(WorldCase):
     def test_a_births_night_runs_with_these_rows_and_reads_the_lanes_sum(self):
         """R3's validator reads the lane's own SEATING sum: 1.5 used with these rows and no birth (section 3; A92), 1.7
         with the two invented births; their facts list these rows (counted, never their prices)."""
         from league.events import births as BI
 
-        self.assertEqual(BI.budget_used_tenths(self.st), 15)
-        self.assertEqual(BI.budget(self.st)["left"], 1.5)
+        # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version of 3.9, in hundredths)
+        self.assertEqual(BI.budget_used_hundredths(self.st), 195)
+        self.assertEqual(BI.budget(self.st)["left"], 1.95)
         self.w.births()
-        self.assertEqual(BI.budget_used_tenths(self.st), 17)
+        self.assertEqual(BI.budget_used_hundredths(self.st), 221)
         facts = BI.Facts(self.st, D).facts()
         listed = {p["id"]: p for p in facts["programs"]}
         for pid in ALL5:
@@ -1931,6 +1947,12 @@ class TheBirths(WorldCase):
                                             "rank": "score", "seatable": True}, "why": "invented"}])
         self.assertIn("counts", out)
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

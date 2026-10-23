@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import report as R
 from league.events import screen as SC
@@ -30,6 +31,7 @@ def et(day, hhmm):
     return S.iso(dt.datetime.combine(day, dt.time(h, m), tzinfo=C.NY))
 
 
+@on_1019h
 class ReportTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -116,8 +118,12 @@ class ReportTest(unittest.TestCase):
         self.assertIn("EVL-NEWS-READ-O1", rep["registered_without_intents"])
         self.assertEqual(rep["gaps"]["entry"]["n"], 1)
         self.assertAlmostEqual(rep["gaps"]["entry"]["mean_bp"], (123.45 / 123.40 - 1) * 1e4, places=9)
-        self.assertEqual(rep["expected_false_passes"], {"versions": 15, "expected": 1.5, "budget": 3.0, "left": 1.5},
-                         "PREREG-EVL-3's nine version 2 rows and PREREG-EVL-4's three, of the lane's stated 3.0")
+        # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version or run of 3.9, three ways)
+        self.assertEqual(rep["expected_false_passes"],
+                         {"versions": 15, "runs": 0, "waiting": 0, "charge": 0.13, "expected": 1.95, "budget": 3.9,
+                          "left": 1.95, "left_after_waiting": 1.95, "base": 0.45, "stress": 2.55, "per_version": 0.24,
+                          "rule": "PREREG-EVL-6 section 5"},
+                         "fifteen seatable versions at 0.13, of the lane's restated 3.9")
         jb = rep["jobs"]
         self.assertEqual(jb["missed"], ["decide-close", "screen"])  # decide-open ran (and failed); score still runs
         self.assertEqual(sorted((f["job"], f["status"]) for f in jb["failed"]),
@@ -132,8 +138,9 @@ class ReportTest(unittest.TestCase):
             self.assertNotIn(banned, text)
             self.assertNotIn(banned, data)
         self.assertLessEqual(len(text.splitlines()), 14)
-        self.assertIn("Expected false passes: 1.5 (0.10 x 15 seatable versions) of the lane's stated 3.0 "
-                      "(PREREG-EVL-4 section 3; 1.5 left)", text)
+        self.assertIn("Expected false passes: 1.95 (0.13 x 15 versions and 0 fresh runs; base 0.45, stresses' worst "
+                      "2.55) of the lane's restated 3.9 (PREREG-EVL-6 section 5; 1.95 left, 0 runs waiting); per version "
+                      "0.24 within 120 sessions", text)
         self.assertIn("missed: decide-close, screen", text)
         self.assertIn("EVL-ERN-READ-O3 v1 (record)", text)
 
@@ -171,6 +178,11 @@ class ProgramTableTest(unittest.TestCase):
             self.assertEqual(P.BY_ID[ctl].family, P.BY_ID[prog].family)
             self.assertFalse(P.BY_ID[ctl].reads or P.BY_ID[ctl].seatable)
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,11 +59,32 @@ REGISTERED_AT_4: str | None = "2026-10-19T16:01:05Z"  # A71: tag prereg-evl-4, c
 #: control. Its programs count only events knowable after THIS time (not PREREG-EVL-1's, -2's, -3's or -4's). None
 #: refuses every decision of its programs.
 REGISTERED_AT_5: str | None = "2026-10-21T21:26:21Z"  # A92: tag prereg-evl-5, commit b73f205f
+#: PREREG-EVL-6's registration time (A116: the latest of its commit's time 12:24:36Z, GitHub's activity time for the
+#: branch push 12:24:48Z and the pushing client's clock after the tag push returned 12:24:50Z; tag prereg-evl-6, commit
+#: 4ae9017a, docs/prereg/PREREG-EVL-6.md sha256 0f67f94e...). Section 1.1: for EVERY SEATABLE VERSION REGISTERED BEFORE
+#: IT this file registers the next version of the same id (`regfile` 6), the id's SEATING version from this time on,
+#: word for word the superseded version's rule, counting only events knowable after THIS time; the superseded version
+#: is a shadow record whose PREREG-EVL-3 looks move no band again (D7). None refuses every decision of its versions.
+REGISTERED_AT_6: str | None = "2026-10-22T12:24:50Z"  # A116: tag prereg-evl-6, commit 4ae9017a
 #: The files whose seatable rows may trade real money: PREREG-EVL-3 (version 2 of the nine seatable programs of
 #: PREREG-EVL-1 and -2), PREREG-EVL-4 (version 1 of its three: its ids are new, so their version 1 is registered
-#: with PREREG-EVL-3's bands, section 2) and PREREG-EVL-5 (version 1 of its three, as PREREG-EVL-4's: its section 2).
-#: Version 1 of PREREG-EVL-1's and -2's ids, records and controls never seat.
+#: with PREREG-EVL-3's bands, section 2) and PREREG-EVL-5 (version 1 of its three, as PREREG-EVL-4's: its section 2),
+#: EACH IN ITS PREREG-EVL-6 VERSION (`Program.regfile` 6: version 3 of the nine, version 2 of PREREG-EVL-4's and -5's
+#: three, version 2 of every seatable birth registered before REGISTERED_AT_6), whose rule is its file's word for word
+#: and whose screen, runs, stays, demotion and Probe band are PREREG-EVL-6's. Every version PREREG-EVL-6 supersedes
+#: (`Program.superseded6`) seats no more. Version 1 of PREREG-EVL-1's and -2's ids, records and controls never seat.
 SEATING_PREREGS = (3, 4, 5)
+#: THE FILE THAT REGISTERS THE NEW VERSIONS (PREREG-EVL-6 section 1.1): a Program row with `regfile` 6 is this file's.
+FILE_6 = 6
+#: PREREG-EVL-6 section 1.1, THE NEW VERSIONS' RECORD BEFORE THE RELEASE (D8): THE RELEASE is the moment the House's code
+#: carrying this file first ran its lane (league/events/house.py's first turn, the CLI's `catchup`: `mark_release`),
+#: kept once in meta under this key and never moved (INSERT OR IGNORE). A session whose decision time (09:15 ET for an
+#: open entry, the close decision time for a close entry) is BEFORE it was "decided before the release": its new
+#: versions' intents are the superseded versions' copied (`copy_before_release`); from it on each new version is decided
+#: by itself. Until the mark is written every session reads as before the release (the new versions are records only,
+#: copied, never decided by themselves), the reading that trades less (section 1.1: "until the release the new versions
+#: are records only"). The captain's reading, recorded as an amendment before the new versions' first look.
+RELEASE_KEY = "evl6:release"
 
 ERN_ITEMS = frozenset({"2.02"})
 OTHER_ITEMS = frozenset({"1.01", "2.01", "7.01", "8.01"})
@@ -101,10 +122,45 @@ class Program:
     #: `select` hands to births.select). None for every PREREG program, whose rule and time are the ones above.
     born_at: str | None = None
     spec: str | None = None
+    #: PREREG-EVL-6 (section 1.1): the file that registered THIS VERSION when it is not `prereg`'s: 6 for the new versions
+    #: PREREG-EVL-6 registers (the next version of every seatable version registered before REGISTERED_AT_6), whose rule
+    #: (`prereg`, `family`, `spec`, every window and skip) is the superseded version's word for word and whose
+    #: registration time is REGISTERED_AT_6. None for every other row.
+    regfile: int | None = None
 
     @property
     def key(self) -> tuple[str, int]:
         return (self.id, self.version)
+
+    @property
+    def evl6(self) -> bool:
+        """Whether PREREG-EVL-6's sections 1-3 judge this version (its screen, runs, stays, demotion, retirement) and its
+        section 6 sizes it (A99: 14 Probe slots, at-size buys): the new versions it registers (`regfile` 6) and every
+        seatable version registered at or after REGISTERED_AT_6 (R3's births from then on: section 1.1's LATER
+        VERSIONS). Never a record or a control."""
+        if not self.seatable:
+            return False
+        if self.regfile == FILE_6:
+            return True
+        if self.born_at is not None and REGISTERED_AT_6 is not None:
+            return S.parse_iso(self.born_at) >= S.parse_iso(REGISTERED_AT_6)
+        return False
+
+    @property
+    def superseded6(self) -> bool:
+        """Whether PREREG-EVL-6 SUPERSEDES this version (section 1.1): a seatable version of PREREG-EVL-3, -4 or -5's
+        seating files (version 2 of the nine, version 1 of PREREG-EVL-4's and -5's three, version 1 of a seatable birth)
+        registered before REGISTERED_AT_6. It seats no more (`can_seat`): a shadow record whose PREREG-EVL-3 looks are
+        still written and reported and move no band (D7, league/events/bands.py `on_look`); its new version holds the
+        seat."""
+        if not self.seatable or self.regfile is not None or self.prereg not in SEATING_PREREGS or REGISTERED_AT_6 is None:
+            return False
+        return self.registered_at < S.parse_iso(REGISTERED_AT_6)
+
+    @property
+    def superseded_key(self) -> tuple[str, int] | None:
+        """The (id, version) this PREREG-EVL-6 version supersedes (the version before it), None for every other row."""
+        return (self.id, self.version - 1) if self.regfile == FILE_6 else None
 
     @property
     def born(self) -> bool:
@@ -117,7 +173,12 @@ class Program:
         -2's, -3's, -4's or -5's; never another file's (PREREG-EVL-4: "not PREREG-EVL-1's, -2's or -3's"; PREREG-EVL-5:
         "not PREREG-EVL-1's, -2's, -3's or -4's"). A file this code
         does not know has none (ValueError), so no event of it is ever counted under another file's time. A registered
-        birth (R3) has its OWN registration time (`born_at`), never its file's."""
+        birth (R3) has its OWN registration time (`born_at`), never its file's. A version PREREG-EVL-6 registers
+        (`regfile` 6, section 1.1) has REGISTERED_AT_6, whatever its rule's file or its birth's time."""
+        if self.regfile == FILE_6:
+            if REGISTERED_AT_6 is None:
+                raise RuntimeError("PREREG-EVL-6 is not pinned: none of its versions decides before its registration time")
+            return S.parse_iso(REGISTERED_AT_6)
         if self.born_at is not None:
             return S.parse_iso(self.born_at)
         if self.prereg == 1:
@@ -142,8 +203,10 @@ class Program:
         programs (prereg 3), PREREG-EVL-4 section 2, version 1 of its three seatable programs (prereg 4: its seating
         version), and PREREG-EVL-5 section 2, version 1 of its three (prereg 5, the same). Version 1 of PREREG-EVL-1's and -2's programs stays a shadow record with its own screen, never seated;
         a record or a control (`seatable` False) never seats, whatever its file. R3: a seatable registered birth (prereg
-        3: PREREG-EVL-3's learning band, screen and limit at entry) seats at its own version 1 (R3-SPEC section 1)."""
-        return self.seatable and self.prereg in SEATING_PREREGS
+        3: PREREG-EVL-3's learning band, screen and limit at entry) seats at its own version 1 (R3-SPEC section 1).
+        PREREG-EVL-6 section 1.1: every version it SUPERSEDES (`superseded6`) seats no more; its new version does (from
+        the House release that carries this file: section 1.1's SUPERSESSION IN MONEY)."""
+        return self.seatable and self.prereg in SEATING_PREREGS and not self.superseded6
 
 
 PROGRAMS = (
@@ -193,13 +256,23 @@ PROGRAMS = PROGRAMS + (
     Program("EVL-NEWS-NIGHT2-ON", 1, True, "news-night2", "close", 1, False, exit_at="open", rule="none", prereg=5),
     Program("EVL-CTRL-ERN-UNDER-ON", 1, False, "ern-under", "close", 1, False, exit_at="open", rule="none", prereg=5),
 )
+#: PREREG-EVL-6 (registered 2026-10-22T12:24:50Z, A116) section 1.1, THE NEW VERSIONS: the next version of every seatable
+#: version registered before REGISTERED_AT_6, in the tables' order (version 3 of the nine, then version 2 of
+#: PREREG-EVL-4's three, then of PREREG-EVL-5's three), each the superseded version's row word for word (family, windows,
+#: rule, ranking, hold, exit, its file's real-money rules: `prereg` stays its file's) but its version and `regfile` 6 (its
+#: registration time REGISTERED_AT_6; PREREG-EVL-6's screen, runs, stays, demotion and Probe band). Appended after
+#: PREREG-EVL-5's rows, so every superseded version is decided before its new version in each decision (the copy of the
+#: record before the release reads the superseded intents the same run wrote); ROOM's order reads the ids' order, which
+#: SEATING keeps (league/events/book.py `order_of`). R3's births get theirs when loaded (`load_births`).
+PROGRAMS = PROGRAMS + tuple(dataclasses.replace(p, version=p.version + 1, regfile=FILE_6) for p in PROGRAMS
+                            if p.superseded6)
 #: Every program version by (id, version).
 BY_KEY = {(p.id, p.version): p for p in PROGRAMS}
 #: Version 1 of every program by id (the records and controls exist at version 1 only).
 BY_ID = {p.id: p for p in PROGRAMS if p.version == 1}
-#: The versions that may ever trade real money (PREREG-EVL-3 section 1, PREREG-EVL-4 and -5 section 2), in the tables'
-#: order: the nine version 2 rows (PREREG-EVL-1's four, then PREREG-EVL-2's five), then PREREG-EVL-4's three, then
-#: PREREG-EVL-5's three (version 1).
+#: The versions that may ever trade real money (PREREG-EVL-3 section 1, PREREG-EVL-4 and -5 section 2, PREREG-EVL-6
+#: section 1.1), in the tables' order: the nine version 3 rows (PREREG-EVL-1's four, then PREREG-EVL-2's five), then
+#: PREREG-EVL-4's three, then PREREG-EVL-5's three (version 2): PREREG-EVL-6's new versions, the ids' order unchanged.
 SEATING = tuple(p for p in PROGRAMS if p.can_seat)
 #: THE PREREG PROGRAMS (PREREG-EVL-1 to -5), fixed: `load_births` keeps them first and unchanged, and adds the
 #: registered births after them (after PREREG-EVL-5's rows, so ROOM's order puts every PREREG program first).
@@ -213,6 +286,99 @@ _LOAD = threading.Lock()
 #: load of the SAME store keeps when its read fails (release 1019e's review).
 _LAST_READ: tuple[str | None, tuple[Program, ...]] = (None, ())
 
+# ---------------------------------------------------------------------------------------------------- PREREG-EVL-7
+#: PREREG-EVL-7's REGISTRATION TIME (its preamble, A92's method: the latest of its commit's time, the pushing client's
+#: clock after the push of the tag `prereg-evl-7` returned and GitHub's activity time for the branch `prereg/evl-7`),
+#: the ONE CONSTANT the freeze sets: A125 (the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the client's
+#: 20:14:13Z after the tag push returned; tag prereg-evl-7, commit 367a2970, docs/prereg/PREREG-EVL-7.md sha256
+#: ced186aa..., docs/prereg/evl-7/ 211 files). None refuses every decision of the learners: they are then in no registry
+#: (`learners`), so they neither decide nor trade nor are charged (E3), and nothing of the lane moves. Pinned, they
+#: start with the first release that carries this code (section 1.7: their judged clock starts at its first live
+#: decision; the decisions from this time to it are the catch-up's training state, never judged or traded).
+REGISTERED_AT_7: str | None = "2026-10-22T20:14:13Z"  # A125: tag prereg-evl-7, commit 367a2970
+#: PREREG-EVL-6's registration time as the captain's A116 records it (tag prereg-evl-6, commit 4ae9017a): PREREG-EVL-7
+#: registers anything only when it is EARLIER than REGISTERED_AT_7 (section 3.3, E3; `registers_7`). Kept here beside
+#: the learners so this file's rows read no other branch's constant; a test holds it equal to `REGISTERED_AT_6` wherever
+#: the tree carries PREREG-EVL-6's code.
+REGISTERED_AT_6_FOR_7 = "2026-10-22T12:24:50Z"
+#: The file that registers the learners, and their families (one each; league/events/learner.py decides them, never
+#: `select`): an open-to-close learner over the open pool, a close-to-next-open learner over the close pool.
+FILE_7 = 7
+LEARNER_FAMILIES = ("learner-o1", "learner-on")
+
+
+@dataclasses.dataclass(frozen=True)
+class Learner(Program):
+    """A PREREG-EVL-7 learner version (section 1.2): its own registration time, REGISTERED_AT_7 (never another file's),
+    and its seat only when this file registers anything (`registers_7`, E3). Its rule is league/events/learner.py's
+    pinned procedure, never `select`'s: `rule` "learner", no verdict read by the shadow rule (`reads` False)."""
+
+    @property
+    def registered_at(self) -> dt.datetime:
+        if REGISTERED_AT_7 is None:
+            raise RuntimeError("PREREG-EVL-7 is not pinned: none of its learners decides before its registration time")
+        return S.parse_iso(REGISTERED_AT_7)
+
+    @property
+    def can_seat(self) -> bool:
+        return self.seatable and registers_7()
+
+
+#: SECTION 1.2'S TWO PROGRAMS, VERSION 1 EACH, seatable at PREREG-EVL-3's learning band from birth, hold 1 (one session in
+#: the screen's sense), PREREG-EVL-2's limit at entry (score.py: prereg >= 2). This file registers no other version.
+LEARNER_ROWS: tuple[Learner, ...] = (
+    Learner("EVL-LRN-O1", 1, True, "learner-o1", "open", 1, False, rule="learner", prereg=FILE_7),
+    Learner("EVL-LRN-ON", 1, True, "learner-on", "close", 1, False, exit_at="open", rule="learner", prereg=FILE_7),
+)
+
+
+def registers_7() -> bool:
+    """Whether PREREG-EVL-7 registers anything (its preamble, section 3.3, E3): REGISTERED_AT_7 is pinned and
+    PREREG-EVL-6's registration time is earlier than it. Never True on an unreadable time (fail closed)."""
+    if REGISTERED_AT_7 is None:
+        return False
+    try:
+        return S.parse_iso(REGISTERED_AT_6_FOR_7) < S.parse_iso(REGISTERED_AT_7)
+    except (TypeError, ValueError):
+        return False
+
+
+def learners() -> tuple[Learner, ...]:
+    """The learner rows in force: both when this file registers anything (`registers_7`), else none."""
+    return LEARNER_ROWS if registers_7() else ()
+
+
+#: The registries without this file's rows (PREREG-EVL-1 to -6 as this tree holds them): `refresh_7` adds the learners
+#: AFTER every one of them, so ROOM's order (league/events/book.py `order_of`) puts them after every earlier file's row
+#: and before R3's births (A101), and no earlier row's place, rule or judge moves.
+_BEFORE_7 = (PROGRAMS, SEATING)
+
+
+def refresh_7() -> tuple[Learner, ...]:
+    """THE REGISTRIES WITH PREREG-EVL-7 AS PINNED (`learners`): PREREG_PROGRAMS and PREREG_SEATING are the earlier files'
+    rows then the learners; PROGRAMS, BY_KEY, BY_ID and SEATING are rebound with R3's births loaded last after them (as
+    `load_births` binds them). Run at import and by a test that pins REGISTERED_AT_7. Returns the learners in force."""
+    global PROGRAMS, BY_KEY, BY_ID, SEATING, PREREG_PROGRAMS, PREREG_SEATING
+    rows = learners()
+    with _LOAD:
+        PREREG_PROGRAMS = _BEFORE_7[0] + rows
+        PREREG_SEATING = _BEFORE_7[1] + tuple(p for p in rows if p.can_seat)
+        programs = PREREG_PROGRAMS + BIRTHS
+        PROGRAMS = programs
+        BY_KEY = {(p.id, p.version): p for p in programs}
+        BY_ID = {p.id: p for p in programs if p.version == 1}
+        SEATING = PREREG_SEATING + tuple(p for p in BIRTHS if p.can_seat)
+    return rows
+
+
+def is_learner(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-7's learners, pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid for p in LEARNER_ROWS)
+
+
+refresh_7()
+
 
 def _where(store: Any) -> str | None:
     """The store's root, resolved (the lane's `Store` and the book's read-only `Lane` of one store give the same), or
@@ -224,6 +390,210 @@ def _where(store: Any) -> str | None:
         return str(Path(root).resolve())
     except (OSError, RuntimeError, TypeError, ValueError):
         return None
+
+
+def with_versions_6(born: Iterable[Program]) -> tuple[Program, ...]:
+    """PREREG-EVL-6 section 1.1 for R3's births: every seatable birth registered before REGISTERED_AT_6 (version 1,
+    `superseded6`) followed by its VERSION 2, the same id and spec (`regfile` 6: registered at REGISTERED_AT_6, judged by
+    PREREG-EVL-6), in registration order, so SEATING keeps each birth's place in ROOM's order; a birth registered at or
+    after REGISTERED_AT_6 is judged by PREREG-EVL-6 at its own version 1 (section 1.1's LATER VERSIONS)."""
+    out: list[Program] = []
+    for p in born:
+        out.append(p)
+        if p.superseded6:
+            out.append(dataclasses.replace(p, version=p.version + 1, regfile=FILE_6))
+    return tuple(out)
+
+
+def superseded_of(program: Program) -> Program | None:
+    """The version PREREG-EVL-6's new version `program` supersedes (its row, from BY_KEY), None for any other row."""
+    key = program.superseded_key
+    return None if key is None else BY_KEY.get(key)
+
+
+def successor_of(program: Program) -> Program | None:
+    """The PREREG-EVL-6 version that supersedes `program` (None when PREREG-EVL-6 supersedes nothing of it)."""
+    if not program.superseded6:
+        return None
+    got = BY_KEY.get((program.id, program.version + 1))
+    return got if got is not None and got.regfile == FILE_6 else None
+
+
+def release_at(store: Any) -> dt.datetime | None:
+    """THE RELEASE (`RELEASE_KEY`'s comment): the moment the House's code carrying PREREG-EVL-6 first ran its lane, read
+    from the store's meta (the lane's store or the book's read-only view of it), None before it is written or when it
+    cannot be read (every session then reads as before the release)."""
+    try:
+        if hasattr(store, "meta"):
+            raw = store.meta(RELEASE_KEY)
+        else:
+            row = store.db.execute("SELECT value FROM meta WHERE key=?", (RELEASE_KEY,)).fetchone()
+            raw = None if row is None else row[0]
+        return None if raw is None else S.parse_iso(str(raw))
+    except Exception:  # noqa: BLE001 - an unreadable mark: before the release (copied, never decided by itself)
+        return None
+
+
+def mark_release(store: S.Store, now: dt.datetime) -> dt.datetime:
+    """Write THE RELEASE once (INSERT OR IGNORE: the first mark stays, a later release or a restart never moves it) and
+    return the mark on record. The House's lane calls it at its first turn under this code, the CLI's `catchup` too."""
+    store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)", (RELEASE_KEY, S.iso(now)))
+    got = release_at(store)
+    return got if got is not None else now
+
+
+def decision_time(store: Any, program: Program, day: dt.date) -> dt.datetime | None:
+    """The time of `program`'s decision of entry session `day` (09:15 ET for an open entry, the close decision time for a
+    close entry), None when the calendar holds no such session."""
+    session = C.session(store, day)
+    if session is None:
+        return None
+    return session.open_decide if program.entry_at == "open" else session.close_decide
+
+
+def before_release(store: Any, program: Program, day: dt.date, *, release: dt.datetime | None = None,
+                   read: bool = True) -> bool:
+    """Whether entry session `day` was DECIDED BEFORE THE RELEASE for `program`'s entry kind (`RELEASE_KEY`'s comment):
+    its decision time is before the release mark, or no mark is written (every session before it). `release`: the mark
+    already read (`read` False with None: no mark)."""
+    mark = release_at(store) if (release is None and read) else release
+    if mark is None:
+        return True
+    at = decision_time(store, program, day)
+    return at is None or at < mark
+
+
+def last_before_release(store: Any, program: Program, *, release: dt.datetime | None = None) -> dt.date | None:
+    """The last entry session of `program`'s kind decided before the release (None: none, or no session before it is
+    in the calendar). With no release mark, None means every session (the caller reads `release_at` first)."""
+    mark = release_at(store) if release is None else release
+    if mark is None:
+        return None
+    row = store.db.execute("SELECT day FROM sessions WHERE open_at<=? ORDER BY day DESC LIMIT 7",
+                           (S.iso(mark + dt.timedelta(days=1)),)).fetchall()
+    for r in row:
+        day = dt.date.fromisoformat(str(r[0]))
+        at = decision_time(store, program, day)
+        if at is not None and at < mark:
+            return day
+    return None
+
+
+def knowable_of(store: Any, event: str) -> dt.datetime | None:
+    """An event's knowable time from the store (`8k:`/`f4:<accession>` a filing's, `news:<id>` an article's), None when
+    the store holds no such row."""
+    kind, _, ident = str(event).partition(":")
+    if kind in ("8k", "f4"):
+        row = store.db.execute("SELECT knowable_at FROM filings WHERE accession=?", (ident,)).fetchone()
+    elif kind == "news":
+        row = store.db.execute("SELECT knowable_at FROM news WHERE id=?", (ident,)).fetchone()
+    else:
+        return None
+    if row is None or row[0] is None:
+        return None
+    return S.parse_iso(str(row[0]))
+
+
+#: The column list of an intent row (the copy writes it whole).
+INTENT_COLUMNS = ("program", "version", "event", "symbol", "cik", "decided_at", "entry_day", "entry_at", "exit_day",
+                  "exit_at", "rank_key", "mode", "status", "why")
+#: A copied intent's `why` (section 1.1, D8: copied, never re-decided).
+COPIED = "copied from v{version} (PREREG-EVL-6 section 1.1: the record before the release)"
+
+
+def copy_before_release(store: S.Store, program: Program, day: dt.date) -> dict[str, int]:
+    """PREREG-EVL-6 section 1.1, THE NEW VERSIONS' RECORD BEFORE THE RELEASE (D8), for the new version `program` and an
+    entry session `day` decided before the release (`before_release`): its intents are EXACTLY the superseded version's
+    intents of `day` whose events are knowable after REGISTERED_AT_6, with the same skips, cooldown and live or backfill
+    rule as decided at the time (copied, never re-decided): each copied whole (its status `planned` while the
+    superseded one is unsettled or settled, so the lane's score settles the copy on the same prices; a superseded
+    `skipped:<why>` copied as it stands). Idempotent: a copy is written once (INSERT OR IGNORE); an unsettled copy whose
+    superseded intent was skipped since (a re-decision's `skipped:excluded`, `skipped:taken`, the score's skips) moves to
+    the same skip, so the record stays the superseded one's. Returns {copied, moved, known}."""
+    sup = superseded_of(program)
+    counts = {"copied": 0, "moved": 0, "known": 0}
+    if sup is None:
+        return counts
+    since = program.registered_at
+    rows = [dict(r) for r in store.db.execute("SELECT * FROM intents WHERE program=? AND version=? AND entry_day=? "
+                                              "ORDER BY event", (sup.id, sup.version, day.isoformat()))]
+    for row in rows:
+        knowable = knowable_of(store, str(row["event"]))
+        if knowable is None or knowable <= since:
+            continue
+        status = str(row["status"])
+        status = status if status.startswith("skipped") else "planned"
+        have = store.db.execute("SELECT status FROM intents WHERE program=? AND version=? AND event=?",
+                                (program.id, program.version, row["event"])).fetchone()
+        if have is not None:
+            counts["known"] += 1
+            if status.startswith("skipped") and str(have["status"]) in ("planned", "entered"):
+                counts["moved"] += bool(store.move_intent(program.id, program.version, str(row["event"]), status,
+                                                          row.get("why")))
+            continue
+        values = dict(row, program=program.id, version=program.version, status=status,
+                      why=(row.get("why") or COPIED.format(version=sup.version)))
+        store.db.execute(f"INSERT OR IGNORE INTO intents({', '.join(INTENT_COLUMNS)}) VALUES("
+                         f"{', '.join('?' * len(INTENT_COLUMNS))})", tuple(values[c] for c in INTENT_COLUMNS))
+        counts["copied"] += 1
+    return counts
+
+
+def uncopied(store: Any, program: Program, through: dt.date) -> list[str]:
+    """The superseded version's intents of entry sessions decided before the release through `through`, knowable after
+    REGISTERED_AT_6, that `program` (a new version) holds no copy of, or whose skip its unsettled copy has not taken:
+    while any is left, a look of `program` covering that session waits (league/events/screen.py)."""
+    sup = superseded_of(program)
+    if sup is None:
+        return []
+    mark = release_at(store)
+    since = program.registered_at
+    first = since.astimezone(C.NY).date().isoformat()
+    out = []
+    for row in store.db.execute("SELECT s.event, s.entry_day, s.status, c.status AS copy FROM intents s LEFT JOIN intents c "
+                                "ON c.program=s.program AND c.version=? AND c.event=s.event WHERE s.program=? AND "
+                                "s.version=? AND s.entry_day>=? AND s.entry_day<=? ORDER BY s.entry_day, s.event",
+                                (program.version, sup.id, sup.version, first, through.isoformat())):
+        day = dt.date.fromisoformat(str(row["entry_day"]))
+        if not before_release(store, program, day, release=mark, read=False):
+            continue
+        knowable = knowable_of(store, str(row["event"]))
+        if knowable is None or knowable <= since:
+            continue
+        if row["copy"] is None or (str(row["status"]).startswith("skipped") and str(row["copy"]) in ("planned", "entered")):
+            out.append(str(row["event"]))
+    return out
+
+
+def copy_all_before_release(store: S.Store, *, through: dt.date | None = None) -> dict[str, int]:
+    """THE CATCH-UP OF THE COPIED RECORD (section 1.1, D8): `copy_before_release` for every new version of PREREG-EVL-6
+    (births' too, once loaded) and every entry session from REGISTERED_AT_6's day decided before the release (through
+    `through` at most), for the sessions a release without the new versions decided (release 1019h's receipts name
+    none of them). Run by the House's lane at each turn and by the CLI's `catchup`; idempotent. Returns the counts."""
+    total = {"copied": 0, "moved": 0, "known": 0}
+    if REGISTERED_AT_6 is None:
+        return total
+    mark = release_at(store)
+    first = S.parse_iso(REGISTERED_AT_6).astimezone(C.NY).date()
+    last = through
+    for prog in PROGRAMS:
+        if prog.regfile != FILE_6:
+            continue
+        end = last_before_release(store, prog, release=mark) if mark is not None else last
+        if end is None and mark is not None:
+            continue
+        if last is not None and end is not None:
+            end = min(end, last)
+        days = [s.day for s in C.sessions(store, first, end)] if end is not None else \
+            [dt.date.fromisoformat(str(r[0])) for r in store.db.execute(
+                "SELECT DISTINCT entry_day FROM intents WHERE program=? AND version=? AND entry_day>=? ORDER BY 1",
+                (prog.id, prog.version - 1, first.isoformat()))]
+        with store.tx():
+            for day in days:
+                got = copy_before_release(store, prog, day)
+                for k in total:
+                    total[k] += got[k]
+    return total
 
 
 def registered() -> dt.datetime:
@@ -252,7 +622,7 @@ def load_births(store: Any) -> tuple[Program, ...]:
 
     where = None if store is None else _where(store)
     try:
-        born = () if store is None else tuple(BI.registered_programs(store))
+        born = () if store is None else with_versions_6(BI.registered_programs(store))
         read = True
     except Exception:  # noqa: BLE001 - an unreadable births table: the same store's last read births, else none
         last_where, last_born = _LAST_READ
@@ -774,7 +1144,32 @@ def _held_recently(store: S.Store, program: Program, cik: str, day: dt.date) -> 
     row = store.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE 'skipped%' "
                            "AND exit_day>=? AND entry_day<=? LIMIT 1",
                            (program.id, program.version, cik, since.isoformat(), until)).fetchone()
+    if row is None:
+        row = superseded_held(store, program, cik, since.isoformat(), until)
     return row is not None
+
+
+def superseded_held(store: Any, program: Program, cik: str, since: str, until: str) -> Any:
+    """PREREG-EVL-6 section 1.1 (D12): a new version's one position per issuer and its cooldown count, BESIDE its own
+    intents, the superseded version's intents (not skipped) of every entry session decided BEFORE THE RELEASE, those
+    whose events were knowable before REGISTERED_AT_6 included, exiting on or after `since` and entering by `until`; no
+    intent the superseded version writes for a session decided from the release on ever counts. A row, or None (also
+    for every row that is no new version). With no release mark every session is before it (the new version is then
+    copied, never decided: `copy_before_release`)."""
+    sup = superseded_of(program)
+    if sup is None:
+        return None
+    mark = release_at(store)
+    if mark is None:
+        last = until
+    else:
+        got = last_before_release(store, program, release=mark)
+        if got is None:
+            return None
+        last = min(until, got.isoformat())
+    return store.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE "
+                            "'skipped%' AND exit_day>=? AND entry_day<=? LIMIT 1",
+                            (sup.id, sup.version, cik, since, last)).fetchone()
 
 
 def write_intents(store: S.Store, program: Program, day: dt.date, candidates: Iterable[Candidate], *,
@@ -929,7 +1324,10 @@ def select(program: Program, rows: Iterable[Mapping[str, Any]], *, eligible: Cal
     return out
 
 
-__all__ = ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "PREREG_PROGRAMS", "PREREG_SEATING", "BIRTHS", "load_births",
+__all__ = ["REGISTERED_AT_6", "FILE_6", "RELEASE_KEY", "with_versions_6", "superseded_of", "successor_of", "release_at",
+           "mark_release", "decision_time", "before_release", "last_before_release", "knowable_of", "copy_before_release",
+           "uncopied", "copy_all_before_release", "superseded_held", "INTENT_COLUMNS", "COPIED"]
+__all__ += ["PROGRAMS", "BY_ID", "BY_KEY", "SEATING", "PREREG_PROGRAMS", "PREREG_SEATING", "BIRTHS", "load_births",
            "REGISTERED_AT_3", "REGISTERED_AT_4", "SEATING_PREREGS", "Program", "Candidate", "REGISTERED_AT",
            "REGISTERED_AT_2", "registered", "open_window", "close_window", "news_window", "day_news_window", "filings_in",
            "news_in", "ins_triggers", "ins_buys", "select", "write_intents", "items_of", "NEWS_FAMILIES", "BEST_SCORE",

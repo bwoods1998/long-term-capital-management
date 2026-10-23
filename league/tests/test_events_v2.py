@@ -5,6 +5,7 @@ import datetime as dt
 import tempfile
 import unittest
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import bands as BA
 from league.events import calendar as C
 from league.events import programs as P
@@ -19,6 +20,7 @@ NINE = ("EVL-ERN-READ-O1", "EVL-ERN-REACT-C1", "EVL-8K-READ-O1", "EVL-NEWS-READ-
         "EVL-ERN-GUIDE-O1", "EVL-INS-BUY-O1", "EVL-NEWS-READ-ON", "EVL-NEWS-REACT-ON")
 
 
+@on_1019h
 class V2Test(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -49,7 +51,7 @@ class V2Test(unittest.TestCase):
                                                                            "EVL-ERN-UNDER-ON", "EVL-NEWS-NIGHT2-ON")]))
         self.assertTrue(all(p.version == 1 for p in P.BY_ID.values()))
         self.assertEqual(SC.expected_false_passes(self.st)["versions"], 15)
-        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 1.5)
+        self.assertEqual(SC.expected_false_passes(self.st)["expected"], 1.95)    # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version or run of 3.9)
 
     def test_registration_gates_version_two(self):
         row = {"accession": "0000000001-26-000009", "cik": "0000000001", "items": '["2.02"]',
@@ -162,6 +164,11 @@ class V2Test(unittest.TestCase):
         self.assertEqual(len(events), 160)
         self.assertAlmostEqual(events[0]["r"], 0.005)
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

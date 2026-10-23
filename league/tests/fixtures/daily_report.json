@@ -1,5 +1,5 @@
 {
- "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f; `supply`, the Done supply line, since release 1019h; `settle`, the batched score's settle pace, and `fill_rates`, the attempts ledger's fill rates, since release 1019i), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
+ "_note": "The event lane's daily one-screen report as league/ops/daily_report.py `facts` writes it (release 1019c; `entries` and `break_even` since release 1019f; `supply`, the Done supply line, since release 1019h; `settle`, the batched score's settle pace, and `fill_rates`, the attempts ledger's fill rates, and `px_store`, the PX line, since release 1019i), shared by the House's test (league/tests/test_daily_report.py: the House writes exactly these keys) and the gateway's (gateway/test/report-notice.test.mjs: what it composes). Every figure here is invented; none is a market price. The costs are the UTC day of the report's date (HH:MM in UTC), the costs to date as far as metered.json covers them (costs_from, partial, missing).",
  "kind": "report",
  "notice_id": "report:2026-10-20",
  "day": "2026-10-20",
@@ -98,7 +98,7 @@
  "programs": [
   {
    "id": "EVL-ERN-READ-O1",
-   "version": 2,
+   "version": 3,
    "band": "learning",
    "intents": 9,
    "shadow_tradable": 38,
@@ -114,7 +114,10 @@
     }
    ],
    "next_look": 1,
-   "events_to_go": 22,
+   "events_to_go": null,
+   "look_unit": "blocks",
+   "blocks_to_go": 19,
+   "look_of": "run 1",
    "market_share_pct": 35.0,
    "bench_mean_bp": 4.1,
    "buy_hold_usd": 0.42,
@@ -122,7 +125,7 @@
   },
   {
    "id": "EVL-INS-BUY-O1",
-   "version": 2,
+   "version": 3,
    "band": "probe",
    "intents": 4,
    "shadow_tradable": 61,
@@ -138,7 +141,10 @@
     }
    ],
    "next_look": 2,
-   "events_to_go": 29,
+   "events_to_go": null,
+   "look_unit": "blocks",
+   "blocks_to_go": 3,
+   "look_of": "stay 1",
    "market_share_pct": -12.0,
    "bench_mean_bp": -2.5,
    "buy_hold_usd": null,
@@ -154,8 +160,20 @@
   "usd": 0.42,
   "why": null
  },
- "expected_false_passes": 0.9,
- "seatable_versions": 9,
+ "expected_false_passes": 1.95,
+ "seatable_versions": 15,
+ "false_passes": {
+  "count": 1.95,
+  "charge": 0.13,
+  "versions": 15,
+  "runs": 0,
+  "waiting": 0,
+  "budget": 3.9,
+  "left": 1.95,
+  "base": 0.45,
+  "stress": 2.55,
+  "per_version": 0.24
+ },
  "alarms": [
   "cap_breach",
   "evl_verdicts"
@@ -292,7 +310,8 @@
   "parity": {
    "checked": 20,
    "equal": 20
-  }
+  },
+  "latched": false
  },
  "fill_rates": {
   "open": {
@@ -334,6 +353,22 @@
     "resent": 1,
     "unsent": 2
    }
+  }
+ },
+ "px_store": {
+  "on": true,
+  "size_mb": 812.4,
+  "line_mb": 2048.0,
+  "free_gb": 41.2,
+  "floor_gb": 5.0,
+  "ok": true,
+  "runs": {
+   "ok": 12,
+   "partial": 1,
+   "waiting": 0,
+   "cut": 0,
+   "failed": 0,
+   "disk": 0
   }
  }
 }

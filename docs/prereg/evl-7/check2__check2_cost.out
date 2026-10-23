@@ -1,0 +1,10 @@
+E $1,898 sigma 0.04 only: replay minus COST-7, ADV >= $10M: mean +0.2 bp, range -4.0 to +6.0
+E $1,898 sigma 0.04 only: replay minus COST-7, ADV < $10M: mean +5.3 bp, range +0.2 to +12.0
+E $5,000 sigma 0.04 only: replay minus COST-7, ADV >= $10M: mean +1.2 bp, range -3.0 to +3.7
+E $5,000 sigma 0.04 only: replay minus COST-7, ADV < $10M: mean +3.2 bp, range -2.4 to +7.2
+E $30,000 sigma 0.04 only: replay minus COST-7, ADV >= $10M: mean -1.3 bp, range -7.4 to +3.5
+E $30,000 sigma 0.04 only: replay minus COST-7, ADV < $10M: mean -10.9 bp, range -20.5 to -2.4
+E $30,000 ADV $1.5M: IMP a side at sigma 0.04 17.9 bp, at sigma 0.08 35.8 bp: under-charge 17.9 bp a side, 35.8 bp a round trip
+E $30,000 ADV $3.0M: IMP a side at sigma 0.04 12.6 bp, at sigma 0.08 25.3 bp: under-charge 12.6 bp a side, 25.3 bp a round trip
+IC 0, replay round trip 14.2 bp: a pick earns -6.2 bp; $ over 120 sessions per learner at learning: -5.5 (F_L .25) to -11.1 (F_L .50)
+IC 0, replay round trip 24.2 bp: a pick earns -16.2 bp; $ over 120 sessions per learner at learning: -14.5 (F_L .25) to -29.1 (F_L .50)

@@ -22,6 +22,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal as D
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.events import births as BI
 from league.events import book as EB
@@ -40,6 +41,7 @@ def pick(symbol: str, program: str = "x") -> EB.Pick:
     return EB.Pick(program, 2, f"8k:{symbol}", symbol, f"c-{symbol}", 3.0, 1e6, D("16"), "t")
 
 
+@on_1019h
 class Births(unittest.TestCase):
     def setUp(self):
         self.case = TB.EventTest("run")
@@ -183,6 +185,11 @@ class Births(unittest.TestCase):
         self.assertIn("A85 holds", buy["why"])
         self.assertEqual(h.bodies(), [], "nothing sent")
 
+
+# PREREG-EVL-7 (A125 pinned REGISTERED_AT_7): this module's tests are of mechanisms written before the learners
+# registered and run on the registries without them (league/tests/evl7_fakes.py); the learners' own effects on these
+# paths are league/tests/test_events_evl7.py's and test_events_evl7_fix.py's.
+from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

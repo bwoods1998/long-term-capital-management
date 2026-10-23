@@ -557,5 +557,9 @@ class TheDeploy(RealMoney):
         self.assertEqual((seat["probe"], seat["seated"], seat["waiting"]), (families, [], ["late"]))
 
 
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
+
 if __name__ == "__main__":
     unittest.main()

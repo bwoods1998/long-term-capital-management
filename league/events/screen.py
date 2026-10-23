@@ -453,6 +453,8 @@ def write_look(store: S.Store, look: Mapping[str, Any], *,
             return False
         detail = {c: look[c] for c in LOOK_COLUMNS} | {x: look.get(x) for x in ("issuer", "control", "skew", "beside",
                                                                               "retirement")}
+        if look.get("v6") is not None:      # (PREREG-EVL-6: its tag, its look and S, q, p_I, the guards and figures)
+            detail["v6"] = look["v6"]
         detail["written_at"] = S.iso(now or S.utc_now())
         if look.get("merged") is not None:
             detail["merged"] = [int(k) for k in look["merged"]]
@@ -957,13 +959,20 @@ def made_without(store: S.Store, last: dt.date, *, first: dt.date | None = None,
         since = max(since, first)
     if since > last:
         return {}
+    from .programs import before_release, release_at
+
     latest = _latest_receipts(store, ("close", own))
+    mark = release_at(store)
     out: dict[dt.date, bool] = {}
     for x in C.sessions(store, since, last):
         rid, status, summary = latest.get(f"decide-close:{x.day.isoformat()}", (0, "", None))
         if status not in ("ok", "pending"):
             continue    # not made (none, cut, failed, running): the House decides it again whole, naming them
-        keys = [program_key(p.id, p.version) for p in four if p.registered_at < x.close_decide]
+        # (PREREG-EVL-6 section 1.1: a new version's record of a close decided before the release is its superseded
+        # version's, copied; only the closes from the release on are its own decisions to name)
+        keys = [program_key(p.id, p.version) for p in four if p.registered_at < x.close_decide and
+                not (getattr(p, "regfile", None) is not None and before_release(store, p, x.day, release=mark,
+                                                                                 read=False))]
         if all(names(summary, k) for k in keys):
             continue
         rid4, status4, _ = latest.get(f"decide-{own}:{x.day.isoformat()}", (0, "", None))
@@ -983,7 +992,7 @@ def birth_group(prog: Any) -> list[str]:
     if getattr(prog, "spec", None) is None:
         return []
     keys = [program_key(prog.id, prog.version)]
-    control = control_of(prog.id) if prog.version == 1 else None
+    control = control_of(prog.id)       # (PREREG-EVL-6: a birth's version 2 reads the same control record)
     if control is not None:
         keys.append(program_key(control, 1))
     return keys
@@ -1008,12 +1017,17 @@ def births_made_without(store: S.Store, last: dt.date, *, first: dt.date | None 
         since = max(since, first)
     if since > last:
         return {}
+    from .programs import before_release, release_at
+
     latest = _latest_receipts(store, ("open", "close", *BIRTHS_KIND.values()))
+    mark = release_at(store)
     out: dict[tuple[str, dt.date], bool] = {}
     for x in C.sessions(store, since, last):
         for kind in ("open", "close"):
             at = _decision_time(x, kind)
-            keys = [program_key(p.id, p.version) for p in BIRTHS if p.entry_at == kind and p.registered_at < at]
+            # (PREREG-EVL-6: a birth's version 2 is copied before the release, never decided by the births' kind)
+            keys = [program_key(p.id, p.version) for p in BIRTHS if p.entry_at == kind and p.registered_at < at and
+                    not (p.regfile is not None and before_release(store, p, x.day, release=mark, read=False))]
             if not keys:
                 continue
             rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
@@ -1070,7 +1084,6 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     first = prog.registered_at.astimezone(C.NY).date()
     reach_sessions, reach_lookback, reach_weekdays = _reach()
     kind = prog.entry_at
-    key = program_key(prog.id, prog.version)
     # (release 1019c's review: a program of PREREG-EVL-4 or later reads a receipt that does not name it as not made,
     # unless a later receipt of its file's rows decided by themselves names it: `NAMED_FROM`, above)
     named = prog.prereg >= NAMED_FROM
@@ -1086,30 +1099,44 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     # one is its decision (`NAMED_FROM`, above). A registered birth (`group`) reads a decision made after its registration
     # that does not name every member of its group the same way, with the births' own decision (`BIRTHS_KIND`), and
     # waits when a member of its group failed its part or is pending on its verdicts (`BIRTHS_KIND`'s comment).
+    # PREREG-EVL-6 section 1.1 (D8): a NEW VERSION's record of an entry session decided before the release is its
+    # superseded version's, copied (league/events/programs.py `copy_before_release`), so that session's decision is
+    # read exactly as the superseded version's (its key, its file's own kind, its births' group); the copy itself is
+    # complete before any look reads it (`_run_v6`, `programs.uncopied`). From the release on the decision is its own.
+    from .programs import before_release, release_at, superseded_of
+
+    sup = superseded_of(prog)
+    mark = release_at(store) if sup is not None else None
     unmade: tuple[dt.date, str] | None = None
     for x in C.sessions(store, since, today):
+        use = sup if sup is not None and before_release(store, prog, x.day, release=mark, read=False) else prog
+        ukey = program_key(use.id, use.version)
+        ugroup = birth_group(use)
+        # (a new version's own session, from the release on, is made for it only when its receipt names it, whatever
+        # its file: a release without the new versions, a rollback, decided it for nothing: the reading that waits)
+        unamed = named or (use is prog and sup is not None)
         rid, status, summary = latest.get(f"decide-{kind}:{x.day.isoformat()}", (0, "", None))
-        if named and status in ("ok", "pending") and not names(summary, key) and \
-                (own_kind != FIVE_KIND or _decision_time(x, kind) > prog.registered_at):
+        if unamed and status in ("ok", "pending") and not names(summary, ukey) and \
+                (own_kind != FIVE_KIND or _decision_time(x, kind) > use.registered_at):
             rid4, status4, summary4 = latest.get(f"decide-{own_kind}:{x.day.isoformat()}", (0, "", None))
-            if kind == "close" and rid4 > rid and names(summary4, key):
+            if kind == "close" and rid4 > rid and names(summary4, ukey):
                 status, summary = status4, summary4        # its rows decided by themselves, after that decision
             elif kind == "close" and rid4 > rid:
                 status = f"made without its rows ({own_kind}: {status4 or 'running'})"
             else:
                 status = "made without its rows"
-        if group and status in ("ok", "pending") and _decision_time(x, kind) > prog.registered_at and \
-                not all(names(summary, k) for k in group):
+        if ugroup and status in ("ok", "pending") and _decision_time(x, kind) > use.registered_at and \
+                not all(names(summary, k) for k in ugroup):
             ridb, statusb, summaryb = latest.get(f"decide-{born_kind}:{x.day.isoformat()}", (0, "", None))
-            if ridb > rid and all(names(summaryb, k) for k in group):
+            if ridb > rid and all(names(summaryb, k) for k in ugroup):
                 status, summary = statusb, summaryb        # the births' rows decided by themselves, after that decision
             elif ridb > rid:
                 status = f"made without its rows ({born_kind}: {statusb or 'running'})"
             else:
                 status = "made without its rows"
-        if status in ("ok", "pending") and group and any(k in _births_failed(summary) for k in group):
+        if status in ("ok", "pending") and ugroup and any(k in _births_failed(summary) for k in ugroup):
             status = "failed"       # (R3: a member of this birth's group raised in its own part; never a PREREG program)
-        if _waits_on(status, summary, key) or any(_waits_on(status, summary, k) for k in group[1:]):
+        if _waits_on(status, summary, ukey) or any(_waits_on(status, summary, k) for k in ugroup[1:]):
             unmade = (x.day, f"the {kind} decision of {x.day.isoformat()} is {status or 'not made'}")
             break
     decided = [x for x in C.sessions(store, first, today) if x.open_decide <= now]
@@ -1338,14 +1365,29 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
     a record, and a birth's control, are never screened. At a held look the skew checks go to meta
     `skew:<program>:<version>:<k>` before p is computed. One program's failure is its own (release 1019b's review):
     it is in `errors` and the others' looks go on. Returns {written, waiting, errors}."""
+    from .programs import BY_KEY
+
     now = now or S.utc_now()
     written, waiting, errors = [], [], []
+    try:
+        started = start_runs(store, now)    # (PREREG-EVL-6 section 3: waiting runs the budget holds now, in order)
+    except Exception as exc:  # noqa: BLE001 - started again at the next run
+        started = []
+        errors.append({"program": None, "version": None, "error": f"start_runs: {type(exc).__name__}: {str(exc)[:200]}"})
     for program, version in programs or program_versions(store):
         born = _born(program, version)
         if program not in SEATABLE and born is None:
             continue
+        prog = BY_KEY.get((program, int(version)))
         try:
-            if _seating(program, version):
+            if prog is not None and prog.evl6:
+                # PREREG-EVL-6 (sections 1.2-3): its versions' runs alone; a stay is the night's band review's
+                out = _run_v6(store, program, version, today, now=now, draws=draws)
+            elif prog is not None and prog.superseded6:
+                # PREREG-EVL-6 section 1.1 (D7): a superseded version keeps PREREG-EVL-3's looks as a shadow record,
+                # written and reported; league/events/bands.py `on_look` moves no band for it from REGISTERED_AT_6
+                out = _run_v2(store, program, version, today, now=now, draws=draws)
+            elif _seating(program, version):
                 out = _run_v2(store, program, version, today, now=now, draws=draws)
             elif born is not None:
                 continue        # (R3: a birth that is a record, or a birth's control, is never screened)
@@ -1358,7 +1400,14 @@ def run(store: S.Store, today: dt.date, *, programs: Sequence[tuple[str, int]] |
             continue
         written += out["written"]
         waiting += out["waiting"]
-    return {"written": written, "waiting": waiting, "errors": errors}
+    try:
+        started += start_runs(store, now)   # (a run that ended at its 60th block in this job starts when room holds)
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"program": None, "version": None, "error": f"start_runs: {type(exc).__name__}: {str(exc)[:200]}"})
+    out = {"written": written, "waiting": waiting, "errors": errors}
+    if started:
+        out["runs_started"] = started
+    return out
 
 
 def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: dt.datetime,
@@ -1408,22 +1457,23 @@ def _run_v1(store: S.Store, program: str, version: int, today: dt.date, *, now: 
 
 
 def expected_false_passes(store: S.Store) -> dict[str, Any]:
-    """0.10 x every version that can seat (PREREG-EVL-3 section 4: the nine version 2 programs, version 1 of their ids
-    never seats; PREREG-EVL-4 section 3: version 1 of its three, 1.2 in all; PREREG-EVL-5 section 3: version 1 of its
-    three, 1.5 in all with no birth registered before it), plus any later version of a seatable
-    program seen in the store (a version above the program's highest seating version); and (R3) every seatable birth
-    registered, through SEATING once league/events/programs.py `load_births` has loaded them (A81: R3's validator
-    charges each 0.10 against `LANE_BUDGET`, 3.0 in all, counted from this sum)."""
-    from .programs import SEATING
-
-    seating = {(p.id, p.version) for p in SEATING}
-    top: dict[str, int] = {}
-    for pid, version in seating:
-        top[pid] = max(top.get(pid, 0), int(version))
-    versions = seating | {(p, v) for p, v in program_versions(store) if p in SEATABLE and v > top.get(p, 2)}
-    expected = round(FALSE_PASS_RATE * len(versions), 3)
-    return {"versions": len(versions), "expected": expected, "budget": LANE_BUDGET,
-            "left": round(LANE_BUDGET - expected, 3)}
+    """THE LANE'S EXPECTED FALSE PASSES, PREREG-EVL-6 section 5 (D6, D11), restating PREREG-EVL-3 section 4's and
+    PREREG-EVL-4 section 3's count: 0.13 for every seatable version PREREG-EVL-6 registers or judges (its run 1:
+    SEATING's versions, fifteen new versions and every seatable birth's, once league/events/programs.py `load_births`
+    has loaded them; a later version of a seatable id the store holds beyond them too) and 0.13 for every fresh run when
+    it starts (`budget6`); 0 for a version it supersedes (none can make a look that moves a band after REGISTERED_AT_6,
+    and none has held one), as PREREG-EVL-3 dropped version 1. THE LANE'S LIFETIME BUDGET, RESTATED: 3.9 (30 x 0.13, a
+    relaxation of PREREG-EVL-4's 3.0 by 0.9, accepted by the captain's D6, A107); R3's validator and the House's start
+    of a fresh run charge against it (a birth only with room left after every waiting run). Beside the count, as every
+    report shows it: the base model's (0.03 a version or run) and the stresses' worst (0.17), and the per-version figure
+    (0.24 within 120 sessions at the worst plausible cell)."""
+    b = budget6(store)
+    charges = b["versions"] + b["runs"]
+    return {"versions": b["versions"], "runs": b["runs"], "waiting": b["waiting"], "charge": V6_CHARGE,
+            "expected": round(b["used"] / 100, 2), "budget": V6_BUDGET, "left": round(b["left"] / 100, 2),
+            "left_after_waiting": round((b["left"] - V6_CHARGE_HUNDREDTHS * b["waiting"]) / 100, 2),
+            "base": round(V6_BASE_RATE * charges, 2), "stress": round(V6_STRESS_RATE * charges, 2),
+            "per_version": V6_PER_VERSION, "rule": "PREREG-EVL-6 section 5"}
 
 
 def _births_failed(summary: Any) -> dict[str, Any]:
@@ -1587,6 +1637,702 @@ def next_look_v2(store: S.Store, program: str, version: int, today: dt.date) -> 
             "status": "upcoming"}
 
 
+# ================================================================================ PREREG-EVL-6: ONE MONEY-WEIGHTED SCREEN
+#: PREREG-EVL-6 (docs/prereg/PREREG-EVL-6.md, tag prereg-evl-6, sha256 0f67f94e..., REGISTERED_AT_6 2026-10-22T12:24:50Z,
+#: A116), sections 1.2-3, for the versions it judges (league/events/programs.py `Program.evl6`: its new versions and
+#: every seatable version registered at or after REGISTERED_AT_6), and ONLY for them: PREREG-EVL-1's and -3's screens
+#: above stay as they are for every version they judge (the versions PREREG-EVL-6 supersedes keep PREREG-EVL-3's looks
+#: as a shadow record, D7). Built to the frozen text and to its reference calibration (docs/prereg/evl-6/calib_v2.py,
+#: search_final.py and demotion_v2.py: league/tests/test_events_evl6_calib.py runs their own synthetic arrays through
+#: this code and compares every statistic and decision).
+#: - THE RECORD (1.2): a run's (or a stay's) settled events (status `settled`, knowable after the registration time:
+#:   the version's own intents are), its scheduled exits at or before the as-of close X; only TRADABLE events enter a
+#:   figure. BLOCKS: each entry session holding a TRADABLE event, in session order; n_s its TRADABLE count, B_s their
+#:   mean a (`math.fsum`).
+#: - THE VALUES (D4): y_s = min(n_s, 14) x (B_s - 0.0010); the lower tail's -min(n_s, 14) x B_s (no margin).
+#: - p (1.3): the one-sided sign-flip p of mean(y) > 0, EXACT over all 2^S sign vectors for S <= 16 (count / 2^S; `_count`
+#:   over `b.to_bytes(width, "little")` for every b), else (1 + count) / (1 + 99,999) over `random.Random(seed)
+#:   .getrandbits(S)` (bit j set = +1 for value j), seed = int.from_bytes(sha256(seed string).digest()[:8], "big"), seed
+#:   string f"{id}|v{version}|evl6|{tag}S{S}"; a signed sum at or above the observed sum less S x 1e-12 counts against
+#:   the program. TAG: "" for run 1, f"run{n}|" for run n >= 2, f"stay{n}|" for the n-th Probe stay. q: the same count on
+#:   the lower values over the same vectors. p_I: PREREG-EVL-1 section 7's issuer-block p (each issuer's TRADABLE events
+#:   averaged, ascending issuer order, no margin), 99,999 vectors, seed string + "|issuer".
+#: - alpha(S) (D14): 0.020 for 22 <= S <= 30, 0.006 for 31-40, 0.001 for 41-60; no look below the 22nd block.
+#: - RETIRE (1.4), first: mean a < 0 and q <= alpha(S) + 1e-12 (nothing else is checked). PASS: p <= alpha(S) (no
+#:   tolerance); >= 30 TRADABLE events and >= 30 distinct issuers; mean a > 0 and mean r > 0; THE MONEY'S EVENTS: each
+#:   block's top 14 TRADABLE events by the program's own ranking (`book.picks`' order: rank_key descending, a missing key
+#:   last; then the issuer's adv20 on the entry session descending, missing as 0; then the event id), pooled, mean a > 0
+#:   and mean r > 0; a READ version's mean block value (unweighted) above its control's over the same sessions (the
+#:   control's TRADABLE events of those sessions knowable after the version's registration time); p_I <= 0.10.
+#: - LOOKS (2): look k at the first close X at which the run's covered record holds >= S_k blocks (22, 25, 30, 35, 40,
+#:   50, 60) AND the minimums hold (30 events, 30 issuers, 6 blocks); in order, at most one a close; every S_k reached
+#:   by then is consumed (the lowest k is the look, the others merged); alpha at the record's own S; never after the
+#:   run's 60th block. A look waits until X is final (`final_until`) and every intent of the version and of its control
+#:   scheduled to exit by X has settled; written once (INSERT OR IGNORE) under a key that carries its tag (`look_key6`).
+#: - RUNS (2-3, D2, D11): a run ends at its PASS, its RETIRE or its 60th block (then the version stays in learning);
+#:   run n + 1 starts at the first block after run n's 60th, or at the first decision after a demotion, ONLY WHEN THE
+#:   LANE'S BUDGET (3.9 expected false passes) HOLDS ITS 0.13: waiting runs start in their versions' registration order
+#:   (`start_runs`), a version waiting holds no run (no look, no pass, no retirement). Each start is charged when written.
+#: - STAYS (3): the n-th move to probe begins stay n; its record the version's TRADABLE events whose entry decision is at
+#:   or after the first decision made at Probe; its looks as a run's (tag stay{n}|), to its own 60th block; its RETIRE
+#:   demotes, its PASS with section 3's real-money conditions moves Probe to Sized (league/events/bands.py `review`, in
+#:   section 3's order with the fixed reads and the money stop).
+V6_LOOKS: tuple[int, ...] = (22, 25, 30, 35, 40, 50, 60)
+V6_ALPHAS: tuple[tuple[int, float], ...] = ((30, 0.020), (40, 0.006), (60, 0.001))
+V6_MARGIN = 0.0010
+V6_CAP = 14
+V6_MIN_EVENTS = 30
+V6_MIN_ISSUERS = 30
+V6_MIN_BLOCKS = 6
+V6_ISSUER_P = 0.10
+V6_EXACT = 16
+V6_RUN_BLOCKS = 60
+#: Section 5: THE LANE'S COUNT (D6) and its restated lifetime budget, in HUNDREDTHS of an expected false pass (integers:
+#: no float drift): 0.13 for every seatable version this file registers or judges (its run 1) and for every fresh run
+#: when it starts; 0 for a superseded version; 3.9 in all (30 x 0.13, a relaxation of PREREG-EVL-4's 3.0 accepted by
+#: the captain's D6, A107). Every report shows the count three ways and the per-version figure beside it.
+V6_CHARGE_HUNDREDTHS = 13
+V6_BUDGET_HUNDREDTHS = 390
+V6_CHARGE = V6_CHARGE_HUNDREDTHS / 100
+V6_BUDGET = V6_BUDGET_HUNDREDTHS / 100
+V6_BASE_RATE = 0.03
+V6_STRESS_RATE = 0.17
+V6_PER_VERSION = 0.24
+#: The stored key of a look of this file (`looks.k`): it carries the run or stay and the record's own S, so a later run's
+#: or a stay's look is never dropped as a duplicate of an earlier one (section 2: "identified by (id, version, its run or
+#: stay tag, S)"): 1000 x n + S for run n, STAY_BASE + 1000 x n + S for stay n.
+V6_STAY_BASE = 1_000_000
+#: meta: a fresh run's start (written once, when the budget holds its charge) and a run's end at its 60th block.
+V6_RUN_KEY = "evl6:run:{program}:{version}:{n}"
+V6_END_KEY = "evl6:end:{program}:{version}:{n}"
+
+
+def v6_alpha(S: int) -> float | None:
+    """alpha(S) by the record's own S (section 1.3, D14); None below the first look's 22 blocks or above 60."""
+    S = int(S)
+    if S < V6_LOOKS[0] or S > V6_RUN_BLOCKS:
+        return None
+    for upper, alpha in V6_ALPHAS:
+        if S <= upper:
+            return alpha
+    return None
+
+
+def v6_tag(kind: str, n: int) -> str:
+    """Section 1.3's TAG: "" for a version's run 1, f"run{n}|" for its run n >= 2, f"stay{n}|" for its n-th stay."""
+    if kind == "stay":
+        return f"stay{int(n)}|"
+    return "" if int(n) == 1 else f"run{int(n)}|"
+
+
+def v6_seed_string(program: str, version: int, tag: str, S: int) -> str:
+    """The session test's (and the lower tail's) seed string; the issuer guard's is this + "|issuer"."""
+    return f"{program}|v{int(version)}|evl6|{tag}S{int(S)}"
+
+
+def look_key6(kind: str, n: int, S: int) -> int:
+    """A PREREG-EVL-6 look's stored `k` (`V6_STAY_BASE`'s comment)."""
+    return (V6_STAY_BASE if kind == "stay" else 0) + 1000 * int(n) + int(S)
+
+
+def key_of6(k: int) -> tuple[str, int, int]:
+    """(kind, n, S) of a stored PREREG-EVL-6 look key."""
+    k = int(k)
+    kind = "stay" if k >= V6_STAY_BASE else "run"
+    rest = k - (V6_STAY_BASE if kind == "stay" else 0)
+    return kind, rest // 1000, rest % 1000
+
+
+def _exact_flips(n: int) -> Iterable[bytes]:
+    """Every sign vector of `n` values (bit j of b set = +1 for value j), as `_count` reads them."""
+    width = (n + 7) // 8
+    return (b.to_bytes(width, "little") for b in range(1 << n))
+
+
+#: A source of Monte Carlo sign vectors for given values (league/tests/test_events_evl6_calib.py: the calibration's own
+#: fixed vectors, which it applies to |y|, turned into vectors over y): values -> little-endian bytes, bit j = +1.
+FlipSource = Callable[[Sequence[float]], Iterable[bytes]]
+
+
+def v6_count_p(values: Sequence[float], seed_text: str, draws: int = B, *, flips: FlipSource | None = None) -> float:
+    """Section 1.3's sign-flip p of mean(values) > 0: EXACT over all 2^S vectors for S <= 16 (count / 2^S), else the
+    Monte Carlo (1 + count) / (1 + draws) over `draws` vectors from the seed string's seed. `flips`: another source of
+    the Monte Carlo vectors (the reproduction test's), never used by the lane."""
+    vals = _check_values(values)
+    S = len(vals)
+    if S <= V6_EXACT:
+        return _count(vals, _exact_flips(S)) / float(1 << S)
+    if flips is not None:
+        got = list(flips(vals))
+        return (1 + _count(vals, got)) / (1 + len(got))
+    return (1 + _count(vals, _flips(seed_of(seed_text), S, draws))) / (1 + int(draws))
+
+
+@dataclasses.dataclass(frozen=True)
+class Block6:
+    """One block of a PREREG-EVL-6 record: its entry session, its TRADABLE events (in the program's ranking order:
+    `rank_order`), their count n, mean a (B) and mean r."""
+
+    day: dt.date
+    events: tuple[Mapping[str, Any], ...]
+
+    @property
+    def n(self) -> int:
+        return len(self.events)
+
+    @property
+    def value(self) -> float:
+        return math.fsum(float(e["a"]) for e in self.events) / len(self.events)
+
+    @property
+    def mean_r(self) -> float:
+        return math.fsum(float(e["r"]) for e in self.events) / len(self.events)
+
+    def top(self, cap: int = V6_CAP) -> tuple[Mapping[str, Any], ...]:
+        return self.events[:cap]
+
+
+def rank_order(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Section 1.4's order of a session's events (`book.picks`' before ROOM and the sale gate): `rank_key` descending, a
+    missing key last; then the issuer's `adv20` on the entry session descending, a missing adv20 counting as 0; then the
+    event id."""
+    rank = row.get("rank_key")
+    adv = row.get("adv20")
+    return (rank is None, -(float(rank) if rank is not None else 0.0), -(float(adv) if adv is not None else 0.0),
+            str(row.get("event")))
+
+
+def blocks6(rows: Iterable[Mapping[str, Any]]) -> list[Block6]:
+    """The blocks of a record (section 1.2): every entry session holding at least one TRADABLE event, in session order,
+    each with its TRADABLE events in the program's ranking order. An event without a finite a and r is an error."""
+    groups: dict[dt.date, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if not _tradable(row):
+            continue
+        a, r = row.get("a"), row.get("r")
+        if a is None or r is None or not (math.isfinite(float(a)) and math.isfinite(float(r))):
+            raise ValueError(f"event {row.get('event')} has no finite a and r")
+        groups.setdefault(_day(row["entry_day"]), []).append(row)
+    return [Block6(day, tuple(sorted(g, key=rank_order))) for day, g in sorted(groups.items())]
+
+
+def v6_values(blocks: Sequence[Block6]) -> list[float]:
+    """D4's money-weighted values: y_s = min(n_s, 14) x (B_s - 0.0010)."""
+    return [min(b.n, V6_CAP) * (b.value - V6_MARGIN) for b in blocks]
+
+
+def v6_lower(blocks: Sequence[Block6]) -> list[float]:
+    """The lower tail's values: -min(n_s, 14) x B_s (no margin)."""
+    return [-min(b.n, V6_CAP) * b.value for b in blocks]
+
+
+def v6_minimums(n: int, issuers: int, S: int) -> bool:
+    return n >= V6_MIN_EVENTS and issuers >= V6_MIN_ISSUERS and S >= V6_MIN_BLOCKS
+
+
+def v6_judge(blocks: Sequence[Block6], *, program: str, version: int, tag: str, control_rows: Sequence[Mapping[str, Any]]
+             | None = None, control: str | None = None, draws: int = B, flips: FlipSource | None = None,
+             issuer_flips: FlipSource | None = None, beside: bool = True) -> dict[str, Any]:
+    """ONE LOOK OF PREREG-EVL-6 (sections 1.3-1.4) on a record's blocks: {S, alpha, p, q, p_issuer, figures, guards,
+    decision ("retire" | "pass" | None), why}. RETIRE is checked first and, when it holds, nothing else is; PASS needs
+    every condition. `control` (a READ version's control id) with `control_rows` (its settled rows of these sessions,
+    knowable after the version's registration time). `flips` / `issuer_flips`: the calibration's own sign vectors for
+    the session tests and the issuer guard (league/tests/test_events_evl6_calib.py); by default the seeded ones."""
+    S = len(blocks)
+    alpha = v6_alpha(S)
+    events = [e for b in blocks for e in b.events]
+    n = len(events)
+    issuers = issuer_values(events)
+    mean_a = _mean([float(e["a"]) for e in events])
+    mean_r = _mean([float(e["r"]) for e in events])
+    tops = [e for b in blocks for e in b.top()]
+    top_a = _mean([float(e["a"]) for e in tops])
+    top_r = _mean([float(e["r"]) for e in tops])
+    weights = [min(b.n, V6_CAP) for b in blocks]
+    money_a = (math.fsum(w * b.value for w, b in zip(weights, blocks)) / sum(weights)) if weights else None
+    block_mean = _mean([b.value for b in blocks])
+    text = v6_seed_string(program, version, tag, S)
+    out: dict[str, Any] = {"S": S, "alpha": alpha, "tag": tag, "seed": text, "n": n, "issuers": len(issuers),
+                           "mean_a": mean_a, "mean_r": mean_r, "money_a": money_a, "top14": {"n": len(tops),
+                           "mean_a": top_a, "mean_r": top_r}, "block_mean": block_mean, "p": None, "q": None,
+                           "p_issuer": None, "control": None, "guards": {}, "decision": None, "why": ""}
+    if S == 0:
+        out["why"] = "no block"
+        return out
+    p = v6_count_p(v6_values(blocks), text, draws, flips=flips)
+    q = v6_count_p(v6_lower(blocks), text, draws, flips=flips)
+    if issuer_flips is not None:
+        vals = _check_values([v for _, v in issuers])
+        got = list(issuer_flips(vals))
+        p_i = (1 + _count(vals, got)) / (1 + len(got))
+    else:
+        p_i = signflip_p([v for _, v in issuers], seed_of(text + "|issuer"), draws)
+    out.update(p=p, q=q, p_issuer=p_i)
+    c_mean = c_blocks = None
+    if control is not None:
+        c_mean, c_blocks = control_mean(control_rows or [], [b.day for b in blocks])
+        out["control"] = {"program": control, "mean_block": c_mean, "blocks": c_blocks, "program_mean_block": block_mean}
+    if beside:
+        out["beside"] = {"p_r": v6_count_p([b.mean_r for b in blocks], text, draws, flips=flips),
+                         "event_weighted_a": mean_a, "money_weighted_a": money_a}
+    if alpha is None:
+        out["why"] = f"no look at {S} blocks (looks from the {V6_LOOKS[0]}nd block to the {V6_RUN_BLOCKS}th)"
+        return out
+    if mean_a is not None and mean_a < 0 and q <= alpha + TIE:
+        out.update(decision="retire", why=f"RETIRE: mean a {mean_a:.6f} < 0 and q {q:.6f} <= alpha {alpha:.3f}")
+        return out
+    guards = {
+        "p": p <= alpha,
+        "events": n >= V6_MIN_EVENTS, "issuers": len(issuers) >= V6_MIN_ISSUERS, "blocks": S >= V6_MIN_BLOCKS,
+        "mean_a": mean_a is not None and mean_a > 0, "mean_r": mean_r is not None and mean_r > 0,
+        "top14_a": top_a is not None and top_a > 0, "top14_r": top_r is not None and top_r > 0,
+        "issuer": p_i <= V6_ISSUER_P,
+    }
+    if control is not None:
+        guards["control"] = c_mean is not None and block_mean is not None and block_mean > c_mean
+    out["guards"] = guards
+    fails = [k for k, ok in guards.items() if not ok]
+    if not fails:
+        out.update(decision="pass", why=f"PASS: p {p:.6f} <= alpha {alpha:.3f}, every guard holds")
+    else:
+        out["why"] = "fail: " + ", ".join(fails)
+    return out
+
+
+def settled_rows6(store: Any, program: str, version: int) -> list[dict[str, Any]]:
+    """`settled_rows` with what PREREG-EVL-6's record reads beside: each event's `rank_key` and `decided_at` (its intent's)
+    and its issuer's `adv20` on the entry session (the largest of the universe rows of that day and CIK, none: None)."""
+    rows = settled_rows(store, program, version)
+    if not rows:
+        return rows
+    extra = {str(r["event"]): (r["rank_key"], r["decided_at"]) for r in store.db.execute(
+        "SELECT event, rank_key, decided_at FROM intents WHERE program=? AND version=?", (program, int(version)))}
+    days = sorted({r["entry_day"].isoformat() for r in rows})
+    advs: dict[tuple[str, str], float] = {}
+    for lo in range(0, len(days), 400):
+        part = days[lo:lo + 400]
+        for u in store.db.execute(f"SELECT day, cik, MAX(adv20) AS adv FROM universe WHERE day IN "
+                                  f"({', '.join('?' * len(part))}) GROUP BY day, cik", part):
+            if u["adv"] is not None:
+                advs[(str(u["day"]), str(u["cik"]))] = float(u["adv"])
+    for r in rows:
+        rank, decided = extra.get(str(r["event"]), (None, None))
+        r["rank_key"], r["decided_at"] = rank, decided
+        r["adv20"] = advs.get((r["entry_day"].isoformat(), str(r["issuer"])))
+    return rows
+
+
+def _after(row: Mapping[str, Any], moment: dt.datetime | None) -> bool:
+    if moment is None:
+        return True
+    try:
+        return S.parse_iso(str(row["decided_at"])) > moment
+    except (KeyError, TypeError, ValueError):
+        return False        # (a decision time that cannot be read: not in the record, the reading less likely to pass)
+
+
+def control_rows6(store: Any, control: str, since: dt.datetime) -> list[dict[str, Any]]:
+    """A READ version's control record for PREREG-EVL-6 (section 1.4): the control's settled rows (version 1) whose
+    events are knowable after `since` (the version's registration time)."""
+    from .programs import knowable_of
+
+    out = []
+    for r in settled_rows(store, control, 1):
+        k = knowable_of(store, str(r["event"]))
+        if k is not None and k > since:
+            out.append(r)
+    return out
+
+
+def _band_moves(store: Any, program: str, version: int) -> list[dict[str, Any]]:
+    """The version's band moves in order: {band, at (the later of since and written_at), id}."""
+    out = []
+    try:
+        rows = store.db.execute("SELECT id, band, since, written_at FROM band_history WHERE program=? AND version=? "
+                                "ORDER BY id", (program, int(version))).fetchall()
+    except Exception:  # noqa: BLE001 - no band history yet
+        return out
+    for r in rows:
+        moments = []
+        for text in (r["since"], r["written_at"]):
+            try:
+                moments.append(S.parse_iso(str(text)))
+            except (TypeError, ValueError):
+                continue
+        out.append({"id": int(r["id"]), "band": str(r["band"]), "at": max(moments) if moments else None})
+    return out
+
+
+def stays6(store: Any, program: str, version: int) -> list[dict[str, Any]]:
+    """The version's Probe stays (section 3): [{n, since (the move to probe), until (its demotion or retirement, None
+    while it lasts), sized (the move to sized inside it, or None)}], stay n beginning at the n-th move to probe."""
+    out: list[dict[str, Any]] = []
+    for m in _band_moves(store, program, version):
+        if m["band"] == "probe" and (not out or out[-1]["until"] is not None):
+            out.append({"n": len(out) + 1, "since": m["at"], "until": None, "sized": None})
+        elif out and out[-1]["until"] is None:
+            if m["band"] == "sized":
+                out[-1]["sized"] = m["at"]
+            elif m["band"] in ("learning", "retired"):
+                out[-1]["until"] = m["at"]
+                out[-1]["ended"] = m["band"]
+    return out
+
+
+def _meta_json(store: Any, key: str) -> dict[str, Any] | None:
+    raw = store.meta(key) if hasattr(store, "meta") else None
+    if raw is None:
+        return None
+    try:
+        got = json.loads(raw)
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def runs6(store: Any, program: str, version: int) -> list[dict[str, Any]]:
+    """The version's runs (sections 2-3) as the store records them: [{n, after_day, after (its record's bounds), started
+    (iso), ended (None, or {why: pass | retire | horizon | probe, at})}]. Run 1 needs no record (charged with its version);
+    a fresh run is the one `start_runs` wrote. A run ends at a written look that passed or retired, at its 60th block's
+    end record, or (a run that was passing) when the version moved to probe."""
+    out = [{"n": 1, "after_day": None, "after": None, "started": None, "ended": None}]
+    n = 2
+    while True:
+        rec = _meta_json(store, V6_RUN_KEY.format(program=program, version=int(version), n=n))
+        if rec is None:
+            break
+        out.append({"n": n, "after_day": rec.get("after_day"), "after": rec.get("after"), "started": rec.get("started"),
+                    "ended": None, "why": rec.get("why")})
+        n += 1
+    looks = {int(r["k"]): r for r in look_rows(store, program, version)}
+    for run in out:
+        for k, r in sorted(looks.items()):
+            kind, rn, _ = key_of6(k)
+            if kind == "run" and rn == run["n"]:
+                d = (look_detail(store, program, version, k) or {}).get("v6") or {}
+                if d.get("decision") in ("pass", "retire"):
+                    run["ended"] = {"why": d["decision"], "at": str(r["at"])}
+        end = _meta_json(store, V6_END_KEY.format(program=program, version=int(version), n=run["n"]))
+        if run["ended"] is None and end is not None:
+            run["ended"] = {"why": "horizon", "at": end.get("at"), "last_day": end.get("last_day")}
+    return out
+
+
+def run_record6(rows: Sequence[Mapping[str, Any]], run: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """A run's record of `rows` (the version's settled rows): run 1 every one; a fresh run's from its start record's
+    bounds: blocks after `after_day` (the first block after run n - 1's 60th) and entries decided after `after` (a
+    demotion's, or the close at which the budget held its charge)."""
+    after_day = dt.date.fromisoformat(str(run["after_day"])) if run.get("after_day") else None
+    after = S.parse_iso(str(run["after"])) if run.get("after") else None
+    return [r for r in rows if (after_day is None or _day(r["entry_day"]) > after_day) and _after(r, after)]
+
+
+def written6(store: Any, program: str, version: int, kind: str, n: int) -> dict[str, Any]:
+    """The PREREG-EVL-6 looks on record of one run or stay: {consumed: threshold indexes used (1-based, the looks' k and
+    the ones merged into them), last: the as-of New York day of the latest, S: the largest S looked at}."""
+    consumed: set[int] = set()
+    last: dt.date | None = None
+    top = 0
+    for r in look_rows(store, program, version):
+        k = int(r["k"])
+        knd, rn, s = key_of6(k)
+        if knd != kind or rn != int(n):
+            continue
+        d = look_detail(store, program, version, k) or {}
+        consumed |= {int((d.get("v6") or {}).get("look", 0))} | {int(x) for x in d.get("merged") or []}
+        day = S.parse_iso(str(r["at"])).astimezone(C.NY).date()
+        last = day if last is None or day > last else last
+        top = max(top, s)
+    consumed.discard(0)
+    return {"consumed": consumed, "last": last, "S": top}
+
+
+def schedule6(store: Any, record: Sequence[Mapping[str, Any]], today: dt.date, *,
+              pending: Sequence[tuple[dt.date, dt.date]] = (), consumed: Iterable[int] = (),
+              after: dt.date | None = None, final: tuple[dt.date | None, str] | None = None
+              ) -> dict[str, Any]:
+    """Section 2's looks of one run (or stay) record from where the record on file left it: [(look k, as-of day, merged
+    ks, S)] in order, the close its 60th block is covered at (`horizon`, when the scan reaches it), and where the scan
+    stopped and why (an intent scheduled to exit by a close not settled; a look or the horizon due at a close not final
+    yet). `after`: the as-of day of the run's last written look (the scan resumes after it); `consumed` the thresholds
+    already used."""
+    out: dict[str, Any] = {"looks": [], "horizon": None, "stopped": None, "why": None}
+    if not record:
+        return out
+    used = set(int(k) for k in consumed)
+    j = max(used) if used else 0
+    first = min(_day(r["entry_day"]) for r in record)
+    for s in C.sessions(store, first, today):
+        if after is not None and s.day <= after:
+            continue
+        if any(x <= s.day for _, x in pending):
+            out["stopped"], out["why"] = s.day, f"an intent scheduled to exit by {s.day.isoformat()} has not settled"
+            break
+        every = blocks6(covered(record, s.day))
+        blk = every[:V6_RUN_BLOCKS]
+        S_ = len(blk)
+        events = [e for b in blk for e in b.events]
+        held = j < len(V6_LOOKS) and S_ >= V6_LOOKS[j] and \
+            v6_minimums(len(events), len({str(e["issuer"]) for e in events}), S_)
+        horizon = len(every) >= V6_RUN_BLOCKS
+        if (held or horizon) and final is not None and (final[0] is None or s.day > final[0]):
+            what = f"look {j + 1}" if held else "the run's 60th block"
+            out["stopped"], out["why"] = s.day, f"{what} falls due at {s.day.isoformat()}, not final yet: {final[1]}"
+            break
+        if held:
+            reached = [i for i in range(j, len(V6_LOOKS)) if S_ >= V6_LOOKS[i]]
+            out["looks"].append((reached[0] + 1, s.day, [i + 1 for i in reached[1:]], S_))
+            j = reached[-1] + 1
+        if horizon:
+            out["horizon"] = (s.day, every[V6_RUN_BLOCKS - 1].day)
+            break
+    return out
+
+
+def last_close(store: Any, now: dt.datetime) -> C.Session | None:
+    """The last session whose close is at or before `now` (the lane's calendar)."""
+    row = store.db.execute("SELECT day FROM sessions WHERE close_at<=? ORDER BY day DESC LIMIT 1", (S.iso(now),)).fetchone()
+    return None if row is None else C.session(store, dt.date.fromisoformat(str(row[0])))
+
+
+def _v6_programs() -> list[Any]:
+    from .programs import SEATING
+
+    return [p for p in SEATING if p.evl6]
+
+
+def waiting_runs(store: Any, now: dt.datetime | None = None) -> list[dict[str, Any]]:
+    """THE RUNS WAITING FOR THE BUDGET (section 3, D11): every PREREG-EVL-6 version in `learning` whose last run ended
+    at its 60th block, or that was demoted after its last run passed, and has no run since: [{program, version, n (the
+    run that waits), why, after_day, after (the record's bounds if it started now), registered_at}], in the order they
+    start: the versions' registration order (the earliest REGISTERED_AT first, then the id). A retired version waits
+    for nothing."""
+    from . import bands as BA
+
+    band_of = BA.bands(store)
+    out = []
+    for p in _v6_programs():
+        if band_of.get((p.id, p.version), "learning") != "learning":
+            continue
+        runs = runs6(store, p.id, p.version)
+        last = runs[-1]
+        ended = last.get("ended")
+        if ended is None:
+            continue
+        item = {"program": p.id, "version": p.version, "n": last["n"] + 1, "registered_at": S.iso(p.registered_at)}
+        if ended["why"] == "horizon":
+            item |= {"why": f"run {last['n']} reached its {V6_RUN_BLOCKS}th block unpassed", "after_day":
+                     ended.get("last_day"), "at": ended.get("at"), "after": None}
+        elif ended["why"] == "pass":
+            stays = stays6(store, p.id, p.version)
+            demoted = [s for s in stays if s.get("ended") == "learning" and s["until"] is not None]
+            if not demoted:
+                continue        # (passed: its band moves with the look; a demotion back to learning opens the next run)
+            item |= {"why": f"demoted from its stay {demoted[-1]['n']}", "after_day": None, "at": None,
+                     "after": S.iso(demoted[-1]["until"])}
+        else:
+            continue
+        out.append(item)
+    return sorted(out, key=lambda x: (x["registered_at"], x["program"], x["version"]))
+
+
+def budget6(store: Any) -> dict[str, int]:
+    """THE LANE'S CHARGES (section 5, D6), in hundredths: {versions: each PREREG-EVL-6 version in SEATING (its run 1),
+    extra: a later version of a seatable id the store holds intents of beyond SEATING's, runs: the fresh runs started,
+    used, waiting: the runs waiting for room (each would charge 0.13), left}."""
+    from .programs import BY_KEY, SEATING
+
+    seating = {(p.id, p.version) for p in SEATING}
+    top: dict[str, int] = {}
+    for pid, version in seating:
+        top[pid] = max(top.get(pid, 0), int(version))
+    extra = {(p, v) for p, v in program_versions(store) if p in SEATABLE and v > top.get(p, 0)
+             and (p, v) not in seating and not getattr(BY_KEY.get((p, v)), "superseded6", False)}
+    runs = 0
+    for p in SEATING:
+        runs += sum(1 for r in runs6(store, p.id, p.version) if r["n"] >= 2)
+    versions = len(seating) + len(extra)
+    used = V6_CHARGE_HUNDREDTHS * (versions + runs)
+    waiting = len(waiting_runs(store))
+    return {"versions": versions, "extra": len(extra), "runs": runs, "used": used, "waiting": waiting,
+            "left": V6_BUDGET_HUNDREDTHS - used}
+
+
+def start_runs(store: Any, now: dt.datetime) -> list[dict[str, Any]]:
+    """THE HOUSE'S START OF FRESH RUNS (section 3, D11): every waiting run (`waiting_runs`, in registration order)
+    starts while the lane's budget holds its 0.13 (used + 0.13 <= 3.9), each written once (meta `V6_RUN_KEY`) with the
+    bounds of its record: the first block after the run that ended at its 60th block (`after_day`) or the first
+    decision after the demotion (`after`), AND, when it starts at a later close than that end or demotion, only the
+    entries decided after that close. A run the budget cannot hold waits (no look, no pass, no retirement), and so does
+    every run after it in the order. Returns the runs started."""
+    started = []
+    budget = budget6(store)
+    used = budget["used"]
+    close = last_close(store, now)
+    for item in waiting_runs(store, now):
+        if used + V6_CHARGE_HUNDREDTHS > V6_BUDGET_HUNDREDTHS:
+            break
+        bound = item.get("after")
+        if item.get("at"):          # (a 60th block's end: no extra bound when the room holds it at that very close)
+            end_close = S.parse_iso(str(item["at"]))
+            if close is not None and close.close_at > end_close:
+                bound = S.iso(close.close_at)
+        elif bound is not None and close is not None and close.close_at > S.parse_iso(bound):
+            bound = S.iso(close.close_at)       # (a demotion before the last close: the room held only at that close)
+        record = {"n": item["n"], "after_day": item.get("after_day"), "after": bound, "started": S.iso(now),
+                  "why": item["why"], "charge": V6_CHARGE}
+        key = V6_RUN_KEY.format(program=item["program"], version=item["version"], n=item["n"])
+        cur = store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)", (key, json.dumps(record, sort_keys=True)))
+        if cur.rowcount == 1:
+            used += V6_CHARGE_HUNDREDTHS
+            started.append({"program": item["program"], "version": item["version"]} | record)
+    return started
+
+
+def next_look6(store: Any, program: str, version: int, today: dt.date) -> dict[str, Any]:
+    """The next PREREG-EVL-6 look of a version (the report's and the site's): {k, kind (run | stay), n, tag, blocks_needed
+    (S_k), blocks (now), events, issuers, status}; {k: None, status} for a version waiting for its run, retired, or past
+    its looks."""
+    from . import bands as BA
+
+    band = BA.bands(store).get((program, int(version)), "learning")
+    if band == "retired":
+        return {"k": None, "status": "retired"}
+    rows = settled_rows6(store, program, version)
+    if band in ("probe", "sized"):
+        stays = stays6(store, program, version)
+        if not stays:
+            return {"k": None, "status": "no stay on record"}
+        kind, n = "stay", stays[-1]["n"]
+        since = stays[-1]["since"]
+        record = [r for r in rows if _after(r, since)]
+    else:
+        runs = runs6(store, program, version)
+        run = runs[-1]
+        if run["ended"] is not None:
+            return {"k": None, "status": f"run {run['n']} ended ({run['ended']['why']}); run {run['n'] + 1} waits for the "
+                                         "lane's budget"}
+        kind, n = "run", run["n"]
+        record = run_record6(rows, run)
+    on = written6(store, program, version, kind, n)
+    j = max(on["consumed"]) if on["consumed"] else 0
+    blk = blocks6(record)[:V6_RUN_BLOCKS]
+    events = [e for b in blk for e in b.events]
+    if j >= len(V6_LOOKS):
+        return {"k": None, "kind": kind, "n": n, "tag": v6_tag(kind, n), "status": "all looks written",
+                "blocks": len(blk)}
+    return {"k": j + 1, "kind": kind, "n": n, "tag": v6_tag(kind, n), "blocks_needed": V6_LOOKS[j], "blocks": len(blk),
+            "events": len(events), "issuers": len({str(e["issuer"]) for e in events}), "status": "upcoming"}
+
+
+def _look6_row(program: str, version: int, kind: str, n: int, k: int, merged: list[int], at: Any, days: int,
+               judged: Mapping[str, Any]) -> dict[str, Any]:
+    """A PREREG-EVL-6 look as `write_look` writes it: the `looks` row (k carries the tag: `look_key6`) and its detail
+    (`v6`: the tag, the look's k and the thresholds merged into it, S, p, q, p_I, alpha, every guard and figure)."""
+    decision = judged.get("decision")
+    look: dict[str, Any] = {
+        "program": program, "version": int(version), "k": look_key6(kind, n, judged["S"]),
+        "at": S.iso(at) if isinstance(at, dt.datetime) else str(at), "sessions": int(days), "n": judged["n"],
+        "issuers": judged["issuers"], "blocks": judged["S"], "mean_a": judged["mean_a"], "mean_r": judged["mean_r"],
+        "mean_a_tradable": judged["mean_a"], "p": judged["p"], "alpha": judged["alpha"], "fp_check": None, "held": 1,
+        "passed": int(decision == "pass"), "why": judged["why"][:400],
+        "issuer": {"p": judged["p_issuer"], "alpha": V6_ISSUER_P}, "control": judged.get("control"), "skew": None,
+        "beside": judged.get("beside"), "retirement": {"retire": decision == "retire", "q": judged["q"]},
+        "merged": list(merged),
+        "v6": {"rule": "PREREG-EVL-6", "kind": kind, "n": int(n), "tag": judged["tag"], "look": int(k), "S": judged["S"],
+               "seed": judged["seed"], "p": judged["p"], "q": judged["q"], "p_issuer": judged["p_issuer"],
+               "alpha": judged["alpha"], "guards": judged.get("guards"), "top14": judged.get("top14"),
+               "money_a": judged.get("money_a"), "block_mean": judged.get("block_mean"), "decision": decision},
+    }
+    return look
+
+
+def _run_v6(store: S.Store, program: str, version: int, today: dt.date, *, now: dt.datetime,
+            draws: int = B) -> dict[str, Any]:
+    """PREREG-EVL-6's looks of a version in `learning` (its current run): each look due by `today` whose as-of close is
+    final for it (`final_until`), with every intent of it and of its control scheduled to exit by then settled and its
+    copied record before the release complete (league/events/programs.py `uncopied`), written once with its band move
+    in its own transaction (league/events/bands.py `on_look`: PASS to Probe, RETIRE to retired); the run's END at its
+    60th block (section 2: decided with that close's look, after its RETIRE and PASS, or once that close is final)
+    written in a transaction of its own (meta `V6_END_KEY`). A version at Probe or Sized is the night's band review's
+    (its stay's looks, reads and money stop in section 3's order); a waiting or retired version has no look."""
+    from . import bands as BA
+    from .programs import BY_KEY, uncopied
+
+    written: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+    prog = BY_KEY.get((program, int(version)))
+    if prog is None:
+        return {"written": written, "waiting": waiting}
+    band = BA.bands(store).get((program, int(version)), "learning")
+    if band != "learning":
+        return {"written": written, "waiting": waiting}
+    runs = runs6(store, program, version)
+    run = runs[-1]
+    if run["ended"] is not None:
+        waiting.append({"program": program, "version": version, "k": None,
+                        "why": f"run {run['n']} ended ({run['ended']['why']}): run {run['n'] + 1} waits for the budget"})
+        return {"written": written, "waiting": waiting}
+    rows = settled_rows6(store, program, version)
+    record = run_record6(rows, run)
+    if not record:
+        return {"written": written, "waiting": waiting}
+    control = control_of(program)
+    ctl_rows = control_rows6(store, control, prog.registered_at) if control else None
+    pending = _pending(store, program, version) + (_pending(store, control, 1) if control else [])
+    on = written6(store, program, version, "run", run["n"])
+    tag = v6_tag("run", run["n"])
+    plan = schedule6(store, record, today, pending=pending, consumed=on["consumed"], after=on["last"],
+                     final=final_until(store, program, version, today, now))
+    if on["S"] >= V6_RUN_BLOCKS and plan["horizon"] is None:
+        last = blocks6(covered(record, on["last"]))[V6_RUN_BLOCKS - 1].day if on["last"] else None
+        plan["horizon"] = (on["last"], last) if last is not None else None
+    if plan["stopped"] is not None:
+        waiting.append({"program": program, "version": version, "k": None, "why": plan["why"]})
+    ended = False
+    for k, as_of, merged, S_ in plan["looks"]:
+        missing = uncopied(store, prog, as_of)
+        if missing:
+            waiting.append({"program": program, "version": version, "k": k,
+                            "why": f"{len(missing)} superseded intents through {as_of.isoformat()} are not copied yet"})
+            plan["horizon"] = None
+            break
+        session = C.session(store, as_of)
+        cov = covered(record, as_of)
+        blk = blocks6(cov)[:V6_RUN_BLOCKS]
+        first_entry = min(_day(r["entry_day"]) for r in record)
+        days = len(C.sessions(store, first_entry, as_of))
+        ctl = covered(ctl_rows, as_of) if ctl_rows is not None else None
+        judged = v6_judge(blk, program=program, version=version, tag=tag, control_rows=ctl, control=control,
+                          draws=draws)
+        look = _look6_row(program, version, "run", run["n"], k, merged, session.close_at, days, judged)
+        moved: list[str | None] = [None]
+
+        def apply(db: Any, look: dict[str, Any] = look) -> None:
+            moved[0] = BA.on_look(store, look, now=now, db=db)   # (in the look's own transaction)
+        if write_look(store, look, apply=apply, now=now):
+            written.append({c: look[c] for c in ("program", "version", "k", "held", "passed", "p", "alpha", "why")}
+                           | {"band": moved[0], "merged": merged, "tag": tag, "S": S_})
+        if judged.get("decision") in ("pass", "retire"):
+            ended = True
+            break
+    if not ended and plan["horizon"] is not None:
+        at, last_day = plan["horizon"]
+        if not uncopied(store, prog, at):
+            session = C.session(store, at)
+            key = V6_END_KEY.format(program=program, version=int(version), n=run["n"])
+            with store.tx() as db:
+                cur = db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
+                                 (key, json.dumps({"at": S.iso(session.close_at), "last_day": last_day.isoformat(),
+                                                   "n": run["n"], "written_at": S.iso(now)}, sort_keys=True)))
+            if cur.rowcount == 1:
+                written.append({"program": program, "version": version, "k": None, "held": 0, "passed": 0, "p": None,
+                                "alpha": None, "why": f"run {run['n']} ended at its {V6_RUN_BLOCKS}th block (D2): the "
+                                                      "version stays in learning; its next run waits for the budget",
+                                "tag": tag, "end": at.isoformat()})
+    return {"written": written, "waiting": waiting}
+
+
 __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_schedule", "next_look_v2", "written_v2",
            "final_until", "FINAL_SESSIONS", "FINAL_LOOKBACK", "FINAL_BACKFILL_WEEKDAYS", "SEC_HOLIDAYS", "index_through",
            "FAST_RECORD_GAP", "NAMED_FROM", "FOUR_KIND", "FIVE_KIND", "FILE_KINDS", "file_programs", "BIRTHS_KIND",
@@ -1598,3 +2344,11 @@ __all__ = ["ALPHA", "V2_ALPHA", "V2_NS", "V2_MIN_ISSUERS", "V2_MIN_BLOCKS", "v2_
            "bounds_seed", "done_bounds", "kill_bounds", "sized_bound", "calibration", "program_versions",
            "exit_overrides", "settled_rows", "first_settled_exit", "covered", "skew_records", "look_rows", "next_look",
            "run", "expected_false_passes", "LANE_BUDGET", "control_of"]
+#: (PREREG-EVL-6: one money-weighted session-block screen for every seat)
+__all__ += ["V6_LOOKS", "V6_ALPHAS", "V6_MARGIN", "V6_CAP", "V6_MIN_EVENTS", "V6_MIN_ISSUERS", "V6_MIN_BLOCKS",
+            "V6_ISSUER_P", "V6_EXACT", "V6_RUN_BLOCKS", "V6_CHARGE", "V6_BUDGET", "V6_CHARGE_HUNDREDTHS",
+            "V6_BUDGET_HUNDREDTHS", "V6_BASE_RATE", "V6_STRESS_RATE", "V6_PER_VERSION", "V6_STAY_BASE", "V6_RUN_KEY",
+            "V6_END_KEY", "v6_alpha", "v6_tag", "v6_seed_string", "look_key6", "key_of6", "v6_count_p", "Block6",
+            "rank_order", "blocks6", "v6_values", "v6_lower", "v6_minimums", "v6_judge", "settled_rows6",
+            "control_rows6", "stays6", "runs6", "run_record6", "written6", "schedule6", "last_close", "waiting_runs",
+            "budget6", "start_runs", "next_look6", "FlipSource"]

@@ -223,6 +223,16 @@ export const STALL_CAUSES = {
   // gateway first, as above.
   evl_fill_rate: 'event-lane real buys filled less often than they did',
   evl_attempts: 'event-lane orders have no final state on record',
+  // Release 1019i's review (PREREG-EVL-8's H1 and H2): the batched score's parity check found a difference, so the
+  // score is latched to the per-intent path until the captain clears it (league/events/score.py `latched`); and the
+  // price lane's store at its 2 GB line or the state disk under the PX floor (league/events/pxstore.py `room`).
+  evl_score_parity: 'the batched score disagreed with the per-intent path and is switched off',
+  evl_px_store: 'the price lane\'s store has no room left on the disk',
+  // PREREG-EVL-7 (release 1019i): the learners' own stalls (league/ops/evl_learner.py, judged only once the freeze pins
+  // REGISTERED_AT_7): a live part that failed or ran past its own bound (never traded at that auction), a decision owed,
+  // a training lagging the evening score, a nightly recompute mismatch, a warm-up unmet. Deploy the gateway first, as
+  // above: an older gateway refuses a notice naming a cause it does not word.
+  evl_learner: 'the event lane\'s learners failed, lagged or mismatched',
   // PREREG-EVL-8 (release 1019j; league/ops/evl_price.py, judged only once the freeze pins REGISTERED_AT_8): a PX run or
   // a meta-learner's part that failed or ran past its own bound (never traded at that auction), a PX recorder lagging
   // the morning pass or the nightly bars, or the placebo audit's alarm. Deploy the gateway first, as above: an older
@@ -516,7 +526,13 @@ export function composeReport(facts = {}) {
       const shown = real(row.shown_usd) === null ? 'no real event' : `${signedUsd(row.shown_usd)} | ${signedUsd(row.net_usd)}`;
       add(` ${programOf(row.id)} v${versionOf(row.version)} ${bandOf(row.band)}: ${count(row.shadow_tradable)} | `
         + `${count(row.real)}; ${shown}`, '   ');
-      const look = Number.isInteger(row.next_look) ? `look ${row.next_look} in ${count(row.events_to_go)}` : 'every look written';
+      // (release 1019i, PREREG-EVL-6: a version's looks counted in settled session blocks, its run beside)
+      const look = !Number.isInteger(row.next_look) ? 'every look written'
+        : row.look_unit === 'blocks' ? `look ${row.next_look}`
+          + (typeof row.look_of === 'string' && /^(run|stay) \d{1,3}$/.test(row.look_of) && row.look_of !== 'run 1'
+            ? ` of ${row.look_of}` : '')
+          + ` in ${count(row.blocks_to_go)} blocks`
+          : `look ${row.next_look} in ${count(row.events_to_go)}`;
       add(`  ${look}; market ${pct(row.market_share_pct)}, bench ${bp(row.bench_mean_bp)}`
         + (real(row.buy_hold_usd) === null ? '' : `; b&h ${signedUsd(row.buy_hold_usd)}`), '   ');
       const bands = list(row.by_band).filter(b => b && BANDS.includes(b.band) && Number.isInteger(b.n) && b.n > 0);
@@ -594,12 +610,38 @@ export function composeReport(facts = {}) {
       + `${count(asked.bars)}, prints ${count(asked.trades)}`
       + (Number.isInteger(parity.checked) && parity.checked > 0
         ? `; parity ${count(parity.equal)}/${count(parity.checked)}` : ''), '   ');
+    // (release 1019i's review: a parity flag 0 latches the score to the per-intent path until the captain clears it)
+    if (pace.latched === true) add(' BATCHED SCORE OFF: a parity difference latched it', '   ');
+  }
+  // RELEASE 1019i's review: THE PX LINE (PREREG-EVL-8's H2, "a size line and a 2 GB alarm"; league/ops/daily_report.py
+  // `px_line`): px.sqlite's size against its line, the state disk's free space against the PX floor and the day's PX
+  // runs by status, while the recorders run or px.sqlite exists. Sizes and counts only.
+  const px = plain(facts.px_store), runs = plain(px.runs);
+  if (px.on === true || real(px.size_mb) !== null) {
+    const gb = value => (real(value) === null ? 'unknown' : real(value).toFixed(1));
+    const done = ['ok', 'partial', 'waiting', 'cut', 'failed', 'disk']
+      .filter(k => Number.isInteger(runs[k]) && runs[k] > 0).map(k => `${count(runs[k])} ${k}`);
+    const mb = value => (real(value) === null ? 'unknown' : String(Math.round(real(value))));
+    const floor = gb(px.floor_gb);
+    add(`PX store${px.on === true ? '' : ' (off)'}: ${mb(px.size_mb)}/${mb(px.line_mb)} MB, ${gb(px.free_gb)} GB free; `
+      + `runs ${done.length ? done.join(', ') : 'none'}`
+      + (px.ok === false ? `; NO ROOM (floor ${floor} GB): nothing written` : ''));
   }
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);
   add(`Same-risk buy-and-hold: ${real(hold.usd) === null ? (traded ? 'n/a' : 'n/a until real fills') : signedUsd(hold.usd)}`);
-  add(`Expected false passes: ${real(facts.expected_false_passes) === null ? 'unknown' : real(facts.expected_false_passes).toFixed(1)} `
-    + `(0.10 x ${count(facts.seatable_versions)} versions)`);
+  const fp = facts.false_passes && typeof facts.false_passes === 'object' ? facts.false_passes : null;
+  if (fp && real(fp.count) !== null) {
+    // PREREG-EVL-6 section 5 (release 1019i): the lane's count three ways (0.13 a version or run, the base model's,
+    // the stresses' worst) and the per-version figure beside them
+    const fixed = (value, places) => (real(value) === null ? 'unknown' : real(value).toFixed(places));
+    add(`Expected false passes: ${fixed(fp.count, 2)} at ${fixed(fp.charge, 2)} (${count(fp.versions)} versions, `
+      + `${count(fp.runs)} runs) of ${fixed(fp.budget, 1)}; base ${fixed(fp.base, 2)}, stresses ${fixed(fp.stress, 2)}; `
+      + `per version ${fixed(fp.per_version, 2)}`);
+  } else {
+    add(`Expected false passes: ${real(facts.expected_false_passes) === null ? 'unknown' : real(facts.expected_false_passes).toFixed(1)} `
+      + `(0.10 x ${count(facts.seatable_versions)} versions)`);
+  }
   out.push(...pack('Alarms open:', alarms.length ? alarms.map(cause => STALL_CAUSES[cause]) : ['none']));
   if (facts.lane_report === false) add('The lane\'s own report job did not run for this day.');
   out.push('', `At: ${typeof facts.at === 'string' && DATE.test(facts.at) ? facts.at : 'an unknown time'}.`);

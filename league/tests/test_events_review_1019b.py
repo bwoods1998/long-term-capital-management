@@ -14,6 +14,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.equity import schedule as ES
 from league.events import bands as BA
@@ -544,6 +545,7 @@ class TheMigrationRefusesWhenSystemdCannotAnswer(unittest.TestCase):
 
 
 # ============================================================================================================ the judges
+@on_1019h
 class LooksOnAFinalRecord(unittest.TestCase):
     """PREREG-EVL-3 section 3 (looks in order, at most one at a session close, no other look) and PREREG-EVL-1
     section 7 (late data delays the computation, never its as-of date): a look is computed once its close is final for
@@ -754,6 +756,7 @@ def by_program(rows) -> dict[str, list[str]]:
     return out
 
 
+@on_1019h
 class RoomIsGivenInRoomsOrder(EventTest):
     """PREREG-EVL-3 section 2: every TRADABLE version 2 event that fits the walls is entered, up to each program's open
     positions; ROOM goes Sized, Probe, learning, then the tables' order, within a program its own ranking; one name at
@@ -802,6 +805,7 @@ class RoomIsGivenInRoomsOrder(EventTest):
         self.assertEqual(sorted(got["EVL-ERN-REACT-C1"]), sorted(syms[:4]), "C1 at learning: the other 4")
 
 
+@on_1019h
 class APickNoShareFitsTakesNoSlot(EventTest):
     """PREREG-EVL-3 section 2: an event no whole share fits by price is skipped (the shadow keeps it); its program's
     limit is on open POSITIONS, so such a pick never takes a slot of the room (`EquityBook._event_gate`)."""
@@ -1000,6 +1004,7 @@ class TheCloseDecisionIsMadeAgainAfterAFailedRead(EventTest):
 
 
 # ======================================================================================= the second review: the judges
+@on_1019h
 class UntradableOnTheHouse(LaneCase):
     """PREREG-EVL-1 section 2: a LIVE decision reads Alpaca's `status=active` and `tradable: true`; a BACKFILLED one
     `status=all`. Eligibility is decided once per (entry session, CIK), by the rule that made it, and kept whether
@@ -1300,6 +1305,7 @@ class TheReachIsTheJudges(unittest.TestCase):
         self.assertEqual([(w["program"], w["k"]) for w in out["written"]], [(p, 1)])
 
 
+@on_1019h
 class ADemotedProgramReturnsToProbe(unittest.TestCase):
     """PREREG-EVL-3 section 2: a demoted program "returns to Probe at its next passed look". The demotion windows count
     the current Probe stay (its events bought after its latest move to Probe); so does Sized (the third review)."""
@@ -1426,6 +1432,7 @@ def _sent_at(h) -> list[tuple[float, str, str, str]]:
     return log
 
 
+@on_1019h
 class TheSalesGoBeforeTheDecision(EventTest):
     """Release 1019b's third review (House, major): the close decision reads every live name's T29 minute, 200 names a
     request, and `_send` judges the 15:49 cut-off on the wall clock. With 450 live names and Alpaca's 1Min bars hanging
@@ -1528,6 +1535,7 @@ class TheSalesGoBeforeTheDecision(EventTest):
         self.assertTrue(L._timed_out(wrapped), "a timeout a transport error wraps")
 
 
+@on_1019h
 class AT29FailureDropsOnlyTheReactRows(EventTest):
     """Release 1019b's third review (money and House, minor): when the batched T29 read fails, the decision is made with
     what was read: a REACT row of an unread name is not taken, every other close-entry program's picks go
@@ -1562,6 +1570,7 @@ class AT29FailureDropsOnlyTheReactRows(EventTest):
 
 
 # =========================================================================================== the third review: the judges
+@on_1019h
 class DemotedFromSizedEarnsSizedAgainOnItsNewStay(unittest.TestCase):
     """Release 1019b's third review (judges, minor): Sized counted every Probe+ event while demotion counted the current
     Probe stay, so a Sized program demoted on its last 50 events and returned to Probe at its next passed look was moved
@@ -1925,6 +1934,10 @@ class TheVerdictStepNeverFailsTheRecordPass(LaneCase):
         self.assertGreaterEqual(len(recs), 14, "a record pass every 2 minutes")
         self.assertEqual({status for _, status, _ in recs}, {"ok"})
 
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()
