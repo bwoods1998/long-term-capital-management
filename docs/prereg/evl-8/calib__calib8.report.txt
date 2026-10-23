@@ -1,0 +1,463 @@
+PREREG-EVL-8 CALIBRATION (synthetic only; nothing here read the lane)
+====================================================================================================
+
+PX seats under rule a08 (px8_a08.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.015  by20 0.015  by60 0.015  chain3 0.034
+  NK-mid-lam40-K40         R  2000  pass 0.034  by20 0.032  by60 0.034  chain3 0.064
+  N0-stress-lam40-K40      R  2000  pass 0.148  by20 0.117  by60 0.148  chain3 0.265
+  NK-worst-lam20-K20       R  2000  pass 0.102  by20 0.091  by60 0.102  chain3 0.178
+  N0-worst-lam40-K40       R  2000  pass 0.115  by20 0.102  by60 0.115  chain3 0.209
+  NK-worst-lam40-K40       R  2000  pass 0.104  by20 0.087  by60 0.104  chain3 0.188
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.205 / 0.244 / 0.307 / 0.320  med 15.0
+  P60-base-lam20-K20       R  1000  0.431 / 0.581 / 0.715 / 0.728  med 18.0
+  P30-base-lam40-K40       R  1000  0.131 / 0.164 / 0.218 / 0.218  med 16.0
+  P40-base-lam40-K40       R  1000  0.287 / 0.374 / 0.486 / 0.486  med 18.0
+  P60-base-lam40-K40       R  1000  0.581 / 0.761 / 0.863 / 0.863  med 15.0
+  P80-base-lam40-K40       R  1000  0.813 / 0.942 / 0.990 / 0.990  med 11.0
+  P40-worst-lam40-K40      R  1000  0.246 / 0.299 / 0.338 / 0.339  med 13.0
+  P60-worst-lam40-K40      R  1000  0.380 / 0.491 / 0.568 / 0.570  med 14.0
+
+PX seats under rule a10 (px8_a10.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.018  by20 0.018  by60 0.018  chain3 0.038
+  NK-mid-lam40-K40         R  2000  pass 0.036  by20 0.035  by60 0.036  chain3 0.069
+  N0-stress-lam40-K40      R  2000  pass 0.161  by20 0.126  by60 0.161  chain3 0.287
+  NK-worst-lam20-K20       R  2000  pass 0.108  by20 0.097  by60 0.108  chain3 0.195
+  N0-worst-lam40-K40       R  2000  pass 0.124  by20 0.111  by60 0.124  chain3 0.231
+  NK-worst-lam40-K40       R  2000  pass 0.112  by20 0.095  by60 0.112  chain3 0.206
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.228 / 0.271 / 0.334 / 0.348  med 15.0
+  P60-base-lam20-K20       R  1000  0.458 / 0.605 / 0.732 / 0.744  med 16.0
+  P30-base-lam40-K40       R  1000  0.149 / 0.192 / 0.242 / 0.242  med 16.0
+  P40-base-lam40-K40       R  1000  0.310 / 0.405 / 0.521 / 0.521  med 18.0
+  P60-base-lam40-K40       R  1000  0.609 / 0.774 / 0.877 / 0.879  med 14.0
+  P80-base-lam40-K40       R  1000  0.834 / 0.952 / 0.991 / 0.991  med 10.0
+  P40-worst-lam40-K40      R  1000  0.266 / 0.314 / 0.358 / 0.359  med 13.0
+  P60-worst-lam40-K40      R  1000  0.401 / 0.510 / 0.591 / 0.593  med 14.0
+
+PX seats under rule a10m15 (px8_a10m15.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.011  by20 0.011  by60 0.011  chain3 0.021
+  NK-mid-lam40-K40         R  2000  pass 0.025  by20 0.025  by60 0.025  chain3 0.048
+  N0-stress-lam40-K40      R  2000  pass 0.142  by20 0.114  by60 0.142  chain3 0.257
+  NK-worst-lam20-K20       R  2000  pass 0.096  by20 0.084  by60 0.096  chain3 0.166
+  N0-worst-lam40-K40       R  2000  pass 0.106  by20 0.093  by60 0.106  chain3 0.193
+  NK-worst-lam40-K40       R  2000  pass 0.097  by20 0.082  by60 0.096  chain3 0.175
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.179 / 0.211 / 0.246 / 0.250  med 14.0
+  P60-base-lam20-K20       R  1000  0.403 / 0.536 / 0.659 / 0.668  med 16.0
+  P30-base-lam40-K40       R  1000  0.106 / 0.123 / 0.164 / 0.164  med 16.0
+  P40-base-lam40-K40       R  1000  0.251 / 0.308 / 0.399 / 0.399  med 16.0
+  P60-base-lam40-K40       R  1000  0.532 / 0.704 / 0.835 / 0.836  med 16.0
+  P80-base-lam40-K40       R  1000  0.794 / 0.927 / 0.983 / 0.983  med 11.0
+  P40-worst-lam40-K40      R  1000  0.239 / 0.288 / 0.323 / 0.325  med 13.0
+  P60-worst-lam40-K40      R  1000  0.373 / 0.478 / 0.548 / 0.551  med 14.0
+
+PX seats under rule a12m15 (px8_a12m15.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.011  by20 0.011  by60 0.011  chain3 0.024
+  NK-mid-lam40-K40         R  2000  pass 0.030  by20 0.029  by60 0.030  chain3 0.057
+  N0-stress-lam40-K40      R  2000  pass 0.154  by20 0.125  by60 0.154  chain3 0.278
+  NK-worst-lam20-K20       R  2000  pass 0.104  by20 0.093  by60 0.104  chain3 0.182
+  N0-worst-lam40-K40       R  2000  pass 0.116  by20 0.103  by60 0.116  chain3 0.213
+  NK-worst-lam40-K40       R  2000  pass 0.104  by20 0.088  by60 0.104  chain3 0.191
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.199 / 0.230 / 0.268 / 0.275  med 14.0
+  P60-base-lam20-K20       R  1000  0.428 / 0.557 / 0.677 / 0.686  med 16.0
+  P30-base-lam40-K40       R  1000  0.120 / 0.135 / 0.178 / 0.178  med 15.0
+  P40-base-lam40-K40       R  1000  0.269 / 0.330 / 0.415 / 0.415  med 15.0
+  P60-base-lam40-K40       R  1000  0.558 / 0.727 / 0.841 / 0.842  med 15.0
+  P80-base-lam40-K40       R  1000  0.814 / 0.938 / 0.986 / 0.986  med 11.0
+  P40-worst-lam40-K40      R  1000  0.257 / 0.301 / 0.338 / 0.340  med 12.5
+  P60-worst-lam40-K40      R  1000  0.384 / 0.491 / 0.563 / 0.566  med 14.0
+
+PX seats under rule evl6 (px8_evl6.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam8-K20         R  2000  pass 0.034  by20 0.033  by60 0.034  chain3 0.063
+  NK-base-lam8-K20         R  2000  pass 0.032  by20 0.029  by60 0.032  chain3 0.067
+  N0-base-lam20-K20        R  2000  pass 0.030  by20 0.030  by60 0.030  chain3 0.062
+  NK-base-lam20-K20        R  2000  pass 0.036  by20 0.035  by60 0.036  chain3 0.069
+  N0-base-lam40-K40        R  2000  pass 0.028  by20 0.026  by60 0.028  chain3 0.061
+  NK-base-lam40-K40        R  2000  pass 0.028  by20 0.026  by60 0.028  chain3 0.062
+  N0-mid-lam8-K20          R  2000  pass 0.056  by20 0.051  by60 0.054  chain3 0.108
+  NK-mid-lam8-K20          R  2000  pass 0.053  by20 0.048  by60 0.052  chain3 0.102
+  N0-mid-lam20-K20         R  2000  pass 0.055  by20 0.050  by60 0.055  chain3 0.118
+  NK-mid-lam20-K20         R  2000  pass 0.055  by20 0.053  by60 0.055  chain3 0.112
+  N0-mid-lam40-K40         R  2000  pass 0.065  by20 0.061  by60 0.065  chain3 0.128
+  NK-mid-lam40-K40         R  2000  pass 0.059  by20 0.056  by60 0.059  chain3 0.116
+  N0-quiet-lam8-K20        R  2000  pass 0.030  by20 0.029  by60 0.030  chain3 0.064
+  NK-quiet-lam8-K20        R  2000  pass 0.025  by20 0.025  by60 0.025  chain3 0.059
+  N0-quiet-lam20-K20       R  2000  pass 0.027  by20 0.027  by60 0.027  chain3 0.053
+  NK-quiet-lam20-K20       R  2000  pass 0.029  by20 0.029  by60 0.029  chain3 0.059
+  N0-quiet-lam40-K40       R  2000  pass 0.020  by20 0.019  by60 0.020  chain3 0.046
+  NK-quiet-lam40-K40       R  2000  pass 0.025  by20 0.025  by60 0.025  chain3 0.051
+  N0-stress-lam8-K20       R  2000  pass 0.163  by20 0.140  by60 0.161  chain3 0.301
+  NK-stress-lam8-K20       R  2000  pass 0.162  by20 0.142  by60 0.160  chain3 0.316
+  N0-stress-lam20-K20      R  2000  pass 0.172  by20 0.153  by60 0.171  chain3 0.325
+  NK-stress-lam20-K20      R  2000  pass 0.176  by20 0.152  by60 0.175  chain3 0.330
+  N0-stress-lam40-K40      R  2000  pass 0.202  by20 0.167  by60 0.202  chain3 0.361
+  NK-stress-lam40-K40      R  2000  pass 0.176  by20 0.153  by60 0.176  chain3 0.337
+  N0-worst-lam8-K20        R  2000  pass 0.137  by20 0.119  by60 0.135  chain3 0.255
+  NK-worst-lam8-K20        R  2000  pass 0.142  by20 0.122  by60 0.141  chain3 0.255
+  N0-worst-lam20-K20       R  2000  pass 0.126  by20 0.114  by60 0.125  chain3 0.255
+  NK-worst-lam20-K20       R  2000  pass 0.150  by20 0.138  by60 0.149  chain3 0.271
+  N0-worst-lam40-K40       R  2000  pass 0.159  by20 0.142  by60 0.159  chain3 0.286
+  NK-worst-lam40-K40       R  2000  pass 0.152  by20 0.132  by60 0.152  chain3 0.284
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P20-base-lam20-K20       R  1000  0.117 / 0.133 / 0.147 / 0.149  med 12.0
+  P30-base-lam20-K20       R  1000  0.190 / 0.217 / 0.251 / 0.253  med 13.0
+  P40-base-lam20-K20       R  1000  0.297 / 0.350 / 0.421 / 0.431  med 14.0
+  P60-base-lam20-K20       R  1000  0.561 / 0.684 / 0.798 / 0.810  med 14.0
+  P80-base-lam20-K20       R  1000  0.764 / 0.885 / 0.945 / 0.952  med 11.0
+  P100-base-lam20-K20      R  1000  0.878 / 0.961 / 0.993 / 0.994  med 9.0
+  P20-base-lam40-K40       R  1000  0.133 / 0.146 / 0.168 / 0.168  med 12.0
+  P30-base-lam40-K40       R  1000  0.223 / 0.273 / 0.323 / 0.323  med 15.0
+  P40-base-lam40-K40       R  1000  0.377 / 0.476 / 0.579 / 0.579  med 14.0
+  P60-base-lam40-K40       R  1000  0.689 / 0.825 / 0.913 / 0.915  med 12.0
+  P80-base-lam40-K40       R  1000  0.876 / 0.961 / 0.995 / 0.995  med 9.0
+  P100-base-lam40-K40      R  1000  0.952 / 0.994 / 0.998 / 0.998  med 7.0
+  P20-mid-lam20-K20        R  1000  0.136 / 0.150 / 0.165 / 0.168  med 11.0
+  P30-mid-lam20-K20        R  1000  0.205 / 0.233 / 0.277 / 0.283  med 12.0
+  P40-mid-lam20-K20        R  1000  0.275 / 0.323 / 0.401 / 0.407  med 14.0
+  P60-mid-lam20-K20        R  1000  0.487 / 0.575 / 0.694 / 0.706  med 13.0
+  P80-mid-lam20-K20        R  1000  0.651 / 0.770 / 0.869 / 0.881  med 12.0
+  P100-mid-lam20-K20       R  1000  0.780 / 0.892 / 0.967 / 0.972  med 10.0
+  P20-mid-lam40-K40        R  1000  0.169 / 0.190 / 0.218 / 0.218  med 11.0
+  P30-mid-lam40-K40        R  1000  0.237 / 0.275 / 0.316 / 0.320  med 13.0
+  P40-mid-lam40-K40        R  1000  0.342 / 0.420 / 0.493 / 0.493  med 13.0
+  P60-mid-lam40-K40        R  1000  0.549 / 0.650 / 0.760 / 0.760  med 12.5
+  P80-mid-lam40-K40        R  1000  0.736 / 0.868 / 0.958 / 0.959  med 11.0
+  P100-mid-lam40-K40       R  1000  0.890 / 0.965 / 0.997 / 0.997  med 8.0
+  P20-worst-lam20-K20      R  1000  0.211 / 0.226 / 0.239 / 0.240  med 10.0
+  P30-worst-lam20-K20      R  1000  0.241 / 0.268 / 0.304 / 0.309  med 11.0
+  P40-worst-lam20-K20      R  1000  0.311 / 0.355 / 0.388 / 0.392  med 11.0
+  P60-worst-lam20-K20      R  1000  0.423 / 0.497 / 0.565 / 0.571  med 11.0
+  P80-worst-lam20-K20      R  1000  0.534 / 0.631 / 0.726 / 0.732  med 12.0
+  P100-worst-lam20-K20     R  1000  0.653 / 0.750 / 0.838 / 0.843  med 10.0
+  P20-worst-lam40-K40      R  1000  0.215 / 0.238 / 0.259 / 0.259  med 10.0
+  P30-worst-lam40-K40      R  1000  0.294 / 0.332 / 0.362 / 0.362  med 10.0
+  P40-worst-lam40-K40      R  1000  0.329 / 0.378 / 0.432 / 0.432  med 11.0
+  P60-worst-lam40-K40      R  1000  0.464 / 0.562 / 0.643 / 0.646  med 12.0
+  P80-worst-lam40-K40      R  1000  0.596 / 0.708 / 0.790 / 0.790  med 11.0
+  P100-worst-lam40-K40     R  1000  0.727 / 0.827 / 0.902 / 0.907  med 9.0
+
+PX seats under rule evl6 (px8_evl6_v3.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.028  by20 0.026  by60 0.028  chain3 0.061
+  NK-mid-lam40-K40         R  2000  pass 0.059  by20 0.056  by60 0.059  chain3 0.116
+  N0-stress-lam40-K40      R  2000  pass 0.202  by20 0.167  by60 0.202  chain3 0.361
+  N0-worst-lam20-K20       R  2000  pass 0.126  by20 0.114  by60 0.125  chain3 0.255
+  NK-worst-lam20-K20       R  2000  pass 0.150  by20 0.138  by60 0.149  chain3 0.271
+  N0-worst-lam40-K40       R  2000  pass 0.159  by20 0.142  by60 0.159  chain3 0.286
+  NK-worst-lam40-K40       R  2000  pass 0.152  by20 0.132  by60 0.152  chain3 0.284
+  N0-worstnotau-lam20-K20  R  2000  pass 0.151  by20 0.129  by60 0.151  chain3 0.279
+  NK-worstnotau-lam20-K20  R  2000  pass 0.138  by20 0.122  by60 0.137  chain3 0.272
+  N0-worstnotau-lam40-K40  R  2000  pass 0.155  by20 0.139  by60 0.155  chain3 0.303
+  NK-worstnotau-lam40-K40  R  2000  pass 0.155  by20 0.133  by60 0.155  chain3 0.277
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.297 / 0.350 / 0.421 / 0.431  med 14.0
+  P60-base-lam20-K20       R  1000  0.561 / 0.684 / 0.798 / 0.810  med 14.0
+  P30-base-lam40-K40       R  1000  0.223 / 0.273 / 0.323 / 0.323  med 15.0
+  P40-base-lam40-K40       R  1000  0.377 / 0.476 / 0.579 / 0.579  med 14.0
+  P60-base-lam40-K40       R  1000  0.689 / 0.825 / 0.913 / 0.915  med 12.0
+  P80-base-lam40-K40       R  1000  0.876 / 0.961 / 0.995 / 0.995  med 9.0
+  P40-worst-lam40-K40      R  1000  0.329 / 0.378 / 0.432 / 0.432  med 11.0
+  P60-worst-lam40-K40      R  1000  0.464 / 0.562 / 0.643 / 0.646  med 12.0
+
+PX seats under rule s10 (px8_s10.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.020  by20 0.018  by60 0.020  chain3 0.042
+  NK-mid-lam40-K40         R  2000  pass 0.041  by20 0.037  by60 0.041  chain3 0.081
+  N0-stress-lam40-K40      R  2000  pass 0.174  by20 0.138  by60 0.174  chain3 0.314
+  NK-worst-lam20-K20       R  2000  pass 0.116  by20 0.103  by60 0.116  chain3 0.217
+  N0-worst-lam40-K40       R  2000  pass 0.137  by20 0.118  by60 0.137  chain3 0.249
+  NK-worst-lam40-K40       R  2000  pass 0.128  by20 0.106  by60 0.128  chain3 0.240
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.267 / 0.322 / 0.399 / 0.410  med 15.0
+  P60-base-lam20-K20       R  1000  0.529 / 0.665 / 0.786 / 0.798  med 15.0
+  P30-base-lam40-K40       R  1000  0.199 / 0.250 / 0.305 / 0.305  med 16.0
+  P40-base-lam40-K40       R  1000  0.339 / 0.451 / 0.560 / 0.560  med 16.0
+  P60-base-lam40-K40       R  1000  0.668 / 0.812 / 0.907 / 0.909  med 13.0
+  P80-base-lam40-K40       R  1000  0.868 / 0.959 / 0.994 / 0.994  med 10.0
+  P40-worst-lam40-K40      R  1000  0.297 / 0.351 / 0.407 / 0.407  med 13.0
+  P60-worst-lam40-K40      R  1000  0.424 / 0.530 / 0.617 / 0.620  med 14.0
+
+PX seats under rule s10a12 (px8_s10a12.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.016  by20 0.015  by60 0.016  chain3 0.032
+  NK-mid-lam40-K40         R  2000  pass 0.031  by20 0.029  by60 0.031  chain3 0.061
+  N0-stress-lam40-K40      R  2000  pass 0.155  by20 0.120  by60 0.155  chain3 0.279
+  NK-worst-lam20-K20       R  2000  pass 0.100  by20 0.088  by60 0.099  chain3 0.190
+  N0-worst-lam40-K40       R  2000  pass 0.126  by20 0.106  by60 0.125  chain3 0.227
+  NK-worst-lam40-K40       R  2000  pass 0.111  by20 0.091  by60 0.111  chain3 0.204
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.235 / 0.282 / 0.354 / 0.368  med 15.0
+  P60-base-lam20-K20       R  1000  0.468 / 0.621 / 0.743 / 0.757  med 16.0
+  P30-base-lam40-K40       R  1000  0.160 / 0.204 / 0.254 / 0.254  med 17.0
+  P40-base-lam40-K40       R  1000  0.304 / 0.406 / 0.531 / 0.532  med 18.0
+  P60-base-lam40-K40       R  1000  0.619 / 0.784 / 0.887 / 0.889  med 14.0
+  P80-base-lam40-K40       R  1000  0.842 / 0.954 / 0.992 / 0.992  med 11.0
+  P40-worst-lam40-K40      R  1000  0.267 / 0.319 / 0.371 / 0.373  med 13.0
+  P60-worst-lam40-K40      R  1000  0.397 / 0.507 / 0.592 / 0.594  med 14.0
+
+PX seats under rule s12 (px8_s12.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.016  by20 0.014  by60 0.016  chain3 0.034
+  NK-mid-lam40-K40         R  2000  pass 0.035  by20 0.032  by60 0.035  chain3 0.071
+  N0-stress-lam40-K40      R  2000  pass 0.158  by20 0.118  by60 0.158  chain3 0.283
+  NK-worst-lam20-K20       R  2000  pass 0.105  by20 0.092  by60 0.105  chain3 0.197
+  N0-worst-lam40-K40       R  2000  pass 0.123  by20 0.103  by60 0.122  chain3 0.225
+  NK-worst-lam40-K40       R  2000  pass 0.115  by20 0.091  by60 0.115  chain3 0.215
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.250 / 0.307 / 0.386 / 0.397  med 16.0
+  P60-base-lam20-K20       R  1000  0.508 / 0.652 / 0.778 / 0.791  med 16.0
+  P30-base-lam40-K40       R  1000  0.187 / 0.238 / 0.294 / 0.294  med 18.0
+  P40-base-lam40-K40       R  1000  0.326 / 0.441 / 0.553 / 0.553  med 18.0
+  P60-base-lam40-K40       R  1000  0.649 / 0.806 / 0.905 / 0.907  med 14.0
+  P80-base-lam40-K40       R  1000  0.864 / 0.956 / 0.994 / 0.994  med 12.0
+  P40-worst-lam40-K40      R  1000  0.263 / 0.321 / 0.378 / 0.378  med 14.0
+  P60-worst-lam40-K40      R  1000  0.403 / 0.514 / 0.603 / 0.606  med 15.0
+
+PX seats under rule s12 (px8_s12_v3.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.016  by20 0.014  by60 0.016  chain3 0.034
+  NK-mid-lam40-K40         R  2000  pass 0.035  by20 0.032  by60 0.035  chain3 0.071
+  N0-stress-lam40-K40      R  2000  pass 0.158  by20 0.118  by60 0.158  chain3 0.283
+  N0-worst-lam20-K20       R  2000  pass 0.095  by20 0.082  by60 0.094  chain3 0.189
+  NK-worst-lam20-K20       R  2000  pass 0.105  by20 0.092  by60 0.105  chain3 0.197
+  N0-worst-lam40-K40       R  2000  pass 0.123  by20 0.103  by60 0.122  chain3 0.225
+  NK-worst-lam40-K40       R  2000  pass 0.115  by20 0.091  by60 0.115  chain3 0.215
+  N0-worstnotau-lam20-K20  R  2000  pass 0.111  by20 0.086  by60 0.111  chain3 0.204
+  NK-worstnotau-lam20-K20  R  2000  pass 0.101  by20 0.084  by60 0.100  chain3 0.198
+  N0-worstnotau-lam40-K40  R  2000  pass 0.117  by20 0.099  by60 0.117  chain3 0.230
+  NK-worstnotau-lam40-K40  R  2000  pass 0.115  by20 0.090  by60 0.115  chain3 0.203
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.250 / 0.307 / 0.386 / 0.397  med 16.0
+  P60-base-lam20-K20       R  1000  0.508 / 0.652 / 0.778 / 0.791  med 16.0
+  P30-base-lam40-K40       R  1000  0.187 / 0.238 / 0.294 / 0.294  med 18.0
+  P40-base-lam40-K40       R  1000  0.326 / 0.441 / 0.553 / 0.553  med 18.0
+  P60-base-lam40-K40       R  1000  0.649 / 0.806 / 0.905 / 0.907  med 14.0
+  P80-base-lam40-K40       R  1000  0.864 / 0.956 / 0.994 / 0.994  med 12.0
+  P40-worst-lam40-K40      R  1000  0.263 / 0.321 / 0.378 / 0.378  med 14.0
+  P60-worst-lam40-K40      R  1000  0.403 / 0.514 / 0.603 / 0.606  med 15.0
+
+PX seats under rule s12a12 (px8_s12a12.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.012  by20 0.011  by60 0.012  chain3 0.025
+  NK-mid-lam40-K40         R  2000  pass 0.026  by20 0.024  by60 0.026  chain3 0.053
+  N0-stress-lam40-K40      R  2000  pass 0.143  by20 0.105  by60 0.143  chain3 0.259
+  NK-worst-lam20-K20       R  2000  pass 0.090  by20 0.078  by60 0.089  chain3 0.172
+  N0-worst-lam40-K40       R  2000  pass 0.114  by20 0.095  by60 0.114  chain3 0.205
+  NK-worst-lam40-K40       R  2000  pass 0.100  by20 0.080  by60 0.100  chain3 0.183
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.220 / 0.269 / 0.342 / 0.357  med 16.0
+  P60-base-lam20-K20       R  1000  0.455 / 0.612 / 0.738 / 0.753  med 18.0
+  P30-base-lam40-K40       R  1000  0.153 / 0.197 / 0.247 / 0.247  med 18.0
+  P40-base-lam40-K40       R  1000  0.296 / 0.400 / 0.526 / 0.527  med 18.0
+  P60-base-lam40-K40       R  1000  0.600 / 0.778 / 0.885 / 0.887  med 15.0
+  P80-base-lam40-K40       R  1000  0.835 / 0.951 / 0.992 / 0.992  med 12.0
+  P40-worst-lam40-K40      R  1000  0.234 / 0.289 / 0.346 / 0.348  med 15.0
+  P60-worst-lam40-K40      R  1000  0.377 / 0.492 / 0.577 / 0.579  med 15.0
+
+PX seats under rule s14 (px8_s14_v3.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.015  by20 0.013  by60 0.015  chain3 0.027
+  NK-mid-lam40-K40         R  2000  pass 0.029  by20 0.025  by60 0.029  chain3 0.060
+  N0-stress-lam40-K40      R  2000  pass 0.144  by20 0.102  by60 0.144  chain3 0.257
+  N0-worst-lam20-K20       R  2000  pass 0.085  by20 0.072  by60 0.085  chain3 0.168
+  NK-worst-lam20-K20       R  2000  pass 0.094  by20 0.079  by60 0.093  chain3 0.180
+  N0-worst-lam40-K40       R  2000  pass 0.113  by20 0.091  by60 0.113  chain3 0.205
+  NK-worst-lam40-K40       R  2000  pass 0.111  by20 0.085  by60 0.111  chain3 0.203
+  N0-worstnotau-lam20-K20  R  2000  pass 0.101  by20 0.075  by60 0.101  chain3 0.188
+  NK-worstnotau-lam20-K20  R  2000  pass 0.086  by20 0.069  by60 0.086  chain3 0.175
+  N0-worstnotau-lam40-K40  R  2000  pass 0.105  by20 0.086  by60 0.105  chain3 0.206
+  NK-worstnotau-lam40-K40  R  2000  pass 0.103  by20 0.077  by60 0.103  chain3 0.179
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.236 / 0.297 / 0.378 / 0.389  med 18.0
+  P60-base-lam20-K20       R  1000  0.495 / 0.645 / 0.774 / 0.787  med 18.0
+  P30-base-lam40-K40       R  1000  0.167 / 0.219 / 0.277 / 0.277  med 18.0
+  P40-base-lam40-K40       R  1000  0.302 / 0.423 / 0.539 / 0.540  med 18.0
+  P60-base-lam40-K40       R  1000  0.630 / 0.797 / 0.900 / 0.902  med 15.0
+  P80-base-lam40-K40       R  1000  0.856 / 0.951 / 0.992 / 0.992  med 14.0
+  P40-worst-lam40-K40      R  1000  0.246 / 0.305 / 0.364 / 0.364  med 16.0
+  P60-worst-lam40-K40      R  1000  0.391 / 0.502 / 0.593 / 0.596  med 15.5
+
+PX seats under rule s14a12 (px8_s14a12_v3.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.011  by20 0.010  by60 0.011  chain3 0.020
+  NK-mid-lam40-K40         R  2000  pass 0.023  by20 0.021  by60 0.023  chain3 0.045
+  N0-stress-lam40-K40      R  2000  pass 0.131  by20 0.091  by60 0.131  chain3 0.232
+  N0-worst-lam20-K20       R  2000  pass 0.075  by20 0.064  by60 0.075  chain3 0.147
+  NK-worst-lam20-K20       R  2000  pass 0.083  by20 0.070  by60 0.082  chain3 0.159
+  N0-worst-lam40-K40       R  2000  pass 0.102  by20 0.083  by60 0.102  chain3 0.184
+  NK-worst-lam40-K40       R  2000  pass 0.095  by20 0.074  by60 0.095  chain3 0.171
+  N0-worstnotau-lam20-K20  R  2000  pass 0.084  by20 0.060  by60 0.084  chain3 0.159
+  NK-worstnotau-lam20-K20  R  2000  pass 0.068  by20 0.056  by60 0.067  chain3 0.148
+  N0-worstnotau-lam40-K40  R  2000  pass 0.088  by20 0.070  by60 0.088  chain3 0.174
+  NK-worstnotau-lam40-K40  R  2000  pass 0.091  by20 0.068  by60 0.091  chain3 0.158
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.206 / 0.259 / 0.335 / 0.350  med 18.0
+  P60-base-lam20-K20       R  1000  0.440 / 0.601 / 0.731 / 0.746  med 18.0
+  P30-base-lam40-K40       R  1000  0.137 / 0.183 / 0.236 / 0.236  med 20.0
+  P40-base-lam40-K40       R  1000  0.272 / 0.383 / 0.512 / 0.514  med 20.0
+  P60-base-lam40-K40       R  1000  0.584 / 0.770 / 0.881 / 0.883  med 16.0
+  P80-base-lam40-K40       R  1000  0.823 / 0.946 / 0.990 / 0.990  med 14.0
+  P40-worst-lam40-K40      R  1000  0.220 / 0.276 / 0.334 / 0.336  med 16.0
+  P60-worst-lam40-K40      R  1000  0.364 / 0.481 / 0.567 / 0.569  med 16.0
+
+PX seats under rule s15 (px8_s15_confirm.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam8-K20         R  4000  pass 0.015  by20 0.012  by60 0.015  chain3 0.030
+  NK-base-lam8-K20         R  4000  pass 0.017  by20 0.012  by60 0.017  chain3 0.037
+  N0-base-lam20-K20        R  4000  pass 0.015  by20 0.013  by60 0.015  chain3 0.026
+  NK-base-lam20-K20        R  4000  pass 0.012  by20 0.011  by60 0.012  chain3 0.025
+  N0-base-lam40-K40        R  4000  pass 0.011  by20 0.010  by60 0.011  chain3 0.019
+  NK-base-lam40-K40        R  4000  pass 0.009  by20 0.008  by60 0.009  chain3 0.019
+  N0-mid-lam8-K20          R  4000  pass 0.026  by20 0.019  by60 0.025  chain3 0.047
+  NK-mid-lam8-K20          R  4000  pass 0.025  by20 0.020  by60 0.025  chain3 0.051
+  N0-mid-lam20-K20         R  4000  pass 0.029  by20 0.025  by60 0.029  chain3 0.060
+  NK-mid-lam20-K20         R  4000  pass 0.023  by20 0.020  by60 0.023  chain3 0.049
+  N0-mid-lam40-K40         R  4000  pass 0.035  by20 0.028  by60 0.035  chain3 0.062
+  NK-mid-lam40-K40         R  4000  pass 0.035  by20 0.029  by60 0.035  chain3 0.062
+  N0-quiet-lam8-K20        R  4000  pass 0.012  by20 0.009  by60 0.011  chain3 0.022
+  NK-quiet-lam8-K20        R  4000  pass 0.010  by20 0.009  by60 0.010  chain3 0.022
+  N0-quiet-lam20-K20       R  4000  pass 0.009  by20 0.008  by60 0.009  chain3 0.017
+  NK-quiet-lam20-K20       R  4000  pass 0.007  by20 0.006  by60 0.007  chain3 0.017
+  N0-quiet-lam40-K40       R  4000  pass 0.007  by20 0.007  by60 0.007  chain3 0.016
+  NK-quiet-lam40-K40       R  4000  pass 0.008  by20 0.007  by60 0.008  chain3 0.017
+  N0-stress-lam8-K20       R  4000  pass 0.114  by20 0.080  by60 0.110  chain3 0.212
+  NK-stress-lam8-K20       R  4000  pass 0.111  by20 0.084  by60 0.108  chain3 0.202
+  N0-stress-lam20-K20      R  4000  pass 0.117  by20 0.088  by60 0.116  chain3 0.224
+  NK-stress-lam20-K20      R  4000  pass 0.108  by20 0.076  by60 0.107  chain3 0.223
+  N0-stress-lam40-K40      R  4000  pass 0.116  by20 0.088  by60 0.116  chain3 0.227
+  NK-stress-lam40-K40      R  4000  pass 0.120  by20 0.092  by60 0.120  chain3 0.227
+  N0-worst-lam8-K20        R  4000  pass 0.086  by20 0.065  by60 0.085  chain3 0.162
+  NK-worst-lam8-K20        R  4000  pass 0.083  by20 0.060  by60 0.081  chain3 0.157
+  N0-worst-lam20-K20       R  4000  pass 0.090  by20 0.070  by60 0.090  chain3 0.176
+  NK-worst-lam20-K20       R  4000  pass 0.086  by20 0.068  by60 0.085  chain3 0.163
+  N0-worst-lam40-K40       R  4000  pass 0.094  by20 0.076  by60 0.094  chain3 0.184
+  NK-worst-lam40-K40       R  4000  pass 0.097  by20 0.075  by60 0.097  chain3 0.193
+  N0-worstnotau-lam20-K20  R  4000  pass 0.088  by20 0.070  by60 0.088  chain3 0.172
+  NK-worstnotau-lam20-K20  R  4000  pass 0.092  by20 0.071  by60 0.091  chain3 0.178
+  N0-worstnotau-lam40-K40  R  4000  pass 0.096  by20 0.074  by60 0.096  chain3 0.185
+  NK-worstnotau-lam40-K40  R  4000  pass 0.098  by20 0.074  by60 0.097  chain3 0.188
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P20-base-lam20-K20       R  2000  0.065 / 0.076 / 0.087 / 0.089  med 16.0
+  P30-base-lam20-K20       R  2000  0.131 / 0.163 / 0.201 / 0.203  med 18.0
+  P40-base-lam20-K20       R  2000  0.209 / 0.274 / 0.361 / 0.369  med 18.0
+  P60-base-lam20-K20       R  2000  0.468 / 0.619 / 0.755 / 0.768  med 18.0
+  P80-base-lam20-K20       R  2000  0.664 / 0.843 / 0.936 / 0.943  med 15.0
+  P100-base-lam20-K20      R  2000  0.838 / 0.950 / 0.987 / 0.989  med 15.0
+  P20-base-lam40-K40       R  2000  0.071 / 0.096 / 0.117 / 0.117  med 18.0
+  P30-base-lam40-K40       R  2000  0.189 / 0.240 / 0.300 / 0.301  med 18.0
+  P40-base-lam40-K40       R  2000  0.309 / 0.414 / 0.554 / 0.556  med 20.0
+  P60-base-lam40-K40       R  2000  0.613 / 0.795 / 0.914 / 0.915  med 16.0
+  P80-base-lam40-K40       R  2000  0.820 / 0.955 / 0.988 / 0.989  med 15.0
+  P100-base-lam40-K40      R  2000  0.940 / 0.993 / 0.998 / 0.998  med 15.0
+  P20-mid-lam20-K20        R  2000  0.077 / 0.091 / 0.105 / 0.107  med 16.0
+  P30-mid-lam20-K20        R  2000  0.119 / 0.159 / 0.196 / 0.198  med 18.0
+  P40-mid-lam20-K20        R  2000  0.203 / 0.249 / 0.320 / 0.327  med 18.0
+  P60-mid-lam20-K20        R  2000  0.361 / 0.481 / 0.606 / 0.618  med 18.0
+  P80-mid-lam20-K20        R  2000  0.566 / 0.720 / 0.849 / 0.859  med 16.0
+  P100-mid-lam20-K20       R  2000  0.729 / 0.875 / 0.947 / 0.951  med 15.0
+  P20-mid-lam40-K40        R  2000  0.108 / 0.135 / 0.162 / 0.162  med 18.0
+  P30-mid-lam40-K40        R  2000  0.173 / 0.213 / 0.265 / 0.267  med 18.0
+  P40-mid-lam40-K40        R  2000  0.256 / 0.337 / 0.424 / 0.426  med 18.0
+  P60-mid-lam40-K40        R  2000  0.481 / 0.643 / 0.775 / 0.777  med 18.0
+  P80-mid-lam40-K40        R  2000  0.665 / 0.832 / 0.922 / 0.923  med 15.0
+  P100-mid-lam40-K40       R  2000  0.828 / 0.938 / 0.987 / 0.987  med 15.0
+  P20-worst-lam20-K20      R  2000  0.144 / 0.167 / 0.193 / 0.195  med 16.0
+  P30-worst-lam20-K20      R  2000  0.172 / 0.217 / 0.260 / 0.264  med 17.0
+  P40-worst-lam20-K20      R  2000  0.231 / 0.283 / 0.337 / 0.341  med 16.0
+  P60-worst-lam20-K20      R  2000  0.315 / 0.415 / 0.500 / 0.507  med 18.0
+  P80-worst-lam20-K20      R  2000  0.432 / 0.567 / 0.682 / 0.692  med 16.0
+  P100-worst-lam20-K20     R  2000  0.563 / 0.719 / 0.824 / 0.835  med 16.0
+  P20-worst-lam40-K40      R  2000  0.156 / 0.188 / 0.220 / 0.220  med 16.0
+  P30-worst-lam40-K40      R  2000  0.200 / 0.243 / 0.290 / 0.291  med 16.0
+  P40-worst-lam40-K40      R  2000  0.248 / 0.307 / 0.372 / 0.374  med 16.0
+  P60-worst-lam40-K40      R  2000  0.358 / 0.470 / 0.560 / 0.561  med 16.0
+  P80-worst-lam40-K40      R  2000  0.505 / 0.642 / 0.752 / 0.754  med 15.0
+  P100-worst-lam40-K40     R  2000  0.621 / 0.767 / 0.868 / 0.868  med 15.0
+
+PX seats under rule s15 (px8_s15_v3.jsonl): FALSE PASSES within 120 sessions (pass | by20 | chain of 3)
+  N0-base-lam40-K40        R  2000  pass 0.013  by20 0.011  by60 0.013  chain3 0.025
+  NK-mid-lam40-K40         R  2000  pass 0.027  by20 0.024  by60 0.027  chain3 0.055
+  N0-stress-lam40-K40      R  2000  pass 0.137  by20 0.093  by60 0.137  chain3 0.245
+  N0-worst-lam20-K20       R  2000  pass 0.079  by20 0.067  by60 0.079  chain3 0.159
+  NK-worst-lam20-K20       R  2000  pass 0.088  by20 0.073  by60 0.087  chain3 0.171
+  N0-worst-lam40-K40       R  2000  pass 0.106  by20 0.083  by60 0.105  chain3 0.196
+  NK-worst-lam40-K40       R  2000  pass 0.105  by20 0.079  by60 0.105  chain3 0.194
+  N0-worstnotau-lam20-K20  R  2000  pass 0.096  by20 0.070  by60 0.096  chain3 0.176
+  NK-worstnotau-lam20-K20  R  2000  pass 0.080  by20 0.061  by60 0.079  chain3 0.166
+  N0-worstnotau-lam40-K40  R  2000  pass 0.098  by20 0.079  by60 0.098  chain3 0.193
+  NK-worstnotau-lam40-K40  R  2000  pass 0.098  by20 0.071  by60 0.098  chain3 0.171
+  POWER (P(pass) by session 20 / 40 / 60 / 120; median pass session):
+  P40-base-lam20-K20       R  1000  0.225 / 0.288 / 0.371 / 0.382  med 18.0
+  P60-base-lam20-K20       R  1000  0.472 / 0.630 / 0.767 / 0.780  med 18.0
+  P30-base-lam40-K40       R  1000  0.156 / 0.211 / 0.271 / 0.271  med 20.0
+  P40-base-lam40-K40       R  1000  0.294 / 0.415 / 0.535 / 0.536  med 20.0
+  P60-base-lam40-K40       R  1000  0.617 / 0.793 / 0.899 / 0.901  med 16.0
+  P80-base-lam40-K40       R  1000  0.850 / 0.949 / 0.991 / 0.991  med 15.0
+  P40-worst-lam40-K40      R  1000  0.232 / 0.293 / 0.355 / 0.355  med 16.0
+  P60-worst-lam40-K40      R  1000  0.382 / 0.497 / 0.590 / 0.593  med 16.0
+
+META (null): EVL-6 as drafted (e6), its v1->v2->v3 chain (ch), PREREG-EVL-3 minus skew (e3); pass | pass given true mean <= 0; by20/60/120; picks a session; picks' true mean bp
+  M-N0-base-n300                   R  2000 | e6 0.021 |0 0.021 (0.003/0.016/0.021) | ch 0.022 |0 0.022 | e3 0.017 |0 0.017 | picks 1.04 true 0.0 null 1.00
+  M-N0-worst-n300                  R  2000 | e6 0.038 |0 0.019 (0.005/0.025/0.038) | ch 0.039 |0 0.019 | e3 0.034 |0 0.016 | picks 0.71 true 4.5 null 0.73
+  M-N0-worstnotau-n300             R  2000 | e6 0.037 |0 0.021 (0.006/0.029/0.037) | ch 0.037 |0 0.021 | e3 0.028 |0 0.017 | picks 0.66 true -0.5 null 0.74
+  M-N0-base-n800                   R  2000 | e6 0.013 |0 0.013 (0.003/0.011/0.013) | ch 0.013 |0 0.013 | e3 0.011 |0 0.011 | picks 0.80 true 0.0 null 1.00
+  M-N0-worst-n800                  R  2000 | e6 0.029 |0 0.009 (0.004/0.022/0.029) | ch 0.029 |0 0.009 | e3 0.024 |0 0.009 | picks 0.64 true 4.0 null 0.76
+  M-N1-worst-n300                  R  2000 | e6 0.024 |0 0.016 (0.001/0.014/0.024) | ch 0.024 |0 0.017 | e3 0.016 |0 0.010 | picks 0.60 true -12.3 null 0.87
+  M-N2r1-worst-n300                R  2000 | e6 0.021 |0 0.014 (0.004/0.014/0.021) | ch 0.022 |0 0.015 | e3 0.015 |0 0.011 | picks 0.57 true -10.9 null 0.87
+  M-N2r3-worst-n300                R  2000 | e6 0.034 |0 0.021 (0.003/0.022/0.034) | ch 0.035 |0 0.022 | e3 0.027 |0 0.018 | picks 0.75 true -4.3 null 0.79
+  M-N0-worstnotau-n300-wide2       R  2000 | e6 0.051 |0 0.032 (0.006/0.039/0.051) | ch 0.051 |0 0.032 | e3 0.043 |0 0.029 | picks 1.08 true -0.5 null 0.65
+  M-N0-worst-n300-wide3            R  2000 | e6 0.051 |0 0.026 (0.004/0.035/0.051) | ch 0.054 |0 0.029 | e3 0.041 |0 0.021 | picks 1.24 true 3.3 null 0.60
+  M-N0-worst-n300-rand             R  2000 | e6 0.114 |0 0.090 (0.101/0.114/0.114) | ch 0.231 |0 0.179 | e3 0.175 |0 0.129 | picks 16.00 true 0.1 null 0.50
+
+META (stress): EVL-6 as drafted (e6), its v1->v2->v3 chain (ch), PREREG-EVL-3 minus skew (e3); pass | pass given true mean <= 0; by20/60/120; picks a session; picks' true mean bp
+  MS-N0-rho30-n300                 R   600 | e6 0.042 |0 0.028 (0.007/0.030/0.042) | ch 0.045 |0 0.032 | e3 0.037 |0 0.025 | picks 0.74 true 0.5 null 0.72
+  MS-N0-famdrift20-n300            R   600 | e6 0.047 |0 0.022 (0.003/0.028/0.047) | ch 0.052 |0 0.025 | e3 0.042 |0 0.016 | picks 1.27 true 8.6 null 0.61
+  MS-N0-tau3-n300                  R   600 | e6 0.163 |0 0.018 (0.000/0.088/0.163) | ch 0.202 |0 0.018 | e3 0.175 |0 0.006 | picks 4.29 true 38.9 null 0.28
+  MS-N0-mom40-rho30-n300           R   600 | e6 0.065 |0 0.050 (0.007/0.047/0.065) | ch 0.067 |0 0.053 | e3 0.037 |0 0.023 | picks 0.74 true 0.6 null 0.73
+  MS-N0-drift30ar99-n300           R   600 | e6 0.037 |0 0.011 (0.003/0.030/0.037) | ch 0.037 |0 0.011 | e3 0.025 |0 0.007 | picks 0.67 true 0.6 null 0.72
+  MS-N0-worstnotau-n300-z2         R   600 | e6 0.092 |0 0.075 (0.038/0.088/0.092) | ch 0.105 |0 0.082 | e3 0.092 |0 0.068 | picks 4.05 true -0.1 null 0.49
+  MS-N0-worstnotau-n300-wide4      R   600 | e6 0.062 |0 0.050 (0.013/0.037/0.062) | ch 0.062 |0 0.050 | e3 0.058 |0 0.048 | picks 1.39 true -1.3 null 0.63
+  MS-N2r3-worstnotau-n800-wide3    R   600 | e6 0.042 |0 0.033 (0.007/0.023/0.042) | ch 0.042 |0 0.033 | e3 0.028 |0 0.019 | picks 0.95 true -8.6 null 0.81
+
+META (power): EVL-6 as drafted (e6), its v1->v2->v3 chain (ch), PREREG-EVL-3 minus skew (e3); pass | pass given true mean <= 0; by20/60/120; picks a session; picks' true mean bp
+  MP-r1-e30-base-n300              R   600 | e6 0.092 |0 0.021 (0.002/0.038/0.092) | ch 0.108 |0 0.021 | e3 0.133 |0 0.017 | picks 3.29 true 20.1 null 0.40
+  MP-r1-e40-base-n300              R   600 | e6 0.233 |0 0.019 (0.010/0.100/0.233) | ch 0.313 |0 0.019 | e3 0.408 |0 0.019 | picks 6.81 true 34.8 null 0.09
+  MP-r1-e60-base-n300              R   600 | e6 0.513 |0 0.000 (0.045/0.365/0.513) | ch 0.715 |0 0.000 | e3 0.808 |0 0.000 | picks 11.50 true 53.5 null 0.00
+  MP-r1-e100-base-n300             R   600 | e6 0.927 |0 0.000 (0.278/0.863/0.927) | ch 0.992 |0 0.000 | e3 0.997 |0 0.000 | picks 13.73 true 87.8 null 0.00
+  MP-r1-e40-base-n800              R   600 | e6 0.287 |0 0.000 (0.022/0.223/0.287) | ch 0.502 |0 0.000 | e3 0.652 |0 0.000 | picks 12.79 true 38.3 null 0.00
+  MP-r3-e40-base-n300              R   600 | e6 0.192 |0 0.000 (0.013/0.123/0.192) | ch 0.253 |0 0.000 | e3 0.307 |0 0.000 | picks 7.58 true 34.7 null 0.02
+  MP-r3-e40-worst-n300             R   600 | e6 0.207 |0 0.037 (0.008/0.105/0.207) | ch 0.290 |0 0.037 | e3 0.282 |0 0.037 | picks 7.07 true 36.2 null 0.04
+  MP-truthK16-r1-e40-base-n300     R   600 | e6 0.343 |0 0.000 (0.237/0.338/0.343) | ch 0.575 |0 0.000 | e3 0.787 |0 0.000 | picks 13.90 true 40.0 null 0.00
+  MP-r1-e60-base-n800              R   600 | e6 0.640 |0 0.000 (0.158/0.545/0.640) | ch 0.857 |0 0.000 | e3 0.938 |0 0.000 | picks 14.21 true 58.5 null 0.00
+  MP-r3-e60-base-n300              R   600 | e6 0.398 |0 0.000 (0.033/0.255/0.398) | ch 0.640 |0 0.000 | e3 0.730 |0 0.000 | picks 12.03 true 56.1 null 0.00
+  MP-r3-e60-worst-n300             R   600 | e6 0.448 |0 0.000 (0.042/0.342/0.448) | ch 0.628 |0 0.000 | e3 0.625 |0 0.000 | picks 11.88 true 58.2 null 0.00
+  MP-truthK16-r1-e60-base-n300     R   600 | e6 0.628 |0 0.000 (0.430/0.620/0.628) | ch 0.863 |0 0.000 | e3 0.957 |0 0.000 | picks 13.91 true 60.0 null 0.00
+
+META (tune): EVL-6 as drafted (e6), its v1->v2->v3 chain (ch), PREREG-EVL-3 minus skew (e3); pass | pass given true mean <= 0; by20/60/120; picks a session; picks' true mean bp
+  MT-N0-worst-n300-w20             R   600 | e6 0.032 |0 0.007 (0.000/0.015/0.032) | ch 0.032 |0 0.007 | e3 0.028 |0 0.005 | picks 0.65 true 3.4 null 0.73
+  MT-r1-e40-base-n300-w20          R   600 | e6 0.258 |0 0.000 (0.000/0.125/0.258) | ch 0.333 |0 0.000 | e3 0.408 |0 0.000 | picks 6.83 true 34.9 null 0.06
+  MT-r1-e60-base-n300-w20          R   600 | e6 0.532 |0 0.000 (0.000/0.368/0.532) | ch 0.720 |0 0.000 | e3 0.803 |0 0.000 | picks 11.12 true 54.4 null 0.00
+  MT-N0-worst-n300-w30             R   600 | e6 0.033 |0 0.009 (0.000/0.018/0.033) | ch 0.035 |0 0.011 | e3 0.023 |0 0.009 | picks 0.58 true 6.0 null 0.75
+  MT-r1-e40-base-n300-w30          R   600 | e6 0.242 |0 0.027 (0.000/0.090/0.242) | ch 0.302 |0 0.027 | e3 0.392 |0 0.027 | picks 6.41 true 35.8 null 0.06
+  MT-r1-e60-base-n300-w30          R   600 | e6 0.560 |0 0.000 (0.000/0.390/0.560) | ch 0.728 |0 0.000 | e3 0.818 |0 0.000 | picks 10.51 true 54.4 null 0.00
+
+PLACEBO AUDIT AND CANARY under THE PX SCREEN (placebo8.py; alarm = >= 3 of 8 placebos passed or the canary)
+  lift    +0 bp drift    0 bp crash False | single 0.014 | >=3 0.002 | canary 0.002 | ALARM 0.003
+  lift    +0 bp drift   10 bp crash True  | single 0.019 | >=3 0.006 | canary 0.032 | ALARM 0.033
+  lift    +0 bp drift   20 bp crash True  | single 0.036 | >=3 0.023 | canary 0.092 | ALARM 0.097
+  lift   +20 bp drift    0 bp crash False | single 0.086 | >=3 0.051 | canary 0.268 | ALARM 0.278
+  lift   +30 bp drift    0 bp crash False | single 0.171 | >=3 0.182 | canary 0.705 | ALARM 0.715
+  lift   +50 bp drift    0 bp crash False | single 0.537 | >=3 0.818 | canary 0.996 | ALARM 0.996
+  lift   +30 bp drift   20 bp crash True  | single 0.253 | >=3 0.330 | canary 0.626 | ALARM 0.630
+  lift   +50 bp drift   20 bp crash True  | single 0.519 | >=3 0.685 | canary 0.901 | ALARM 0.902
+
+EXPECTED VALUE (ev8_px_a=(0.016,0.004)_px_first=15_1000_98000001.json; 1,000 runs a scenario): P(Done by 40/60/120) E[min(T,121)] | true/false promotions, EVL-8's | P&L mean / p05 | worst-20 p5 | P(false Done)
+  base|Z0        0.000/0.000/0.000  121.0 | 0.00/0.306, 0.000 (0 counted) | +14 / -109 | -110 | 0.000
+  base|Z15       0.000/0.000/0.000  121.0 | 0.00/0.097, 0.000 (0 counted) | -100 / -216 | -139 | 0.000
+  base|PX40      0.000/0.000/0.000  121.0 | 0.00/0.097, 0.000 (0 counted) | -100 / -216 | -139 | 0.000
+  base|PX60      0.000/0.000/0.000  121.0 | 0.00/0.097, 0.000 (0 counted) | -100 / -216 | -139 | 0.000
+  base|META      0.000/0.000/0.000  121.0 | 0.00/0.097, 0.000 (0 counted) | -100 / -216 | -139 | 0.000
+  base|E1        0.000/0.000/0.000  121.0 | 0.97/0.102, 0.000 (0 counted) | +288 / +1 | -113 | 0.000
+  base|E3news    0.183/0.317/0.638   84.0 | 2.82/0.081, 0.000 (0 counted) | +427 / +129 | -81 | 0.002
+  base|E1PX      0.000/0.000/0.000  121.0 | 0.97/0.102, 0.000 (0 counted) | +288 / +1 | -113 | 0.000
+  evl8|Z0        0.000/0.000/0.000  121.0 | 0.00/0.327, 0.057 (8 counted) | +14 / -123 | -120 | 0.000
+  evl8|Z15       0.000/0.000/0.000  121.0 | 0.00/0.100, 0.019 (1 counted) | -120 / -250 | -158 | 0.000
+  evl8|PX40      0.000/0.000/0.000  121.0 | 0.44/0.106, 0.463 (342 counted) | +8 / -202 | -148 | 0.000
+  evl8|PX60      0.000/0.000/0.000  121.0 | 0.88/0.106, 0.897 (677 counted) | +306 / -114 | -141 | 0.000
+  evl8|META      0.000/0.000/0.000  121.0 | 1.08/0.093, 1.081 (136 counted) | +1 / -159 | -156 | 0.000
+  evl8|E1        0.000/0.000/0.006  120.9 | 1.47/0.073, 0.520 (62 counted) | +330 / +36 | -129 | 0.000
+  evl8|E3news    0.189/0.332/0.663   83.1 | 3.09/0.090, 0.279 (11 counted) | +425 / +125 | -76 | 0.005
+  evl8|E1PX      0.000/0.004/0.060  119.5 | 1.92/0.071, 0.968 (299 counted) | +379 / +70 | -121 | 0.003

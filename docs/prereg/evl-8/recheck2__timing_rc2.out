@@ -1,0 +1,10 @@
+origin/rel/1019h: DATA_INTERVAL 0.5 s (120 reads a minute); gateway read timeout 45 s; one-slot lane: True; 'a bound is not a promise': True; book once a minute a few seconds after it: True; one book decision an auction: True; book close wait 60 s
+  N_U 2000: 32 PX-ON reads x 0.5 s = 16.0 s of spacing alone (text: 13 s at 150 a minute); window 15:46:00-15:46:42 = 42 s
+  N_U 3000: 42 PX-ON reads x 0.5 s = 21.0 s of spacing alone (text: 17 s at 150 a minute); window 15:46:00-15:46:42 = 42 s
+  N_U 4500: 57 PX-ON reads x 0.5 s = 28.5 s of spacing alone (text: 23 s at 150 a minute); window 15:46:00-15:46:42 = 42 s
+  N_U 6041: 73 PX-ON reads x 0.5 s = 36.5 s of spacing alone (text: 29 s at 150 a minute); window 15:46:00-15:46:42 = 42 s
+  a PX read sent at 15:46:42 and held to the 45 s timeout returns at 15:46:42+45s: the lane's live close run (one slot) starts up to 27 s late
+  book tick phase  2 s: last close-window tick 15:48:02; EVL-META-ON trades only if decide-close-meta8 has finished by then, so the lane's close receipt is in by 15:47:47 (the lane's run at most 47 s; the text says 15:48:25 and 85 s)
+  book tick phase  5 s: last close-window tick 15:48:05; EVL-META-ON trades only if decide-close-meta8 has finished by then, so the lane's close receipt is in by 15:47:50 (the lane's run at most 50 s; the text says 15:48:25 and 85 s)
+  book tick phase 10 s: last close-window tick 15:48:10; EVL-META-ON trades only if decide-close-meta8 has finished by then, so the lane's close receipt is in by 15:47:55 (the lane's run at most 55 s; the text says 15:48:25 and 85 s)
+  the book's one close decision is at its first tick >= 15:46:00 + 60 s = 15:47:00: PX-ON's intents (by 15:46:50) are in it; PREREG-EVL-7's EVL-LRN-ON intents (written inside the lane's run from 15:47:00) are not, so PX-ON's buys are planned and sent a tick before any EVL-LRN-ON buy

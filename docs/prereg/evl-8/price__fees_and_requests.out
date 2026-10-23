@@ -1,0 +1,35 @@
+== FEES A ROUND TRIP (bp of the lot), whole shares, E = $1898 ==
+lot (band)                       $8      $20      $50     $150 rate-only
+learning 2% ($38)              12.5     20.0      8.0    skip     0.36
+Probe 3.5% ($66)                6.2      6.7      8.0    skip     0.36
+Probe 5% ($95)                  4.5      5.0      8.0    skip     0.36
+Sized 10% ($190)                2.2      2.2      2.7      2.7     0.36
+$30k Probe 3.5% ($1,050)        0.8      0.6      0.6      0.6     0.36
+$30k Sized 10% ($3,000)         0.6      0.5      0.4      0.4     0.36
+
+PREREG-EVL-1 s5 replay cost (score.py cost_bp), ADV20 >= $10M: entry 6.55 + exit 7.61 = 14.16 bp RT
+PREREG-EVL-1 s5 replay cost, ADV20 < $10M:  entry 11.55 + exit 12.61 = 24.16 bp RT
+Auction fills: no spread inside a cross (EXECUTION-FACTS: 84 of 84 fills at the replay's print, 0.0 bp).
+
+== DATA REQUESTS A SESSION (SIP via the gateway's GET /v1/alpaca/v2/stocks/bars; Basic plan 200 a minute) ==
+read (when)                                                 N=2000  N=3000  N=4500  N=6041
+one-time backfill, 270 sessions, raw + all (once)              120     180     276     372
+nightly 1Day bars of the session, raw + all (16:20 ET)          20      30      46      62
+D's morning re-read of P's bar, adjustment=all (09:05 ET)       10      15      23      31
+premarket 1Min 08:00-08:59, GAP universe ~N/2 (09:15 ET)        10      15      23      31
+px1530 marks, 1Min 15:00-15:30, all N (15:46 ET)                20      30      45      61
+OPENGAP records: D's 09:30 1Min bar, all N (10:00 ET)           10      15      23      31
+SURGE volume, 1Min 09:30-15:30, <= 300 candidates (15:46 ET)      12      12      12      12
+auction prints: 3 seats x K 40 + 2 control samples x 60, 2 prints, 1.5 pages     720     720     720     720
+TOTAL a session (excluding the one-time backfill)              802     837     892     948
+minutes of the plan's 200/min allowance                        4.0     4.2     4.5     4.7
+peak at the 15:46 ET close decision (requests)                  32      42      57      73
+peak at the 09:15 ET open decision (requests)                   20      30      46      62
+
+SEC operating-company test (EDGAR company feed, cached 30 days, 1-3 reads a CIK):
+  N=2000: first fill 2000-6000 reads; then about 100 a day
+  N=3000: first fill 3000-9000 reads; then about 150 a day
+  N=4500: first fill 4500-13500 reads; then about 225 a day
+  N=6041: first fill 6041-18123 reads; then about 303 a day
+
+METERED COST: $0 (no model call; the Basic plan is free; the gateway's Worker requests are inside its plan).

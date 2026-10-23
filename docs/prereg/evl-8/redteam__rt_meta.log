@@ -1,0 +1,41 @@
+NULL     F=  50 RAWP: pass 0.058 retire 0.018 | picks a   +1.5 bp r   +2.5 bp beta 1.15 crash 1.59%
+NULL     F=  50 ABNP: pass 0.055 retire 0.021 | picks a   +1.5 bp r   +2.6 bp beta 1.20 crash 1.65%
+NULL     F=  50 ABNC: pass 0.061 retire 0.019 | picks a   +2.0 bp r   +3.4 bp beta 1.21 crash 1.35%
+NULL     F=  50 ABNU: pass 0.047 retire 0.028 | picks a   +1.7 bp r   +3.1 bp beta 1.21 crash 1.03%
+NULL     F= 200 RAWP: pass 0.065 retire 0.024 | picks a   -1.0 bp r   +0.4 bp beta 1.14 crash 1.83%
+NULL     F= 200 ABNP: pass 0.061 retire 0.025 | picks a   +2.7 bp r   +4.1 bp beta 1.22 crash 1.94%
+NULL     F= 200 ABNC: pass 0.061 retire 0.014 | picks a   +1.9 bp r   +3.3 bp beta 1.22 crash 1.60%
+NULL     F= 200 ABNU: pass 0.042 retire 0.029 | picks a   +2.4 bp r   +3.7 bp beta 1.20 crash 0.97%
+NULL     F= 800 RAWP: pass 0.061 retire 0.018 | picks a   +0.4 bp r   +2.1 bp beta 1.11 crash 2.04%
+NULL     F= 800 ABNP: pass 0.067 retire 0.018 | picks a   +2.4 bp r   +4.0 bp beta 1.20 crash 2.14%
+NULL     F= 800 ABNC: pass 0.060 retire 0.017 | picks a   +2.5 bp r   +4.1 bp beta 1.20 crash 1.83%
+NULL     F= 800 ABNU: pass 0.038 retire 0.034 | picks a   +4.3 bp r   +5.9 bp beta 1.21 crash 0.91%
+LOTTERY  F=  50 RAWP: pass 0.025 retire 0.034 | picks a   -6.0 bp r   -5.5 bp beta 1.16 crash 1.29%
+LOTTERY  F=  50 ABNP: pass 0.033 retire 0.022 | picks a   -5.7 bp r   -5.2 bp beta 1.20 crash 1.36%
+LOTTERY  F=  50 ABNC: pass 0.038 retire 0.029 | picks a   -5.3 bp r   -5.0 bp beta 1.20 crash 1.05%
+LOTTERY  F=  50 ABNU: pass 0.031 retire 0.035 | picks a   -2.7 bp r   -2.3 bp beta 1.19 crash 0.78%
+LOTTERY  F= 200 RAWP: pass 0.036 retire 0.035 | picks a   -7.7 bp r   -7.9 bp beta 1.14 crash 1.49%
+LOTTERY  F= 200 ABNP: pass 0.031 retire 0.035 | picks a   -8.7 bp r   -8.9 bp beta 1.21 crash 1.58%
+LOTTERY  F= 200 ABNC: pass 0.024 retire 0.030 | picks a   -6.2 bp r   -6.5 bp beta 1.21 crash 1.24%
+LOTTERY  F= 200 ABNU: pass 0.025 retire 0.040 | picks a   -4.4 bp r   -4.6 bp beta 1.21 crash 0.77%
+LOTTERY  F= 800 RAWP: pass 0.034 retire 0.025 | picks a   -6.4 bp r   -5.8 bp beta 1.13 crash 1.66%
+LOTTERY  F= 800 ABNP: pass 0.033 retire 0.025 | picks a   -6.6 bp r   -6.0 bp beta 1.22 crash 1.78%
+LOTTERY  F= 800 ABNC: pass 0.033 retire 0.031 | picks a   -6.3 bp r   -5.6 bp beta 1.21 crash 1.45%
+LOTTERY  F= 800 ABNU: pass 0.030 retire 0.036 | picks a   -1.8 bp r   -1.1 bp beta 1.20 crash 0.75%
+POWER    F=  50 RAWP: pass 0.059 retire 0.025 | picks a   +0.9 bp r   +0.6 bp beta 1.15 crash 1.50% true-rule share 0.064
+POWER    F=  50 ABNP: pass 0.055 retire 0.017 | picks a   +1.1 bp r   +0.8 bp beta 1.20 crash 1.59% true-rule share 0.057
+POWER    F=  50 ABNC: pass 0.057 retire 0.020 | picks a   +0.8 bp r   +0.6 bp beta 1.20 crash 1.25% true-rule share 0.077
+POWER    F=  50 ABNU: pass 0.043 retire 0.019 | picks a   +0.8 bp r   +0.6 bp beta 1.20 crash 0.97% true-rule share 0.065
+POWER    F= 200 RAWP: pass 0.065 retire 0.018 | picks a   -0.1 bp r   -0.1 bp beta 1.13 crash 1.84% true-rule share 0.017
+POWER    F= 200 ABNP: pass 0.062 retire 0.015 | picks a   +1.0 bp r   +1.1 bp beta 1.20 crash 1.95% true-rule share 0.014
+POWER    F= 200 ABNC: pass 0.052 retire 0.029 | picks a   -0.4 bp r   -0.9 bp beta 1.21 crash 1.61% true-rule share 0.020
+POWER    F= 200 ABNU: pass 0.053 retire 0.031 | picks a   +1.4 bp r   +0.9 bp beta 1.20 crash 1.03% true-rule share 0.017
+POWER    F= 800 RAWP: pass 0.056 retire 0.021 | picks a   -0.2 bp r   -0.9 bp beta 1.10 crash 2.01% true-rule share 0.001
+POWER    F= 800 ABNP: pass 0.067 retire 0.022 | picks a   +0.7 bp r   -0.0 bp beta 1.20 crash 2.11% true-rule share 0.001
+POWER    F= 800 ABNC: pass 0.059 retire 0.020 | picks a   +1.5 bp r   +0.5 bp beta 1.20 crash 1.81% true-rule share 0.002
+POWER    F= 800 ABNU: pass 0.025 retire 0.025 | picks a   +1.1 bp r   +0.1 bp beta 1.21 crash 0.89% true-rule share 0.004
+75s
+
+real	1m15.824s
+user	0m0.622s
+sys	0m0.060s

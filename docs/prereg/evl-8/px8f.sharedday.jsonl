@@ -1,0 +1,3 @@
+{"cell": "rho15|phi0.20|crasht3cl|skew|d20|lam40K40|SHARED-DAY", "R": 4000, "A": 0.11325, "B": 0.10775, "both": 0.0715, "indep": 0.0122026875, "P(B|A)": 0.6313465783664459, "rho_blocks": 0.8582464346808192}
+{"cell": "rho15|phi0.20|crasht3cl|skew|d20|lam20K20|SHARED-DAY", "R": 4000, "A": 0.112, "B": 0.10775, "both": 0.0605, "indep": 0.012068, "P(B|A)": 0.5401785714285714, "rho_blocks": 0.7514755694928837}
+{"cell": "rho15|phi0.20|crash|skew|d20|lam40K40|SHARED-DAY", "R": 4000, "A": 0.09125, "B": 0.09175, "both": 0.06075, "indep": 0.0083721875, "P(B|A)": 0.6657534246575343, "rho_blocks": 0.8543732324266637}

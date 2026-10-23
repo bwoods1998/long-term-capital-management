@@ -1,0 +1,70 @@
+10/350 25s
+20/350 42s
+30/350 57s
+40/350 73s
+50/350 90s
+60/350 103s
+70/350 121s
+80/350 137s
+90/350 152s
+100/350 163s
+110/350 180s
+120/350 191s
+130/350 209s
+140/350 219s
+150/350 234s
+160/350 243s
+170/350 265s
+180/350 277s
+190/350 285s
+200/350 290s
+210/350 310s
+220/350 324s
+230/350 339s
+240/350 362s
+250/350 383s
+260/350 401s
+270/350 418s
+280/350 453s
+290/350 480s
+300/350 502s
+310/350 529s
+320/350 563s
+330/350 589s
+340/350 605s
+350/350 614s
+{"cell": "-15bp (cost only)|base (the PX designer's)", "lam": 8, "R": 2000, "by300": 0.402, "by1000": 0.6255, "by1000_reached": 1.0, "by2000": 0.743, "by2000_reached": 1.0, "by3000": 0.8, "by3000_reached": 0.885, "by1000_read": 0.5965, "by1000_stop": 0.001, "by1000_tail": 0.028, "sized": 0.0045, "se1000": 0.0108}
+{"cell": "-15bp (cost only)|base (the PX designer's)", "lam": 40, "R": 2000, "by300": 0.4215, "by1000": 0.646, "by1000_reached": 1.0, "by2000": 0.762, "by2000_reached": 1.0, "by3000": 0.822, "by3000_reached": 1.0, "by1000_read": 0.598, "by1000_stop": 0.0, "by1000_tail": 0.048, "sized": 0.0, "se1000": 0.0107}
+{"cell": "0bp (a false pass's stay)|base (the PX designer's)", "lam": 8, "R": 2000, "by300": 0.23, "by1000": 0.332, "by1000_reached": 1.0, "by2000": 0.385, "by2000_reached": 1.0, "by3000": 0.405, "by3000_reached": 0.64, "by1000_read": 0.3185, "by1000_stop": 0.001, "by1000_tail": 0.0125, "sized": 0.0145, "se1000": 0.0105}
+{"cell": "0bp (a false pass's stay)|base (the PX designer's)", "lam": 40, "R": 2000, "by300": 0.251, "by1000": 0.37, "by1000_reached": 1.0, "by2000": 0.4135, "by2000_reached": 1.0, "by3000": 0.441, "by3000_reached": 0.994, "by1000_read": 0.359, "by1000_stop": 0.0005, "by1000_tail": 0.0105, "sized": 0.007, "se1000": 0.0108}
+{"cell": "0bp (a false pass's stay)|crasht3cl|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.252, "by1000": 0.3825, "by1000_reached": 1.0, "by2000": 0.4585, "by2000_reached": 1.0, "by3000": 0.493, "by3000_reached": 0.8865, "by1000_read": 0.3695, "by1000_stop": 0.0095, "by1000_tail": 0.0035, "sized": 0.128, "se1000": 0.0109}
+{"cell": "0bp (a false pass's stay)|crasht3cl|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.2405, "by1000": 0.3675, "by1000_reached": 1.0, "by2000": 0.4435, "by2000_reached": 1.0, "by3000": 0.482, "by3000_reached": 0.893, "by1000_read": 0.3555, "by1000_stop": 0.0105, "by1000_tail": 0.0015, "sized": 0.123, "se1000": 0.0108}
+{"cell": "0bp (a false pass's stay)|crash|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.2525, "by1000": 0.3875, "by1000_reached": 1.0, "by2000": 0.4545, "by2000_reached": 1.0, "by3000": 0.4905, "by3000_reached": 0.929, "by1000_read": 0.3815, "by1000_stop": 0.004, "by1000_tail": 0.002, "sized": 0.082, "se1000": 0.0109}
+{"cell": "0bp (a false pass's stay)|crash|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.256, "by1000": 0.4115, "by1000_reached": 1.0, "by2000": 0.483, "by2000_reached": 1.0, "by3000": 0.5135, "by3000_reached": 0.9255, "by1000_read": 0.4045, "by1000_stop": 0.004, "by1000_tail": 0.003, "sized": 0.087, "se1000": 0.011}
+{"cell": "40bp|STRESS crasht3cl skew rho15 phi.25 d20", "lam": 40, "R": 2000, "by300": 0.1295, "by1000": 0.176, "by1000_reached": 1.0, "by2000": 0.1845, "by2000_reached": 1.0, "by3000": 0.188, "by3000_reached": 0.6505, "by1000_read": 0.168, "by1000_stop": 0.008, "by1000_tail": 0.0, "sized": 0.3535, "se1000": 0.0085}
+{"cell": "40bp|STRESS the PX designer's stress (phi .25)", "lam": 40, "R": 2000, "by300": 0.1325, "by1000": 0.1965, "by1000_reached": 1.0, "by2000": 0.2075, "by2000_reached": 1.0, "by3000": 0.211, "by3000_reached": 0.717, "by1000_read": 0.1925, "by1000_stop": 0.002, "by1000_tail": 0.002, "sized": 0.2865, "se1000": 0.0089}
+{"cell": "40bp|STRESS the PX designer's worst (phi .25)", "lam": 40, "R": 2000, "by300": 0.1075, "by1000": 0.1285, "by1000_reached": 1.0, "by2000": 0.133, "by2000_reached": 1.0, "by3000": 0.133, "by3000_reached": 0.66, "by1000_read": 0.1255, "by1000_stop": 0.002, "by1000_tail": 0.001, "sized": 0.3415, "se1000": 0.0075}
+{"cell": "40bp|base (the PX designer's)", "lam": 8, "R": 2000, "by300": 0.0345, "by1000": 0.037, "by1000_reached": 1.0, "by2000": 0.037, "by2000_reached": 1.0, "by3000": 0.037, "by3000_reached": 0.3465, "by1000_read": 0.036, "by1000_stop": 0.0005, "by1000_tail": 0.0005, "sized": 0.243, "se1000": 0.0042}
+{"cell": "40bp|base (the PX designer's)", "lam": 40, "R": 2000, "by300": 0.032, "by1000": 0.0355, "by1000_reached": 1.0, "by2000": 0.0355, "by2000_reached": 1.0, "by3000": 0.0355, "by3000_reached": 0.508, "by1000_read": 0.0355, "by1000_stop": 0.0, "by1000_tail": 0.0, "sized": 0.4925, "se1000": 0.0041}
+{"cell": "40bp|crashcl|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.1165, "by1000": 0.1535, "by1000_reached": 1.0, "by2000": 0.1595, "by2000_reached": 1.0, "by3000": 0.1615, "by3000_reached": 0.7005, "by1000_read": 0.143, "by1000_stop": 0.01, "by1000_tail": 0.0005, "sized": 0.3005, "se1000": 0.0081}
+{"cell": "40bp|crashcl|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.1135, "by1000": 0.1595, "by1000_reached": 1.0, "by2000": 0.1665, "by2000_reached": 1.0, "by3000": 0.1675, "by3000_reached": 0.6945, "by1000_read": 0.1485, "by1000_stop": 0.01, "by1000_tail": 0.001, "sized": 0.308, "se1000": 0.0082}
+{"cell": "40bp|crasht3cl|skew|rho15 phi.20 d20", "lam": 8, "R": 2000, "by300": 0.085, "by1000": 0.112, "by1000_reached": 1.0, "by2000": 0.1175, "by2000_reached": 1.0, "by3000": 0.1175, "by3000_reached": 0.3745, "by1000_read": 0.1035, "by1000_stop": 0.0075, "by1000_tail": 0.001, "sized": 0.2565, "se1000": 0.0071}
+{"cell": "40bp|crasht3cl|skew|rho15 phi.20 d20", "lam": 20, "R": 2000, "by300": 0.1085, "by1000": 0.1425, "by1000_reached": 1.0, "by2000": 0.1485, "by2000_reached": 1.0, "by3000": 0.1505, "by3000_reached": 0.6845, "by1000_read": 0.1285, "by1000_stop": 0.014, "by1000_tail": 0.0, "sized": 0.3195, "se1000": 0.0078}
+{"cell": "40bp|crasht3cl|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.105, "by1000": 0.141, "by1000_reached": 1.0, "by2000": 0.145, "by2000_reached": 1.0, "by3000": 0.1475, "by3000_reached": 0.666, "by1000_read": 0.1315, "by1000_stop": 0.0095, "by1000_tail": 0.0, "sized": 0.336, "se1000": 0.0078}
+{"cell": "40bp|crasht3cl|t3|rho15 phi.20 d20", "lam": 8, "R": 2000, "by300": 0.1025, "by1000": 0.1255, "by1000_reached": 1.0, "by2000": 0.1315, "by2000_reached": 1.0, "by3000": 0.1315, "by3000_reached": 0.389, "by1000_read": 0.1065, "by1000_stop": 0.016, "by1000_tail": 0.003, "sized": 0.272, "se1000": 0.0074}
+{"cell": "40bp|crasht3cl|t3|rho15 phi.20 d20", "lam": 20, "R": 2000, "by300": 0.108, "by1000": 0.1355, "by1000_reached": 1.0, "by2000": 0.1425, "by2000_reached": 1.0, "by3000": 0.144, "by3000_reached": 0.701, "by1000_read": 0.122, "by1000_stop": 0.0125, "by1000_tail": 0.001, "sized": 0.3015, "se1000": 0.0077}
+{"cell": "40bp|crasht3cl|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.107, "by1000": 0.1435, "by1000_reached": 1.0, "by2000": 0.153, "by2000_reached": 1.0, "by3000": 0.155, "by3000_reached": 0.6625, "by1000_read": 0.136, "by1000_stop": 0.0075, "by1000_tail": 0.0, "sized": 0.3405, "se1000": 0.0078}
+{"cell": "40bp|crasht3|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.102, "by1000": 0.1305, "by1000_reached": 1.0, "by2000": 0.14, "by2000_reached": 1.0, "by3000": 0.1405, "by3000_reached": 0.69, "by1000_read": 0.1195, "by1000_stop": 0.0105, "by1000_tail": 0.0005, "sized": 0.3115, "se1000": 0.0075}
+{"cell": "40bp|crasht3|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.109, "by1000": 0.142, "by1000_reached": 1.0, "by2000": 0.1485, "by2000_reached": 1.0, "by3000": 0.1505, "by3000_reached": 0.6915, "by1000_read": 0.1385, "by1000_stop": 0.0035, "by1000_tail": 0.0, "sized": 0.311, "se1000": 0.0078}
+{"cell": "40bp|crash|skew|rho15 phi.20 d20", "lam": 8, "R": 2000, "by300": 0.1105, "by1000": 0.1345, "by1000_reached": 1.0, "by2000": 0.138, "by2000_reached": 1.0, "by3000": 0.138, "by3000_reached": 0.3935, "by1000_read": 0.1245, "by1000_stop": 0.0095, "by1000_tail": 0.0005, "sized": 0.234, "se1000": 0.0076}
+{"cell": "40bp|crash|skew|rho15 phi.20 d20", "lam": 20, "R": 2000, "by300": 0.1235, "by1000": 0.163, "by1000_reached": 1.0, "by2000": 0.166, "by2000_reached": 1.0, "by3000": 0.167, "by3000_reached": 0.74, "by1000_read": 0.1545, "by1000_stop": 0.008, "by1000_tail": 0.0005, "sized": 0.2605, "se1000": 0.0083}
+{"cell": "40bp|crash|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.121, "by1000": 0.1585, "by1000_reached": 1.0, "by2000": 0.167, "by2000_reached": 1.0, "by3000": 0.1685, "by3000_reached": 0.733, "by1000_read": 0.155, "by1000_stop": 0.0035, "by1000_tail": 0.0, "sized": 0.269, "se1000": 0.0082}
+{"cell": "40bp|crash|t3|rho15 phi.20 d20", "lam": 8, "R": 2000, "by300": 0.123, "by1000": 0.146, "by1000_reached": 1.0, "by2000": 0.15, "by2000_reached": 1.0, "by3000": 0.1505, "by3000_reached": 0.4095, "by1000_read": 0.134, "by1000_stop": 0.0095, "by1000_tail": 0.0025, "sized": 0.207, "se1000": 0.0079}
+{"cell": "40bp|crash|t3|rho15 phi.20 d20", "lam": 20, "R": 2000, "by300": 0.1085, "by1000": 0.145, "by1000_reached": 1.0, "by2000": 0.151, "by2000_reached": 1.0, "by3000": 0.1535, "by3000_reached": 0.726, "by1000_read": 0.139, "by1000_stop": 0.006, "by1000_tail": 0.0, "sized": 0.2755, "se1000": 0.0079}
+{"cell": "40bp|crash|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.1285, "by1000": 0.1675, "by1000_reached": 1.0, "by2000": 0.178, "by2000_reached": 1.0, "by3000": 0.181, "by3000_reached": 0.731, "by1000_read": 0.163, "by1000_stop": 0.0035, "by1000_tail": 0.001, "sized": 0.2715, "se1000": 0.0083}
+{"cell": "60bp|base (the PX designer's)", "lam": 8, "R": 2000, "by300": 0.0135, "by1000": 0.0135, "by1000_reached": 1.0, "by2000": 0.0135, "by2000_reached": 1.0, "by3000": 0.0135, "by3000_reached": 0.2185, "by1000_read": 0.0115, "by1000_stop": 0.002, "by1000_tail": 0.0, "sized": 0.5125, "se1000": 0.0026}
+{"cell": "60bp|base (the PX designer's)", "lam": 40, "R": 2000, "by300": 0.009, "by1000": 0.0095, "by1000_reached": 1.0, "by2000": 0.0095, "by2000_reached": 1.0, "by3000": 0.0095, "by3000_reached": 0.108, "by1000_read": 0.009, "by1000_stop": 0.0005, "by1000_tail": 0.0, "sized": 0.892, "se1000": 0.0022}
+{"cell": "60bp|crasht3cl|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.064, "by1000": 0.08, "by1000_reached": 1.0, "by2000": 0.082, "by2000_reached": 1.0, "by3000": 0.082, "by3000_reached": 0.546, "by1000_read": 0.0715, "by1000_stop": 0.008, "by1000_tail": 0.0005, "sized": 0.4555, "se1000": 0.0061}
+{"cell": "60bp|crasht3cl|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.076, "by1000": 0.089, "by1000_reached": 1.0, "by2000": 0.092, "by2000_reached": 1.0, "by3000": 0.092, "by3000_reached": 0.5295, "by1000_read": 0.082, "by1000_stop": 0.007, "by1000_tail": 0.0, "sized": 0.471, "se1000": 0.0064}
+{"cell": "60bp|crash|skew|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.083, "by1000": 0.098, "by1000_reached": 1.0, "by2000": 0.0995, "by2000_reached": 1.0, "by3000": 0.0995, "by3000_reached": 0.6085, "by1000_read": 0.091, "by1000_stop": 0.0065, "by1000_tail": 0.0005, "sized": 0.393, "se1000": 0.0066}
+{"cell": "60bp|crash|t3|rho15 phi.20 d20", "lam": 40, "R": 2000, "by300": 0.0755, "by1000": 0.09, "by1000_reached": 1.0, "by2000": 0.092, "by2000_reached": 1.0, "by3000": 0.0925, "by3000_reached": 0.5915, "by1000_read": 0.084, "by1000_stop": 0.006, "by1000_tail": 0.0, "sized": 0.409, "se1000": 0.0064}

@@ -1,0 +1,9 @@
+prior use of the $800 total (U0) sensitivity, zero edge, flat market
+U0  300 share 0.95 | P(probe cut) 0.085 lost 0.009 P(total stop) 0.001 | P&L mean   +0.5 p05  -263.4
+U0  300 share 0.25 | P(probe cut) 0.040 lost 0.003 P(total stop) 0.000 | P&L mean   +0.6 p05  -222.8
+U0  450 share 0.95 | P(probe cut) 0.135 lost 0.018 P(total stop) 0.003 | P&L mean   +0.6 p05  -267.1
+U0  450 share 0.25 | P(probe cut) 0.071 lost 0.007 P(total stop) 0.002 | P&L mean   -0.2 p05  -228.7
+U0  550 share 0.95 | P(probe cut) 0.344 lost 0.068 P(total stop) 0.013 | P&L mean   +1.8 p05  -222.6
+U0  550 share 0.25 | P(probe cut) 0.255 lost 0.031 P(total stop) 0.006 | P&L mean   -1.5 p05  -203.8
+U0  650 share 0.95 | P(probe cut) 0.683 lost 0.203 P(total stop) 0.030 | P&L mean   -0.3 p05  -144.9
+U0  650 share 0.25 | P(probe cut) 0.699 lost 0.141 P(total stop) 0.016 | P&L mean   -0.7 p05  -136.4

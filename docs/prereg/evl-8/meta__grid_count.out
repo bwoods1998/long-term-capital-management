@@ -1,0 +1,56 @@
+{
+ "O1": {
+  "features": 39,
+  "pairs": 681,
+  "grid_subrules": 720,
+  "groups": 11
+ },
+ "ON": {
+  "features": 45,
+  "pairs": 924,
+  "grid_subrules": 969,
+  "groups": 13
+ },
+ "experts_O1": [
+  "EVL-ERN-READ-O1:v1",
+  "EVL-8K-READ-O1:v1",
+  "EVL-NEWS-READ-O1:v1",
+  "EVL-CTRL-ERN-ALL-O1:v1",
+  "EVL-CTRL-8K-ALL-O1:v1",
+  "EVL-CTRL-NEWS-ALL-O1:v1",
+  "EVL-ERN-GUIDE-O1:v1",
+  "EVL-INS-BUY-O1:v1",
+  "EVL-ERN-READ3-O1:v1",
+  "EVL-ERN-READ-O1:v2",
+  "EVL-8K-READ-O1:v2",
+  "EVL-NEWS-READ-O1:v2",
+  "EVL-ERN-GUIDE-O1:v2",
+  "EVL-INS-BUY-O1:v2"
+ ],
+ "experts_ON": [
+  "EVL-ERN-REACT-ON:v1",
+  "EVL-NEWS-READ-ON:v1",
+  "EVL-NEWS-REACT-ON:v1",
+  "EVL-CTRL-NEWS-DAY-ON:v1",
+  "EVL-ERN-REACT-ON:v2",
+  "EVL-NEWS-READ-ON:v2",
+  "EVL-NEWS-REACT-ON:v2",
+  "EVL-8K-REACT-ON:v1",
+  "EVL-8K-READ-ON:v1",
+  "EVL-NEWSPM-READ-ON:v1",
+  "EVL-CTRL-8K-ON:v1",
+  "EVL-CTRL-NEWSPM-ON:v1",
+  "EVL-ERN-DROP-ON:v1",
+  "EVL-ERN-UNDER-ON:v1",
+  "EVL-NEWS-NIGHT2-ON:v1",
+  "EVL-CTRL-ERN-UNDER-ON:v1"
+ ],
+ "excluded": [
+  "EVL-ERN-READ-O3:v1(open->close,h3)",
+  "EVL-ERN-REACT-C1:v1(close->close,h1)",
+  "EVL-INS-CLUSTER-O5:v1(open->close,h5)",
+  "EVL-INS-BUY-O5:v1(open->close,h5)",
+  "EVL-ERN-REACT-READ-C1:v1(close->close,h1)",
+  "EVL-ERN-REACT-C1:v2(close->close,h1)"
+ ]
+}

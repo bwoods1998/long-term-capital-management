@@ -1,0 +1,7 @@
+records 528 by family {'REV1': 54, 'REV5': 54, 'REV20': 54, 'REV1S': 54, 'GAP': 18, 'OPENGAP': 36, 'DAY': 36, 'DAYS': 36, 'HI52': 54, 'VOL': 54, 'DRIFT': 48, 'UNIV': 27, 'SEAT': 3}
+px_grid8.json canonical sha256 bb0d50e47d94e73f677a22bb612ef3f1cf7d23b23e5a51375fe965cf57e3e5a1
+
+expected members a session of ONE decile record (assumed shares: news NONE 0.80 / SOME 0.20; tier SMALL 0.60 / LARGE 0.40 at ADV20 >= $10M):
+  N_U=1500: ALL/ANY 150; NONE/ALL 120; SOME/ALL 30; NONE/SMALL 72; SOME/LARGE 12; panel rows a session (3 windows) 4500
+  N_U=2000: ALL/ANY 200; NONE/ALL 160; SOME/ALL 40; NONE/SMALL 96; SOME/LARGE 16; panel rows a session (3 windows) 6000
+  N_U=3000: ALL/ANY 300; NONE/ALL 240; SOME/ALL 60; NONE/SMALL 144; SOME/LARGE 24; panel rows a session (3 windows) 9000
