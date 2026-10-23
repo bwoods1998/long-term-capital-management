@@ -959,6 +959,84 @@ class TheHouseTiming(Eight):
                          "never past 09:19:30")
 
 
+class TheOneLiveRun(Eight):
+    """SECTIONS 3.4, 4.6 AND 7.7 (the money review of release 1019n): this file's parts run live on THE LANE'S FIRST
+    FINISHED DECISION of (D, X) alone, and each live part runs once: a part that was cut or failed trades nothing at
+    that auction and is decided only by its catch-up, never by a later live receipt (a pending decision's retry, or the
+    hourly re-decision of today's open while it is still live), so it is never a judged block and never a pick."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    def test_a_cut_open_part_is_never_run_live_again_on_a_later_receipt(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        w.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)          # (the lane's first finished decision of (D, O1))
+        lane, clock = self.lane(w, et(D_DAY, 9, 15, 40))
+        lane._gateway = Hanging(w.gw, clock)                       # (every PX read hangs: the PX part does not finish)
+        lane._eight_after(self.ctx(lane, w), "open", D_DAY, True)
+        status = dict(w.st.db.execute("SELECT job, status FROM receipts WHERE job=?", (f"decide-open-px8:{D_DAY}",)))
+        self.assertNotEqual(status[f"decide-open-px8:{D_DAY}"], "ok")
+        ran = w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat()))
+        self.assertIsNotNone(ran)
+        metas = w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?", (f"decide-open-meta8:{D_DAY}",)).fetchone()[0]
+        # the hourly re-decision of today's open while it is still live: a later receipt of (D, O1)
+        w.at(et(D_DAY, 9, 17, 20)).decide("open", D_DAY)
+        later, _ = self.lane(w, et(D_DAY, 9, 17, 30))
+        later._eight_after(self.ctx(later, w), "open", D_DAY, True)
+        self.assertEqual(w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?",
+                                         (f"decide-open-px8:{D_DAY}",)).fetchone()[0], 1, "no second live PX run")
+        self.assertEqual(w.st.db.execute("SELECT COUNT(*) FROM receipts WHERE job=?",
+                                         (f"decide-open-meta8:{D_DAY}",)).fetchone()[0], metas, "no second META part")
+        self.assertEqual(w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat())), ran,
+                         "the open run's end is the first receipt's")
+        px = w.px()
+        try:
+            self.assertIsNone(PXL.decided(px.db, D_DAY, "o1"), "nothing decided live")
+            self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "o1"), "nothing judged")
+            self.assertEqual(PXL.live_picks(px.db, P.BY_KEY[("PX-GAP-O1", 1)], D_DAY), [], "no pick")
+        finally:
+            px.close()
+        lane_ro = EB.Lane(w.st.root / S.DB_NAME)
+        try:
+            self.assertEqual(EB.picks(lane_ro, P.BY_KEY[("PX-GAP-O1", 1)], D_DAY,
+                                      decided_at=C.session(lane_ro, D_DAY).open_decide), [], "no real-money pick")
+        finally:
+            lane_ro.close()
+
+    def test_a_pending_decisions_retry_is_no_first_receipt(self):
+        w = self.world("pending", rows=False)
+        st = w.st
+        for status, at in (("pending", et(D_DAY, 15, 47, 40)), ("ok", et(D_DAY, 15, 48, 20))):
+            rid = st.start_receipt(f"decide-close:{D_DAY}", now=at - dt.timedelta(seconds=30))
+            st.finish_receipt(rid, status, {}, now=at)
+            self.assertEqual(H.EventLane._eight_first(st, "close", D_DAY), status == "pending")
+        lane, _ = self.lane(w, et(D_DAY, 15, 48, 25))
+        with mock.patch.object(lane, "_eight_close_meta") as part:
+            lane._eight_after(self.ctx(lane, w), "close", D_DAY, True)
+        part.assert_not_called()
+
+    def test_a_cut_live_part_is_decided_by_its_catch_up_alone(self):
+        w = self.world("cut")
+        the_open(w, meta=False)
+        w.at(et(D_DAY, 15, 46, 5)).px_decide(D_DAY, "on", late=lambda: True)          # (cut: no decision mark)
+        self.assertIn("ran already", w.at(et(D_DAY, 15, 46, 20)).px_decide(D_DAY, "on")["skipped"])
+        w.at(et(D_DAY, 15, 47)).decide("close", D_DAY)
+        got = MT.decide(w.st, D_DAY, "on", now=lambda: et(D_DAY, 15, 48, 0), kind="live", late=lambda: True)
+        self.assertEqual(got["_status"], "cut")
+        self.assertIn("ran already", w.at(et(D_DAY, 15, 48, 10)).meta_decide(D_DAY, "on")["skipped"])
+        self.assertIsNone(MT.decided(w.st.db, MT.learner("on"), D_DAY), "no live META decision")
+        w.at(et(N_DAY, 20, 0)).px_decide(D_DAY, "on", kind="catchup")
+        w.at(et(N_DAY, 20, 5)).meta_decide(D_DAY, "on", kind="catchup")
+        self.assertEqual(MT.decided(w.st.db, MT.learner("on"), D_DAY)["kind"], "catchup")
+        px = w.px()
+        try:
+            self.assertEqual(PXL.decided(px.db, D_DAY, "on")["kind"], "catchup")
+            self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "on"))
+        finally:
+            px.close()
+
+
 class TheLatePasses(TB.EventTest):
     """SECTION 4.6's TEST (v) AND THE LATE PASSES BY TIME (league/equity/live.py `_event_decide_8`): PX-DROP-ON's buys
     are planned at the first tick at which the lane's close receipt is in, after every PREREG-EVL-7 row of the close is

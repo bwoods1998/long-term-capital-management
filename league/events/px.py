@@ -379,6 +379,16 @@ def live_allowed(store: Any, session: C.Session, auction: str) -> bool:
     return mark is not None and at >= mark and at > S.parse_iso(str(P.REGISTERED_AT_8))
 
 
+def live_ran(store: Any, job: str) -> bool:
+    """Whether a receipt of the live job `job` (`decide-open-px8:<D>`, `decide-close-px8:<D>`, or a meta-learner's
+    `decide-open-meta8:<D>` / `decide-close-meta8:<D>`) exists, WHATEVER ITS STATUS: a live part runs once; a second
+    live run of it is refused. Unreadable: True (the reading that trades less)."""
+    try:
+        return store.db.execute("SELECT 1 FROM receipts WHERE job=? LIMIT 1", (job,)).fetchone() is not None
+    except sqlite3.Error:
+        return True
+
+
 # ----------------------------------------------------------------------------------------------------- the items
 def item_ciks(store: Any, lo: dt.datetime, hi: dt.datetime, *, tickers: Mapping[str, Any],
               stored_by: dt.datetime | None = None) -> set[str]:
@@ -959,6 +969,10 @@ def decide(px: Any, store: S.Store, gw: Any, day: dt.date, auction: str, *, now:
         raise ValueError(f"a PX decision of {day} {auction} runs at or after its tau {S.iso(t)}")
     job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else \
         f"{JOB_CATCHUP}:{AT_OF[auction]}:{day.isoformat()}"
+    if kind == "live" and live_ran(store, job):
+        # (sections 3.4, 4.6 and 7.7: an auction's ONE live run; one that was cut or failed is decided by its catch-up
+        # alone, never live again, never judged, never traded)
+        return {"skipped": f"its live run {job} ran already: a catch-up decides it"}
     rid = store.start_receipt(job, now=started)
     run = px.start_run(JOB_LIVE[auction] if kind == "live" else JOB_CATCHUP, now=started)
     out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "run": run, **code_identity()}
@@ -1613,7 +1627,8 @@ __all__ = ["K", "CONTROL_N", "Z_SEAT", "DROP_MOVE", "SURGE_MOVE", "SURGE_VOLUME"
            "OPEN_BOUND", "OPEN_UNTIL", "CLOSE_LAST_REQUEST", "CLOSE_DONE", "SCHEMA_8", "TABLES_8", "FEATURE_COLUMNS",
            "PxCutShort", "CODE_SHA", "release_id", "code_identity", "registered", "program", "seats", "control", "auction_of", "event_id", "parse_event", "knowable",
            "event_knowable", "tau", "spans", "ensure", "open_px", "read_only", "decided", "release_at", "mark_release",
-           "live_allowed", "item_ciks", "reread", "drift_events", "morning", "pxu", "mid", "read_minutes", "values_on",
+           "live_allowed", "live_ran", "item_ciks", "reread", "reread_at", "BACKFILL_JOB", "drift_events", "morning",
+           "pxu", "mid", "read_minutes", "values_on",
            "values_o1", "qualifies", "ranked", "control_population", "control_hash", "placebo_hash", "take", "write_rows",
            "decide", "redecide", "live_picks", "universe_row", "judged_days", "features", "grid_sha", "grid",
            "FAMILY_VALUE", "select_record", "records", "window_auction", "seat_events", "panel_row", "exit_day",

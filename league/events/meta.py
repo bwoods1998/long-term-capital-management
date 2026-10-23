@@ -955,8 +955,13 @@ def decide(store: S.Store, day: dt.date, auction: str, *, now: Callable[[], dt.d
         raise ValueError(f"a meta decision of {day} runs at or after its tau {S.iso(t)}")
     job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else \
         f"{JOB_CATCHUP}:{'open' if auction == 'o1' else 'close'}:{day.isoformat()}"
-    rid = store.start_receipt(job, now=started)
     from . import px as PXL
+
+    if kind == "live" and PXL.live_ran(store, job):
+        # (section 7.7: a META part that did not finish in its bound is never traded at that auction; it is decided by
+        # its catch-up alone, never by a second live run)
+        return {"skipped": f"its live run {job} ran already: a catch-up decides it"}
+    rid = store.start_receipt(job, now=started)
 
     out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "code_sha": CODE_SHA,
                            "release": PXL.release_id()}

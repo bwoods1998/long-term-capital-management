@@ -2373,6 +2373,8 @@ class EventLane:
         if not P.registers_8():
             return
         try:
+            if kind in ("open", "close") and live and not self._eight_first(ctx.store, kind, day):
+                return      # (a later live receipt of (D, X): this file's parts ran on the first, or are catch-ups)
             if kind == "open" and live:
                 self._eight_open(ctx, day)
             elif kind == "close" and live:
@@ -2381,6 +2383,22 @@ class EventLane:
                 self._eight_redecide(ctx, kind, day)
         except Exception as exc:  # noqa: BLE001 - a part's failure is its own: decided later as a catch-up
             self.warn("PREREG-EVL-8 part", exc)
+
+    @staticmethod
+    def _eight_first(st: S.Store, kind: str, day: dt.date) -> bool:
+        """Whether the lane's receipt of `decide-<kind>:<D>` that just finished is THE LANE'S FIRST FINISHED DECISION of
+        (D, X) (section 7.2, league/events/meta.py `first_decision`: the earliest finished `ok` or `pending`): this
+        file's live parts run on that receipt alone (section 4.6: "on that receipt"; sections 3.4 and 7.7: a part that
+        did not finish trades nothing at that auction and is decided only by its catch-up, never judged). A pending
+        decision's retry, or an hourly re-decision of the auction while it is still live (`LIVE_WITHIN`), is a later
+        receipt: never a second live part. Unreadable: False (the reading that trades less)."""
+        try:
+            first = MT.first_decision(st, day, "o1" if kind == "open" else "on")
+            last = st.db.execute("SELECT id FROM receipts WHERE job=? AND finished_at IS NOT NULL AND status IN ('ok', "
+                                 "'pending') ORDER BY id DESC LIMIT 1", (f"decide-{kind}:{day.isoformat()}",)).fetchone()
+        except Exception:  # noqa: BLE001 - no live part
+            return False
+        return first is not None and last is not None and int(first["id"]) == int(last["id"])
 
     def _eight_px(self, ctx: LaneContext, day: dt.date, auction: str, until: dt.datetime, *, kind: str = "live",
                   request_until: dt.datetime | None = None, read_until: dt.datetime | None = None) -> dict[str, Any]:
