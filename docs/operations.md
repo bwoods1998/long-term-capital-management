@@ -14,8 +14,9 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 `feat/evl-8` = the first build (`b52f4bbe`, its WIP `686f1db2`) merged with release 1019l (`rel/1019l`, `3df7dd9d`:
 releases 1019i-1019k, PREREG-EVL-6's code, PREREG-EVL-7's learners, the PX data layer, the stay look, births.RESERVED,
-goal V3's rows) and then with `main` (release 1019m-hotfix `bc33cf95`, A140, and release 1019m `84de2f4a`, A139: no
-digest moves), finished to the frozen text; a draft PR with base `rel/1019l` (main carries it). Its code lives in its own modules
+goal V3's rows) and then with `main` (release 1019m-hotfix `bc33cf95`, A140; release 1019m `84de2f4a`, A139; release
+1019m-cost `1c87837f`, A145: no digest moves), finished to the frozen text; a draft PR with base `rel/1019l` (main
+carries it). Its code lives in its own modules
 (league/events/px.py, px_grid8.json, meta.py, screen8.py, league/ops/evl_price.py, league/tests/evl8_world.py,
 test_events_evl8.py, test_events_evl8_proof.py) and in short, marked hunks of book.py, run.py, house.py, score.py,
 births.py, report.py, bands.py, screen.py (CONTROLS' three rows), programs.py, pxdata.py, site_lane.py,
@@ -84,7 +85,8 @@ that decision (a pending decision's retry, the hourly re-decision while it is st
 
 **Deploy, in order** (an owner deploy with the release that carries it; never 12:55-20:05Z on a trading day
 (12:55-21:05Z from Nov 2), never with an order in flight, CI green on the exact head; rerere off; THE HOUSE MUST BE ON
-RELEASE 1019m FIRST (main `84de2f4a`, which carries release 1019l), or this release carries it):
+main's head FIRST (`1c87837f`: releases 1019m and 1019m-cost, which carry release 1019l), or this release carries
+it):
 1. THE GATEWAY FIRST (`gateway/lib/email.mjs`: the stall cause `evl_price`'s words beside release 1019i's): `cd gateway
    && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces (an older
    gateway refuses a stall notice naming `evl_price`).
@@ -103,9 +105,9 @@ meta-learners go on with no PX member. PX's real money alone: the row `event.max
 pair `2d112ae9` / `992cefd8`, grant re-ratified): the PX seats buy nothing at learning, the shadow and the records go
 on. Everything of the file: `REGISTERED_AT_8` back to None (a code deploy): nothing of it runs or trades; its open lots
 still exit at their own planned exits (each lot's `evl_exit`, league/equity/live.py `_event_exits`, whatever the
-registry); px.sqlite and the mrl_* tables stay, read by nothing. The whole release: the House to release 1019m (main
-`84de2f4a`) by `floor_box.py rollback` with that release's pair (`1687e4e3` / `3feab26d`, unchanged since release 1019l),
-then the gateway by `wrangler rollback`.
+registry); px.sqlite and the mrl_* tables stay, read by nothing. The whole release: the House to main's head before it
+(`1c87837f`, releases 1019m and 1019m-cost) by `floor_box.py rollback` with that pair (`1687e4e3` / `3feab26d`,
+unchanged since release 1019l), then the gateway by `wrangler rollback`.
 
 ## Release 1019m-cost (Oct 23, 2026): goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145): `fix/cost-v3`, not deployed
 
