@@ -148,12 +148,12 @@ test('the switch: only "on" (any case, trimmed) admits buys; anything else, a ty
   for (const raw of ['off', '', 'yes', 'true', '1', 'onn', undefined, null]) assert.equal(stockBuysEnabled({ STOCK_BUYS_REAL: raw }), false, String(raw));
 });
 
-test('the list: 19 ETFs (the index four, the eleven SPDR sectors, TLT, GLD, SOXL, NVDL) and 37 US stocks, each flagged', () => {
+test('the list: 19 ETFs (the index four, the eleven SPDR sectors, TLT, GLD, SOXL, NVDL) and 38 US stocks, each flagged', () => {
   const etfs = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'etf');
   const stocks = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'stock');
   assert.deepEqual(etfs, ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL']);
   assert.deepEqual(stocks, ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
-    'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT']);
+    'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI']);
   assert.ok(Object.isFrozen(STOCK_UNIVERSE));
   assert.deepEqual(['SPY', 'BRK.B', 'TSLA', 'spy', 'toString', '__proto__'].map(stockKind), ['etf', 'stock', null, null, null, null]);
 });
@@ -1154,7 +1154,7 @@ test('health reports the stock route: the switch, the shares, the list, today\'s
     symbols: {
       etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL'],
       stock: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
-        'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT'],
+        'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI'],
     },
     day_buys_usd: '271.50', in_flight: 0, in_flight_usd: '0.00', closes_in_flight: 0, buys_admitted: true,
   });

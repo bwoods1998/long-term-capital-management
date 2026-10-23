@@ -806,7 +806,7 @@ export const STOCK_UNIVERSE = Object.freeze({
   SOXL: 'etf', NVDL: 'etf',
   MU: 'stock', TSM: 'stock', AMD: 'stock', SKHY: 'stock', ALAB: 'stock', LITE: 'stock', DELL: 'stock', VRT: 'stock', GEV: 'stock',
   SNDK: 'stock', INTC: 'stock', NBIS: 'stock', ASML: 'stock', BE: 'stock', PLTR: 'stock', CAMT: 'stock', IREN: 'stock', ASX: 'stock',
-  AMAT: 'stock',
+  AMAT: 'stock', SMCI: 'stock',
 });
 
 /** What STOCK_UNIVERSE says a symbol is: "etf", "stock", or null when it is not on the list. */
