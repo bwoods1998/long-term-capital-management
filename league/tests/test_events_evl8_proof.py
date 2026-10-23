@@ -1221,6 +1221,37 @@ class TheMetaMoney(TB.EventTest):
         mine, rows = self.run_close("catchup")
         self.assertEqual(mine, [])
 
+    def test_its_guard_is_e10s_the_late_filing_included(self):
+        """Section 7.7 reads PREREG-EVL-7's E10, which A131 (M2) holds with NO upper bound on the knowable time: an 8-K
+        STORED before tau whose knowable time falls after it, unanswered, bars the issuer (else it is bought, held
+        overnight, and its sale at D+1's open takes an earlier next-open row's buy through the sale gate). The guard
+        is E10's own (`book.issuer_8k_guard`), case by case."""
+        with W.pinned():
+            root = self.root / "late"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            self.seed(h, "live")
+            s = C.session(h.lane.st, TB.DAY)
+            knowable = s.close_decide + dt.timedelta(minutes=5)          # (15:51: after tau)
+            h.lane.filing("m-late", "0000007003", accepted=S.iso(knowable - dt.timedelta(minutes=10)), items=("8.01",),
+                          received=S.iso(s.at(dt.time(15, 30))))           # (stored at 15:30: before tau, unanswered)
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            for _, cik in self.PICKS:
+                self.assertEqual(EB.meta_on_guard(lane, cik, s, s.close_decide),
+                                 EB.issuer_8k_guard(lane, cik, s, s.close_decide), cik)
+            self.assertTrue(EB.meta_on_guard(lane, "0000007003", s, s.close_decide), "the late filing bars MC")
+            self.assertFalse(EB.meta_on_guard(lane, "0000007001", s, s.close_decide), "MA has no 8-K")
+            learners_failed(h, "on")
+            self.ready(h)
+            h.tick(15, 47)
+            h.tick(15, 48)
+            self.assertEqual([r["symbol"] for r in h.event_intents("buy") if r["program"] == "EVL-META-ON"], ["MA"],
+                             "MB (an 8-K read at score 3) and MC (the late, unanswered 8-K) are barred")
+
 
 class ThePromotedSizing(TB.EventTest):
     """SECTION 4.1: a Probe or Sized buy of a version of this file is PREREG-EVL-6 section 6's (clause 2, A99, A123's

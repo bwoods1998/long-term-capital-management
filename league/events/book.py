@@ -1826,32 +1826,14 @@ def px_store(lane: Any) -> Any:
 
 
 def meta_on_guard(lane: Any, cik: str, session: C.Session | None, decided_at: dt.datetime) -> bool:
-    """EVL-META-ON'S GUARD (PREREG-EVL-8 section 7.7, PREREG-EVL-7's E10 reading), IN REAL MONEY ONLY: True when the
-    issuer is NOT bought: an 8-K of the issuer (form exactly 8-K) knowable at or after 09:00 ET of D and stored before
-    the decision time whose stored PROMPT-DOC verdict is `ok` with score >= 2, or `ok` with score >= 1 and guidance
-    "raised", or has no answer by then (PREREG-EVL-4's NEXT_OPEN_GUARD with RAISED_GUARD). Unreadable inputs read as
-    barred (fail closed). The shadow keeps every pick."""
-    if session is None:
-        return True
-    try:
-        rows = lane.db.execute("SELECT * FROM filings WHERE form='8-K' AND status='fetched' AND cik=? AND knowable_at>=? "
-                               "AND knowable_at<=? ORDER BY knowable_at, accession",
-                               (str(cik), S.iso(session.open_cutoff), S.iso(decided_at))).fetchall()
-        for r in rows:
-            row = dict(r)
-            if not _stored_before(row, decided_at, lane):
-                continue
-            got = V.stored(lane, f"8k:{row['accession']}", V.PROMPTS["doc"])
-            if not got or not got.get("answered_at") or S.parse_iso(str(got["answered_at"])) > decided_at:
-                return True
-            score = None if got.get("score") is None else int(got["score"])
-            if got.get("status") != "ok" or score is None:
-                continue
-            if score >= P.READ_MIN_SCORE or (score >= P.GUIDE_MIN_SCORE and got.get("guidance") == "raised"):
-                return True
-    except (sqlite3.Error, TypeError, ValueError, KeyError):
-        return True
-    return False
+    """EVL-META-ON'S GUARD (PREREG-EVL-8 section 7.7: "PREREG-EVL-7's E10 reading"), IN REAL MONEY ONLY: True when the
+    issuer is NOT bought. It IS E10's guard (`issuer_8k_guard`, called, never copied): every 8-K of the issuer (form
+    exactly 8-K) knowable at or after 09:00 ET of D and STORED before the decision time, with NO upper bound on its
+    knowable time (A131, M2: a filing stored before tau whose knowable time falls after it is read like any other),
+    barred when its stored PROMPT-DOC verdict is `ok` with score >= 2, or `ok` with score >= 1 and guidance "raised",
+    or has no answer by then (PREREG-EVL-4's NEXT_OPEN_GUARD with RAISED_GUARD). Unreadable inputs read as barred
+    (fail closed). The shadow keeps every pick."""
+    return issuer_8k_guard(lane, cik, session, decided_at)
 
 
 def meta_o1_guard(lane: Any, cik: str, day: dt.date, decided_at: dt.datetime) -> bool:
