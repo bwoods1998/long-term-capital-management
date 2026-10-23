@@ -156,7 +156,7 @@ PARTS: dict[str, Part] = {}
 #: House's lane or the book's pass, ever sees a file's program as a main row because nothing had imported its module
 #: yet (a later file's program in the main pass would be planned in ROOM's earlier place: the reading that trades MORE).
 #: PREREG-EVL-10's READER-2 (league/events/reader2.py) is the first.
-PART_MODULES: tuple[str, ...] = ()
+PART_MODULES: tuple[str, ...] = ("league.events.reader2",)
 _LOADED: list[str] = []
 
 
@@ -233,6 +233,17 @@ TABLE: dict[str, tuple[Slot, ...]] = {
     "open": (main_rows()[0],),
     "close": (main_rows()[1],),
 }
+#: PREREG-EVL-10 SECTION 2.4, FROZEN (docs/prereg/PREREG-EVL-10.md on the tag `prereg-evl-10`): "`decide-close-r2:<D>`
+#: is THIS FILE'S SLOT in the decision scheduler's close table ... `scheduler.Slot("evl10", "close", 10.0, "close-r2",
+#: start=Wall("close", -1200), never_past=Wall("close", -940), send_from=Wall("close", -780), send_until=Wall("close",
+#: -660), catchup=None)`, the LAST row of the close table": a clock start at tau (the close - 20 minutes, 15:40:00 ET
+#: on a full day), a bound of 10 seconds, never started past the close - 15 minutes 40 seconds (15:44:20 ET), so it
+#: ends by 15:44:30 (HOLD_LEAD's lead) and DECISION_MARGIN before the lane's close decision; the send window
+#: [15:47:00, 15:49:00) of the main rows; NO CATCH-UP (a session whose slot did not run live has no decision of this
+#: file's rows). Its part is league/events/reader2.py's (`PART_MODULES`); a later file's row goes BEFORE it.
+TABLE["close"] = TABLE["close"] + (
+    Slot("evl10", "close", 10.0, "close-r2", start=Wall("close", -1200), never_past=Wall("close", -940),
+         send_from=Wall("close", -780), send_until=Wall("close", -660), catchup=None),)
 
 
 def slots(auction: str, table: Mapping[str, tuple[Slot, ...]] | None = None) -> tuple[Slot, ...]:

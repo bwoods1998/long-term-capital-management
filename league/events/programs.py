@@ -73,7 +73,9 @@ REGISTERED_AT_6: str | None = "2026-10-22T12:24:50Z"  # A116: tag prereg-evl-6, 
 #: three, version 2 of every seatable birth registered before REGISTERED_AT_6), whose rule is its file's word for word
 #: and whose screen, runs, stays, demotion and Probe band are PREREG-EVL-6's. Every version PREREG-EVL-6 supersedes
 #: (`Program.superseded6`) seats no more. Version 1 of PREREG-EVL-1's and -2's ids, records and controls never seat.
-SEATING_PREREGS = (3, 4, 5)
+#: PREREG-EVL-10 (release 1019n-r2): its one seatable row, EVL-R2-ON v1 (`Reader2Row`, section 2.2), seats from the
+#: release that carries its code (`REGISTERED_AT_10` pinned), judged by PREREG-EVL-6 as frozen (`Program.evl6` True).
+SEATING_PREREGS = (3, 4, 5, 10)
 #: THE FILE THAT REGISTERS THE NEW VERSIONS (PREREG-EVL-6 section 1.1): a Program row with `regfile` 6 is this file's.
 FILE_6 = 6
 #: PREREG-EVL-6 section 1.1, THE NEW VERSIONS' RECORD BEFORE THE RELEASE (D8): THE RELEASE is the moment the House's code
@@ -354,6 +356,13 @@ def learners() -> tuple[Learner, ...]:
 _BEFORE_7 = (PROGRAMS, SEATING)
 
 
+def _later_rows() -> tuple[Program, ...]:
+    """The rows of the files decided in their own scheduler slots, appended after R3's births in every registry
+    (release 1019n-r2: PREREG-EVL-10's, `reader2_rows`; read at each rebuild, so pinning REGISTERED_AT_10 in a test and
+    calling `refresh_7` adds or removes them)."""
+    return reader2_rows()
+
+
 def refresh_7() -> tuple[Learner, ...]:
     """THE REGISTRIES WITH PREREG-EVL-7 AS PINNED (`learners`): PREREG_PROGRAMS and PREREG_SEATING are the earlier files'
     rows then the learners; PROGRAMS, BY_KEY, BY_ID and SEATING are rebound with R3's births loaded last after them (as
@@ -363,11 +372,12 @@ def refresh_7() -> tuple[Learner, ...]:
     with _LOAD:
         PREREG_PROGRAMS = _BEFORE_7[0] + rows
         PREREG_SEATING = _BEFORE_7[1] + tuple(p for p in rows if p.can_seat)
-        programs = PREREG_PROGRAMS + BIRTHS
+        later = _later_rows()
+        programs = PREREG_PROGRAMS + BIRTHS + later
         PROGRAMS = programs
         BY_KEY = {(p.id, p.version): p for p in programs}
         BY_ID = {p.id: p for p in programs if p.version == 1}
-        SEATING = PREREG_SEATING + tuple(p for p in BIRTHS if p.can_seat)
+        SEATING = PREREG_SEATING + tuple(p for p in BIRTHS if p.can_seat) + tuple(p for p in later if p.can_seat)
     return rows
 
 
@@ -375,6 +385,70 @@ def is_learner(program: Any) -> bool:
     """Whether a Program row (or an id) is one of PREREG-EVL-7's learners, pinned or not."""
     pid = getattr(program, "id", program)
     return any(p.id == pid for p in LEARNER_ROWS)
+
+
+# --------------------------------------------------------------------------------------------------- PREREG-EVL-10
+#: PREREG-EVL-10's REGISTRATION TIME (its preamble, A92's method; the captain's A144: the latest of the commit's
+#: 07:10:41Z, GitHub's 07:10:43Z and the client's 07:10:45Z after the tag push returned; tag prereg-evl-10, commit
+#: d0626c8b, docs/prereg/PREREG-EVL-10.md sha256 ab7e587c..., docs/prereg/evl-10/ 129 files). A program or record of
+#: this file counts only events knowable after it, and its JUDGED RECORD only decisions the House makes LIVE with the
+#: release carrying this code (section 2.6: no record before that release, no catch-up). None refuses every decision
+#: of its rows: they are then in no registry (`reader2_rows`), so they neither decide nor trade nor are charged, R2
+#: asks nothing (league/events/reader2.py) and births.RESERVED keeps holding its 0.13.
+REGISTERED_AT_10: str | None = "2026-10-23T07:10:45Z"  # A144: tag prereg-evl-10, commit d0626c8b
+#: The file that registers READER-2's rows, and their one family: league/events/reader2.py decides them in the
+#: scheduler's slot `decide-close-r2:<D>` (never `select`, never the House's close decision).
+FILE_10 = 10
+R2_FAMILIES = ("reader2",)
+
+
+@dataclasses.dataclass(frozen=True)
+class Reader2Row(Program):
+    """A PREREG-EVL-10 row (section 2): its own registration time, REGISTERED_AT_10 (never another file's); the seatable
+    EVL-R2-ON is a version PREREG-EVL-6 judges and sizes (`evl6` True, section 2.5 (b)); its control and its two free
+    records read False (never seated). Its rule is league/events/reader2.py's decision, never `select`'s."""
+
+    @property
+    def registered_at(self) -> dt.datetime:
+        if REGISTERED_AT_10 is None:
+            raise RuntimeError("PREREG-EVL-10 is not pinned: none of its rows decides before its registration time")
+        return S.parse_iso(REGISTERED_AT_10)
+
+    @property
+    def evl6(self) -> bool:
+        return bool(self.seatable)
+
+    @property
+    def can_seat(self) -> bool:
+        return self.seatable and REGISTERED_AT_10 is not None and self.prereg in SEATING_PREREGS
+
+
+#: SECTION 2's FOUR ROWS, VERSION 1 EACH, every one a hold-1 close-to-open row (bought at D's close auction, sold at the
+#: next session's open; PREREG-EVL-2's limit at entry, score.py: prereg >= 2): EVL-R2-ON (seatable, section 2.2), its
+#: control EVL-R2-ON-SET (section 2.3) and the free records REC-R2-ON-PASS and REC-R2-ON-AVOID (never seated, no
+#: expected false pass). This file registers no other row and no learner version. EVL-R2-ON is a READ version (`reads`:
+#: its control is EVL-R2-ON-SET, screen.py `CONTROLS`, section 3); none of the four is decided by `select`.
+R2_ON, R2_SET, R2_PASS, R2_AVOID = "EVL-R2-ON", "EVL-R2-ON-SET", "REC-R2-ON-PASS", "REC-R2-ON-AVOID"
+READER2_ROWS: tuple[Reader2Row, ...] = (
+    Reader2Row(R2_ON, 1, True, "reader2", "close", 1, True, exit_at="open", rule="reader2", prereg=FILE_10),
+    Reader2Row(R2_SET, 1, False, "reader2", "close", 1, False, exit_at="open", rule="reader2", prereg=FILE_10),
+    Reader2Row(R2_PASS, 1, False, "reader2", "close", 1, False, exit_at="open", rule="reader2", prereg=FILE_10),
+    Reader2Row(R2_AVOID, 1, False, "reader2", "close", 1, False, exit_at="open", rule="reader2", prereg=FILE_10),
+)
+
+
+def reader2_rows() -> tuple[Reader2Row, ...]:
+    """PREREG-EVL-10's rows in force: all four once REGISTERED_AT_10 is pinned, else none. They come AFTER every earlier
+    file's row AND after R3's births in every registry (`refresh_7`, `load_births`), so no earlier row's place in the
+    tables' order (`book.order_of`), its rule or its judge moves, and ROOM puts this file's rows after every earlier
+    one (section 2.5; the book's per-file pass, league/equity/live.py `_event_decide_slot`)."""
+    return READER2_ROWS if REGISTERED_AT_10 is not None else ()
+
+
+def is_reader2(program: Any) -> bool:
+    """Whether a Program row (or an id) is one of PREREG-EVL-10's four rows, pinned or not."""
+    pid = getattr(program, "id", program)
+    return any(p.id == pid for p in READER2_ROWS)
 
 
 refresh_7()
@@ -629,10 +703,11 @@ def load_births(store: Any) -> tuple[Program, ...]:
         born = last_born if where is not None and where == last_where else ()
         read = False
     with _LOAD:
-        programs = PREREG_PROGRAMS + born
+        later = _later_rows()       # (PREREG-EVL-10's rows: after every PREREG row AND after the births)
+        programs = PREREG_PROGRAMS + born + later
         by_key = {(p.id, p.version): p for p in programs}
         if len(by_key) != len(programs):
-            born, programs = (), PREREG_PROGRAMS
+            born, programs = (), PREREG_PROGRAMS + later
             by_key = {(p.id, p.version): p for p in programs}
         if store is None:
             _LAST_READ = (None, ())
@@ -641,7 +716,7 @@ def load_births(store: Any) -> tuple[Program, ...]:
         BIRTHS = born
         BY_KEY = by_key
         BY_ID = {p.id: p for p in programs if p.version == 1}
-        SEATING = PREREG_SEATING + tuple(p for p in born if p.can_seat)
+        SEATING = PREREG_SEATING + tuple(p for p in born if p.can_seat) + tuple(p for p in later if p.can_seat)
         PROGRAMS = programs
     return born
 

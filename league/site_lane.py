@@ -215,7 +215,7 @@ def verdict_usd(lane: Any) -> Decimal:
     """Every Claude call the lane paid for, in dollars (unrounded): its verdicts' stated costs, `VERDICT_USD_UNKNOWN` for
     each answered verdict whose cost the gateway did not state, and (R3) every births call's stored cost
     (`birth_calls`: the stated one, else its worst case; `BIRTH_USD_UNKNOWN` for one stored with none) when the store
-    has that table."""
+    has that table, and (release 1019n-r2) every READER-2 read's (`reads2`)."""
     row = lane.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(CASE WHEN usd IS NULL AND answered_at IS NOT NULL "
                           "THEN 1 ELSE 0 END), 0) FROM verdicts").fetchone()
     total = Decimal(str(row[0] or 0)) + VERDICT_USD_UNKNOWN * int(row[1] or 0)
@@ -223,6 +223,11 @@ def verdict_usd(lane: Any) -> Decimal:
         born = lane.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(CASE WHEN usd IS NULL AND answered_at IS NOT "
                                "NULL THEN 1 ELSE 0 END), 0) FROM birth_calls").fetchone()
         total += Decimal(str(born[0] or 0)) + BIRTH_USD_UNKNOWN * int(born[1] or 0)
+    if _table(lane.db, "reads2"):
+        # (release 1019n-r2: PREREG-EVL-10's READER-2, each read at its stored cost, one in flight at its hold)
+        from .events.reader2 import usd_all
+
+        total += Decimal(str(round(usd_all(lane.db), 6)))
     return total
 
 

@@ -122,6 +122,8 @@ INFRA_1019I_PENDING = ("league/events/attempts.py", "league/events/pxstore.py", 
 LEARNER_PENDING = ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
 #: The decision scheduler's timing table (release 1019i, A120): league/events/scheduler.py.
 SCHED_PENDING = ("league/events/scheduler.py",)
+#: PREREG-EVL-10's READER-2 (release 1019n-r2): league/events/reader2.py.
+READER2_PENDING = ("league/events/reader2.py",)
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
 FGS_LITERAL = {
     "version": "fgs-prereg-1", "stat": "t_r over the first n counted days", "n": [20, 60, 120, 250], "then_every": 250,
@@ -392,7 +394,7 @@ class TheWiringIsWhole(unittest.TestCase):
                                            + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING + DONE_PENDING,
                                            E4_PENDING + FWD1_PENDING + R0_PENDING + R1_PENDING + V2_PENDING
                                            + R2_PENDING + LANE_PENDING + LINE_PENDING + R3_PENDING + DONE_PENDING
-                                           + INFRA_1019I_PENDING + LEARNER_PENDING + SCHED_PENDING),
+                                           + INFRA_1019I_PENDING + LEARNER_PENDING + SCHED_PENDING + READER2_PENDING),
                       "nothing of E2's or E3's waits for the gateway")
         self.assertFalse(set(ci.PENDING_GATEWAY) & {*E2_PENDING, *E3_SWARM})
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY), "beyond the gateway's list: what waits")

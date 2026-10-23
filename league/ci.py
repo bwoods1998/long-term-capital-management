@@ -276,6 +276,12 @@ PENDING_GATEWAY += ("league/events/learner.py", "league/events/costs7.py", "leag
 #: in-box updater would ship can move a file's slot without the owner's deploy. It waits here for the gateway's
 #: merge-list follow-up, as the lane's rule inputs do.
 PENDING_GATEWAY += ("league/events/scheduler.py",)
+#: PREREG-EVL-10'S READER-2 (release 1019n-r2): league/events/reader2.py is a pre-registered reader version and its
+#: consumer seat's rule (the frozen request specs copied verbatim, the qualification and choice rules, the line R2 asks
+#: within, inside the lane's line and the cost rule's cap, the decision real money buys from), so no main commit the
+#: in-box updater would ship can change it without the owner's deploy. It waits here for the gateway's merge-list
+#: follow-up, as the lane's rule inputs do.
+PENDING_GATEWAY += ("league/events/reader2.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

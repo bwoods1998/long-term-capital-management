@@ -51,7 +51,12 @@ class TheTable(unittest.TestCase):
     def test_the_pinned_table_holds_its_invariants_and_its_main_rows_are_todays_constants(self):
         self.assertEqual(X.check(), [])
         self.assertEqual([s.file for s in X.slots("open")], ["main"])
-        self.assertEqual([s.file for s in X.slots("close")], ["main"])
+        # (release 1019n-r2: PREREG-EVL-10's frozen row is the close table's LAST row, its section 2.4's Slot exactly)
+        self.assertEqual([s.file for s in X.slots("close")], ["main", "evl10"])
+        self.assertEqual(X.slot("evl10", "close"), X.Slot("evl10", "close", 10.0, "close-r2", start=X.Wall("close", -1200),
+                                                          never_past=X.Wall("close", -940),
+                                                          send_from=X.Wall("close", -780),
+                                                          send_until=X.Wall("close", -660), catchup=None))
         o, c = X.main_slot("open"), X.main_slot("close")
         self.assertEqual(o.start.text(), "09:15:00")
         self.assertEqual((o.send_from.text(), o.send_until.text()), ("09:16:00", "09:27:00"))
@@ -76,7 +81,9 @@ class TheTable(unittest.TestCase):
     def test_the_digest_is_pinned(self):
         """The table is one pinned constant per auction: a row that moves moves this digest (update it with the
         docs' timing table, docs/events.md)."""
-        self.assertEqual(X.digest()[:8], "40a08163", X.canonical())
+        self.assertEqual(X.digest()[:8], "3514111b", X.canonical())
+        # (release 1019n-r2: the main rows alone, as release 1019i's table had them, still read 40a08163)
+        self.assertEqual(X.digest({"open": (X.main_slot("open"),), "close": (X.main_slot("close"),)})[:8], "40a08163")
 
     def test_check_refuses_a_slot_that_sends_after_the_cut_off_or_runs_into_the_main_decision(self):
         late = X.Slot("f", "close", 30.0, "close-f", after=("main",), never_past=wall("15:48:30"),
@@ -137,7 +144,8 @@ class TheTable(unittest.TestCase):
         self.addCleanup(X.unregister, "sim")
         self.assertEqual(X.file_of("EVL-ERN-DROP-ON"), "sim")
         self.assertEqual(X.file_of(P.BY_KEY[("EVL-ERN-DROP-ON", 1)]), "sim")
-        self.assertEqual(X.live_files("close"), [], "a part with no `since` runs nothing, even with a row")
+        self.assertEqual([s.file for s in X.live_files("close")], ["evl10"],
+                         "a part with no `since` runs nothing, even with a row (PREREG-EVL-10's, pinned, runs)")
         with self.assertRaises(ValueError):
             X.register(X.Part("main", run=lambda *a: {}))
 

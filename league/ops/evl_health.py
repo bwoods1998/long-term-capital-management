@@ -1807,8 +1807,9 @@ def checks(ctx: Any, root: str | Path, now: float, *, errors: list[str] | None =
 
 def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | None:
     """The lane's verdict line of the UTC day (league/events/house.py: the lower of `events.verdict_usd_day` and the
-    budget's allowance, league/ops/budget.py `lane_allowance`, held on the UTC day: `verdict_day`) and the day's verdict
-    dollars so far: {line_usd, spent_usd, source}, or None when the store cannot be read."""
+    budget's allowance, league/ops/budget.py `lane_allowance`, held on the UTC day: `verdict_day`) and the day's dollars so
+    far inside it, the verdicts' and (release 1019n-r2) READER-2's: {line_usd, spent_usd (both), verdicts_usd,
+    reader2_usd, source}, or None when the store cannot be read."""
     from . import budget as B
     from ..events.house import VERDICT_USD_DAY, verdict_day   # the House's own default and day: read where they are set
 
@@ -1822,14 +1823,20 @@ def verdict_line(ctx: Any, root: str | Path, now: float) -> dict[str, Any] | Non
     if not path.exists():
         return {"line_usd": line, "spent_usd": 0.0, "source": allowance["source"]}
     _, (lo, hi) = verdict_day(dt.datetime.fromtimestamp(now, dt.timezone.utc))
+
+    def spent(db: Any) -> tuple[float, float]:
+        from ..events.reader2 import usd_between     # (PREREG-EVL-10: READER-2's dollars are inside the lane's line)
+
+        row = db.execute(f"SELECT COALESCE(SUM(COALESCE(usd, {B.VERDICT_USD_UNKNOWN})), 0) FROM verdicts WHERE "
+                         "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()[0]
+        return float(row or 0.0), usd_between(db, lo, hi)
     try:
         with guard.readonly():
-            row = guard.read(path, lambda db: db.execute(
-                f"SELECT COALESCE(SUM(COALESCE(usd, {B.VERDICT_USD_UNKNOWN})), 0) FROM verdicts WHERE answered_at>=? "
-                "AND answered_at<?", (lo, hi)).fetchone()[0])
+            verdicts, reader = guard.read(path, spent)
     except Exception:  # noqa: BLE001 - the line alone
         return None
-    return {"line_usd": line, "spent_usd": float(row or 0.0), "source": allowance["source"]}
+    return {"line_usd": line, "spent_usd": verdicts + reader, "verdicts_usd": verdicts, "reader2_usd": reader,
+            "source": allowance["source"]}
 
 
 __all__ = ["CAUSES", "SWITCH", "STORE", "STOP", "PAUSE", "checks", "facts", "switched_off", "lane_on", "decisions",

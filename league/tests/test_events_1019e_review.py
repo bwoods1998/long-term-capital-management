@@ -46,6 +46,7 @@ from league.events import store as S
 from league.ops import budget as B
 from league.tests import test_events_births as TB
 from league.tests import test_events_house as TH
+from league.tests.evl10_fakes import off_10
 
 UTC = dt.timezone.utc
 spec, et, unload = TB.spec, TB.et, TB.unload
@@ -471,6 +472,7 @@ class AnUnknownProgramTakesTheLimit(unittest.TestCase):
 
 
 # ======================================================================================================== the loader
+@off_10
 class AReadErrorKeepsTheBirthsLastRead(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

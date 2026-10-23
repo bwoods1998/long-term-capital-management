@@ -59,6 +59,7 @@ from league.events import screen as SN
 from league.events import store as S
 from league.events import verdicts as V
 from league.ops import evl_learner as EL
+from league.tests.evl10_fakes import off_10
 
 NY = ZoneInfo("America/New_York")
 UTC = dt.timezone.utc
@@ -292,6 +293,7 @@ def snapshot(got: dict) -> tuple:
 
 
 # -------------------------------------------------------------------------------------------------------- the rows
+@off_10
 class TheRows(unittest.TestCase):
     def test_the_constant_is_a125s_and_names_the_frozen_file(self):
         """THE FREEZE (A125): REGISTERED_AT_7 is the latest of the commit's 20:14:07Z, GitHub's 20:14:11Z and the

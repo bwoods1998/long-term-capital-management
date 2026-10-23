@@ -121,6 +121,7 @@ from . import news as N
 from . import programs as P
 from . import pxdata as PX
 from . import pxstore as PXS
+from . import reader2 as R2
 from . import report as RP
 from . import run as R
 from . import score as SC
@@ -135,6 +136,11 @@ ROOT_NAME = "events"
 HEALTH_FILE = "lane.json"
 STOP_FILE = "STOP"                            # <state>/events/STOP: the lane idles while it exists (no deploy needed)
 BACKGROUND_KEY = "feeds:evl"
+#: PREREG-EVL-10 section 1.5: READER-2's asks run as per-call jobs on THEIR OWN House lane 'reader' (league/house.py
+#: `_lanes`: Semaphore(1)), key 'reader:r2' (`_background`: one job per key), never on 'feeds:' (the lane's one slot:
+#: no record pass, verdict pass or decision waits for R2) and never on 'ops:'; each House publish (`turn`) starts one job
+#: when R2's last job has finished (league/events/reader2.py `job`: a qualification scan and the next due call).
+READER_KEY = "reader:r2"
 
 RECORD_EVERY = dt.timedelta(minutes=2)
 RECORD_BUDGET = 90.0
@@ -574,12 +580,45 @@ class EventLane:
             return False
 
     def turn(self, house: Any) -> None:
-        """Start a turn on the House's feeds lane when one is due (the wrapped publisher's call). Never raises."""
+        """Start a turn on the House's feeds lane when one is due (the wrapped publisher's call), and READER-2's job on its
+        own lane when one is due (`reader_due`; PREREG-EVL-10 section 1.5). Never raises."""
         try:
             if self.due():
                 house._background(BACKGROUND_KEY, self.run)
         except Exception as exc:  # noqa: BLE001
             self.warn("turn", exc)
+        try:
+            if self.reader_due():
+                house._background(READER_KEY, self.reader_job)
+        except Exception as exc:  # noqa: BLE001 - (the turn's one warning an hour: `warn`'s task "turn")
+            self.warn("turn", exc)
+
+    def reader_due(self) -> bool:
+        """Whether READER-2's job may start now: PREREG-EVL-10 pinned, the store ready, and now inside 07:30:00 ET to
+        30 seconds before tau of today's session (the job itself reads the calendar again)."""
+        if not R2.pinned() or not self.ready():
+            return False
+        now = self.now().astimezone(C.NY)
+        return now.weekday() < 5 and R2.START_AT <= now.time() < dt.time(16, 0)
+
+    def reader_job(self) -> dict[str, Any]:
+        """ONE JOB OF READER-2 (league/events/reader2.py `job`), on the House's 'reader' lane; its result kept for the
+        health page (`tasks`' "reader")."""
+        began = self._mono()
+
+        def note(status: str, summary: Mapping[str, Any]) -> None:
+            row = {"at": S.iso(self.now()), "status": status, "seconds": round(self._mono() - began, 3)}
+            brief = {k: v for k, v in summary.items() if isinstance(v, (int, float, str, bool)) or v is None}
+            with self._lock:        # (the feeds lane's `last` is its own tasks'; R2's job is kept beside them)
+                self._tasks["reader"] = row | ({"summary": brief} if brief else {})
+        try:
+            out = R2.job(self)
+            note("ok", out)
+            return out
+        except Exception as exc:  # noqa: BLE001 - a failed job is said once an hour; the next publish starts another
+            note("failed", {"error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+            self.warn("reader", exc)
+            return {"error": f"{type(exc).__name__}"}
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -649,7 +688,8 @@ class EventLane:
         day, (lo, hi) = verdict_day(now)
         row = st.db.execute("SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(usd IS NULL), 0) FROM verdicts WHERE "
                             "answered_at>=? AND answered_at<?", (lo, hi)).fetchone()
-        usd = float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1]) + birth_usd(st.db, lo, hi)
+        # (PREREG-EVL-10 section 1.5: READER-2's dollars count in the lane's line, a lost or unpriced call at its hold)
+        usd = float(row[0]) + VERDICT_USD_UNKNOWN * int(row[1]) + birth_usd(st.db, lo, hi) + R2.usd_between(st.db, lo, hi)
         self._usd = {"day": day, "usd": usd}
         self._line = self.verdict_line(now)
 
@@ -792,8 +832,13 @@ class EventLane:
                     next_look = self.house.clock() if follow is not None else \
                         self.house.clock() + max(0.0, (at - now).total_seconds())
                     hold = self._close_hold(st, now)
+                    # (release 1019n-r2: A FILE'S SLOT NEVER TAKES AN EARLIER FILE'S TURN: after a slot's run the turn
+                    # goes on at once into the task that was due, so a verdict pass, a record pass or a pre-pass due at
+                    # the slot's clock start runs when it would have run with no slot; PREREG-EVL-10's 15:40 slot is
+                    # SQL only, within 10 s)
+                    slot_done = task is not None and self._clock_slot(task.name)
                     if hold is None and follow is not None and (self._close_owed(st, now) or
-                                                                follow.name.startswith(SLOT_TASK)):
+                                                                follow.name.startswith(SLOT_TASK) or slot_done):
                         # (a task of the lead returned at or after the decision's time: the decision in this turn,
                         # at once, never at the next publish; release 1019i: a file's live slot that is due, after
                         # the main decision's receipt or at its own clock start, runs in this turn the same way)
@@ -809,7 +854,7 @@ class EventLane:
                         wake = min(max(at, now + step), hold)      # (the next task due, or the decision)
                     elif now >= hold - dt.timedelta(seconds=DECISION_MARGIN):
                         wake = hold                                 # (inside the decision's margin: the decision first)
-                    elif task is not None and self._mono() - began < HOLD_STEP:
+                    elif task is not None and self._mono() - began < HOLD_STEP and not slot_done:
                         wake = now + step                           # (a task that took no time is not run again at once)
                     else:
                         wake = now
@@ -827,6 +872,20 @@ class EventLane:
                 self._running = None
                 self._next_look = next_look
             self._write_health()
+
+    @staticmethod
+    def _clock_slot(name: str) -> bool:
+        """Whether task `name` is a file's live slot with a CLOCK START before its auction's main decision (PREREG-EVL-10's
+        `close-r2` at tau): after its run the turn goes on into the task that was due (`run`). A follower of the main
+        receipt is not one (it runs after the main decision, as release 1019i ran it)."""
+        if not name.startswith(SLOT_TASK):
+            return False
+        auction, _, file = name[len(SLOT_TASK):].partition("-")
+        s = X.slot(file, auction)
+        if s is None or s.start is None or s.after:
+            return False
+        main = X.main_slot(auction)
+        return main.start is not None and X._secs(s.start, auction) < X._secs(main.start, auction)
 
     def _close_hold(self, st: S.Store, now: dt.datetime) -> dt.datetime | None:
         """When today's LIVE CLOSE DECISION starts next (`_live_next`: its time + CLOSE_GRACE, or after a FAILED run its

@@ -29,9 +29,9 @@ from league.events import programs as P
 def unpinned_7() -> Iterator[None]:
     """The registries without the learners for the block (REGISTERED_AT_7 None, rebuilt by `refresh_7` with R3's births
     as loaded), restored and rebuilt on exit."""
-    patch = mock.patch.object(P, "REGISTERED_AT_7", None)
-    patch.start()
-    P.refresh_7()
+    patch = mock.patch.multiple(P, REGISTERED_AT_7=None, REGISTERED_AT_10=None)    # (release 1019n-r2: a registry
+    patch.start()                                                                  # before PREREG-EVL-7's has no
+    P.refresh_7()                                                                  # PREREG-EVL-10 row either)
     try:
         yield
     finally:

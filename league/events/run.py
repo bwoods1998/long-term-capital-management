@@ -635,8 +635,10 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         out[_key(prog)] = P.write_intents(st, prog, day, cands, decided_at=session.open_decide, why=why)
 
     for prog in P.PROGRAMS:
-        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.LEARNER_FAMILIES:
-            continue        # (PREREG-EVL-7's learners decide after the receipt, by themselves: `learner_part`)
+        if prog.entry_at != "open" or (births_only and prog.spec is None) or prog.family in P.LEARNER_FAMILIES or \
+                prog.family in P.R2_FAMILIES:
+            continue        # (PREREG-EVL-7's learners decide after the receipt, by themselves: `learner_part`; PREREG-EVL-10's
+            #                  rows in their own scheduler slot, league/events/reader2.py)
         _decide_one(prog, one, out)
     for prog, rows in [] if ask_only else later:     # (what each kept program leaves out, once this run's asks are in)
         def left(prog: P.Program, rows: list[Mapping[str, Any]] = rows) -> None:
@@ -1650,7 +1652,9 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \
                     prog.family not in P.CLOSE_FAMILIES_5 and not (births_only and prog.spec is None) and \
-                    prog.family not in P.LEARNER_FAMILIES:     # (PREREG-EVL-7's: after the receipt, `learner_part`)
+                    prog.family not in P.LEARNER_FAMILIES and \
+                    prog.family not in P.R2_FAMILIES:   # (PREREG-EVL-7's: after the receipt, `learner_part`; PREREG-EVL-10's:
+                #                                        its own slot `decide-close-r2:<D>`, before this decision)
                 _decide_one(prog, lambda prog: one(prog, False), out)
     try:
         if not births_only and not evl5_only:     # (the births, or PREREG-EVL-5's rows, by themselves: no PREREG-EVL-4 row)

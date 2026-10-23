@@ -1151,9 +1151,12 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
     rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
     price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`).
-    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`)."""
+    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`). PREREG-EVL-10's four
+    rows: section 2.4's ONE READING, `r2_picks` (the live receipt's own intents, whatever `decided_at`)."""
     if P.is_learner(program):
         return learner_picks(lane, program, day, decided_at=decided_at, held=held)
+    if P.is_reader2(program):
+        return r2_picks(lane, program, day, decided_at=decided_at, held=held)
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
     guard = program.id in NEXT_OPEN_GUARD
@@ -1614,6 +1617,32 @@ def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: d
     return out
 
 
+# ----------------------------------------------------------------------------------------------------- PREREG-EVL-10
+def r2_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime | None = None,
+             held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-10 ROW (EVL-R2-ON, EVL-R2-ON-SET, REC-R2-ON-PASS, REC-R2-ON-AVOID), section
+    2.4's ONE READING (league/events/reader2.py `one_reading`): the intents of `program` its live `decide-close-r2:<D>`
+    receipt with status `ok` wrote, in rank_key order, then adv20 descending, then event id, LESS REAL MONEY'S OWN
+    HELD-LOT SKIP (`held(cik)`: the book's lots and buys; the version's own five-session rule is already in the
+    decision). `decided_at` is NOT READ: every input is cut at this file's tau of D, so a read answered after tau or an
+    8-K stored after it never reaches real money or a member of PREREG-EVL-8's EVL-META-ON. Empty with no such receipt."""
+    from . import reader2 as R2
+
+    out: list[Pick] = []
+    for r in R2.one_reading(lane, program, day):
+        if held is not None and held(str(r["cik"])):
+            continue
+        try:
+            prev = Decimal(str(r["prev_close"]))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not prev.is_finite() or prev <= 0:
+            continue
+        out.append(Pick(program.id, program.version, r["event"], r["symbol"], r["cik"], r["rank"], r["adv20"], prev,
+                        str(r["knowable_at"] or "")))
+    return out
+
+
 # ----------------------------------------------------------------------------------- the decision scheduler (1019i)
 def slot_of(program: Any) -> str:
     """Which file's slot of the timing table decides `program` (a Program or an id; league/events/scheduler.py
@@ -1800,7 +1829,7 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
 #: last, so release 1019i's other branches append below without touching these lines)
 __all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
             "learner_pending", "learner_picks", "pick_record", "pick_of", "LINE_ACROSS_AUCTIONS"]
-__all__ += ["slot_of", "slot_files", "send_window", "slot_receipt", "slot_catchup"]
+__all__ += ["slot_of", "slot_files", "send_window", "slot_receipt", "slot_catchup", "r2_picks"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)
