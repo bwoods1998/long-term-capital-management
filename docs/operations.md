@@ -67,7 +67,7 @@ before its decision time (a name out of the base that morning, a morning pass th
 pass makes the name's full adjusted re-read (`px_rereads`, one request a name) before it decides PXU(D), and a name
 it cannot re-read in time is out of PXU(D). So after a missed morning the next one re-reads every base name once (up
 to about 6,000 requests at the slot's 120 a minute, yielding: PXU(D) then may land after 09:15 and serve only the ON
-auction that day). h52 needs its 252 sessions on one basis the same way (else it is none). A PX or META part that did
+auction that day). h52 needs its 52-week window on one basis the same way (else it is none). A PX or META part that did
 not finish on the lane's first finished decision of (D, X) is decided by its catch-up alone: a later live receipt of
 that decision (a pending decision's retry, the hourly re-decision while it is still live) never runs it again.
 

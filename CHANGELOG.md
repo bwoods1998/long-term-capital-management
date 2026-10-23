@@ -108,7 +108,7 @@ test_events_evl8_proof.py, on invented data only: league/tests/evl8_world.py). T
   and a run or stay look waits for the control's intents scheduled to exit by it (meta.py `pool_record`, screen8.py
   `control_record`, review8 too); (2) THE BASIS: a window session with no c*_P stored before its decision time is
   FLAGGED (section 1.1) and needs a full re-read after it (`px_rereads` or the first night's read, `reread_at`), h52's
-  252 sessions are checked the same way, a benchmark's closes share cb*_P's basis, and the morning pass re-reads such
+  52-week window is checked the same way, a benchmark's closes share cb*_P's basis, and the morning pass re-reads such
   a name before PXU(D) (px.py `_basis_ok`, `_bench_basis`; the review's split gave sigma60 0.065 against 0.011); (3) ONE
   LIVE RUN: the parts run on the lane's first finished decision of (D, X) alone and a live part never runs twice
   (house.py `_eight_first`, px.py `live_ran`); (4) EVL-META-ON's 8-K guard is E10's own (`issuer_8k_guard`, A131's late
