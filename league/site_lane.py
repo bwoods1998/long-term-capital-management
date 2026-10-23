@@ -302,14 +302,16 @@ def read_programs(lane: Any, today: dt.date) -> dict[str, Any]:
             # before the release)
             real += _real_events(lane, key[0], key[1], REAL_BANDS)
         look = None
-        if band in REAL_BANDS and not getattr(p, "evl6", False):
+        if band in REAL_BANDS and not getattr(p, "evl6", False) and not P.is_8(p):
             nxt = SC.next_look_v2(lane, p.id, p.version, today)
             if nxt.get("k") is not None:
                 need = int(nxt["events_needed"])
                 look = {"need": need, "to_go": max(0, need - int(nxt["events"]))}
         # (PREREG-EVL-6's versions: their looks are counted in settled SESSION BLOCKS, which lane_v1's ring reads as
         # settled events ({need, to_go}, the page's "events to the next look"), so their `look` is null: lane_v1's
-        # contract unchanged, never a figure in the wrong unit; a versioned key with the unit is the page's follow-up)
+        # contract unchanged, never a figure in the wrong unit; a versioned key with the unit is the page's follow-up.
+        # PREREG-EVL-8's five seats the same: THE PX SCREEN and THE META SCREEN judge them in settled session blocks
+        # from the 22nd block, its section 5, never PREREG-EVL-3's screen, section 5.1; league/events/screen8.py)
         if p.can_seat:
             probe_events += _real_events(lane, p.id, p.version, PROBE_PLUS)
         rows.append({"id": slug_of(p.id), "name": name_of(p), "band": band, "real": real, "shadow": shadow, "look": look})

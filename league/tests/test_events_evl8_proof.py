@@ -431,6 +431,52 @@ class TheEarlierList(TB.EventTest):
             self.assertIn(("ACME", "PXA", "PXB", "PXC", "PXD", "PXE"), lists, "this file's names in its own pass")
             self.assertEqual(lists.count(("ACME",)), 1, "never the earlier rows' list again once widened")
 
+    def test_once_this_files_names_are_at_the_gateway_an_earlier_re_send_posts_no_list(self):
+        """The second half of the rule (the money lens's re-review of release 1019n): with the lane's close receipt in
+        before the 15:47 tick, PX's close pass POSTs the earlier list with this file's names at 15:47; ACME's 15:47 buy
+        is cancelled by the venue, and at 15:48 (the eligible route up) its A80 re-send goes FIRST WITH NO POST BEFORE
+        IT: the gateway's list was made of the earlier rows' list (kv `eq_event_list` `base`), so the earlier path
+        never POSTs its own list again (a POST it would never wait for without this file, which would narrow the
+        gateway's list)."""
+        from league.tests import test_events_venue_cancel as VC
+
+        with W.pinned():
+            root = self.root / "base"
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's 15:47 buy, cancelled 5 ms after it: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)                           # (the lane's close receipt in: PX's close pass at 15:47)
+            log: list[tuple[str, Any]] = []
+            post, submit = h.venue.client.request, h.venue.submit
+
+            def request(method, url, *, headers, body, timeout):
+                log.append(("list", tuple(json.loads(body)["symbols"])))
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                log.append(("order", body["symbol"]))
+                return submit(body, exit=exit)
+            h.venue.client.request, h.venue.submit = request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            union = ("ACME", "PXA", "PXB", "PXC", "PXD", "PXE")
+            self.assertEqual([x for k, x in log if k == "list"][-1], union, "PX's 15:47 pass sent its names")
+            self.assertEqual(h.state.get("eq_event_list")["count"], len(union))
+            self.assertIn(("order", "PXA"), log, "PX's buys went at 15:47")
+            mark = len(log)
+            h.tick(15, 48)
+            after = log[mark:]
+            self.assertEqual(after[:1], [("order", "ACME")], "ACME's A80 re-send at 15:48, first")
+            self.assertEqual([x for x in after if x[0] == "list"], [], "no POST of the earlier rows' list after the union")
+            self.assertEqual(len([b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]), 2)
+
 
 class TheTickBound(TB.EventTest):
     """SECTIONS 4.2 AND 4.6 IN THE BOOK'S MINUTE (release 1019n's second money review, its major 3): this file's work
@@ -1402,6 +1448,84 @@ class TheOneLiveRun(Eight):
             self.assertNotIn(D_DAY.isoformat(), PXL.judged_days(px.db, "on"))
         finally:
             px.close()
+
+
+class Refusing:
+    """A gateway client whose PX bar reads fail at once (the data host refuses them), leaving the open run's bound
+    almost whole; every other route is `inner`'s."""
+
+    def __init__(self, inner):
+        self.inner, self.timeout = inner, 45.0
+
+    def get_json(self, path, params=None):
+        if path.endswith("/v2/stocks/bars"):
+            raise RuntimeError("the data host refused the read (invented)")
+        return self.inner.get_json(path, params)
+
+
+class TheOpenMetaAfterPx(Eight):
+    """SECTION 4.6'S OPEN ROW (the judges' re-review of release 1019n, its major): "a PX part not finished gives
+    EVL-META-O1 no member, section 7.2, and then the META part is decided only by its catch-up". So after a PX-GAP-O1
+    part that did not finish, `decide-open-px8:<D>` runs no live META part however much of its 60 s is left: no
+    `decide-open-meta8:<D>` receipt, no live decision, no real-money pick; `decide-meta:open:<D>` decides the session
+    later (a reported shadow, never traded, never judged). The close is not the same: section 1.2's test (iv) keeps
+    EVL-META-ON live with no PX member when the PX close run is cut (`TheClockTest`)."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    @staticmethod
+    def every_eligible(pool, st, cbar, *, session_index):
+        """The walk, invented: every eligible member, so a live decision has picks whatever the state holds."""
+        return [(m["event"], "g:invented", 0.01) for m in pool if m["eligible"]][:MT.K]
+
+    def run_open(self, name: str, *, cut: bool) -> W.World8:
+        w = self.world(name)
+        w.at(et(P_DAY, 15, 47)).decide("close", P_DAY)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        w.at(et(D_DAY, 9, 15, 30)).decide("open", D_DAY)          # (the lane's first finished decision of (D, O1))
+        lane, _ = self.lane(w, et(D_DAY, 9, 15, 40))
+        if cut:
+            lane._gateway = Refusing(w.gw)                         # (the PX part fails at once: its bound is left)
+        with mock.patch.object(MT, "walk", self.every_eligible):
+            lane._eight_after(self.ctx(lane, w), "open", D_DAY, True)
+        self.assertLess(lane.now(), et(D_DAY, 9, 16, 40), "time was left for a META part")
+        self.assertIsNotNone(w.st.meta(PXL.RAN_KEY.format(key="open", day=D_DAY.isoformat())),
+                             "the open run's end is marked for the book's late pass whatever its parts did")
+        return w
+
+    def real_picks(self, w: W.World8) -> list:
+        lane_ro = EB.Lane(w.st.root / S.DB_NAME)
+        try:
+            return EB.picks_8(lane_ro, MT.learner("o1"), D_DAY, decided_at=C.session(lane_ro, D_DAY).open_decide)
+        finally:
+            lane_ro.close()
+
+    def jobs(self, w: W.World8) -> dict[str, str]:
+        return {str(r[0]): str(r[1]) for r in w.st.db.execute("SELECT job, status FROM receipts")}
+
+    def test_a_finished_px_part_then_meta_live(self):
+        w = self.run_open("whole", cut=False)
+        self.assertEqual(self.jobs(w).get(f"decide-open-px8:{D_DAY}"), "ok")
+        self.assertIn(f"decide-open-meta8:{D_DAY}", self.jobs(w))
+        self.assertEqual(MT.decided(w.st.db, MT.learner("o1"), D_DAY)["kind"], "live")
+        self.assertTrue(self.real_picks(w), "named: a live META-O1 decision with picks is real money")
+
+    def test_a_cut_px_part_then_no_live_meta_part_and_no_real_buy(self):
+        w = self.run_open("cut", cut=True)
+        jobs = self.jobs(w)
+        self.assertIn(jobs.get(f"decide-open-px8:{D_DAY}"), ("cut", "failed"), "the PX part did not finish")
+        self.assertNotIn(f"decide-open-meta8:{D_DAY}", jobs, "no live META part after a PX part not finished")
+        self.assertIsNone(MT.decided(w.st.db, MT.learner("o1"), D_DAY), "nothing decided live")
+        self.assertEqual(self.real_picks(w), [], "no real-money pick")
+        with mock.patch.object(MT, "walk", self.every_eligible):
+            got = w.at(et(N_DAY, 20, 0)).meta_decide(D_DAY, "o1", kind="catchup")
+        self.assertEqual(got["_status"], "ok")
+        self.assertGreater(got["picks"], 0, "the catch-up's shadow keeps its picks")
+        self.assertEqual(MT.decided(w.st.db, MT.learner("o1"), D_DAY)["kind"], "catchup")
+        self.assertEqual(self.real_picks(w), [], "a catch-up is never traded")
+        self.assertFalse(any(t.startswith("PX-") for t in self.tags(self.pool(w, "EVL-META-O1"))),
+                         "and it holds no PX member")
 
 
 class TheMidBound(Eight):

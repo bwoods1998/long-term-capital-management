@@ -15,8 +15,8 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 `feat/evl-8` = the first build (`b52f4bbe`, its WIP `686f1db2`) merged with release 1019l (`rel/1019l`, `3df7dd9d`:
 releases 1019i-1019k, PREREG-EVL-6's code, PREREG-EVL-7's learners, the PX data layer, the stay look, births.RESERVED,
 goal V3's rows) and then with `main` (release 1019m-hotfix `bc33cf95`, A140; release 1019m `84de2f4a`, A139; release
-1019m-cost `1c87837f`, A145: no digest moves), finished to the frozen text; a draft PR with base `rel/1019l` (main
-carries it). Its code lives in its own modules
+1019m-cost `1c87837f`, A145: no digest moves), finished to the frozen text; PR 609 with base `main` (which carries
+release 1019l). Its code lives in its own modules
 (league/events/px.py, px_grid8.json, meta.py, screen8.py, league/ops/evl_price.py, league/tests/evl8_world.py,
 test_events_evl8.py, test_events_evl8_proof.py) and in short, marked hunks of book.py, run.py, house.py, score.py,
 births.py, report.py, bands.py, screen.py (CONTROLS' three rows), programs.py, pxdata.py, site_lane.py,
@@ -47,7 +47,8 @@ decision time. With it off the meta-learners still decide (their PX members and 
 THE RUNS ON THE HOUSE (league/events/house.py's PREREG-EVL-8 comment, section 4.6 of the text): the state pre-passes
 `prepass-meta:open:<D>` from 09:00 ET and `prepass-meta:close:<D>` from the close - 30 minutes; the morning pass
 `px-am:<D>` from 09:05 ET (yields, runs until 15:30); `decide-open-px8:<D>` then `decide-open-meta8:<D>` after the
-lane's open decision call (after PREREG-EVL-7's live learner part; 60 s, never past 09:19:30);
+lane's open decision call (after PREREG-EVL-7's live learner part; 60 s, never past 09:19:30; `decide-open-meta8:<D>`
+runs only when the PX part finished `ok`, else EVL-META-O1's open is its `decide-meta:open:<D>` catch-up's alone);
 `decide-close-px8:<D>` from the close decision time (no read after tau + 45 s, ended by tau + 55 s);
 `decide-close-meta8:<D>` after the lane's close decision call (15 s, never past the close - 11:20); the catch-ups
 `decide-px:<open|close>:<D>` and `decide-meta:<open|close>:<D>` (never judged, never traded; each receipt records its
@@ -67,8 +68,11 @@ SECOND FIX ROUND: the earlier rows' sends are exactly as without this file, the 
 lane's live list alone, as before, and never again because this file's names widened it; this file's names go to
 the gateway only in its own pass and send, after every earlier send of the tick. This file's work in a book tick is
 bounded at 30 s from the tick's start (`EIGHT_TICK_S`: its reads, its POST and its orders, each request's timeout
-ending by it), so a slow gateway never runs the 15:47 tick past 15:48:03 (which would skip the 15:48 tick and the
-earlier rows' A80 re-sends there); a buy of this file not sent in the tick its late pass planned it is refused
+ending by it). What that promises, and only that: this file's own work in the tick ends by about :33 whatever the
+gateway does, and the minute's later steps (the proof, the share lanes' windows, the exports, the fees read) keep the
+rest. It does not promise the 15:47 tick ends by 15:48:03: later steps that need more than the rest (a slow data host
+while share-lane exits are re-priced at 15:47) can still run it past and skip the 15:48 tick and the earlier rows' A80
+re-sends there, which they would not without this file's 30 s (a residual edge); a buy of this file not sent in the tick its late pass planned it is refused
 ("PREREG-EVL-8: not sent in the tick its late pass planned it"), never sent later. Watch: `eq_event_decisions`'
 `out` lines `event_decide_8` ("waits for the next tick" when a pass had under 10 s of the bound left).
 

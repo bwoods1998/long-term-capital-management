@@ -834,6 +834,31 @@ class TheRuns(Pinned):
             finally:
                 st.close()
 
+    def test_a_run_that_ends_in_tonights_looks_starts_tonight(self):
+        """Section 6.6's REGISTRATION ORDER (the judges' re-review of release 1019n): `screen8.run` starts its waiting
+        runs before AND after its looks, as PREREG-EVL-6's `screen.run` does, so a run that ends at its 60th block in
+        tonight's looks starts tonight when the budget holds it, never a night later behind a version registered after
+        this file (PREREG-EVL-7's learners' `judge7.start_runs`, later the same night)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                self.assertGreater(390 - S8.budget(st)["used"], 13, "the budget holds a fresh run")
+                ended = []
+
+                def looks(store, prog, today, *, now, draws=S8.B):
+                    if prog.id == "PX-DROP-ON" and not ended:      # (its run 1 reaches its 60th block in this job)
+                        store.set_meta(S8.END_KEY.format(program=prog.id, version=1, n=1),
+                                       json.dumps({"at": "2026-12-01T21:00:00Z", "last_day": "2026-12-01", "n": 1}))
+                        ended.append(prog.id)
+                    return {"written": [], "waiting": []}
+                with mock.patch.object(S8, "run_looks", looks):
+                    got = S8.run(st, dt.date(2026, 12, 1), now=S.parse_iso("2026-12-02T02:00:00Z"))
+                self.assertEqual(got["errors"], [])
+                self.assertEqual([(x["program"], x["n"]) for x in got["started"]], [("PX-DROP-ON", 2)])
+                self.assertEqual([r["n"] for r in S8.runs(st, P.BY_KEY[("PX-DROP-ON", 1)])], [1, 2])
+            finally:
+                st.close()
+
 
 # ================================================================================================ the meta-learners
 class TheMetaConstants(unittest.TestCase):
@@ -1574,6 +1599,47 @@ class TheSecrecy(WorldCase):
             self.assertNotIn(word, json.dumps([r["why"] for r in intents]))
         self.assertIn("META: EVL-META-O1 live/ok", report)
 
+    FREE = ("CTRL-PX-ALL-ON", "CTRL-PX-ALL-O1", "EVL-META-O1-POOL", "EVL-META-ON-POOL", "PLC-PX-ON-1")
+
+    def _settled(self, program: str, a: float, r: float, b: float) -> None:
+        """Five invented settled outcomes of `program` entering P's close, exiting D's open (a, r, b each)."""
+        for i in range(5):
+            event, cik = f"px:{program}:{P_DAY}:{8100 + i}", str(8100 + i)
+            self.w.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                                 "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, ?, ?, ?, 'x', ?, 'close', ?, "
+                                 "'open', NULL, 'shadow', 'exited', NULL)",
+                                 (program, event, f"F{i}", cik, P_DAY.isoformat(), D_DAY.isoformat()))
+            self.w.st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                                 "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, 1, "
+                                 "?, 20, 21, 'IWM', 1, 1, 7, 7, ?, ?, ?, 1, ?, 'settled')",
+                                 (program, event, r, b, a, S.iso(et(D_DAY, 9, 45))))
+
+    def test_this_files_free_records_are_reported_by_counts_only(self):
+        """Sections 3.2, 3.3, 7.1 and 10 (the judges' re-review of release 1019n): the PX controls, the META POOL records
+        and the placebos are free records whose figures the report never carries: a program row of one holds its
+        settled counts only (report.py `FREE_8_SETTLED_KEYS`), in the text and in the JSON house.py writes whole. An
+        earlier file's control with the same invented outcomes still shows its means (named: the scan has teeth)."""
+        for program in self.FREE:
+            self.assertTrue(RP.free_record_8(program), program)
+            self._settled(program, 0.0173913, 0.0234567, 0.0061)
+        for program in ("PX-DROP-ON", "EVL-META-O1", "EVL-CTRL-NEWS-ALL-O1"):
+            self.assertFalse(RP.free_record_8(program), program)
+        built = RP.build(self.w.st, D_DAY, now=et(D_DAY, 21))
+        rows = {p["program"]: p for p in built["programs"]}
+        for program in self.FREE:
+            self.assertEqual(tuple(rows[program]["settled"]), RP.FREE_8_SETTLED_KEYS, program)
+            self.assertEqual(rows[program]["settled"]["n"], 5)
+        text, data = RP.render(built), json.dumps(built, default=str)
+        for figure in ("0.0173913", "0.0234567", "0.0061", repr(0.0061 / 0.0234567)):      # (the last: market_share)
+            self.assertNotIn(figure, data)
+        for figure in ("+1.74%", "+2.35%"):
+            self.assertNotIn(figure, text)
+        self.assertIn("CTRL-PX-ALL-ON v1 (record)", text)
+        self._settled("EVL-CTRL-NEWS-ALL-O1", 0.0173913, 0.0234567, 0.0061)
+        built = RP.build(self.w.st, D_DAY, now=et(D_DAY, 21))
+        self.assertIn("0.0173913", json.dumps(built, default=str), "an earlier file's control is reported as before")
+        self.assertIn("+1.74%", RP.render(built))
+
     def _seed_state(self, prog):
         MT.ensure(self.w.st)
         days = [s.day for s in C.previous(self.w.st, D_DAY, 13)]
@@ -1615,6 +1681,34 @@ class TheSecrecy(WorldCase):
                                  "VALUES(?, ?, ?, 'n', 'NASDAQ', 20, 1e8, 'SPY', NULL)", (D_DAY.isoformat(), sym, cik))
             self.w.st.db.execute("INSERT INTO eligibility(day, cik, rule, eligible, symbol, decided_at) VALUES(?, ?, 'live', "
                                  "1, ?, ?)", (D_DAY.isoformat(), cik, sym, S.iso(et(D_DAY, 9, 15, 10))))
+
+
+class TheSitesLook(WorldCase):
+    def test_this_files_five_seats_show_no_prereg_evl3_look(self):
+        """Section 5 (the judges' re-review of release 1019n): the five seats are judged by THE PX SCREEN and THE META
+        SCREEN in settled session blocks from the 22nd block, never by PREREG-EVL-3's screen (section 5.1), so the
+        site's lane page (league/site_lane.py `read_programs`, lane_v1's `look` {need, to_go} in events) shows them
+        none, as it shows PREREG-EVL-6's versions and PREREG-EVL-7's learners none. Named: a seat this file did not
+        register, with the same countdown, shows it (the guard is what nulls theirs)."""
+        from league import site_lane as SL
+
+        lane = EB.Lane(self.w.st.root / S.DB_NAME)
+        self.addCleanup(lane.close)
+
+        def read() -> dict[str, dict]:
+            with mock.patch.object(SN, "next_look_v2", lambda *a, **k: {"k": 1, "events_needed": 60, "events": 0}):
+                return {r["id"]: r for r in SL.read_programs(lane, D_DAY)["programs"]}
+        seats = [p for p in P.rows_8() if p.seatable]
+        self.assertEqual(len(seats), 5)
+        rows = read()
+        for p in seats:
+            row = rows[SL.slug_of(p.id)]
+            self.assertEqual(row["band"], "learning", p.id)
+            self.assertIsNone(row["look"], p.id)
+        with mock.patch.object(P, "is_8", lambda program: False):
+            rows = read()
+        for p in seats:
+            self.assertEqual(rows[SL.slug_of(p.id)]["look"], {"need": 60, "to_go": 60}, p.id)
 
 
 class TheReportsCounts(WorldCase):

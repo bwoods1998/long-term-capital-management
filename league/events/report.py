@@ -224,6 +224,27 @@ def control_of_look(program: str, control: Any) -> Any:
     return {k: control.get(k) for k in EIGHT_CONTROL_KEYS}
 
 
+#: PREREG-EVL-8 SECTIONS 3.2, 3.3, 7.1 AND 10 (release 1019n's third fix round, the judges' re-review): THIS FILE'S FREE
+#: RECORDS (the PX controls CTRL-PX-ALL-ON and CTRL-PX-ALL-O1, the meta-learners' POOL records EVL-META-O1-POOL and
+#: EVL-META-ON-POOL, the placebos PLC-PX-*) are reported by COUNTS ONLY: section 10's PX block lists "the controls'
+#: counts", and a record's return, mean or look is never reported by figure. A program row of one carries only these
+#: keys of its settled record (never mean_a, mean_r, mean_a_tradable, mean_r_tradable, mean_b_tradable, market_share,
+#: late_share or any other figure).
+FREE_8_SETTLED_KEYS = ("n", "issuers", "entry_sessions", "sessions", "n_tradable", "issuers_tradable", "fallback_exits")
+
+
+def free_record_8(program: str) -> bool:
+    """Whether `program` (an id) is one of PREREG-EVL-8's free records (`FREE_8_SETTLED_KEYS`' comment): a row of this
+    file that never seats (its controls), a meta-learner's POOL record, or a placebo. Pinned or not."""
+    from . import meta as MT
+    from . import programs as P
+
+    pid = str(getattr(program, "id", program))
+    if any(p.id == pid and not p.seatable for p in P.ROWS_8):
+        return True
+    return pid in MT.POOL_OF.values() or pid.startswith("PLC-PX-")
+
+
 def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
                    left: Mapping[str, Mapping[str, set[str]]] | None = None) -> dict[str, Any]:
     today = {c: 0 for c in INTENT_CLASSES}
@@ -252,6 +273,8 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
     }
     mb = settled["mean_b_tradable"]
     settled["market_share"] = (mb / mean_r_t) if (mb is not None and mean_r_t) else None
+    if free_record_8(program):      # (PREREG-EVL-8 sections 3.2 and 10: a free record of this file, counts only)
+        settled = {k: settled[k] for k in FREE_8_SETTLED_KEYS}
     looks = SC.look_rows(store, program, version)
     last = looks[-1] if looks else None
     last_out = None
@@ -732,8 +755,11 @@ def render(report: Mapping[str, Any]) -> str:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)
         line = (f"{p['program']} v{p['version']}{'' if p['seatable'] else ' (record)'}: today p/e/s/x {today}; settled "
-                f"n {st['n']} (tradable {st['n_tradable']}), issuers {st['issuers']}, sessions {st['sessions']}, "
-                f"r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}")
+                f"n {st['n']} (tradable {st['n_tradable']}), issuers {st['issuers']}, sessions {st['sessions']}")
+        if "mean_r" in st:      # (a free record of PREREG-EVL-8 carries counts only: `FREE_8_SETTLED_KEYS`)
+            line += f", r {_pct(st['mean_r'])}, a {_pct(st['mean_a'])}, a tradable {_pct(st['mean_a_tradable'])}"
+        else:
+            line += " (counts only)"
         if p.get("band"):
             line += f"; band {p['band']}"
         ko = p.get("kept_out") or {}

@@ -951,15 +951,21 @@ def seating8() -> list[P.Program8]:
 def run(store: S.Store, today: dt.date, *, now: dt.datetime | None = None, draws: int = B) -> dict[str, Any]:
     """THE SCREEN'S PART FOR THIS FILE (the House's nightly screen and the screen after the open run it after
     screen.run): the fresh runs the budget holds start (`start_runs`), then each version in `learning` gets its run's
-    looks (`run_looks`). One version's failure is its own. {written, waiting, errors, started}."""
+    looks (`run_looks`), then the waiting runs the budget holds start again, as PREREG-EVL-6's `screen.run` starts its
+    own before and after its looks (section 6.6's REGISTRATION ORDER, the judges' re-review of release 1019n): a run
+    that ended at its 60th block in this job starts in this job when the budget holds it, never a night later behind
+    a version registered after it. One version's failure is its own. {written, waiting, errors, started}."""
     now = now or S.utc_now()
     out: dict[str, Any] = {"written": [], "waiting": [], "errors": [], "started": []}
     if not P.registers_8():
         return out
-    try:
-        out["started"] = start_runs(store, now)
-    except Exception as exc:  # noqa: BLE001 - the looks go on
-        out["errors"].append({"program": "runs", "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+
+    def start() -> None:
+        try:
+            out["started"] += start_runs(store, now)
+        except Exception as exc:  # noqa: BLE001 - the looks go on; started again at the next run
+            out["errors"].append({"program": "runs", "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    start()
     for prog in seating8():
         try:
             got = run_looks(store, prog, today, now=now, draws=draws)
@@ -969,6 +975,7 @@ def run(store: S.Store, today: dt.date, *, now: dt.datetime | None = None, draws
             continue
         out["written"] += got["written"]
         out["waiting"] += got["waiting"]
+    start()     # (a run that ended at its 60th block in this job starts when the budget holds it, as screen.run's)
     return out
 
 

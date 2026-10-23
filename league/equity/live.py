@@ -364,8 +364,12 @@ HELD_EARLIER = "earlier rows' buys still to go at this auction"
 #: takes `MINUTE_OFFSET` 3 s into the minute), and each of those requests' timeouts ends by then
 #: (`_timeout_at_most`), whatever the gateway does. live/step.py `_loop` waits for the next minute's :03 counted from
 #: when the tick ENDS, so a tick ending past it skips that minute (the close's 15:48 tick, the open's ticks before
-#: 09:27): with this bound this file never lengthens a minute into the next one, and every later step of the minute
-#: (the proof, the windows, the exports) keeps the rest of it. Every earlier row's send of the tick has gone before.
+#: 09:27). WHAT THE BOUND PROMISES, and only that: this file's own work in the tick ends by it (about :33), whatever the
+#: gateway does, and every later step of the minute (the proof, the share lanes' windows, the exports, the fees read)
+#: keeps the rest of it. It does not promise that the minute ends before the next :03: later steps that themselves need
+#: more than the rest (a slow data host while share-lane exits are re-priced at the 15:47 tick) can still end it past
+#: 15:48:03, which they would not without this file's 30 s (a residual edge, stated: the third fix round). Every
+#: earlier row's send of the tick has gone before.
 EIGHT_TICK_S = 30.0
 #: A late pass of this file starts only with this much of the tick's bound left (its reads, its POST and its sends need
 #: it); one that cannot start waits for the next tick inside the window (section 4.6: a late pass comes at a tick
@@ -5371,7 +5375,8 @@ class EquityBook:
                 # file". Every earlier row's buy of the tick (its first send, a retry, A80's re-send) goes BEFORE this
                 # file's late pass, whose reads (the picks' bars, the eligible list) it never waits for; this file's
                 # buys go after, in their own send. Its work is BOUNDED IN THE TICK (`EIGHT_TICK_S` from the tick's
-                # start, the second money review): it never lengthens the minute into the next one.
+                # start, the second money review): its own work ends by the bound (what the bound promises; see
+                # `EIGHT_TICK_S` for the residual edge of the minute's later steps).
                 if sending:
                     self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",), which="earlier")
                 bound = now + EIGHT_TICK_S

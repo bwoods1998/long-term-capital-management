@@ -2017,8 +2017,10 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   pass starts only with 10 s of it left (else the next tick inside the window). live/step.py `_loop` starts the next
   minute() at the next :03 counted from the tick's END, so without it a slow gateway at the 15:47 tick skipped the 15:48
   tick (the earlier rows' A80 re-sends there) and at the open a minute of sends; the minute's later steps (the proof,
-  the windows, the exports) keep the rest. The file's passes are planned only at a tick that sends (from 09:16 and
-  15:47).
+  the windows, the exports, the fees read) keep the rest. WHAT IT PROMISES (the third fix round): this file's own work
+  ends by the bound, nothing more; later steps that need more than the rest (a slow data host while share-lane exits
+  are re-priced at the 15:47 tick) can still end the minute past the next :03, which they would not without this file's
+  30 s (a residual edge, stated). The file's passes are planned only at a tick that sends (from 09:16 and 15:47).
 - **The eligible list** (sections 4.2-4.3, release 1019n's second money review; book.py `eligible`, `eligible_8`;
   `_event_publish`): `book.eligible` is the earlier rows' list alone (the lane's live rows, exactly release 1019l's),
   and every earlier path (the main pass, the learners' pass, the earlier sends) sends it when the gateway's copy is

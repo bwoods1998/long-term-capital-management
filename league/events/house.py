@@ -329,8 +329,9 @@ PX_NIGHT = (dt.time(21, 30), dt.time(7, 0))
 #: from the close - 30 minutes (never past the close - 17), and THE MORNING PASS `px-am:<D>` from 09:05 ET (PXU(D) written
 #: whole at its end; it resumes after the open decisions and runs until 15:30:00), each the lowest priority and
 #: YIELDING before each read or step to any other lane task due (`_eight_yield`; the night's bars `px-bars` too); THE OPEN
-#: RUN `decide-open-px8:<D>` (PX-GAP-O1's part, then EVL-META-O1's `decide-open-meta8:<D>`), the first task on the lane's
-#: live open receipt, 60 s from its start, never past 09:19:30; THE PX CLOSE RUN `decide-close-px8:<D>`, the lead's next
+#: RUN `decide-open-px8:<D>` (PX-GAP-O1's part, then EVL-META-O1's `decide-open-meta8:<D>` only when the PX part
+#: finished `ok`: else META's open is its catch-up's alone), the first task on the lane's live open receipt, 60 s from its
+#: start, never past 09:19:30; THE PX CLOSE RUN `decide-close-px8:<D>`, the lead's next
 #: task at or after the close decision time tau, ahead of every task due but PREREG-EVL-5's pre-pass while meta
 #: `evl5:pre:<D>` is not stored (no read sent after tau + 45 s, each read's timeout min(45 s, tau + 50 s - now), ended
 #: by tau + 55 s); inside the lead every record or verdict task started before tau is bounded to END BY tau (`_deadline`;
@@ -2432,8 +2433,13 @@ class EventLane:
         """THE OPEN RUN `decide-open-px8:<D>` on the lane's live open receipt (section 4.6), the first task after it:
         PX-GAP-O1's part (while the PX recorders are on) then EVL-META-O1's (`decide-open-meta8:<D>`), together at most
         60 s from its start and never past 09:19:30 ET, each read's timeout min(45 s, the bound - now); a part not
-        finished trades nothing at that open and is decided later as a catch-up. Its end, whatever each part's, is
-        marked for the book's open late pass (`RAN_KEY` "open")."""
+        finished trades nothing at that open and is decided later as a catch-up. A PX-GAP-O1 part not finished (cut,
+        failed, or not run live: anything but `ok`) gives EVL-META-O1 no member, and then THE META PART IS DECIDED ONLY
+        BY ITS CATCH-UP (section 4.6's open row, section 7.2): it is not run live here, so it is never traded and never
+        a judged block; `_eight_owed` schedules `decide-meta:open:<D>` once the open's window has passed. (With the PX
+        recorders off, `events.px_data` false, there is no PX part and META's part runs live with no PX member and no
+        `x:` expert: league/config.json's rollback.) Its end, whatever each part's, is marked for the book's open late
+        pass (`RAN_KEY` "open")."""
         st = ctx.store
         session = C.session(st, day)
         if session is None:
@@ -2442,12 +2448,15 @@ class EventLane:
         if self.now() >= until:
             return
         try:
+            px_ok = True
             if self.px_on:
                 got = self._eight_px(ctx, day, "o1", until, read_until=until)
-                if got.get("_status") not in (None, "ok"):
-                    self.warn("PX open run", f"{day.isoformat()}: {got.get('_status')} "
-                                             f"({got.get('cut') or got.get('error')})")
-            if self.now() < until:
+                px_ok = got.get("_status") == "ok"
+                if not px_ok:
+                    self.warn("PX open run", f"{day.isoformat()}: {got.get('_status') or 'not run'} "
+                                             f"({got.get('cut') or got.get('error') or got.get('skipped')}); "
+                                             f"EVL-META-O1's open is decided by its catch-up alone")
+            if px_ok and self.now() < until:
                 got = MT.decide(st, day, "o1", now=self.now, kind="live", late=lambda: self.now() >= until)
                 if got.get("_status") not in (None, "ok"):
                     self.warn("META open part", f"{day.isoformat()}: {got.get('_status')} "

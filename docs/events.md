@@ -793,7 +793,10 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   settlement read the print: the lane's marks, or px.sqlite's `px_marks` for a PX event; ONE READING for the state and
   the POOL, release 1019n's second fix round: while a tag ahead may still settle, the member is pending, never the next
   tag's outcome). EVL-META-O1 decides inside
-  the open run after PX-GAP-O1 (`decide-open-meta8:<D>`), EVL-META-ON on the lane's close receipt
+  the open run after PX-GAP-O1 (`decide-open-meta8:<D>`) ONLY WHEN PX-GAP-O1'S PART FINISHED `ok` (section 4.6's open
+  row, release 1019n's third fix round: a PX part not finished gives EVL-META-O1 no member, and then the META part is
+  decided only by its catch-up, never traded, never judged; house.py `_eight_open`; with `events.px_data` off there is
+  no PX part and META's part runs live with no PX member), EVL-META-ON on the lane's close receipt
   (`decide-close-meta8:<D>`, 15 s, never past the close - 11:20); catch-ups `decide-meta:<open|close>:<D>`, oldest
   first, once the lane's first finished decision of (D, X) is in. EVL-META-ON's 8-K guard is PREREG-EVL-7's E10 itself
   (book.py `meta_on_guard` calls `issuer_8k_guard`: every 8-K stored before tau, no upper bound on its knowable time,
@@ -805,7 +808,8 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   interface (`judge_blocks`, held equal to PREREG-EVL-6's own `screen.v6_judge` at CAP 14), with F4's CAP a constant
   (4 a PX run, 8 a META run, 14 a Probe stay, 8 a Sized stay), looks from the 22nd block, runs (never retirement by
   exhaustion), each run charged 0.13 when it starts and started only when the lane's budget (3.9) holds it, in
-  registration order. A META look's control is its POOL (meta.py `pool_record`: each LIVE decision's members eligible
+  registration order (`screen8.run` starts the waiting runs before and after its looks, as `screen.run` does, so a run
+  that ends at its 60th block in a night's looks starts that night). A META look's control is its POOL (meta.py `pool_record`: each LIVE decision's members eligible
   to pick, with their settled TRADABLE outcomes and the tag intent's scheduled `exit_day`, read as of the screen's own
   time), covered by scheduled exits as every control is; a run or stay look as of X waits while an intent of the
   version or of its control (a POOL member's outcome to come) scheduled to exit by X has not settled (PREREG-EVL-6
@@ -834,9 +838,14 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   this file's own pass and send (`_event_publish` `eight`, after every earlier send of the tick), and a list they
   widened never makes an earlier row POST again (kv `eq_event_list`'s `base`). (2) THE TICK'S BOUND: this file's work in
   a tick (its pass's account and bars reads, its POST, its sends) starts nothing at or after `EIGHT_TICK_S` (30 s) from
-  the tick's start and every request's timeout ends by it (`_timeout_at_most`), so it never runs the minute into the next
-  one (live/step.py `_loop` counts the next minute's :03 from the tick's end: the close's 15:48 tick and the open's ticks
-  are kept); a pass with less than `EIGHT_PASS_LEAST_S` (10 s) of it left waits for the next tick inside the window.
+  the tick's start and every request's timeout ends by it (`_timeout_at_most`). WHAT IT PROMISES: this file's own work
+  ends by the bound (about :33), and the minute's later steps (the proof, the share lanes' windows, the exports, the fees
+  read) keep the rest of it (live/step.py `_loop` counts the next minute's :03 from the tick's end). It does NOT promise
+  that the minute ends before the next :03: later steps that need more than the rest (a slow data host while share-lane
+  exits are re-priced at the 15:47 tick) can still end it past 15:48:03 and skip the 15:48 tick, which they would not
+  without this file's 30 s (a residual edge, stated in the third fix round). A pass with less than
+  `EIGHT_PASS_LEAST_S` (10 s) of it left waits for the next tick inside the window (the build's reading of section
+  4.6's "ticks inside the window" as chances, beside its reading of "sent in the same tick").
   (3) SENT IN THE SAME TICK: a buy of this file goes only in the tick its late pass planned it; one not sent there (the
   bound, the eligible list, a gate, or the room earlier rows' buys keep: `HELD_EARLIER`, sizing) is refused
   (`EIGHT_UNSENT`), never left waiting (section 4.2: this file does not use `live.HeldAhead`'s waiting room); a buy that
@@ -865,11 +874,14 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
 - THE REPORT AND THE ALARM: the daily report's PX and META lines (counts only, the auctions lost to a late morning pass,
   the share of each run's sessions decided live), the late passes that did not come (live.sqlite's own rows), a look
   of this file's versions with its control's name and block count only (`report.control_of_look`: a META look's POOL
-  is an mrl_* record, section 10's no-leaderboard test, the report's JSON included), the
+  is an mrl_* record, section 10's no-leaderboard test, the report's JSON included), THIS FILE'S FREE RECORDS by their
+  settled counts only (CTRL-PX-ALL-ON / -O1, the META POOL records, the placebos: `report.free_record_8`,
+  `FREE_8_SETTLED_KEYS`, never a mean, a share or any other figure: sections 3.2 and 10), the
   one-mechanism pairs beside Done's ">= 3 programs" line, and beside Done's issuer-block bound the session-block bound
   and the market-direction share; the stall cause `evl_price` (league/ops/evl_price.py: a part not decided live with
   whether its catch-up came, a recorder lagging, the placebo audit's alarm). The site names each of the seven rows
-  plainly (league/site_lane.py `NAMES`), never a sub-rule.
+  plainly (league/site_lane.py `NAMES`), never a sub-rule, and shows the five seats no PREREG-EVL-3 look countdown
+  (`look` null: they are judged in settled session blocks from the 22nd, section 5).
 
 ## Where it runs (shadow)
 
