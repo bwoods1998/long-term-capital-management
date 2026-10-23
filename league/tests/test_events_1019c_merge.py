@@ -10,6 +10,7 @@ import datetime as dt
 import tempfile
 import unittest
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import edgar as E
 from league.events import programs as P
@@ -27,6 +28,7 @@ def sec_pages_801(url):
     return page.replace(b"Item 2.02: Results", b"Item 8.01: Other Events") if url.endswith("-index.htm") else page
 
 
+@on_1019h
 class TheTallyLeavesAFrozenGroupOut(unittest.TestCase):
     MONDAY = dt.date(2026, 10, 19)
     AAA = ("0000000001-26-000001", "0000000001")       # accepted 07:05 ET Monday (sec_pages), items 8.01 here

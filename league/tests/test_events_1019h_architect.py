@@ -40,6 +40,8 @@ REPO = Path(__file__).resolve().parents[2]
 HAIKU = "claude-haiku-4-5-20251001"
 PROMPT_MINORS = "890806ff38f09b7e810cbbfef1159ca85f39d568105537d8eca4d7e60c022b06"
 PROMPT_1019H = "0cae215b0cebb21e9313d392e358c443a4d2caf06554e593f32fbaba8cfe6c21"
+#: (release 1019i: the prompt tells PREREG-EVL-6's restated charge, so its sha moved again with PARSE_VERSION 5)
+PROMPT_1019I = "1442a2a23637e66158ad01b072b2df85f4c6d9fa60b2d7640c8ff98226a6914e"
 
 
 def gateway_models() -> dict:
@@ -195,7 +197,7 @@ class TheCall(unittest.TestCase):
                        (self.AS_OF.isoformat(), PROMPT_MINORS, HAIKU, json.dumps({"specs": []})))
         gw = TB.FakeArchitect(json.dumps({"specs": [self.candidate("EVL-B-P1", ["1.02"])]}))
         got = BI.propose(st, gw, self.sheet(), night=self.AS_OF, now=self.now)
-        self.assertEqual((got["status"], len(gw.calls), got["prompt_sha"]), ("ok", 1, PROMPT_1019H))
+        self.assertEqual((got["status"], len(gw.calls), got["prompt_sha"]), ("ok", 1, PROMPT_1019I))
         self.assertEqual(st.db.execute("SELECT COUNT(*) FROM birth_calls").fetchone()[0], 2)
         tight = TB.FakeArchitect("{}")
         st.db.execute("DELETE FROM birth_calls WHERE model=?", (BI.MODEL,))
@@ -248,12 +250,12 @@ class TheFullestNight(unittest.TestCase):
 # ======================================================================================================== the version
 class TheVersion(unittest.TestCase):
     def test_the_model_is_in_the_shas_spec_so_the_sha_and_the_parse_version_moved(self):
-        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()), (4, PROMPT_1019H))
+        self.assertEqual((BI.PARSE_VERSION, BI.prompt_sha()), (5, PROMPT_1019I), "release 1019i's restated charge")
         from unittest import mock
         with mock.patch.object(BI, "MODEL", HAIKU):
-            self.assertNotEqual(BI.prompt_sha(), PROMPT_1019H, "the model alone moves the sha")
+            self.assertNotEqual(BI.prompt_sha(), PROMPT_1019I, "the model alone moves the sha")
         with mock.patch.object(BI, "EFFORT", "medium"):
-            self.assertNotEqual(BI.prompt_sha(), PROMPT_1019H, "so does the effort")
+            self.assertNotEqual(BI.prompt_sha(), PROMPT_1019I, "so does the effort")
 
     def test_a_night_read_at_version_3_is_due_its_one_rerun_before_its_cutoff(self):
         import tempfile

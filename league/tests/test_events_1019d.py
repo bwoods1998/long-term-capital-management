@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import report as RP
 from league.events import run as R
@@ -69,6 +70,7 @@ class Case(unittest.TestCase):
         return str(row["status"]), json.loads(row["summary"])
 
 
+@on_1019h
 class ALookFreezesAPreregFourGroup(Case):
     def test_a_whole_redecision_keeps_the_group_and_decides_every_other(self):
         """A look of EVL-8K-READ-ON over D: a whole re-decision of D's close keeps it and its control (both asked and
@@ -165,6 +167,7 @@ class RefusingGateway(W.Gateway):
         return super().post_json(path, body, headers)
 
 
+@on_1019h
 class TheTallyCountsPreregFour(unittest.TestCase):
     def test_a_wait_of_its_rows_reaches_the_stall_jobs_tally(self):
         """CCC's 1.01 8-K on D: EVL-8K-READ-ON waits for its PROMPT-DOC verdict, which Claude refuses. The close

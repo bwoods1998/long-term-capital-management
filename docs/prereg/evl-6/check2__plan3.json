@@ -1,0 +1,233 @@
+{
+ "cells": [
+  {
+   "lab": "H|N3|both|AR20|phi0.15",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.15
+   },
+   "R": 2000,
+   "seed0": 93000000,
+   "old": false
+  },
+  {
+   "lab": "H|N3|both|AR20|phi0.2",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.2
+   },
+   "R": 2000,
+   "seed0": 93000100,
+   "old": false
+  },
+  {
+   "lab": "H|N3|both|AR20|phi.25|rho.05",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.05,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 93000200,
+   "old": false
+  },
+  {
+   "lab": "H|N3|dayskew|nodrift|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 93000300,
+   "old": false
+  },
+  {
+   "lab": "H|N3|sym|AR20|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 93000400,
+   "old": false
+  },
+  {
+   "lab": "H|N3|sym|nodrift|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 93000500,
+   "old": false
+  },
+  {
+   "lab": "H|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 30,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 93000600,
+   "old": true
+  },
+  {
+   "lab": "H|N3|dayskew|AR20r.99",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "jump_left": 0.5,
+    "drift_sd": 0.002,
+    "drift_rho": 0.99
+   },
+   "R": 2000,
+   "seed0": 93000700,
+   "old": false
+  },
+  {
+   "lab": "H|N3|sym|AR20r.99",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "drift_sd": 0.002,
+    "drift_rho": 0.99
+   },
+   "R": 2000,
+   "seed0": 93000800,
+   "old": false
+  },
+  {
+   "lab": "I|N3|both|AR20",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002
+   },
+   "R": 2000,
+   "seed0": 94000000,
+   "old": false
+  },
+  {
+   "lab": "I|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 94000100,
+   "old": false
+  },
+  {
+   "lab": "I|N3|crash10|nodrift",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash10",
+    "jump_left": 0.5
+   },
+   "R": 2000,
+   "seed0": 94000200,
+   "old": false
+  },
+  {
+   "lab": "I|N3|both|AR20|lam.005",
+   "gen": {
+    "nbar": 85,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "lam": 0.005
+   },
+   "R": 2000,
+   "seed0": 94000300,
+   "old": false
+  },
+  {
+   "lab": "I|N3|both|AR20|phi.25",
+   "gen": {
+    "nbar": 8,
+    "rho_day": 0.15,
+    "skill": 0.006,
+    "mu_family": -0.006,
+    "day": "crash",
+    "ev_left": 1.4,
+    "ev_right": 0.6,
+    "jump_left": 0.8,
+    "drift_sd": 0.002,
+    "phi_day": 0.25
+   },
+   "R": 2000,
+   "seed0": 94000400,
+   "old": false
+  }
+ ]
+}

@@ -448,6 +448,9 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
                                 "net_usd": None if per_event is None else round(shown - per_event * len(rows), 2)})
         look = status.get("next_look") or {}
         needed, have = _num(look.get("events_needed")), _num(look.get("events"))
+        # (release 1019i, PREREG-EVL-6: its versions' looks are counted in settled session BLOCKS, by run or stay)
+        blocks = "blocks_needed" in look
+        b_need, b_have = _num(look.get("blocks_needed")), _num(look.get("blocks"))
         mean_b = _num(settled.get("mean_b_tradable"))
         programs.append({
             "id": prog.id, "version": prog.version, "band": str(status.get("band") or "learning"),
@@ -457,6 +460,9 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
             "net_usd": None if not mine or per_event is None else round(sum(e["pnl"] for e in mine) - per_event * len(mine), 2),
             "by_band": by_band, "next_look": look.get("k"),
             "events_to_go": None if needed is None or have is None else int(max(0.0, needed - have)),
+            "look_unit": "blocks" if blocks else "events",
+            "blocks_to_go": None if b_need is None or b_have is None else int(max(0.0, b_need - b_have)),
+            "look_of": f"{look['kind']} {int(look['n'])}" if blocks and look.get("kind") in ("run", "stay") else None,
             "market_share_pct": _round(None if settled.get("market_share") is None else 100 * float(settled["market_share"]), 0),
             "bench_mean_bp": _round(None if mean_b is None else mean_b * 1e4, 1),
             "buy_hold_usd": holds[key]["usd"], "buy_hold_why": holds[key]["why"]})
@@ -488,6 +494,13 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
         "buy_hold": {"usd": round(sum(hold_known), 2) if hold_known else None,
                      "why": None if hold_known else "n/a until real fills"},
         "expected_false_passes": _round(efp.get("expected"), 2), "seatable_versions": int(efp.get("versions") or 0),
+        # (release 1019i, PREREG-EVL-6 section 5: the count three ways and the per-version figure beside it; an older
+        # gateway reads the two keys above and ignores this one)
+        "false_passes": {"count": _round(efp.get("expected"), 2), "charge": _round(efp.get("charge"), 2),
+                         "versions": int(efp.get("versions") or 0), "runs": int(efp.get("runs") or 0),
+                         "waiting": int(efp.get("waiting") or 0), "budget": _round(efp.get("budget"), 2),
+                         "left": _round(efp.get("left"), 2), "base": _round(efp.get("base"), 2),
+                         "stress": _round(efp.get("stress"), 2), "per_version": _round(efp.get("per_version"), 2)},
         "alarms": sorted(str(a) for a in (alarms or [])),
         "entries": entries,
         "break_even": break_even(ledger, probe, on, now),

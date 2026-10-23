@@ -98,7 +98,7 @@
  "programs": [
   {
    "id": "EVL-ERN-READ-O1",
-   "version": 2,
+   "version": 3,
    "band": "learning",
    "intents": 9,
    "shadow_tradable": 38,
@@ -114,7 +114,10 @@
     }
    ],
    "next_look": 1,
-   "events_to_go": 22,
+   "events_to_go": null,
+   "look_unit": "blocks",
+   "blocks_to_go": 19,
+   "look_of": "run 1",
    "market_share_pct": 35.0,
    "bench_mean_bp": 4.1,
    "buy_hold_usd": 0.42,
@@ -122,7 +125,7 @@
   },
   {
    "id": "EVL-INS-BUY-O1",
-   "version": 2,
+   "version": 3,
    "band": "probe",
    "intents": 4,
    "shadow_tradable": 61,
@@ -138,7 +141,10 @@
     }
    ],
    "next_look": 2,
-   "events_to_go": 29,
+   "events_to_go": null,
+   "look_unit": "blocks",
+   "blocks_to_go": 3,
+   "look_of": "stay 1",
    "market_share_pct": -12.0,
    "bench_mean_bp": -2.5,
    "buy_hold_usd": null,
@@ -154,8 +160,20 @@
   "usd": 0.42,
   "why": null
  },
- "expected_false_passes": 0.9,
- "seatable_versions": 9,
+ "expected_false_passes": 1.95,
+ "seatable_versions": 15,
+ "false_passes": {
+  "count": 1.95,
+  "charge": 0.13,
+  "versions": 15,
+  "runs": 0,
+  "waiting": 0,
+  "budget": 3.9,
+  "left": 1.95,
+  "base": 0.45,
+  "stress": 2.55,
+  "per_version": 0.24
+ },
  "alarms": [
   "cap_breach",
   "evl_verdicts"

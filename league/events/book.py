@@ -332,6 +332,70 @@ def round_up(band: str | None, target: Decimal, limit: Decimal, whole: Decimal, 
     return None
 
 
+def under_bar(band: str | None, target: Decimal, limit: Decimal, walls: Decimal, *,
+              bar: Decimal | str | None = None) -> bool:
+    """PREREG-EVL-6 SECTION 6, CLAUSE 2 (A99): "A Probe or Sized buy takes the fewest whole shares whose value at the
+    limit reaches 0.8 of its band's target ... It is never above 5% of equity at Probe, nor above the name's 10% wall at
+    Sized ... A pick that no such count reaches is skipped before it takes a slot; the shadow keeps it." True when NO
+    whole-share count reaches the bar inside the band's frozen envelope: the fewest whole shares n >= 1 whose dollars
+    at the limit reach `bar` x `target` (the Done reader's own `at_size` at the row in force) cost more than
+    `envelope_share(band)` x `walls` (Probe 5%, Sized 10%, the walls' equity). False at learning, with the round-up's
+    row at 0 (S2's switch off: no at-size buy), or when the figures are not positive (the caller's other rules judge
+    them). The caller (league/equity/live.py `_event_gate`) skips such a pick at the decision as `under_bar`, for the
+    versions PREREG-EVL-6 judges (`Program.evl6`) alone: release 1019h's S2 (`round_up`) buys a floored buy under the
+    bar as it is when no round-up fits, and skips nothing before a slot."""
+    if str(band) not in PROBE_UP:
+        return False
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return False
+    target, limit, walls = (Decimal(str(v)) for v in (target, limit, walls))
+    if not (target > 0 and limit > 0 and walls > 0):
+        return False
+    cap = envelope_share(band)
+    if cap is None:
+        return False
+    return _fewest(target, limit, share) * limit > cap * walls
+
+
+def _fewest(target: Decimal, limit: Decimal, share: Decimal) -> Decimal:
+    """The fewest whole shares n >= 1 whose dollars n x `limit` reach `share` x `target` by the Done reader's own float
+    comparison (`at_size`), for positive figures and a share above 0."""
+    n = max(Decimal(1), (share * target / limit).to_integral_value(rounding=ROUND_CEILING) - 1)
+    while not at_size(target, n * limit, share):
+        n += 1
+    return n
+
+
+def at_size_count(band: str | None, target: Decimal, limit: Decimal, walls: Decimal, *,
+                  bar: Decimal | str | None = None) -> Decimal | None:
+    """PREREG-EVL-6 SECTION 6, CLAUSE 2 (A99), THE COUNT OF A PROBE OR SIZED BUY of a version it judges: "a Probe or
+    Sized buy takes the FEWEST whole shares whose value at the limit reaches 0.8 of its band's target ... never above 5%
+    of equity at Probe, nor above the name's 10% wall at Sized, and that ask is judged again by every cap". The fewest
+    whole shares n >= 1 whose dollars at `limit` reach `bar` x `target` (the Done reader's own `at_size` at the row in
+    force; `bar` None: the band's `reach_bar` row), when n x limit is at most `envelope_share(band)` x `walls` (Probe 5%,
+    Sized 10%, the walls' equity: so n <= floor(5% E / limit) at Probe, PREREG-EVL-1 section 8's own count); None when
+    no such count fits (`under_bar`: the pick is skipped before it takes a slot), at learning, with the band's row at 0
+    (S2's switch off: no at-size buy), or when the figures are not positive. It is never release 1019h's floor of the
+    target: a buy the floor would take to 13 shares at $5.00 of a $66.43 target takes 11 ($55.00 reaches $53.144), the
+    reading of the text's words, which trades less. The caller (league/equity/live.py `_size_event`) asks `size_entry`
+    for n x limit and buys n only when every cap gives all n; a cap that cuts the ask under the bar skips the buy (the
+    reading that trades less, section 7)."""
+    if str(band) not in PROBE_UP:
+        return None
+    share = settings().reach_bar(str(band)) if bar is None else Decimal(str(bar))
+    if not share > 0:
+        return None
+    target, limit, walls = (Decimal(str(v)) for v in (target, limit, walls))
+    if not (target > 0 and limit > 0 and walls > 0):
+        return None
+    cap = envelope_share(band)
+    if cap is None:
+        return None
+    n = _fewest(target, limit, share)
+    return None if n * limit > cap * walls else n
+
+
 def most_ask(s: "Settings", band: str | None, E: Decimal) -> Decimal:
     """THE MOST A BUY OF `band` MAY ASK at equity `E` before its figures are read (league/equity/live.py
     `_event_keep_room`'s keep when a sizing figure cannot be read this minute: the reading that keeps more): its target,
@@ -427,11 +491,20 @@ class Settings:
     #: A100; `round_up`): a share of the band target, 0.8 in force (the Done reader's `PROBE_SIZE_SHARE`). Empty (0 for
     #: every band) when unread: no round-up, release 1019f's floor rounding.
     reach_bars: Mapping[str, Decimal] = dataclasses.field(default_factory=dict)
+    #: PREREG-EVL-6 SECTION 6's PROBE SLOTS (`event.max_open_v6`, release 1019i, the captain's A99 and A100): read only
+    #: for the versions registered at or after REGISTERED_AT_6 (`max_open`'s `program`, league/events/programs.py
+    #: `Program.evl6`). Empty when unread (the table's FALLBACK: nothing opens anyway).
+    max_opens_v6: Mapping[str, int] = dataclasses.field(default_factory=dict)
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
 
-    def max_open(self, band: str) -> int:
+    def max_open(self, band: str, program: Any = None) -> int:
+        """The open positions a program may hold at `band`: `event.max_open` (learning 8, Probe 6, Sized 8), and for a
+        version registered at or after REGISTERED_AT_6 (`program.evl6`: PREREG-EVL-6 section 6, A100's row read by the
+        version's registration time) at Probe `event.max_open_v6.probe` (14)."""
+        if program is not None and getattr(program, "evl6", False) and str(band) in self.max_opens_v6:
+            return int(self.max_opens_v6[str(band)])
         return int(self.max_opens.get(str(band), 0))
 
     def reach_bar(self, band: str) -> Decimal:
@@ -469,7 +542,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             sigma_sessions=int(e["open_risk"]["sigma_sessions"]),
             offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
             max_orders_day=int(e["max_orders_day"]),
-            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP})
+            reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP},
+            max_opens_v6={band: int(n) for band, n in dict(e["max_open_v6"]).items()})
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
@@ -965,6 +1039,12 @@ def held_recently(lane: Lane, program: P.Program, cik: str, day: dt.date) -> boo
     row = lane.db.execute("SELECT 1 FROM intents WHERE program=? AND version=? AND cik=? AND status NOT LIKE 'skipped%' "
                           "AND exit_day>=? AND entry_day<? LIMIT 1",
                           (program.id, program.version, str(cik), since.isoformat(), day.isoformat())).fetchone()
+    if row is None:
+        # PREREG-EVL-6 section 1.1 (D12): a new version's one position per issuer counts the superseded version's
+        # intents of every session decided BEFORE THE RELEASE too (league/events/programs.py `superseded_held`), as
+        # its shadow does; never one the superseded version writes from the release on
+        row = P.superseded_held(lane, program, str(cik), since.isoformat(),
+                                (day - dt.timedelta(days=1)).isoformat())
     return row is not None
 
 
@@ -1371,7 +1451,8 @@ def prereg_row(program: str, version: int) -> bool:
 def room_free_overdue(program: str, version: int) -> bool:
     """PREREG-EVL-5 section 1.3's WAITING ROOM ONCE THE LANE'S CLOSE RECEIPT IS OVERDUE (THE CAPTAIN'S DECISION on the
     money re-review of PREREG-EVL-5, its option 1; release 1019h; league/equity/live.py `HELD_OVERDUE_S`, `HeldAhead`):
-    True for a row of PREREG-EVL-1 to -4 (version 1 or 2 of the earlier files' programs, PREREG-EVL-4's rows), whose buy
+    True for a row of PREREG-EVL-1 to -4 (any version of the earlier files' programs and of PREREG-EVL-4's rows: their
+    PREREG-EVL-6 versions keep their file, `Program.prereg`), whose buy
     a waiting PREREG-EVL-5 buy no longer keeps its room from once the lane's close receipt is still unfinished one book
     minute before the close window's cut-off; False for PREREG-EVL-5's own rows, R3's births (the room is still kept
     from them) and a program this process does not know (the reading that keeps the room)."""
@@ -1457,3 +1538,5 @@ __all__ += ["PROBE_UP", "RESERVE_DECISIONS", "reservation", "send_key", "ROUND_R
             "leaves_room"]
 #: (release 1019h, the captain's A97: S2's round-up to Done's size bar inside PREREG-EVL-1 section 8's envelope)
 __all__ += ["envelope_share", "at_size", "round_up", "most_ask"]
+#: (release 1019i: PREREG-EVL-6 section 6's skip of a pick no whole-share count brings to Done's size bar)
+__all__ += ["under_bar", "at_size_count"]

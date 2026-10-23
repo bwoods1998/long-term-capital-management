@@ -33,12 +33,89 @@ The running House release is `20261022T053527Z-05c3dc2f4422` (release 1019g, mai
 (release 1019b, main `3230a884`, #574, 21:00Z Oct 19). The gateway is `354aeab2` (05:34:42Z Oct 22, release 1019g's;
 before it `68363043`, 21:15Z Oct 21, release 1019e's, and `fccaf9da`, 20:05Z Oct 21, release 1019d's), and the box's
 updater is on. The money digest in force is `c2f0a478` and the constitution `24f73f18` (release 1019f's pair, A86
-REVISED's two Probe rows). What is built and not deployed is on branches (release 1019h, below). The owner's goal of
+REVISED's two Probe rows). What is built and not deployed is on branches (releases 1019i and 1019h, below). The owner's goal of
 Oct 19, 2026 funds one lane, the event lane (EVL): its rules are [docs/prereg/PREREG-EVL-1.md](docs/prereg/PREREG-EVL-1.md)
-to [PREREG-EVL-5.md](docs/prereg/PREREG-EVL-5.md), its page is [docs/events.md](docs/events.md). It runs on the House
+to [PREREG-EVL-6.md](docs/prereg/PREREG-EVL-6.md) (PREREG-EVL-6's code is release 1019i's, below), its page is [docs/events.md](docs/events.md). It runs on the House
 since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and stays on the captain's workstation as the
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
+
+### Release 1019i: PREREG-EVL-6, one money-weighted session-block screen for every seat (A116), on `feat/evl-6` (unreleased; cut from `rel/1019h` `59663f06`; a draft PR with base `rel/1019h`; an owner deploy after release 1019h or with it (this head carries it): THE GATEWAY FIRST (`gateway/lib/email.mjs`: a PREREG-EVL-6 version's look in blocks and the restated false-pass line; an older gateway prints the old line), THEN THE HOUSE by the captain's ship script with THE NEW PAIR `d52a5af5` / `9c8b2221`; from 20:05Z on a trading day or the weekend, BEFORE THE OCT 28 CLOSE (A116); never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `8e63ce64` -> `d52a5af5` AND THE CONSTITUTION `c3026eba` -> `9c8b2221` (section 6's one row, `equity_money.event.max_open_v6.probe` 14, bound ('0', '14'), alone in its commit), so the standing grant re-ratifies at the House's start; the new slots' own switch (`max_open_v6.probe` 0) `51625225` / `f288d8ec`; S2's switch `96d986c9` / `8f9abf99`; the rollback pair with `equity_money.event.enabled` False `f87d7342` / `134d6285`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract `397b22b7` and the Done rule `54241925` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; THE BIRTHS PROMPT'S SHA MOVES `0cae215b` -> `1442a2a2` WITH `births.PARSE_VERSION` 4 -> 5; the full rollback is to release 1019h)
+
+[PREREG-EVL-6](docs/prereg/PREREG-EVL-6.md) (registered 2026-10-22T12:24:50Z, tag `prereg-evl-6`, commit `4ae9017a`,
+sha256 `0f67f94e`) and its calibration ([docs/prereg/evl-6/](docs/prereg/evl-6/SHA256SUMS), synthetic only) are
+copied from the tag byte for byte; the frozen text wins over every other document. As built, each item held by tests
+that fail without it (league/tests/test_events_evl6.py; league/tests/test_events_evl6_calib.py runs the shipped
+calib_v2.py's and demotion_v2.py's own synthetic arrays through this code):
+
+- **THE NEW VERSIONS** (section 1.1; league/events/programs.py): version 3 of the nine, version 2 of PREREG-EVL-4's and
+  -5's three (`Program.regfile` 6, registered at `REGISTERED_AT_6`, each the superseded version's row word for word)
+  and version 2 of every seatable birth registered before REGISTERED_AT_6 (`with_versions_6`, at load); each is its
+  id's SEATING version and ROOM's order is the ids' order, unchanged. A birth registered after REGISTERED_AT_6 is judged
+  by PREREG-EVL-6 at its version 1. THE D7 GUARD (league/events/bands.py `superseded_guard`): no PREREG-EVL-3 look of a
+  superseded version written or as of a close from REGISTERED_AT_6 moves a band; its looks are still written.
+- **THE RECORD BEFORE THE RELEASE (D8) AND D12**: THE RELEASE is the House lane's first turn under this code (meta
+  `evl6:release`, written once, by the CLI's `catchup` too; no mark reads every session as before it). A session
+  decided before it is copied for the new version from the superseded version's intents (`copy_before_release`, with
+  its skips, a later skip following; the decision receipts' summaries name the new version, league/events/run.py
+  `_copied`); the House copies hourly and no look reads a session not yet copied. From the release on a new version
+  is decided by itself, and its one-position-per-issuer and cooldown rules count its own intents and the superseded
+  version's of the sessions decided before the release (D12: `superseded_held`, in the shadow and in the book's
+  `held_recently`). The judge reads a session decided after the release as made for a new version only when its
+  receipt names it (`screen.final_until`).
+- **THE SCREEN AND ITS RUNS** (sections 1.2-2; league/events/screen.py): session blocks, y_s = min(n_s, 14) x (B_s -
+  0.0010), the exact sign-flip p to 16 blocks and 99,999 seeded vectors above, the lower tail q, the issuer guard p_I;
+  looks at 22/25/30/35/40/50/60 blocks with the minimums, merged thresholds, alpha 0.020/0.006/0.001; RETIRE before PASS;
+  PASS moves learning to Probe in the look's transaction. A run's 60th block ends it; run n + 1 starts only when the
+  lane's budget holds its 0.13 (registration order, after every run waiting). Reproduced exactly: calib_v2's p, q and
+  first decisions (run 2 included) on its own synthetic cells.
+- **THE STAYS** (section 3; bands.py `review6`): the fixed reads every 100th real-money Probe+ event (p <= 0.15), the
+  money stop (net under -10% of the stay's buy cost), the stay's look (its lower tail demotes; its PASS with the real
+  conditions moves Probe to Sized), in that order at each close once THAT close's real-money events have settled,
+  whether or not the close is final: only the look waits for finality, held as of its close once final (that close's
+  reads and stop judged again first), and an older event still unsettled never holds a later close (the stop and the
+  reads count the stay's settled events so far); reproduced exactly: demotion_v2's demotions, their reasons and the
+  Sized moves on its own synthetic cells. A real-money event unsettled `STUCK_AFTER` (6 = `LADDER_CLOSES` + 1)
+  sessions after its scheduled exit no longer holds its own close, and the House holds that version's new Probe and
+  Sized buys while its lot is held, with an error alert once a session (live.py `_event_unsettled`).
+- **THE MONEY** (section 6): the money row above, read for PREREG-EVL-6's versions alone (`book.Settings.max_open(band,
+  program)`); `max_open.probe` stays 6; a Probe or Sized pick of these versions that no whole-share count brings to
+  Done's size bar inside the frozen envelope is skipped `under_bar` before it takes a slot, and a buy that remains
+  takes THE FEWEST whole shares that reach the bar (`book.at_size_count`, clause 2's words: 11 shares at $5.00 of a
+  $66.43 target where release 1019h's floor took 13), asked of `size_entry` so every cap judges them; a cap that cuts
+  the ask under the bar refuses the buy (the reading that trades less). The seat counts the
+  superseded version's open lots (league/equity/live.py `_event_seat_keys`), and the band sync retires the superseded
+  seat's instance. THE PROOF: an invented week decided with and without the change gives identical real-money picks
+  while no version is promoted, the release before the week and inside it.
+- **THE COUNT** (section 5): `screen.expected_false_passes` and the births validator read 0.13 a version, birth or
+  fresh run and the restated 3.9: 1.95 used by the fifteen new versions, 0 for a superseded one, with the base model's
+  and the stresses' figures and the per-version 0.24 beside it; a seatable birth only when 0.13 fits after every run
+  waiting. The prompt states the charge (`<<CHARGE>>`), so `PARSE_VERSION` is 5.
+- **THE REPORT, THE SITE AND THE ALARMS**: the lane's report and the daily report name the new versions, their looks in
+  blocks (run or stay) and the restated count; per run and per version figures; `site_lane` keeps `lane_v1` (a
+  PREREG-EVL-6 version's look is null there; its real counts include its superseded version's); evl_health watches the
+  new versions' looks and counts `under_bar` skips.
+- **RELEASE 1019h's RE-REVIEW MINORS** (births.py, house.py): a births call's row is written before the call (status
+  `asked`, its worst case counted) and settled after it, any exception after the send stored `lost`; the night's
+  reconcile after the call; `BIRTHS_BUDGET` 300 s; the lane client's stream room is its limit plus two gaps.
+- **READINGS FOR THE CAPTAIN TO RECORD AS AMENDMENTS** (section 7: fixed before the new versions' first look, the
+  earliest at a version's 22nd block, about Nov 20; release 1019i's review): (1) section 6 clause 2's at-size buy is
+  the literal fewest whole shares that reach the bar, and a cap that cuts that ask under the bar skips the buy (the
+  reading that trades less); (2) section 3's "once that session's real-money events have settled" is read per close: a
+  close waits for the events scheduled to exit at it alone, and an older one still unsettled counts in the reads and
+  the money stop once it settles (the reading that demotes more); (3) a real-money event still unsettled
+  `STUCK_AFTER` sessions after its scheduled exit no longer holds its close, and its version's new Probe and Sized
+  buys are held while its lot is held, with an error alert (the reading that trades less).
+
+Tests (on the fix round's code, `1e4df440` with its docs): the full suite on Python 3.14 in six shards, 13,152 tests in
+486 modules, all passing (33 skipped); the event, equity, live, CI, constitution, ops, daily report, site, alarms and
+Done modules (124 modules, 3,227 tests) on 3.11 in six shards, all passing but `test_equity_fx_daily`'s 9 when it runs
+after `test_equity_design` in one shard, a module-order artifact the tree had before this release (so on `14a7d6e0` and
+with release 1019h's test helper too), passing when run alone on 3.11 and 3.14 (55 tests); PREREG-EVL-6's own 61
+(test_events_evl6.py, test_events_evl6_calib.py; 8 from the fix round); `python -m league.ci --base origin/main
+--branch feat/evl-6 --no-tests` passed. The gateway did not change in the fix round (its `npm run check` and 507 tests
+passed on `adbecd06`). Identities read with the tree's own functions on 3.14 and 3.11 (`rel/1019h` -> this head): as in
+the heading; the fix round moves none of them.
 
 ### Release 1019h: Done speed, release 1019g's minors, the births architect on Opus 5.5 (the captain's A97, A100, A113 and A109), on `rel/1019h` (unreleased; cut from `fix/1019h-minors` `8e83ad1b` (PR 598, reviewed ship), which was cut from `feat/done-speed` `88ecf37f` (PR 597, reviewed ship: cut from `rel/1019g` `5e2bd57b`, then `rel/1019g`'s head `b374d862` merged in), then A109 on top and origin/main merged with rerere off (`b374d862`, already in: main fast-forwards to the release); a draft PR with base main; an owner deploy after release 1019g, which is live: THE GATEWAY FIRST (`gateway/lib/email.mjs`, feat/done-speed's report composer: the Done supply line's words; an older gateway ignores the new fact), THEN THE HOUSE by the captain's ship script with THE NEW PAIR `8e63ce64` / `c3026eba`; from 20:05Z Oct 22 or the weekend, before the first possible promotion; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2, never with an order in flight, CI green on the exact head; THE MONEY DIGEST MOVES `c2f0a478` -> `8e63ce64` AND THE CONSTITUTION `24f73f18` -> `c3026eba` (S2's two money rows, `equity_money.event.reach_bar.probe` and `.sized`, alone: A100; the minors and A109 move neither), so the standing grant re-ratifies at the House's start; S2's instant rollback is the round-up's own switch (both rows "0") `adf52674` / `fe5d87b7`; the rollback pair with `equity_money.event.enabled` False `973aa2e9` / `3e8cf1c8`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc` and the gate contract `397b22b7` do not move, read with the tree's own functions on 3.14 and 3.11 before and after; THE BIRTHS PROMPT'S SHA MOVES `8294fe77` -> `0cae215b` WITH `births.PARSE_VERSION` 2 -> 4 (SUP-3's `890806ff` at 3, A109's architect at 4; 3 was never live); the Done rule `54241925` is untouched; the full rollback is to release 1019g, `b374d862`)
 
@@ -3726,7 +3803,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `8e63ce64`, full digest `c3026eba` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba9e6341` / `50f572ae`.
+Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
 <!-- equity-design:end -->
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over

@@ -55,6 +55,16 @@ class Lane:
         self.root = self.state / "events"
         self.st = S.Store(self.root)
         self.n = 0
+        # (release 1019i: the weekday calendar, 09:30-16:00 ET, which PREREG-EVL-6's review walks a stay's closes by)
+        day = dt.date(2026, 9, 1)
+        with self.st.tx() as db:
+            while day <= dt.date(2027, 1, 31):
+                if day.weekday() < 5:
+                    ny = dt.timezone(dt.timedelta(hours=-5 if day >= dt.date(2026, 11, 1) else -4))
+                    db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                               (day.isoformat(), S.iso(dt.datetime.combine(day, dt.time(9, 30), tzinfo=ny)),
+                                S.iso(dt.datetime.combine(day, dt.time(16, 0), tzinfo=ny))))
+                day += dt.timedelta(days=1)
 
     def close(self) -> None:
         self.st.close()
@@ -258,14 +268,16 @@ class WhatCounts(DoneCase):
                          "the band review's current stay is its own (bands.py), never the count's")
 
     def test_a_demoted_stays_losers_stay_in_the_count_and_done_does_not_hold(self):
-        """The review's case: A's first Probe stay (50 losers at -5%) is demoted by the House's own review, a passed
-        look returns A to Probe, then A, B and C win 100 each. Checkpoint 300 reads the 50 losers first."""
+        """The review's case: A's first Probe stay (50 losers at -15%) is demoted by the House's own review (PREREG-EVL-6
+        section 3's money stop over the whole stay: its net loss is above 10% of its buy cost from its first close; the
+        seats are PREREG-EVL-6's versions from release 1019i), a passed look returns A to Probe, then A, B and C win
+        100 each. Checkpoint 300 reads the 50 losers first."""
         lane = self.lane
         a, b, c = SEATING[:3]
         for prog in (a, b, c):
             lane.promote(*prog)
         for i in range(50):
-            lane.event(*a, FIRST_DAY + dt.timedelta(days=i // 10), r=-0.05)
+            lane.event(*a, FIRST_DAY + dt.timedelta(days=i // 10), r=-0.15)
         moved = BA.review(lane.st, now=dt.datetime(2026, 11, 7, 1, tzinfo=UTC))
         self.assertEqual([m["program"] for m in moved], [a[0]], "the House's own review demotes A")
         lane.promote(*a, since="2026-11-08T01:00:00Z")

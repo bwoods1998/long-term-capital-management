@@ -1222,6 +1222,17 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   when that rounds to none, one share when it fits every wall and, at learning and at Probe, when one share at the
 #   limit is at most `one_share_max` of the band (0.05 each) of E; otherwise the event is skipped (the shadow keeps it).
 # - `max_open`: open positions a program may hold (learning 8, Probe 6, Sized 8).
+# - `max_open_v6` (release 1019i; PREREG-EVL-6 section 6, the captain's A99 and A100, which names the row): PREREG-EVL-6'S
+#   PROBE BAND HOLDS AT MOST 14 OPEN for the versions registered at or after REGISTERED_AT_6 (2026-10-22T12:24:50Z: its
+#   fifteen new versions, every seatable birth's version 2 and every birth registered from then on; league/events/
+#   programs.py `Program.evl6`), read for them ALONE (league/events/book.py `Settings.max_open`); `max_open.probe` STAYS
+#   6 with its bound 0-6 for every version registered before it (PREREG-EVL-1 section 8's frozen 6, A86 REVISED: a
+#   superseded version never moves a band again and keeps it). Its bound is 0-14: 14 is the registered loose end (the
+#   frozen text's own number, so a change may only trade less) and 0 stops every PREREG-EVL-6 Probe buy. ITS COST,
+#   PLAINLY: a PREREG-EVL-6 program at Probe may hold 14 x 0.035 = 0.49 x E at target (A97: "14 holds one program to
+#   about 49% of E at target"; 6 x 0.035 = 0.21 before), its worst case 14 lots at the 5% envelope 0.70 x E, every lot
+#   still under the name's 10%, the 100% book, the cash, the loss budget at the lot's weight and A85's reservation; no
+#   wall moves and the book's open-risk ceiling is unchanged (cash binds: synth_sim's p95 peak open risk $156-157).
 # - A86 REVISED, PROBE SMALLER, INSIDE THE TRADE-LESS ENVELOPE (the captain's amendment of 20:30Z Oct 21, 2026,
 #   replacing A86's proposal; decided before any Probe event; a sizing rule inside the frozen envelope: no program's
 #   rule and no judge, look, alpha or Done rule moves): the Probe band was PREREG-EVL-1 section 8's 5% of E with at
@@ -1300,6 +1311,7 @@ CONSTITUTION["equity_money"]["event"] = {
     "one_share_max": {"learning": "0.05", "probe": "0.05"},
     "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
+    "max_open_v6": {"probe": 14},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
     "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
@@ -1550,6 +1562,9 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "event.max_open.learning": ("0", "8"),
     "event.max_open.probe": ("0", "6"),
     "event.max_open.sized": ("0", "8"),
+    # RELEASE 1019i (PREREG-EVL-6 section 6, A99, A100): the Probe slots of the versions registered at or after
+    # REGISTERED_AT_6 alone; `event.max_open.probe` keeps 6 and its bound for every version before it.
+    "event.max_open_v6.probe": ("0", "14"),
     "event.per_name_share": ("0", "0.10"),
     "event.limit_ratio": ("1.00", "1.25"),
     "event.open_risk.floor": ("0.10", "1.00"),
@@ -1642,7 +1657,7 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
                   "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
-                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized",
+                  "event.max_open.learning", "event.max_open.probe", "event.max_open.sized", "event.max_open_v6.probe",
                   "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS),
                   "event.max_orders_day")
 EQUITY_CLASSES = ("etf", "stock")
@@ -1802,4 +1817,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'c3026ebacddf03bc853d7dc1f1b64d5788ecdd9dd90623adb2e6365baf9e9f53'
+PINNED_DIGEST = '9c8b2221396c88f9ea8cb51c57f4e0060ffb07bfd859f1d945617c0f23b9412d'

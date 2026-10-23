@@ -5269,6 +5269,17 @@ class EquityBook:
                     if was.get("band") is not None:
                         self.alert("warning", f"equity: event program {b.program} v{b.version} is now {b.band}: "
                                               f"{b.why[:200]}")
+            # PREREG-EVL-6 section 1.1 (SUPERSESSION IN MONEY): a live instance of a version no longer seating (its
+            # new version holds the seat from this release) is retired: it decides no more, and its open lots exit by
+            # their rules (exits read the lots, never the instance)
+            seated = {instance_key(b.program, b.version) for b in bands}
+            for inst in self._instances(alive=True):
+                if inst.kind != EVENT_KIND or inst.id in seated or adapter.program_of(inst.family, inst.version):
+                    continue
+                inst.retired_at, inst.why = now, "superseded: its new version holds the seat (PREREG-EVL-6 section 1.1)"
+                self._save_instance(inst)
+                self.record("equity.instance", {"instance": inst.id, "retired": True, "why": inst.why},
+                            agent=inst.family)
             self.state.put("eq_event_synced", day.isoformat())
             self.state.put(EVENT_BAND_MARK, mark)
         if born:
@@ -5357,7 +5368,19 @@ class EquityBook:
                 program = adapter.program_of(inst.family, inst.version) if inst.kind == EVENT_KIND else None
                 if program is None or not inst.live or program.entry_at != at:
                     continue
-                room = s.max_open(inst.band) - self._event_open_count(inst.id)
+                # (PREREG-EVL-6 section 6: a version it judges holds up to `event.max_open_v6` at Probe; its seat's
+                # count includes the superseded version's lots still open, section 1.1: the seat is the new version's)
+                room = s.max_open(inst.band, program) - self._event_seat_count(inst, adapter)
+                stuck = self._event_unsettled(inst, em.day, adapter) \
+                    if inst.band in adapter.PROBE_UP and getattr(program, "evl6", False) else []
+                if stuck:
+                    # (PREREG-EVL-6 section 3: a real-money event of its stay unsettled past the ladder holds its new
+                    # Probe and Sized buys, the reading that trades less; the shadow keeps its picks)
+                    wanted[inst.family], rooms[inst.family] = [], 0
+                    insts[inst.family] = (inst, program)
+                    summary["programs"][inst.family] = {"picks": None, "room": 0, "held": "unsettled",
+                                                        "why": self._event_unsettled_hold(inst, stuck, em.day)[:300]}
+                    continue
                 if room <= 0:
                     # (A program with no room reads nothing: release 1019b's review; its picks would all be dropped.)
                     wanted[inst.family], rooms[inst.family] = [], 0
@@ -5492,20 +5515,81 @@ class EquityBook:
                                "('planned', 'sent')", (key,))[0]["n"]
         return int(lots) + int(buys)
 
+    def _event_seat_keys(self, inst: Instance, adapter: Any) -> list[str]:
+        """THE SEAT'S INSTANCES (PREREG-EVL-6 section 1.1, SUPERSESSION IN MONEY): the program version's own, and, for a
+        version PREREG-EVL-6 registers, the version it supersedes too (its open lots exit by their rules, still in the
+        seat the new version holds from the release: they count in its room and its one position per issuer, so real
+        money picks what it would have picked without the change). [`inst.id`] for every other version."""
+        keys = [inst.id]
+        try:
+            program = adapter.program_of(inst.family, inst.version)
+        except Exception:  # noqa: BLE001 - no program row: its own instance alone
+            program = None
+        key = getattr(program, "superseded_key", None)
+        if key is not None:
+            keys.append(instance_key(key[0], key[1]))
+        return keys
+
+    def _event_seat_count(self, inst: Instance | None, adapter: Any) -> int:
+        """What an event program's SEAT holds and has on order (`_event_open_count` over `_event_seat_keys`)."""
+        if inst is None:
+            return 0
+        return sum(self._event_open_count(key) for key in self._event_seat_keys(inst, adapter))
+
+    def _event_unsettled(self, inst: Instance, day: dt.date, adapter: Any) -> list[Lot]:
+        """PREREG-EVL-6 section 3, A STAY'S REAL-MONEY EVENT UNSETTLED PAST THE LADDER (the reading that trades less, for
+        the captain's amendment before the first PREREG-EVL-6 look): the program version's own Probe or Sized event lots
+        (`info.evl.band`) still held (open or closing) `book.LADDER_CLOSES` + 1 or more sessions after their planned
+        exit (`info.evl_exit.first`, else its `day`): every closing cross of the fallback ladder passed without selling
+        the lot (from the session of its first day sale on), so the lane judges the stay without it once that session
+        has closed (league/events/bands.py `review6`, `STUCK_AFTER`), and the version's new Probe and Sized buys are held
+        until it is sold (`_event_decide`, with an error alert once a session). Learning lots never hold."""
+        out = []
+        for lot in self._lots(instance=inst.id):
+            evl = lot.info.get("evl") if isinstance(lot.info.get("evl"), Mapping) else {}
+            if lot.lane != EVENT_LANE or str(evl.get("band") or "") not in adapter.PROBE_UP:
+                continue
+            plan = lot.info.get("evl_exit") if isinstance(lot.info.get("evl_exit"), Mapping) else {}
+            first = plan.get("first") or plan.get("day")
+            try:
+                gone = S.sessions_between(str(first), day) if first else -1
+            except (TypeError, ValueError):
+                gone = adapter.LADDER_CLOSES + 1        # (a plan that cannot be read holds: the reading that trades less)
+            if gone >= adapter.LADDER_CLOSES + 1:
+                out.append(lot)
+        return out
+
+    def _event_unsettled_hold(self, inst: Instance, lots: Sequence[Lot], day: dt.date) -> str:
+        """The why of a hold (`_event_unsettled`), its error alert said once a session for the version."""
+        names = ", ".join(f"{lot.lid} ({lot.symbol})" for lot in lots[:5])
+        why = (f"PREREG-EVL-6 holds {inst.family} v{inst.version}'s Probe and Sized buys: its event lot(s) {names} are "
+               f"still held past the fallback ladder after their planned exit, so a real-money event of its stay is "
+               f"unsettled; its buys go again once they are sold")
+        said = self.state.get("eq_event_unsettled_said") or {}
+        said = dict(said) if isinstance(said, Mapping) else {}
+        if said.get(inst.id) != day.isoformat():
+            said[inst.id] = day.isoformat()
+            self.state.put("eq_event_unsettled_said", said)
+            self.alert("error", f"equity: {why}. Look at the name(s).")
+        return why
+
     def _event_held(self, inst: Instance, day: dt.date, adapter: Any) -> set[str]:
         """THE ISSUERS real money holds for this program (PREREG-EVL-1 section 5: one position per issuer per program):
-        its lots open, or closed within the last `ISSUER_GAP_SESSIONS` sessions, and its buys still to execute."""
+        its lots open, or closed within the last `ISSUER_GAP_SESSIONS` sessions, and its buys still to execute; for a
+        version PREREG-EVL-6 registers, the superseded version's too (`_event_seat_keys`, section 1.1 with D12: the
+        superseded version bought only before the release)."""
         since = adapter.sessions_back(day, adapter.ISSUER_GAP_SESSIONS).isoformat()
         out: set[str] = set()
-        for r in self.state.rows("SELECT status, exit_day, info FROM eq_lots WHERE instance=?", (inst.id,)):
-            info = loads(r["info"], {}) or {}
-            cik = str(((info.get("evl") or {}) if isinstance(info, Mapping) else {}).get("cik") or "")
-            if cik and (r["status"] != LOT_CLOSED or str(r["exit_day"] or "") >= since):
-                out.add(cik)
-        for r in self.state.rows("SELECT e.cik FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE "
-                                 "i.instance=? AND e.side='buy' AND i.status IN ('planned', 'sent')", (inst.id,)):
-            if r["cik"]:
-                out.add(str(r["cik"]))
+        for key in self._event_seat_keys(inst, adapter):
+            for r in self.state.rows("SELECT status, exit_day, info FROM eq_lots WHERE instance=?", (key,)):
+                info = loads(r["info"], {}) or {}
+                cik = str(((info.get("evl") or {}) if isinstance(info, Mapping) else {}).get("cik") or "")
+                if cik and (r["status"] != LOT_CLOSED or str(r["exit_day"] or "") >= since):
+                    out.add(cik)
+            for r in self.state.rows("SELECT e.cik FROM eq_event_intents e JOIN eq_intents i ON i.iid=e.iid WHERE "
+                                     "i.instance=? AND e.side='buy' AND i.status IN ('planned', 'sent')", (key,)):
+                if r["cik"]:
+                    out.add(str(r["cik"]))
         return out
 
     def _event_gate(self, day: str, at: str, s: Any, adapter: Any) -> tuple[Callable[[str, Any], str | None] | None, str]:
@@ -5563,6 +5647,14 @@ class EquityBook:
             cap = s.one_share_cap(band)
             if s.share(band) * E < limit and cap is not None and limit > cap * E:
                 return "one_share"
+            # PREREG-EVL-6 section 6, clause 2 (A99): a Probe or Sized pick of a version it judges that no whole-share
+            # count brings to Done's size bar inside the band's frozen envelope is skipped before it takes a slot
+            # (`book.under_bar`; the shadow keeps it); release 1019h's S2 alone would buy it under the bar
+            if band in adapter.PROBE_UP:
+                program = adapter.program_of(pick.program, pick.version)
+                if program is not None and getattr(program, "evl6", False) and \
+                        adapter.under_bar(band, s.share(band) * E, limit, walls, bar=s.reach_bar(band)):
+                    return "under_bar"
             return None
         return skip, ""
 
@@ -6156,8 +6248,9 @@ class EquityBook:
         if why is None:
             why = self._symbol_busy(str(intent.symbol)) or \
                 self._count_refusal(day, exit_=False, event_line=int(s.max_orders_day), held=room.orders)
-        if why is None and self._event_open_count(intent.instance) > s.max_open(inst.band):
-            why = f"the program holds and has on order more than its {s.max_open(inst.band)} positions"
+        program = adapter.program_of(inst.family, inst.version) if inst is not None else None
+        if why is None and self._event_seat_count(inst, adapter) > s.max_open(inst.band, program):
+            why = f"the program holds and has on order more than its {s.max_open(inst.band, program)} positions"
         if why is None and hold is not None:
             # (it would go now but for the lane's close decision: ROOM keeps its room from every buy after it)
             self._event_keep_room(intent, inst, side, day, s, ahead)
@@ -6297,7 +6390,10 @@ class EquityBook:
         refuses the round-up is recorded as the buy's binding. The bar is the band's `equity_money.event.reach_bar` row
         (A100: 0.8, the judge's line; 0 is no round-up, the tighten-only switch). The round-up sits inside this sizing,
         so a `dry` one (`_event_keep_room`'s) gives it too and writes nothing. The target stays the band's; learning
-        never rounds up. A
+        never rounds up. A VERSION PREREG-EVL-6 JUDGES (`Program.evl6`, section 6's clause 2, A99) at Probe or Sized
+        takes instead THE FEWEST whole shares whose dollars at the limit reach the bar (`book.at_size_count`, inside the
+        band's frozen envelope of the walls' equity), that ask judged again by every cap; a cap that cuts it under the
+        bar skips the buy (section 7, the reading that trades less), and so does a pick no count reaches. A
         LEARNING buy, and any buy of a lower ROOM tier (a birth's AT LEARNING, R3: after every PREREG program; a promoted
         birth is in its band's tier, A97 PL-2, and sizes as a PREREG program of its band), sizes on the cash, the
         invested room and the loss budget less THE NEXT AUCTION'S RESERVATION (the captain's A85, `_event_reserve`: what
@@ -6386,6 +6482,34 @@ class EquityBook:
                            invested_share=Decimal(str(et.invested_share)), available_cash=available, cash=cash,
                            any_short=any_short, budget_room=budget_room, weight=weight,
                            min_order_usd=Decimal(str(et.min_order_usd)))
+        adapter = self._event_adapter()
+        program = adapter.program_of(inst.family, inst.version) if adapter is not None else None
+        if getattr(program, "evl6", False) and inst.band in adapter.PROBE_UP and s.reach_bar(inst.band) > 0:
+            # PREREG-EVL-6 section 6, clause 2 (A99), for the versions it judges: the buy takes THE FEWEST whole shares
+            # whose value at the limit reaches Done's size bar (`book.at_size_count`, never above the band's frozen
+            # envelope of the walls' equity), and that ask is judged again by every cap (`size_entry`: the name wall,
+            # the 100% book, cash, the loss budget at the lot's weight, A85's reservation and the buys ahead); a cap that
+            # cuts it under the bar skips the buy (section 7: the reading that trades less). The target stays the band's.
+            cent = Decimal("0.01")
+            bar = s.reach_bar(inst.band)
+            n = adapter.at_size_count(inst.band, target, limit, walls, bar=bar)
+            if n is None:
+                record(target, None, ZERO)
+                return ZERO, (f"no whole-share count reaches Done's size bar ({bar} x the {inst.band} target "
+                              f"${target.quantize(cent)}) at ${limit} inside the band's envelope (PREREG-EVL-6 section "
+                              f"6, clause 2: skipped, the shadow keeps it){held_note}")
+            ask = replace(x, usd=n * limit)
+            again = Z.size_entry(ask)
+            if again.qty.to_integral_value(rounding=ROUND_DOWN) >= n:
+                record(target, self._event_cut(ask, again, False), n * limit)
+                return n, (f"{n} shares at {inst.band} ({again.binding}): {again.reason}{held_note}; the fewest whole "
+                           f"shares that reach Done's size bar (${(n * limit).quantize(cent)}, PREREG-EVL-6 section 6, "
+                           f"clause 2)")
+            cut = self._event_cut(ask, again, True)
+            record(target, cut, ZERO)
+            return ZERO, (f"the at-size ask of {n} shares (${(n * limit).quantize(cent)}) was cut under Done's size bar "
+                          f"({cut or again.binding}): {again.reason}{held_note} (PREREG-EVL-6 section 6, clause 2: "
+                          f"skipped, the reading that trades less; the shadow keeps it)")
         sized = Z.size_entry(x)
         whole = sized.qty.to_integral_value(rounding=ROUND_DOWN)
         if whole >= 1:
@@ -6398,8 +6522,8 @@ class EquityBook:
             # and `size_entry` asked again at those shares' dollars still gives every one of them (the name wall, the
             # 100% book, cash and the loss budget at the lot's weight judge the round-up). The target stays the band's.
             # The bar is the band's `equity_money.event.reach_bar` row (A100; 0.8 in force, the Done reader's own line):
-            # 0 is release 1019f's floor rounding, no round-up (the tighten-only switch).
-            adapter = self._event_adapter()
+            # 0 is release 1019f's floor rounding, no round-up (the tighten-only switch). (A version PREREG-EVL-6 judges
+            # sizes above: the fewest whole shares that reach the bar, section 6's clause 2.)
             bar = s.reach_bar(inst.band)
             n = adapter.round_up(inst.band, target, limit, whole, walls, bar=bar) \
                 if bar > 0 and adapter.at_size(target, sized.usd, bar) else None
@@ -6472,10 +6596,10 @@ class EquityBook:
             program = adapter.program_of(o.family, o.version)
             if program is None or program.entry_at != other:
                 continue
-            holds = self._event_open_count(o.id) - self._event_selling(o.id, day, at)
+            holds = self._event_seat_count(o, adapter) - self._event_selling(o.id, day, at)
             picks, weights = self._event_recent(o, other, adapter.RESERVE_DECISIONS)
-            rows.append({"program": o.family, "band": o.band, "room": s.max_open(o.band) - holds, "picks": picks,
-                         "weights": weights})
+            rows.append({"program": o.family, "band": o.band, "room": s.max_open(o.band, program) - holds,
+                         "picks": picks, "weights": weights})
             names.append(o.family)
         if not rows:
             return ZERO, ZERO, ""

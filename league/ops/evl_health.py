@@ -571,7 +571,9 @@ def final_lags(root: str | Path, now: float) -> list[dict[str, Any]]:
             for prog in P.SEATING:
                 if prog.registered_at > at or band.get((prog.id, prog.version)) == "retired":
                     continue
-                if SC.written_v2(store, prog.id, prog.version)["next"] is None:
+                # (release 1019i: a PREREG-EVL-6 version's looks are keyed by run or stay and its S, never PREREG-EVL-3's
+                # ten: its runs always have a next look while it is not retired, so its record is always watched)
+                if not getattr(prog, "evl6", False) and SC.written_v2(store, prog.id, prog.version)["next"] is None:
                     continue
                 first = prog.registered_at.astimezone(NY).date()
                 opened = [x for x in C.sessions(store, first, today) if x.open_decide <= at]
@@ -1114,7 +1116,10 @@ def decision_room(decision: Mapping[str, Any] | None) -> dict[str, Any]:
         room_cut += max(0, int(wanted) - int(_num(p.get("planned")) or 0) - passed)
     return {"decided": isinstance(decision, Mapping) and str(decision.get("status") or "") == "done", "picks": picks,
             "room_cut": room_cut, "programs_full": full, "skipped_name_wall": skipped.get("name_wall", 0),
-            "skipped_price": skipped.get("one_share", 0), "skipped_sale": skipped.get("sale", 0)}
+            "skipped_price": skipped.get("one_share", 0), "skipped_sale": skipped.get("sale", 0),
+            # (release 1019i, PREREG-EVL-6 section 6: a pick of its versions no whole-share count brings to Done's
+            # size bar inside the band's envelope, counted beside one share too dear: A98 (5))
+            "skipped_under_bar": skipped.get("under_bar", 0)}
 
 
 def auction_entries(rows: list[Mapping[str, Any]], orders: Mapping[int, list[Mapping[str, Any]]],
@@ -1204,7 +1209,7 @@ def entry_facts(root: str | Path, wanted: list[Mapping[str, Any]]) -> list[dict[
 def entry_totals(found: list[Mapping[str, Any]]) -> dict[str, Any]:
     """The auctions' counts added up (the `never` reasons and `cut` constraints too)."""
     keys = ("planned", "filled", "venue_cancels", "resent", "resent_filled", "never_sent", "unfilled", "unfinished",
-            "room_cut", "skipped_name_wall", "skipped_price")
+            "room_cut", "skipped_name_wall", "skipped_price", "skipped_under_bar")
     out: dict[str, Any] = {k: sum(int(a.get(k) or 0) for a in found) for k in keys}
     for group, order in (("never", UNSENT), ("cut", BOUND)):
         out[group] = {k: sum(int((a.get(group) or {}).get(k) or 0) for a in found) for k in order}

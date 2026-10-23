@@ -18,6 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+from league.tests.evl6_fakes import on_1019h
 from league import account_activity, publish, site_lane, site_window, trading_profit
 from league.events import programs as P
 from league.events import store as S
@@ -166,6 +167,7 @@ class Case(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------------------------- the reader
+@on_1019h
 class ReaderTest(Case):
     def test_the_programs_their_steps_and_the_checkpoint(self):
         w = fixture_world(self.dir)
@@ -618,6 +620,7 @@ def accepts(bodies, schema=None):
     return json.loads(done.stdout), "validLane" in schema.read_text(encoding="utf-8")
 
 
+@on_1019h
 class LaneFixtureTest(unittest.TestCase):
     def test_the_lane_fixture_is_this_modules_own_output(self):
         """LTCM_WRITE_SITE_FIXTURES=1 rewrites it from here; the site's contract test publishes and draws it."""

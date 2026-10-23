@@ -9,6 +9,75 @@ enabled. This page describes the tree it is in; the running House release is rel
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019i (Oct 22, 2026): PREREG-EVL-6, one money-weighted session-block screen for every seat (A116): `feat/evl-6`, not deployed
+
+Cut from `rel/1019h` (`59663f06`, not deployed); a draft PR with base `rel/1019h`. It carries [PREREG-EVL-6](prereg/PREREG-EVL-6.md)
+(registered 2026-10-22T12:24:50Z, tag `prereg-evl-6`, commit `4ae9017a`, sha256 `0f67f94e`; the frozen text wins over
+every other document) as built: the new versions (version 3 of the nine, version 2 of PREREG-EVL-4's and -5's three,
+version 2 of every seatable birth registered before REGISTERED_AT_6) seat in ROOM's order, every version they supersede
+is a shadow record whose PREREG-EVL-3 looks move no band (D7), the record before the release is copied (D8), D12's
+issuer rule, the money-weighted session-block screen with its runs, stays, reads, money stop, demotion and Sized move,
+14 Probe slots for these versions alone, the restated false-pass count (1.95 of 3.9, 0.13 a version, birth or fresh run),
+the report's and the site's new versions, and release 1019h's re-review minors in births.py and house.py
+([events.md](events.md), **PREREG-EVL-6**; CHANGELOG.md, **Release 1019i**). A116: the text names release 1019h, which
+was built before the freeze; the code ships in release 1019i, to be live BEFORE THE OCT 28 CLOSE.
+
+IDENTITIES (the tree's own functions, 3.14 and 3.11, before `rel/1019h` and after this head): THE MONEY DIGEST MOVES
+`8e63ce64` -> `d52a5af5` AND THE CONSTITUTION `c3026eba` -> `9c8b2221` (PREREG-EVL-6 section 6's one row,
+`equity_money.event.max_open_v6.probe` 14, bound ('0', '14'), its own commit; nothing else moves a money row), so THE
+STANDING GRANT RE-RATIFIES at the House's start; the rollback pair with `equity_money.event.enabled` False `f87d7342` /
+`134d6285`; S2's switch (both `reach_bar` rows "0") `96d986c9` / `8f9abf99`; THE NEW SLOTS' SWITCH
+(`max_open_v6.probe` "0": no Probe buy of a PREREG-EVL-6 version; learning buys go on) `51625225` / `f288d8ec`; the
+options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract
+`397b22b7` and the Done rule `54241925` do not move; `equity_money_problems()` is `[]`. THE BIRTHS PROMPT'S SHA MOVES
+`0cae215b` -> `1442a2a2` WITH `births.PARSE_VERSION` 4 -> 5 (the prompt states the charge, now 0.13, from the budget).
+
+**Deploy, in order** (after release 1019h is live, or with it in one deploy of this head, which carries it; from 20:05Z
+on a trading day or the weekend, before the Oct 28 close; never 12:55-20:05Z on a trading day, 12:55-21:05Z from Nov 2;
+never with an order in flight; CI green on the exact head; main moves at 23:30Z nightly: merge origin/main into the
+release branch first when it moved, with rerere off, and wait for CI on the new head):
+1. THE GATEWAY FIRST, from this head (`gateway/lib/email.mjs`, the daily report's composer: a PREREG-EVL-6 version's
+   look in blocks and the restated false-pass line from the new `false_passes` fact; an older gateway ignores the new
+   facts and prints the old line from the old ones, so the order decides only when the new words first show): `cd
+   gateway && npm run check && npm test && npx --no-install wrangler@4.129.1 deploy`; record the version it replaces.
+2. THE HOUSE from the same head by the captain's ship script with THE NEW PAIR: `ship_house.sh <head> <PR> r1019i
+   d52a5af5 9c8b2221`. Verify (read-only): promoted, `real_money` true, failures []; the ids `b60410ad` / `78022ca6` /
+   `d52a5af5` / `9c8b2221` and the grant re-ratified on `d52a5af5`; `release.live.equity.events.max_open_v6`
+   {"probe": 14} when the release record lists the event rows.
+3. THEN, as each first happens (read-only). THE RELEASE MARK: the store's meta `evl6:release`, written by the lane's
+   first turn under this code and never moved (its time is THE RELEASE of D8: every session decided before it is
+   copied for the new versions); the House's hourly maintenance copies them (`copy_all_before_release`), and the
+   report's programs list shows each new version "v3"/"v2" with its next look in blocks and each superseded version
+   "superseded by vN (PREREG-EVL-6: a shadow record, its looks move no band)". The lane's first decisions after the
+   mark name the new versions (`decide-open:` / `decide-close:` summaries keyed `<id>@v3`, `<id>@v2`) beside the
+   superseded ones, which the shadow still decides (its records only); no instance of a superseded version stays
+   alive (the band sync retires it: "superseded: its new version holds the seat"). The first real-money pick of a new version
+   buys at its learning size exactly as its superseded version would have (THE PROOF); a Probe pick the size bar
+   refuses is a skip `under_bar`, and a Probe or Sized buy of a new version sends the fewest whole shares that reach
+   Done's bar (a cap that cuts it under the bar refuses it: `sizing: the at-size ask ...`). An error alert "PREREG-EVL-6
+   holds <id> vN's Probe and Sized buys" means a Probe+ lot of that version is still held past the fallback ladder: its
+   buys wait until the lot is sold (look at the name; the lane judges the stay without it). The next daily report's
+   "Expected false passes: 1.95 ... of the lane's restated 3.9" line. The births receipt's `parse_version` 5 with
+   `prompt_sha` `1442a2a2...`; THE ONE RE-RUN (A95) only of a latest night that accepted and registered none with every
+   receipt at an older version and the House live before 12:55Z of the session day after it (a weekday deploy from
+   20:05Z: none; a weekend deploy after an empty Friday night: one Opus call inside its $0.25).
+
+**Rollback**: THE NEW SLOTS ALONE, the instant one, without a deploy of code: `equity_money.event.max_open_v6.probe`
+"0" (`51625225` / `f288d8ec`, which the standing grant re-ratifies like any): no PREREG-EVL-6 Probe buy (a promoted
+version has no room at Probe and reads no picks), learning buys and every exit go on. THE WHOLE RELEASE: the House to release
+1019h's deployed head by `floor_box.py rollback` (the money digest back to `8e63ce64` and the constitution to
+`c3026eba`, re-ratified), then the gateway by `wrangler rollback` to the version recorded (or never: release 1019h's
+facts carry no `false_passes` and the composer prints the old line). WHAT A ROLLBACK LEAVES: release 1019h's code seats
+the superseded versions again and has no D7 guard, so a rollback that holds over a close at which a superseded
+version's PREREG-EVL-3 look falls due (from the Oct 28 close) must stop Probe and Sized buys with it: in release 1019h's
+table `equity_money.event.max_open.probe` and `.sized` "0" (`5501215b` / `da61c0fe`), or every event buy with
+`equity_money.event.enabled` False (`973aa2e9` / `3e8cf1c8`); a band a superseded version takes under release 1019h is
+inert once this release is back (a superseded version never seats). The store keeps the release mark (release 1019h
+never reads it), the new versions' intents, looks and lots (their lots exit by their own plans and count as they were
+sent); a session decided under release 1019h after the mark holds no decision of the new versions, so once this release
+is back their looks wait on it ("made without its rows") until it leaves A66's look-back, then read it as a session
+with no entry for them. A birth registered under `parse_version` 5 stays registered (release 1019h's grammar parses it).
+
 ## Release 1019h (Oct 22, 2026): Done speed, release 1019g's minors, the births architect on Opus 5.5 (A97, A100, A113, A109): `rel/1019h`, not deployed
 
 Cut from `fix/1019h-minors` (`8e83ad1b`, PR 598, reviewed ship), which was cut from `feat/done-speed` (`88ecf37f`, PR
@@ -3666,7 +3735,7 @@ the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's d
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `8e63ce64`, full digest `c3026eba` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba9e6341` / `50f572ae`.
+Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered

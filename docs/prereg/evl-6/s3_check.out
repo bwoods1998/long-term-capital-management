@@ -1,0 +1,8 @@
+N3|both|AR10|phi0.20 n85 rho0.15 T120                   s2 0.1087 s3 0.1062 (se 0.0049) pooled 0.1075 (se 0.0035, R 8000) | two runs s3 0.2008
+N3|both|AR20|phi0.15 n85 rho0.15 T120                   s2 0.1153 s3 0.1128 (se 0.0050) pooled 0.1140 (se 0.0036, R 8000) | two runs s3 0.2045
+N3|both|AR20|phi0.20 n85 rho0.05 T120                   s2 0.1040 s3 0.1035 (se 0.0048) pooled 0.1037 (se 0.0039, R 6000) | two runs s3 0.1805
+N3|both|AR20|phi0.20 n85 rho0.15 T120                   s2 0.1300 s3 0.1232 (se 0.0052) pooled 0.1266 (se 0.0037, R 8000) | two runs s3 0.2240
+N3|both|AR20|phi0.20 n30 rho0.15 T120                   s2 0.1158 s3 0.1180 (se 0.0051) pooled 0.1169 (se 0.0036, R 8000) | two runs s3 0.2105
+N3|both|nodrift|phi0.20 n85 rho0.15 T120                s2 0.1085 s3 0.1195 (se 0.0051) pooled 0.1140 (se 0.0036, R 8000) | two runs s3 0.2112
+N3|dayskew|AR10|phi0.20 n85 rho0.15 T120                s2 0.1110 s3 0.1202 (se 0.0051) pooled 0.1156 (se 0.0036, R 8000) | two runs s3 0.2230
+N3|dayskew|AR20|phi0.20 n85 rho0.15 T120                s2 0.1230 s3 0.1227 (se 0.0052) pooled 0.1229 (se 0.0037, R 8000) | two runs s3 0.2190

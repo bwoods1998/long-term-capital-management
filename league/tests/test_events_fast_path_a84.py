@@ -22,6 +22,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import bands as BA
 from league.events import calendar as C
 from league.events import edgar as E
@@ -289,6 +290,7 @@ class TheHousesOwnReceipts(TH.LaneCase):
 
 
 # ========================================================================================= the stall job's evl_final
+@on_1019h
 class FinalRecordAlarm(unittest.TestCase):
     """`evl_final` (league/ops/evl_health.py): a seatable program's final record (screen.final_until) more than one
     session behind what A69 allows, judged from the lane's store read-only, the program and the judge's why named."""

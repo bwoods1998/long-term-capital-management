@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 
+from league.tests.evl6_fakes import on_1019h
 from league.events import calendar as C
 from league.events import programs as P
 from league.events import run as R
@@ -46,6 +47,7 @@ class DayGateway(FakeGateway):
         return super().post_json(path, body, headers)
 
 
+@on_1019h
 class Wave2Test(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

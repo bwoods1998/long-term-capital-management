@@ -11,6 +11,7 @@ import unittest
 from decimal import Decimal as D
 from zoneinfo import ZoneInfo
 
+from league.tests.evl6_fakes import on_1019h
 from league.constitution import (CONSTITUTION, EQUITY_MONEY_BOUNDS, PINNED_DIGEST, digest, equity_money_problems,
                                  money_digest)
 from league.equity import schedule as ES
@@ -243,6 +244,7 @@ def opens_after(st: S.Store, day: dt.date, now: dt.datetime) -> int:
 
 
 # ================================================================================ A66 owed: what a re-decision writes
+@on_1019h
 class ARedecisionWritesOnlyWhatIsOpen(unittest.TestCase):
     """A66 (owed), as release 1019c's fix round keeps it: a re-decision never writes an intent for a program of a GROUP
     (every version of an id, its control, and every READ program of that control) a look of which stands over the
@@ -500,6 +502,7 @@ class BackfillGateway(FakeGateway):
         return super().get_json(path, params)
 
 
+@on_1019h
 class AnOutageRemovesNothing(unittest.TestCase):
     """Release 1019c's judges review, its major: PREREG-EVL-1 section 3, "an outage removes nothing", and its BACKFILL,
     events "are read afterwards and count". The House is down from Monday 10:00 ET to Thursday 10:00 ET. Back, its
@@ -620,6 +623,7 @@ class TheHouseAfterAnOutage(TH.LaneCase):
 
 
 # ======================================================================== the event kind's own day order count
+@on_1019h
 class TheEventKindsOwnDayCount(EventTest):
     """The event kind's auction orders count against `equity_money.event.max_orders_day` (150), the old lanes keep the
     equity book's 60; both stay under the House-wide line and the gateway's."""

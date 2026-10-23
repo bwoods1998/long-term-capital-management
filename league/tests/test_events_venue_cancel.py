@@ -15,6 +15,7 @@ import datetime as dt
 import unittest
 from decimal import Decimal as D
 
+from league.tests.evl6_fakes import on_1019h
 from league.equity import live as L
 from league.live.venue import Submitted
 from league.tests import test_events_book as EB
@@ -147,6 +148,7 @@ class TheRule(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------------- the day
+@on_1019h
 class TheResend(VenueCancelTest):
     def test_a_buy_the_venue_cancelled_5_ms_after_its_submission_goes_again_once_and_fills(self):
         """(a) The venue cancels the first buy 5 ms after it accepted it; the next minute reads the cancel and the buy

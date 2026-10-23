@@ -471,6 +471,29 @@ HOPED = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
 BIRTHS_FAILED = "births_failed"
 
 
+def _copied(st: S.Store, prog: P.Program, day: dt.date, out: dict[str, Any], *, ask_only: bool = False) -> bool:
+    """PREREG-EVL-6 section 1.1, THE NEW VERSIONS' RECORD BEFORE THE RELEASE (D8): whether this decision's part for the
+    new version `prog` is its COPY. On an entry session decided before the release (league/events/programs.py
+    `before_release`) a new version is never decided by itself: its intents are the superseded version's of that session
+    whose events are knowable after REGISTERED_AT_6, copied as decided (`programs.copy_before_release`); the superseded
+    version is decided first in the same run (PROGRAMS' order), so the copy reads what it wrote. While the superseded
+    version is pending on its verdicts, the new version is pending with it (its copy waits); `ask_only` asks and writes
+    nothing for it (the superseded version's asks cover its events). From the release on: False (decided by itself)."""
+    if prog.regfile != P.FILE_6 or not P.before_release(st, prog, day):
+        return False
+    sup = P.superseded_of(prog)
+    if sup is None:
+        return False
+    key, skey = _key(prog), SN.program_key(sup.id, sup.version)
+    if skey in out["pending"]:
+        out["pending"][key] = out["pending"][skey]
+        return True
+    if ask_only:
+        return True
+    out[key] = P.copy_before_release(st, prog, day) | {"copied_from": skey}
+    return True
+
+
 def _decide_one(prog: P.Program, one: Callable[[P.Program], None], out: dict[str, Any]) -> None:
     """One program's part of a decision. A PREREG program's failure fails the decision, as before; a registered
     birth's (R3, league/events/births.py) is its own: kept in the summary's `births_failed` (league/events/screen.py
@@ -597,6 +620,8 @@ def decide_open(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_o
         if frozen is not None:     # (A66 owed, a look of its group: its earlier intents stand)
             out.setdefault("kept", {})[_key(prog)] = frozen
             later.append((prog, rows))
+            return
+        if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release, copied)
             return
         waiting = pending(prog, rows)
         if ask_only:
@@ -1400,6 +1425,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
             out.setdefault("kept", {})[_key(prog)] = frozen
             later.append((prog, rows, table))
             return
+        if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release, copied)
+            return
         waiting = wait(prog, rows)
         if ask_only:
             if waiting:
@@ -1498,6 +1525,8 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
                 if not ask_only:
                     out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: table.get(c),
                                                          guidance=guidance5, reaction=react5, gap=gap5)
+                continue
+            if _copied(st, prog, day, out, ask_only=ask_only):     # (PREREG-EVL-6 section 1.1: before the release)
                 continue
             waiting = int(f["pending"].get(prog.id) or 0)
             if waiting:

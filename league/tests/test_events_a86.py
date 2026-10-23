@@ -21,6 +21,7 @@ import json
 import unittest
 from decimal import Decimal as D
 
+from league.tests.evl6_fakes import on_1019h
 from league.constitution import (CONSTITUTION, EQUITY_MONEY_BOUNDS, PINNED_DIGEST, digest, equity_money_problems,
                                  money_digest)
 from league.events import book as EB
@@ -41,6 +42,7 @@ def flat(table: dict, prefix: str = "") -> dict[str, object]:
     return out
 
 
+@on_1019h
 class TheRows(unittest.TestCase):
     def test_probe_is_three_and_a_half_percent_six_open_one_share_at_most_five_percent(self):
         s = EB.settings()
@@ -138,6 +140,7 @@ class TheRows(unittest.TestCase):
                          "release 1019c's rollback pair, with A86's rows set back")
 
 
+@on_1019h
 class ProbeBuys(EventTest):
     """Through the real book: an 8-K item 8.01 is EVL-8K-READ-O1's event, an earnings 8-K (item 2.02) EVL-ERN-READ-O1's;
     the default previous close $16.00 puts the limit at $20.00."""

@@ -28,17 +28,30 @@ they are and how the code runs them. When this page and a pre-registration disag
   PREREG-EVL-3's screen unchanged ("PREREG-EVL-5" below). Code in release 1019g (`rel/1019g`: release 1019f with
   `feat/evl-5` merged in, A94), live since 05:36Z Oct 22, 2026 (House `20261022T053527Z-05c3dc2f4422`, main
   `b374d862`, PR 595; A108).
+- [PREREG-EVL-6](prereg/PREREG-EVL-6.md), registered 2026-10-22T12:24:50Z (tag `prereg-evl-6`, commit `4ae9017a`,
+  sha256 `0f67f94e`, its calibration in [prereg/evl-6/](prereg/evl-6/SHA256SUMS); amendment A116): ONE MONEY-WEIGHTED
+  SESSION-BLOCK SCREEN FOR EVERY SEAT. It registers the NEXT VERSION of every seatable version registered before it
+  (version 3 of the nine, version 2 of PREREG-EVL-4's and -5's three and of every seatable birth registered before it),
+  each its superseded version's rule word for word, counting only events knowable after REGISTERED_AT_6, and each the
+  id's SEATING version; the superseded versions are shadow records whose PREREG-EVL-3 looks move no band again (D7).
+  Its screen, runs, stays, demotion and Probe band (14 slots, at-size buys) judge its versions and every seatable
+  version registered after it ("PREREG-EVL-6" below). Code in release 1019i (`feat/evl-6`, A116: the text names 1019h,
+  which was built before the freeze), to be live before the Oct 28 close.
 - An event counts for a program only when it is knowable after that program's own registration time. A change to a
-  registered program is a new version with a new registration time. Expected false passes: 1.5 (0.10 x 15 seatable
-  versions: the nine version 2 rows, PREREG-EVL-4's three and PREREG-EVL-5's three) of the lane's stated lifetime
-  budget of 3.0 (PREREG-EVL-4 section 3, PREREG-EVL-5 section 3; 1.5 left for later births with none registered
-  before PREREG-EVL-5, each seatable birth 0.10, as SEATING sums them).
+  registered program is a new version with a new registration time. Expected false passes (PREREG-EVL-6 section 5,
+  restating PREREG-EVL-3 section 4's and PREREG-EVL-4 section 3's count): 1.95 (0.13 x the 15 new versions; 0 for a
+  version PREREG-EVL-6 supersedes) of the lane's restated lifetime budget of 3.9 (30 x 0.13, a relaxation of 3.0 the
+  captain accepted, D6, A107), 0.13 more for each seatable birth registered and for each fresh run when it starts;
+  every report shows the count three ways (0.13, the base model's 0.03, the stresses' worst 0.17 a version or run) with
+  the per-version figure beside it (0.24 within 120 sessions at the worst plausible cell).
 - [R3's births](#births-r3-live-since-release-1019e) (goal-2026-10-19/R3-SPEC.md): programs born from outcome-free
   facts by the architect (Claude Opus 5.5 from release 1019h, the captain's A109; Claude Haiku 4.5 before it) or the
   captain, each registered as one line of `docs/births/<night>.jsonl`,
-  judged by PREREG-EVL-3's screen unchanged, rationed by the lane's stated false-pass budget (A81: 0.10 a seatable
-  birth, 3.0 in all, counted from SEATING's own sum: 1.5 used by PREREG-EVL-1 to -5's fifteen seatable versions, plus
-  0.10 for each seatable birth registered; at most 3 a night: at most fifteen seatable births).
+  judged by PREREG-EVL-6's screen (a birth registered from REGISTERED_AT_6 on, at its version 1; one registered before
+  it seats at its version 2, release 1019i), rationed by the lane's restated false-pass budget (PREREG-EVL-6 section 5:
+  0.13 a seatable birth, 3.9 in all, counted from the screen's own sum: 1.95 used by the fifteen new versions, plus 0.13
+  for each seatable birth registered and each fresh run started; a birth only with room left after every run waiting
+  for the budget; at most 3 a night: at most fifteen seatable births).
 
 ## The programs
 
@@ -66,16 +79,25 @@ EVL-CTRL-NEWS-ALL-O1 (file 1), EVL-CTRL-NEWS-DAY-ON (file 2), EVL-CTRL-8K-ON and
 EVL-CTRL-ERN-UNDER-ON (file 5). File 2's, file 4's and file 5's programs (and every version 2) are not filled when the
 entry auction is above 1.25 x the previous close (real money's limit).
 
+The SEATING version of each seatable program from release 1019i is its PREREG-EVL-6 version (version 3 of files 1 and
+2's nine, version 2 of files 4 and 5's three), the rule above word for word; release 1019h's seats (version 2 of the
+nine, version 1 of files 4 and 5's three) are shadow records from then on.
+
 ## Bands (the seating versions: real money)
 
-The versions that may seat (`programs.Program.can_seat`, the one gate in the lane and the House's book): version 2 of
-the nine seatable programs of files 1 and 2 (PREREG-EVL-3), version 1 of PREREG-EVL-4's three and version 1 of
-PREREG-EVL-5's three. Version 1 of the earlier files' programs, every record and every control never seat.
+The versions that may seat (`programs.Program.can_seat`, the one gate in the lane and the House's book): from release
+1019i PREREG-EVL-6's versions alone (version 3 of the nine seatable programs of files 1 and 2, version 2 of
+PREREG-EVL-4's and PREREG-EVL-5's three, version 2 of a seatable birth registered before REGISTERED_AT_6, version 1 of
+one registered after it); to release 1019h version 2 of the nine (PREREG-EVL-3), version 1 of PREREG-EVL-4's three
+and version 1 of PREREG-EVL-5's three. The versions PREREG-EVL-6 supersedes, version 1 of the earlier files'
+programs, every record and every control never seat. The table below is PREREG-EVL-3's bands, which PREREG-EVL-6's
+versions keep for their sizes (learning and Sized) and their ROOM; their Probe band, their looks, their Sized move,
+their demotion and their retirement are PREREG-EVL-6's (the section below).
 
 | band | size | how a program gets there |
 |---|---|---|
 | learning | 2% of equity a position (whole shares; one share up to 5%), at most 8 open | from its first event |
-| probe | 3.5% (whole shares, rounded up to Done's size bar inside 5% (A97, release 1019h); one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before) | the first decision after a passed look |
+| probe | 3.5% (whole shares, rounded up to Done's size bar inside 5% (A97, release 1019h); one share up to 5%), at most 6 open (the captain's A86 REVISED; PREREG-EVL-3's 5% before); PREREG-EVL-6's versions at most 14 open (`max_open_v6.probe`), a pick under Done's size bar skipped | the first decision after a passed look |
 | sized | 10%, at most 8 open | >= 150 settled real-money events at Probe size or above, 80% session-block lower bound > 0 |
 | retired | none (shadow only) | a held look with mean a < 0 and the reversed sign-flip p <= 0.05 |
 
@@ -498,6 +520,73 @@ after 21:26:21Z Oct 21):
   intents, 16 outcomes, 18 verdicts, 9 filings, 12 eligibility rows, 468 decision receipts and earlier programs' final
   records as on release 1019f.
 
+## PREREG-EVL-6: one money-weighted session-block screen for every seat (release 1019i)
+
+The frozen text is [prereg/PREREG-EVL-6.md](prereg/PREREG-EVL-6.md); its calibration (synthetic only) is
+[prereg/evl-6/](prereg/evl-6/SHA256SUMS), byte for byte from the tag. As built (league/events/programs.py, screen.py,
+bands.py, run.py, house.py, book.py, league/equity/live.py; league/tests/test_events_evl6.py, and
+test_events_evl6_calib.py, which runs calib_v2.py's and demotion_v2.py's own synthetic arrays through this code and
+gets their every p, q and decision):
+
+- THE NEW VERSIONS (section 1.1): `Program.regfile` 6, registered at `REGISTERED_AT_6`, each the superseded version's
+  row word for word (`dataclasses.replace(superseded, version=+1, regfile=6)`), appended after PREREG-EVL-5's rows so
+  each decision decides the superseded version first; SEATING keeps the ids' order, so ROOM's order is unchanged. A
+  seatable birth registered before REGISTERED_AT_6 gets its version 2 at load (`programs.with_versions_6`); one
+  registered after it is judged by PREREG-EVL-6 at its version 1 (`Program.evl6`).
+- THE D7 GUARD: league/events/bands.py `superseded_guard`: no PREREG-EVL-3 look of a superseded version written or as of
+  a close from REGISTERED_AT_6 moves a band, whatever the release date; its looks are still computed, written and
+  reported (league/events/screen.py runs `_run_v2` for it).
+- THE RECORD BEFORE THE RELEASE (D8): THE RELEASE is the moment the House's code carrying the file first ran its lane
+  (meta `evl6:release`, written once by the lane's first turn and the CLI's `catchup`, never moved). A session whose
+  decision time is before it is COPIED for the new version (`programs.copy_before_release`: the superseded version's
+  intents of that session whose events are knowable after REGISTERED_AT_6, with their skips; a later skip follows; the
+  decision summary names the new version with `copied_from`; the House's lane copies every such session hourly,
+  `copy_all_before_release`, and no look reads a session whose copy is not complete, `programs.uncopied`). From the
+  release on a new version is decided by itself; its one position per issuer and its cooldown count its own intents
+  and the superseded version's of every session decided before the release (D12, `programs.superseded_held`, in the
+  shadow and in real money's `book.held_recently`), never one the superseded version writes from the release on. The
+  judge reads a session before the release as the superseded version's decision (`screen.final_until`), and a session
+  from the release on as the new version's own, made only when its receipt names it.
+- THE SCREEN (sections 1.2-2; screen.py `v6_judge`, `schedule6`, `_run_v6`): blocks are entry sessions holding a
+  TRADABLE settled event; values y_s = min(n_s, 14) x (B_s - 0.0010); p the one-sided sign-flip p, exact over all 2^S
+  vectors to 16 blocks, else 99,999 vectors of the seed string `{id}|v{version}|evl6|{tag}S{S}` (tag "" for run 1,
+  `run{n}|`, `stay{n}|`); q on -min(n_s, 14) x B_s; p_I the issuer-block guard (seed + "|issuer"). Looks at the first
+  close with 22, 25, 30, 35, 40, 50, 60 blocks and the minimums (30 events, 30 issuers, 6 blocks), thresholds reached
+  together one look (the others merged), alpha(S) 0.020 / 0.006 / 0.001 at the record's own S. RETIRE first (mean a < 0,
+  q <= alpha + 1e-12); PASS (p <= alpha, mean a > 0, mean r > 0, the top 14 a block by `book.picks`' order with mean a
+  and r above 0, a READ version beating its control, p_I <= 0.10) moves learning to Probe in the look's transaction. A
+  look's stored key carries its run or stay and S (`look_key6`).
+- RUNS (sections 2-3): the run's 60th block ENDS it (meta `evl6:end:...`), never a retirement; run n + 1 (the first block
+  after it, or the first decision after a demotion) starts only when the lane's budget holds its 0.13 (`start_runs`,
+  in registration order, meta `evl6:run:...`); a waiting version has no look, no pass and no retirement.
+- STAYS (section 3; bands.py `review6`, the night's band review): each close of the current Probe stay in order, once
+  THAT close's real-money events (the stay's Probe+ buys scheduled to exit at it) have settled, WHETHER OR NOT THE CLOSE
+  IS FINAL: the fixed reads at the 100th, 200th, ... real-money Probe+ event (p <= 0.15 for a mean below zero, seed
+  `...|stay{n}|read{k}`), then the money stop (the whole stay's net after-fee P&L under -10% of its buy cost), both over
+  the stay's events settled so far whose scheduled exit is at or before the close (an older one still unsettled never
+  holds a later close: it counts once it settles); then the stay's look when one falls due there (its lower tail
+  demotes, its PASS with >= 30 real events at Probe size or above, summed P&L above 0 and fills within 15 bp moves Probe
+  to Sized). ONLY THE LOOK WAITS for the close to be final (with its and its control's intents due by then settled and
+  every copy made); it is then held as of that close, that close's reads and stop judged again first, the looks in
+  their order (meta `evl6:stay:...` keeps `through`, the last close whose reads and stop were judged, and `looked`, the
+  last close whose look is settled). A real-money event still unsettled `bands.STUCK_AFTER` (6 = `book.LADDER_CLOSES` +
+  1) sessions after its scheduled exit no longer holds its close (judged without it, named in the stay state's
+  `unsettled`), and the House holds that version's new Probe and Sized buys while its lot is held, with an error alarm
+  once a session (league/equity/live.py `_event_unsettled`; the readings that demote more and trade less, section 7).
+  PREREG-EVL-3's $150 stop, rolling read, bootstrap Sized and reversed-p retirement are not these versions'.
+- THE MONEY (section 6): `equity_money.event.max_open_v6.probe` 14 (bound 0-14), read for PREREG-EVL-6's versions alone
+  (`book.Settings.max_open(band, program)`); `max_open.probe` stays 6. A Probe or Sized buy of these versions takes THE
+  FEWEST whole shares whose value at the limit reaches Done's size bar (`book.at_size_count`: at E $1,898 and a $5.00
+  limit, 11 shares, $55.00, where release 1019h's floor of the $66.43 target took 13), never above the band's frozen
+  envelope of the walls' equity, that ask judged again by every cap (league/equity/live.py `_size_event`); a cap that
+  cuts it under the bar skips the buy (the reading that trades less), and a pick no whole-share count brings to the bar
+  inside the envelope is skipped as `under_bar` before it takes a slot (`book.under_bar`, `_event_gate`).
+  The seat counts the superseded version's open lots in its room and its issuers (`_event_seat_keys`), and the band sync
+  retires the superseded seat's instance (its lots exit by their rules).
+- THE PROOF (league/tests/test_events_evl6.py `TheProof`): on an invented week every real-money pick is identical with
+  and without the change while no version is promoted, the release before the week or inside it; no superseded version
+  moves a band after REGISTERED_AT_6.
+
 ## The code
 
 `league/events/` (standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
@@ -549,7 +638,7 @@ turn, the most urgent due first.
 | - | PREREG-EVL-5's rows decided by themselves (`decide-close-evl5`) for each close a release without them decided, or whose part for them failed or ran past its own bound | from the first turn after the record pass, once each, oldest first | 150 s |
 | 2/6 | PREREG-EVL-5's pre-pass: today's close verdict pass, for EVL-NEWS-NIGHT2-ON's heavy reads | from 09:47 ET (D's 09:30 minute on the tape) until meta `evl5:pre:<day>` is stored; once more inside the last 30 minutes once the earlier rows' verdicts are stored | 90 s (the part's own 60 s inside it) |
 | 1 | PREREG-EVL-5's hold for the live close decision: a turn from `HOLD_LEAD` (150 s) before it keeps going, runs what falls due but another decision (none starts in the lead; every other task is bounded to end 5 s before the decision), waits between, and starts the decision at 15:47:00 ET, or at once when a task's last read returns after that; release 1019h: the lead ends only when a run of it has finished `ok` or `pending`, so after a failed run the turn keeps going and starts the retry at its time (the run's start + 1 minute) | each session, while PREREG-EVL-5 has programs | at most 40 tasks a turn; the House closing, STOP or a clock that does not move ends it; the lead ends 10 minutes after the decision's time at the latest |
-| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once, and once more for a night an older reading of the grammar left empty, before 12:55Z of the session day after it (A95) | the score 120 s, resumable; births 240 s |
+| 4 | nightly, keyed on the session: the account equity, the score, the screen (then the band review of the real fills), the report; the night is the session before today until today's 20:30 ET; then R3's births job (`events.births`) | close + 3 min; 20:30 ET, or the next day for a night not finished; births 21:15 ET, a session night, once, and once more for a night an older reading of the grammar left empty, before 12:55Z of the session day after it (A95) | the score 120 s, resumable; births 300 s (240 s to release 1019h) |
 | - | the screen after the open (`screen-open`): the seating versions' looks when the judge's final horizon of any moved since the last screen receipt | from 09:40 ET after the open decision until 5 min before the close decision; horizons read every 10 min | none (CPU only); never within 5 min of a decision |
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
@@ -918,7 +1007,12 @@ thinking Opus answer can take (the reviews' estimate: 22-90 s; Cloudflare's 100-
 an unstreamed one with a 524). Streamed, with its thinking `summarized` (its deltas keep the bytes flowing; the display
 is never billed), the gateway relays the events and ends with its own cost (`gw.Gateway.post_stream`); the socket waits
 `births.STREAM_GAP` (60 s) for a byte and the whole answer at most `births.CALL_LIMIT` (150 s), and on the House the
-call starts only with both left before the births job's bound (`LaneGateway.post_stream`: `room`, BIRTHS_BUDGET 240 s).
+call starts only with its limit and two gaps left before the births job's bound (`LaneGateway.post_stream`: `room`,
+BIRTHS_BUDGET 300 s; release 1019h's one gap inside 240 s let a last read end past the bound, fixed in release 1019i,
+which also runs the reconciliation of earlier nights' registrations after the call, not before it). The night's
+`birth_calls` row is written BEFORE the call goes out (`births.ASKED`, at the call's worst case: a House that restarts
+mid-call leaves it counted, never $0, and the night is not asked again) and settled by the call's end; a call refused
+before it went out deletes it, and any failure after the send stores it `lost` at its worst case (release 1019i).
 A CALL THAT WENT OUT IS NEVER ASKED AGAIN THAT NIGHT (`births.LOST`; the gateway does not refuse a repeated request id,
 so a second ask could be billed twice): one lost on the way (a stream that broke, went quiet or ran past its limit, no
 answer while waiting for one, a 5xx the gateway did not settle) is stored `lost` at the gateway's stated cost when the
@@ -953,13 +1047,16 @@ outage session is left out, never counted at a low count; at least 3 such sessio
 Probe row's slots after the real-money funnel through the season (a react family's count is an upper bound, so the
 floor barely binds it); a RECORD at least 3 a session over the last 20 sessions by selection count, as before; Jaccard < 0.8 of the last 20 sessions' selected events against every registered
 program (records, controls and births included: stricter than "every live program", and it reads no band) and against
-every birth accepted before it that night; and THE FALSE-PASS BUDGET, stated: each seatable birth adds 0.10 expected
-false passes (the measured zero-edge pass rate of PREREG-EVL-3's screen is at most 8.4%; 0.10 is the stated charge), at
-most the lane's stated lifetime budget, 3.0 (A81, the captain's, 16:25Z Oct 21, 2026: A71's budget,
-`screen.LANE_BUDGET`, not R3's draft 2.0), over every seatable version ever registered in the lane, counted from
-SEATING's own sum as the report counts it (`screen.expected_false_passes`: PREREG-EVL-1 to -5's fifteen seatable
-versions use 1.5, so 1.5 used plus 0.10 for each seatable birth, at most fifteen seatable births ever; a retired program
-stays counted), at most 3 seatable births a night; records are free. The captain's births go through the same
+every birth accepted before it that night; and THE FALSE-PASS BUDGET, restated by PREREG-EVL-6 section 5 (release
+1019i): each seatable birth adds 0.13 expected false passes (the worst plausible cell of PREREG-EVL-6's calibration,
+the stated charge), and so does each fresh run when it starts, at most the lane's restated lifetime budget, 3.9 (30 x
+0.13; to release 1019h 0.10 a birth and 3.0, A81), counted from the screen's own sum as the report counts it
+(`screen.expected_false_passes`: PREREG-EVL-6's fifteen new versions use 1.95 and a version it supersedes 0, so 1.95
+used plus 0.13 for each seatable birth and each fresh run; a birth is accepted only when 0.13 fits after every run
+waiting for the budget, `births.budget`'s `left_for_births`; a retired program stays counted), at most 3 seatable births
+a night; records are free. The prompt states the charge from `births.budget` (`<<CHARGE>>`), so its template moved with
+the charge: PARSE_VERSION 5 (release 1019i), and a night whose stored answer was asked under version 4 is asked once
+more under the new sha (A95's doctrine: a template change is a new version). The captain's births go through the same
 validator and registration with no model call: `python -m league.events --state DIR births --specs FILE` (a JSON list
 of `{spec, why}`; `--dry-run` validates only); `facts [--specs FILE]` prints the night's facts, with each spec's
 selection count by session. Every candidate's verdict and figures (its count, its highest Jaccard and with whom) are

@@ -490,7 +490,13 @@ export function composeReport(facts = {}) {
       const shown = real(row.shown_usd) === null ? 'no real event' : `${signedUsd(row.shown_usd)} | ${signedUsd(row.net_usd)}`;
       add(` ${programOf(row.id)} v${versionOf(row.version)} ${bandOf(row.band)}: ${count(row.shadow_tradable)} | `
         + `${count(row.real)}; ${shown}`, '   ');
-      const look = Number.isInteger(row.next_look) ? `look ${row.next_look} in ${count(row.events_to_go)}` : 'every look written';
+      // (release 1019i, PREREG-EVL-6: a version's looks counted in settled session blocks, its run beside)
+      const look = !Number.isInteger(row.next_look) ? 'every look written'
+        : row.look_unit === 'blocks' ? `look ${row.next_look}`
+          + (typeof row.look_of === 'string' && /^(run|stay) \d{1,3}$/.test(row.look_of) && row.look_of !== 'run 1'
+            ? ` of ${row.look_of}` : '')
+          + ` in ${count(row.blocks_to_go)} blocks`
+          : `look ${row.next_look} in ${count(row.events_to_go)}`;
       add(`  ${look}; market ${pct(row.market_share_pct)}, bench ${bp(row.bench_mean_bp)}`
         + (real(row.buy_hold_usd) === null ? '' : `; b&h ${signedUsd(row.buy_hold_usd)}`), '   ');
       const bands = list(row.by_band).filter(b => b && BANDS.includes(b.band) && Number.isInteger(b.n) && b.n > 0);
@@ -558,8 +564,18 @@ export function composeReport(facts = {}) {
   add(`Records and controls: ${count(records.versions)} versions; today ${count(records.intents)}; settled `
     + `${count(records.settled)}`);
   add(`Same-risk buy-and-hold: ${real(hold.usd) === null ? (traded ? 'n/a' : 'n/a until real fills') : signedUsd(hold.usd)}`);
-  add(`Expected false passes: ${real(facts.expected_false_passes) === null ? 'unknown' : real(facts.expected_false_passes).toFixed(1)} `
-    + `(0.10 x ${count(facts.seatable_versions)} versions)`);
+  const fp = facts.false_passes && typeof facts.false_passes === 'object' ? facts.false_passes : null;
+  if (fp && real(fp.count) !== null) {
+    // PREREG-EVL-6 section 5 (release 1019i): the lane's count three ways (0.13 a version or run, the base model's,
+    // the stresses' worst) and the per-version figure beside them
+    const fixed = (value, places) => (real(value) === null ? 'unknown' : real(value).toFixed(places));
+    add(`Expected false passes: ${fixed(fp.count, 2)} at ${fixed(fp.charge, 2)} (${count(fp.versions)} versions, `
+      + `${count(fp.runs)} runs) of ${fixed(fp.budget, 1)}; base ${fixed(fp.base, 2)}, stresses ${fixed(fp.stress, 2)}; `
+      + `per version ${fixed(fp.per_version, 2)}`);
+  } else {
+    add(`Expected false passes: ${real(facts.expected_false_passes) === null ? 'unknown' : real(facts.expected_false_passes).toFixed(1)} `
+      + `(0.10 x ${count(facts.seatable_versions)} versions)`);
+  }
   out.push(...pack('Alarms open:', alarms.length ? alarms.map(cause => STALL_CAUSES[cause]) : ['none']));
   if (facts.lane_report === false) add('The lane\'s own report job did not run for this day.');
   out.push('', `At: ${typeof facts.at === 'string' && DATE.test(facts.at) ? facts.at : 'an unknown time'}.`);

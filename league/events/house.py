@@ -217,11 +217,14 @@ SCORE_AT = dt.time(20, 30)
 REPORT_AT = dt.time(21, 5)                    # a day with no session: its report at this time
 #: R3's births job (R3-SPEC section 5: "nightly after the report (20:30 ET + 45 min)"), on a session night, once. Its
 #: bound holds the architect's STREAMED call (release 1019h's fix round; league/events/births.py `STREAM`): the call
-#: starts only with its whole `CALL_LIMIT` (150 s) and one `STREAM_GAP` (60 s) left before the bound (`LaneGateway`
-#: `post_stream`, `room`), so its last read returns before it; a whole Haiku night took about 10 s on the House (A95,
-#: A109), so the facts before the call leave it its 210 s.
+#: starts only with its whole `CALL_LIMIT` (150 s) and TWO `STREAM_GAP`s (60 s each: the stream's last read may start
+#: just inside the limit and wait a whole gap, and the answer's own last read another) left before the bound
+#: (`LaneGateway` `post_stream`, `room`; release 1019h's re-review, a minor fixed in release 1019i: one gap left a read
+#: that could end past the bound), so its last read returns before it; a whole Haiku night took about 10 s on the House
+#: (A95, A109), the facts before the call leave it its 270 s inside 300 s, and the reconciliation of an earlier night's
+#: registrations runs AFTER the call (league/events/births.py `night`), so its network reads never eat the call's room.
 BIRTHS_AT = dt.time(21, 15)
-BIRTHS_BUDGET = 240.0
+BIRTHS_BUDGET = 300.0
 #: THE SCREEN AFTER THE OPEN (release 1019f; the audit's "bands move a session late"). The judge makes a close X final
 #: (league/events/screen.py `final_until`: A66's three sessions, A69's fast path once the session after X has had its
 #: open decision), and the intents a look as of X covers were settled by X's own score, so the look can be written the
@@ -362,12 +365,14 @@ class LaneGateway:
     def post_stream(self, path: str, body: Any, headers: Mapping[str, str] | None = None, *, limit: float,
                     gap: float) -> tuple[int, Any]:
         """A STREAMED Claude call (R3's births call, release 1019h's fix round; league/events/gw.py `post_stream`):
-        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and one `gap` (a read that
-        returns at the gap's end) are left before the task's bound, so it never runs past the bound. A stream lost
-        after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`), and
-        the next task's `_spend_today` reads it from the store."""
+        refused and counted as `post_json`'s, and refused (`room`) unless its whole `limit` and TWO `gap`s (a read that
+        starts just inside the limit and returns at its gap's end, then the answer's last read; release 1019h's
+        re-review, fixed in release 1019i) are left before the task's bound, so it never runs past the bound. A stream
+        lost after it began is counted `failed`; its cost is the caller's to store (league/events/births.py `propose`),
+        and the next task's `_spend_today` reads it from the store."""
         why = self.lane.claude_refusal(self.deadline)
-        if why is None and self.deadline is not None and self.deadline - self.lane._mono() < float(limit) + float(gap):
+        if why is None and self.deadline is not None and \
+                self.deadline - self.lane._mono() < float(limit) + 2 * float(gap):
             why = "room"
         if why:
             self.counts[f"cut_{why}"] += 1
@@ -472,6 +477,8 @@ class EventLane:
         self._failed: dict[str, dt.datetime] = {}
         # accession -> (the fetches tried, when the first one failed), this process's (`_record_steps`)
         self._fetch_tries: dict[str, tuple[int, dt.datetime | None]] = {}
+        self._release_marked = False            # (PREREG-EVL-6: the release's mark, written at the first turn)
+        self._copied_next = self._born          # (PREREG-EVL-6: the copied record's catch-up, hourly from the first turn)
 
     # -- the feeds lane's interface ---------------------------------------------------------------------------------
     def shipped(self) -> bool:
@@ -673,6 +680,11 @@ class EventLane:
                 return
             with S.Store(self.root) as st:
                 P.load_births(st)       # (R3: the registered births, after every PREREG program, for every task)
+                if not self._release_marked:
+                    # PREREG-EVL-6 section 1.1 (D8): THE RELEASE carrying it is this code's first turn (written once;
+                    # a session decided before it is copied for the new versions, one from it on is their own)
+                    P.mark_release(st, self.now())
+                    self._release_marked = True
                 if not self._started_told:
                     self._started_told = True
                     self._info(f"the event lane runs on the House: store {self.root} (league/events/house.py)")
@@ -888,7 +900,19 @@ class EventLane:
 
     # -- the calendar ----------------------------------------------------------------------------------------------
     def _maintain(self, st: S.Store, now: dt.datetime) -> None:
-        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead."""
+        """The NYSE calendar from Alpaca, about once a day and whenever it does not reach 30 days ahead; and, from the
+        first turn and hourly, PREREG-EVL-6's COPIED RECORD BEFORE THE RELEASE (section 1.1, D8;
+        league/events/programs.py `copy_all_before_release`): every new version's copy of its superseded version's
+        intents of the sessions decided before the release, those a release without the new versions decided too (its
+        own decisions copy theirs as they run; a look waits for the copy: `programs.uncopied`)."""
+        if now >= self._copied_next:
+            self._copied_next = now + REDECIDE_EVERY
+            try:
+                got = P.copy_all_before_release(st, through=now.astimezone(C.NY).date())
+                if got.get("copied") or got.get("moved"):
+                    self._note("copy-evl6", "ok", got, self._mono())
+            except Exception as exc:  # noqa: BLE001 - copied again next hour; a look waits for it meanwhile
+                self.warn("PREREG-EVL-6's copied record", exc)
         last = st.meta("evl:lane:sessions_at")
         tried = self._attempts.get("sessions")
         today = now.astimezone(C.NY).date()
