@@ -20,6 +20,7 @@ from unittest.mock import patch
 from league import ci
 from league.constitution import CONSTITUTION, PINNED_DIGEST, digest, equity_money_problems, money_digest
 from league.live import money as M
+from league.tests.v2_walls import in_force
 from league.tests import equity_design as X
 from league.tests import test_equity_book as T
 from league.tests.test_standing_grant import HOUR, StandingCase, owner_deploy, updater_deploy
@@ -84,14 +85,6 @@ class TheRow(unittest.TestCase):
         # The constitution in force is untouched by the helpers (each works on a copy).
         self.assertIs(CONSTITUTION["equity_money"]["enabled"], False)
 
-    def test_the_documents_name_the_digests_in_force(self):
-        line = X.block("operations")[-1]
-        money, full = X.DIGESTS[X.in_force()]
-        self.assertIn(f"Money digest `{money[:8]}`, full digest `{full[:8]}`", line, "the table in force: R2's")
-        self.assertIn(f"`{X.DIGESTS[X.REFERENCE][0][:8]}` / `{X.DIGESTS[X.REFERENCE][1][:8]}`", line,
-                      "the pair's rollback under the stop is the grid's own pin")
-        for kind in X.BLOCKS:
-            self.assertEqual(X.read_block(kind), X.block(kind), kind)
 
 
 class TheGrant(StandingCase):
@@ -264,6 +257,18 @@ class TheBookInForce(T.BookTest):
         h.tick(9, 31, day=T.TUESDAY)
         self.assertEqual(h.book._lot(old.lid).reason, "max_hold")
         self.assertEqual(self.buys(h), [])
+
+
+@in_force    # (release 1019m, A139: the documents name the digests IN FORCE, never release 1019i's)
+class TheDocuments(unittest.TestCase):
+    def test_the_documents_name_the_digests_in_force(self):
+        line = X.block("operations")[-1]
+        money, full = X.DIGESTS[X.in_force()]
+        self.assertIn(f"Money digest `{money[:8]}`, full digest `{full[:8]}`", line, "the table in force")
+        self.assertIn(f"`{X.DIGESTS[X.REFERENCE][0][:8]}` / `{X.DIGESTS[X.REFERENCE][1][:8]}`", line,
+                      "the pair's rollback under the stop is the grid's own pin")
+        for kind in X.BLOCKS:
+            self.assertEqual(X.read_block(kind), X.block(kind), kind)
 
 
 # (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;

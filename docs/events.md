@@ -632,6 +632,7 @@ Release 1019i adds `attempts.py` (the attempts ledger: league/events/attempts.py
 price lane's store and recorders), all three behind the wall with the lane's rule inputs, and splits universe.py's
 `eligible` into its pure core `eligible_row` and the writer (below, **Release 1019i**).
 
+
 ## Release 1019i: the batched score, the attempts ledger, the price lane's data (not deployed)
 
 Harness only (PREREG-EVL-8's harness plan H1 and H2, PREREG-EVL-7's harness changes H3 and H4): no money row, no
@@ -906,12 +907,15 @@ version 1 is a shadow record and never trades. [PREREG-EVL-4](prereg/PREREG-EVL-
 at version 1 the same way, after the nine in ROOM's order (above: "PREREG-EVL-4"). The bands are the lane's (its store's `bands` table: learning from birth,
 Probe after a passed look, Sized, retired), counted in settled events from its looks and the real fills the House writes
 back (`real_fills`). The House trades them through its EquityBook (its event kind: league/equity/live.py `_event_step`,
-the rules in `book.py`), on the money rows `equity_money.event` of league/constitution.py: learning 2% of equity a
-position (one share at most 5%), Probe 3.5% (A86 REVISED; one share at most 5%), Sized 10%, at most 8 open a program
-(6 at Probe), the
+the rules in `book.py`), on the money rows `equity_money.event` of league/constitution.py: learning 5% of equity a
+position (goal V3's rows, release 1019l: 2% before; one share at most 5%), Probe 5% (3.5% under A86 REVISED before it;
+one share at most 5%), Sized 10%, at most 8 open a program (6 at Probe), the
 book-wide 10% a name, whole shares, entries limit-on-open / limit-on-close at 1.25 x the previous SIP close, exits
 market-on-close (market-on-open for the three overnight rows) with PREREG-EVL-1 section 5's fallback ladder, open risk
-value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($400 net in any 20 sessions, $800 net in total),
+value x max(0.10, 1.65 x sigma60 x sqrt(h)) in the one loss budget ($1,900 net in any 20 sessions and $1,900 net in
+total since goal V3's rows, release 1019l; $400 and $800 before), THE BUG STOP (goal V3: the daily stop at 25% of the
+day's base, LATCHED by league/equity/bugstop.py since release 1019m: every new real entry, options and shares, held from
+the trip until the captain reads why and releases it),
 ROOM in the order Sized, Probe, learning, then the tables' order (round-robin inside Sized and inside Probe, and a
 learning buy leaves the next auction's Probe and Sized programs their cash: the captain's A85, below). The real-money decision reads the lane's store, and
 only events stored and verdicts answered before its decision time (PREREG-EVL-1 section 3). The old lanes'
@@ -1318,7 +1322,7 @@ EVL-LRN-O1's ERN guard (E8: no buy of an issuer with an item 2.02 8-K knowable i
 EVL-LRN-ON's 8-K guard (E10: every 8-K of the issuer knowable from 09:00 ET of D and stored by tau, with no upper bound
 on its knowable time (release 1019i's money re-review), whatever the primary event; barred on an `ok` score >= 2, an `ok` score >= 1 with guidance raised, or no answer by tau), one position per
 issuer on its earlier intents and real lots, and THE LEARNER'S GATE (league/events/judge7.py `gate`, below). Sized at
-learning (2% of E, A85's reservation), sent in ROOM's order (`send_key`). THE DAY ORDER LINE: each learner entry keeps,
+learning (5% of E since goal V3's rows, release 1019l; A85's reservation), sent in ROOM's order (`send_key`). THE DAY ORDER LINE: each learner entry keeps,
 on its day's event line, every order the earlier PREREG rows may still send that day after it
 (`EquityBook._event_line_keep`, `_count_refusal`'s `keep`): this auction's earlier buys not yet sent (their send, their
 A80 re-send and, at the open, their exit at the close) and those sent with no re-send yet (that re-send), and AT THE
@@ -1333,15 +1337,25 @@ only, and an O1 entry with its exit at the close can then take a slot an earlier
 is nearly full (about 134 of 150 orders; a session sends about 24 buys today). STATED EFFECTS, not prevented (section 1.9): an O1 lot sold at D's close
 takes the name from an earlier close row by the sale gate, ON's sale at the next open the same; their lots hold cash
 at the auction they are sold in; ON's sales at D+1's open are exits on D+1's line, which no line stops; at the close
-the House's decision (up to 150 s from 15:46 ET) and ON's part (up to 120 s after it) can finish after the 15:49 ET
-cut-off, so some ON picks, and the births behind them, miss the auction.
+the House's decision (up to 150 s from 15:47:00 ET, CLOSE_GRACE) and ON's part (up to 120 s after it, never past the
+task's bound less EVL5_FINISH) can finish after the 15:49 ET cut-off, so ON's picks then miss the auction.
+RELEASE 1019m (the independent review of the live code, A139): before the hotfix's batched marks (A140, above) the
+House's close decision finished after the cut-off at EVERY close on record (Oct 19-22: 15:49:50-15:58:50 ET), so ON never
+bought and the births held behind it were never planned (no intent, no ledger row), and on a slow day ON's part expired
+and its decision was written `late`, out of the judged record (section 1.7). On the hotfix: (1) A140's last book minute
+(below) holds at the OPEN too (09:26:03 ET); (2) A LEARNER THE DAY'S LINE REFUSES (EVL-LRN-O1 while the close rows hold
+the line, R5; `EquityBook._event_line_refuses` on the least keep an entry can leave) holds no birth back and is given
+names only after the births, from the names no one else was given; (3) the post-close alarm
+(`EquityBook._event_lrn_said`): a WARNING when an auction's births held for the learners were never given their names
+(no learners' decision in the window: the book missed its last minute). The daily report's learner lines count the live
+parts lost in the last 10 sessions beside the House run's seconds (report.py `_parts_lost`).
 
 THE LATE LEARNER AT THE CLOSE (the captain's A140, release 1019m-hotfix; league/equity/live.py `LEARNER_LATE`,
 `_event_decide_lrn`): from the close window's last book minute (`HELD_OVERDUE_S`, one minute, before the close's cut-off:
 15:48:00 ET on a full day, the minute `HeldAhead` already calls overdue) a learner whose own live receipt is STILL
 PENDING takes nothing at that auction, and the births held back for it are given their names and sent as they would be
 without it (a learner that late could not send anyway, so ROOM gives it nothing it could use); ROOM's order is otherwise
-unchanged, and the open waits as before. No pick of it is read, so none is planned and no attempts-ledger row is written
+unchanged (the open waits as before in the hotfix; release 1019m applies the same minute at the open). No pick of it is read, so none is planned and no attempts-ledger row is written
 (the ledger's bindings have no `window`): the `-lrn` row and the auction's own row name it (`late`, its programs entry
 `picks` None), the book raises a warning and writes an `equity.alert` record (`learners_late`). With the batched marks
 above, the House's receipt lands within seconds of 15:47:00 ET and ON's part soon after, so this is a safety net.
