@@ -1088,6 +1088,62 @@ class TheLatePasses(TB.EventTest):
             self.assertEqual(self.mine(h), ["PXA", "PXB", "PXC"])
 
 
+class TheMetaMoney(TB.EventTest):
+    """Section 7.7 in the House's own book: EVL-META-ON's real-money picks are its LIVE decision's intents in rank_key
+    order (book.py `picks_8`, `meta.live_picks`), planned in the close's META late pass after the PX pass, less its
+    8-K guard (PREREG-EVL-7's E10 reading: an 8-K knowable from 09:00 ET of D, stored before tau, read ok with score
+    >= 2, bars the issuer) and one position per issuer; a decision made by a catch-up is never traded."""
+
+    PICKS = (("MA", "0000007001"), ("MB", "0000007002"), ("MC", "0000007003"))
+
+    def seed(self, h, kind: str) -> None:
+        MT.ensure(h.lane.st)
+        h.lane.st.db.execute("INSERT INTO mrl_decisions(program, version, day, kind, receipt, started_at, finished_at, "
+                             "status, code_sha, members, eligible, picks) VALUES('EVL-META-ON', 1, ?, ?, 1, 'x', 'x', 'ok', "
+                             "'c', 3, 3, 3)", (TB.DAY.isoformat(), kind))
+        for n, (sym, cik) in enumerate(self.PICKS, 1):
+            h.lane.universe(TB.DAY, sym, cik, 16.0, adv20=4e7)
+            h.lane.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                 "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-META-ON', 1, ?, ?, "
+                                 "?, ?, ?, 'close', ?, 'open', ?, 'shadow', 'planned', 'mrl')",
+                                 (f"news:meta-{n}", sym, cik, TB.iso(TB.DAY, 15, 46), TB.DAY.isoformat(),
+                                  TB.NEXT.isoformat(), float(MT.K + 1 - n)))
+            h.symbol(sym, last=16.0)
+        h.lane.filing("m-1", "0000007002", accepted=TB.iso(TB.DAY, 10, 0), items=("8.01",))
+        h.lane.verdict("m-1", 3, answered=TB.iso(TB.DAY, 10, 30))
+        h.lane.st.set_meta(PXL.RAN_KEY.format(key="close-meta", day=TB.DAY.isoformat()), "{}")
+
+    def run_close(self, name: str):
+        with W.pinned():
+            root = self.root / name
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            self.seed(h, "catchup" if name == "catchup" else "live")
+            learners_failed(h, "on")
+            self.ready(h)
+            h.tick(15, 47)
+            h.tick(15, 48)
+            mine = [r["symbol"] for r in h.event_intents("buy") if r["program"] == "EVL-META-ON"]
+            rows = [r["at"] for r in h.state.rows("SELECT at FROM eq_event_decisions WHERE day=? ORDER BY rowid",
+                                                  (TB.DAY.isoformat(),))]
+            return mine, rows
+
+    def test_its_live_intents_in_rank_order_less_its_guard_after_the_px_pass(self):
+        mine, rows = self.run_close("live")
+        self.assertEqual(mine, ["MA", "MC"], "MB's 8-K of D read at score 3 bars it (section 7.7)")
+        self.assertLess(rows.index("close-px8"), rows.index("close-meta8"), "the META pass after the PX pass")
+        with mock.patch.object(EB, "meta_on_guard", lambda *a, **k: False):
+            unguarded, _ = self.run_close("unguarded-live")
+        self.assertEqual(unguarded, ["MA", "MB", "MC"], "without the guard MB goes: the guard is what bars it")
+
+    def test_a_catch_up_decision_is_never_traded(self):
+        mine, rows = self.run_close("catchup")
+        self.assertEqual(mine, [])
+
+
 class ThePromotedSizing(TB.EventTest):
     """SECTION 4.1: a Probe or Sized buy of a version of this file is PREREG-EVL-6 section 6's (clause 2, A99, A123's
     literal reading): THE FEWEST whole shares whose value at the limit reaches Done's 0.8 bar of the band's target,
