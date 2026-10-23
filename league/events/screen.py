@@ -98,7 +98,11 @@ CONTROLS: dict[str, str] = {"EVL-ERN-READ-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-8K-RE
                             # PREREG-EVL-4 section 4 (EVL-8K-REACT-ON reads no verdict and has no control condition)
                             "EVL-8K-READ-ON": "EVL-CTRL-8K-ON", "EVL-NEWSPM-READ-ON": "EVL-CTRL-NEWSPM-ON",
                             # PREREG-EVL-5 section 4 (EVL-ERN-DROP-ON and EVL-NEWS-NIGHT2-ON read no verdict and have none)
-                            "EVL-ERN-UNDER-ON": "EVL-CTRL-ERN-UNDER-ON"}
+                            "EVL-ERN-UNDER-ON": "EVL-CTRL-ERN-UNDER-ON",
+                            # PREREG-EVL-8 section 3.2 (A122, release 1019n: "screen.CONTROLS gains these three rows"):
+                            # its PX seats' control condition, judged by its own screen (league/events/screen8.py),
+                            # never by this module's; a look of one freezes its group's re-decision (run.py `_group`)
+                            "PX-DROP-ON": "CTRL-PX-ALL-ON", "PX-SURGE-ON": "CTRL-PX-ALL-ON", "PX-GAP-O1": "CTRL-PX-ALL-O1"}
 #: Sessions held as the prereg counts them (C1, close to next close, holds one; PREREG-EVL-2's, PREREG-EVL-4's and
 #: PREREG-EVL-5's close-to-next-open programs hold one). The screen judges only the seatable programs, every one a one-session hold,
 #: so each of their blocks is one entry session.

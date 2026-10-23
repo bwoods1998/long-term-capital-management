@@ -722,34 +722,50 @@ def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Seque
 
 
 def _within_limit(store: Any, intent: Mapping[str, Any], outcome: Mapping[str, Any]) -> bool:
-    """PREREG-EVL-2's LIMIT AT ENTRY for every member (F9): the raw entry print (the lane's `marks` of the entry
-    auction, else the adjusted entry price over the day's adjusted-to-raw ratio) at most 1.25 x the raw SIP close of
-    the session before D (the universe row's prev_close: the lane's, else px_universe's); False when either cannot be
-    read (the reading that trades less)."""
+    """PREREG-EVL-2's LIMIT AT ENTRY for every member (F9): the raw entry print at most 1.25 x the raw SIP close of the
+    session before D; False when either cannot be read (the reading that trades less). The print and the close are where
+    the member's own settlement read them (league/events/score.py): a lane event's in the lane's `marks` and `universe`
+    (else the adjusted entry price over the lane's adjusted-to-raw ratio of the day); A PX EVENT'S (`px:...`) IN
+    px.sqlite's `px_marks` and `px_universe` (section 4.4: a PX event is settled on px.sqlite alone; else the adjusted
+    entry over px_bars' ratio), never the lane's."""
+    from . import score as SC
+
     symbol, day = str(intent["symbol"]).upper(), str(intent["entry_day"])
     label = "open" if intent["entry_at"] == "open" else "close"
-    row = store.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=? AND px IS NOT NULL",
-                           (symbol, day, label)).fetchone()
-    raw = None if row is None else _f(row[0])
-    if raw is None:
-        from . import score as SC
-        entry = _f(outcome.get("entry_px"))
-        ratio = SC._ratio(store, symbol, dt.date.fromisoformat(day))
-        raw = None if entry is None or not ratio else entry / ratio
-    prev = None
-    u = store.db.execute("SELECT prev_close FROM universe WHERE day=? AND symbol=?", (day, symbol)).fetchone()
-    if u is not None:
-        prev = _f(u[0])
-    if prev is None:
-        from . import px as PXL
-        db = PXL.read_only(Path(store.root)) if hasattr(store, "root") else None
-        if db is not None:
-            try:
+    entry = _f(outcome.get("entry_px"))
+    px_event = SC.px_event(intent)
+    raw = prev = None
+    if not px_event:
+        row = store.db.execute("SELECT px FROM marks WHERE symbol=? AND day=? AND label=? AND px IS NOT NULL",
+                               (symbol, day, label)).fetchone()
+        raw = None if row is None else _f(row[0])
+        if raw is None:
+            ratio = SC._ratio(store, symbol, dt.date.fromisoformat(day))
+            raw = None if entry is None or not ratio else entry / ratio
+        u = store.db.execute("SELECT prev_close FROM universe WHERE day=? AND symbol=?", (day, symbol)).fetchone()
+        prev = None if u is None else _f(u[0])
+    from . import px as PXL
+
+    db = PXL.read_only(Path(store.root)) if hasattr(store, "root") else None
+    if db is not None:
+        try:
+            if px_event:
+                row = db.execute("SELECT px FROM px_marks WHERE symbol=? AND day=? AND label=? AND px IS NOT NULL",
+                                 (symbol, day, label)).fetchone()
+                raw = None if row is None else _f(row[0])
+                if raw is None and entry is not None:
+                    bars = {str(r["adj"]): _f(r["c"]) for r in db.execute(
+                        "SELECT adj, c FROM px_bars WHERE symbol=? AND day=?", (symbol, day))}
+                    rc, ac = bars.get("raw"), bars.get("all")
+                    raw = entry / (ac / rc) if rc and ac else entry
+            if prev is None:
                 got = db.execute("SELECT prev_close FROM px_universe WHERE day=? AND symbol=? AND rule='live'",
                                  (day, symbol)).fetchone()
                 prev = None if got is None else _f(got[0])
-            finally:
-                db.close()
+        except sqlite3.Error:
+            return False
+        finally:
+            db.close()
     return raw is not None and prev is not None and raw <= LIMIT_MULTIPLE * prev
 
 
@@ -939,7 +955,10 @@ def decide(store: S.Store, day: dt.date, auction: str, *, now: Callable[[], dt.d
     job = f"{JOB_LIVE[auction]}:{day.isoformat()}" if kind == "live" else \
         f"{JOB_CATCHUP}:{'open' if auction == 'o1' else 'close'}:{day.isoformat()}"
     rid = store.start_receipt(job, now=started)
-    out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "code_sha": CODE_SHA}
+    from . import px as PXL
+
+    out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "code_sha": CODE_SHA,
+                           "release": PXL.release_id()}
     try:
         got = _decide(store, prog, session, auction, t, started, now=now, kind=kind, late=late, receipt=rid)
     except Exception as exc:  # noqa: BLE001 - its failure is its own: a catch-up decides it later

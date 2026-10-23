@@ -1163,9 +1163,17 @@ def budget_used_hundredths(store: Any) -> int:
 
 
 def budget_waiting_hundredths(store: Any) -> int:
-    """What the runs waiting for the lane's budget would charge (0.13 each, league/events/screen.py `waiting_runs`):
+    """What the runs waiting for the lane's budget would charge (0.13 each, league/events/screen.py `waiting_runs`, and
+    PREREG-EVL-8's, league/events/screen8.py `waiting_runs`):
     PREREG-EVL-6 section 3, a birth registers only when the room left after every waiting run holds its charge."""
-    return CHARGE_HUNDREDTHS * len(SN.waiting_runs(store))
+    n = len(SN.waiting_runs(store))
+    if P.registers_8():
+        # (PREREG-EVL-8 section 6.6: its versions' runs wait for the same budget, drawn in registration order after
+        # PREREG-EVL-6's; a birth registers only once the room after every waiting run holds its charge)
+        from . import screen8 as S8
+
+        n += len(S8.waiting_runs(store))
+    return CHARGE_HUNDREDTHS * n
 
 
 def budget_reserved_hundredths() -> int:

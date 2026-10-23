@@ -28,7 +28,7 @@ the same budget.
 
 THE RECORD of a PX seat is the shadow of its LIVE decisions (league/events/px.py `judged_days`: a catch-up's intents are
 never a judged block) with the hourly re-decision's removals, its events knowable after REGISTERED_AT_8; its control is
-CTRL-PX-ALL-ON / -O1 (screen.CONTROLS is not edited: `CONTROL_OF`). A meta-learner's record is its own settled TRADABLE
+CTRL-PX-ALL-ON / -O1 (screen.CONTROLS' three rows of this file, section 3.2: `CONTROL_OF`). A meta-learner's record is its own settled TRADABLE
 picks of its LIVE decisions; its control its POOL (league/events/meta.py `pool_rows`). THE PLACEBOS and THE CANARY
 (section 3.3) are screened by THE PX SCREEN without its control condition, records only (`audit`): a placebo never moves
 a band. NOTHING HERE RUNS while REGISTERED_AT_8 is None."""
@@ -63,10 +63,15 @@ CAP = {"px": {"run": 4, "probe": 14, "sized": 8}, "meta": {"run": 8, "probe": 14
 #: Section 6.6 (F12): every version and every fresh run 0.13, the lane's budget 3.9, in hundredths.
 CHARGE_HUNDREDTHS = 13
 BUDGET_HUNDREDTHS = 390
-#: Section 6.6's three ways of the count beside this file's: the base model and the stresses' worst, a run.
-BASE_HUNDREDTHS = {"px": 2, "meta": 1}
-STRESS_HUNDREDTHS = {"px": 15, "meta": 4}
-PER_VERSION = {"px": 0.214, "meta": 0.063}
+#: Section 6.6's three ways of the count beside this file's (its last bullet, as frozen): the base model (0.02 a PX run,
+#: 0.019 rounded up; 0.03 a META run, re-check 1's 0.030 by 2,500 sessions) and the stresses' worst (0.15 a PX run,
+#: 0.143 rounded up; 0.13 a META run, 0.125 rounded up), a run; and beside them the per-version figures (a PX
+#: version's two runs within 120 sessions; a META version's every run within 720 sessions and within 2,500-4,000 at
+#: the plausible corners). The draft's META figures (0.01, 0.04, 0.063) are withdrawn with its horizon.
+BASE_HUNDREDTHS = {"px": 2, "meta": 3}
+STRESS_HUNDREDTHS = {"px": 15, "meta": 13}
+PER_VERSION = {"px": "0.214 (two runs within 120 sessions)",
+               "meta": "0.10-0.14 (every run within 720 sessions), 0.23-0.32 (within 2,500-4,000)"}
 #: PREREG-EVL-6 section 3: the fixed reads, the money stop, Sized's real-money conditions.
 READ_EVERY = 100
 READ_P = 0.15
@@ -79,8 +84,9 @@ RUN_KEY = "evl6:run:{program}:{version}:{n}"
 END_KEY = "evl6:end:{program}:{version}:{n}"
 STAY_KEY = "evl8:stay:{program}:{version}:{n}"
 STAY_BASE = 1_000_000
-#: Section 3.2: the PX seats' controls (the control condition); the meta-learners' is their POOL.
-CONTROL_OF = {"PX-DROP-ON": "CTRL-PX-ALL-ON", "PX-SURGE-ON": "CTRL-PX-ALL-ON", "PX-GAP-O1": "CTRL-PX-ALL-O1"}
+#: Section 3.2: the PX seats' controls (the control condition), screen.CONTROLS' three rows of this file (its section
+#: 3.2: "screen.CONTROLS gains these three rows"); the meta-learners' control is their POOL.
+CONTROL_OF = {pid: SN.CONTROLS[pid] for pid in ("PX-DROP-ON", "PX-SURGE-ON", "PX-GAP-O1")}
 #: px.sqlite's audit key of a placebo's or the canary's last look written.
 AUDIT_CANARY = ("CTRL-PX-ALL-ON", "CTRL-PX-ALL-O1")
 

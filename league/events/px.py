@@ -173,6 +173,34 @@ FEATURE_COLUMNS = {"as_of": "ALTER TABLE px_features ADD COLUMN as_of TEXT",
                    "bar_end": "ALTER TABLE px_features ADD COLUMN bar_end TEXT"}
 
 
+def _code_sha(path: Path) -> str:
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return "unknown"
+
+
+def release_id(path: Path | None = None) -> str | None:
+    """The House release this code runs from (`<base>/releases/<id>/league/events/...`: league/watchdog.py's layout), or
+    None off the House box. The deploy log maps the id to its commit (A121's recipe)."""
+    here = Path(path or __file__).resolve()
+    try:
+        root = here.parents[2]
+        return root.name if root.parent.name == "releases" else None
+    except IndexError:
+        return None
+
+
+#: THE CODE'S IDENTITY (section 8: every catch-up is decided "by the release's code, whose commit sha each receipt
+#: records"; PREREG-EVL-7's precedent: the sha256 of the file's own bytes, the release that carries it pinning its
+#: commit): this file's sha256 and the House release it runs from, on every PX decision's receipt, live or catch-up.
+CODE_SHA = _code_sha(Path(__file__))
+
+
+def code_identity() -> dict[str, Any]:
+    return {"code_sha": CODE_SHA, "release": release_id()}
+
+
 class PxCutShort(Exception):
     """A decision run that could not finish inside its bound (its rows stay unread; a catch-up decides it later)."""
 
@@ -857,7 +885,7 @@ def decide(px: Any, store: S.Store, gw: Any, day: dt.date, auction: str, *, now:
         f"{JOB_CATCHUP}:{AT_OF[auction]}:{day.isoformat()}"
     rid = store.start_receipt(job, now=started)
     run = px.start_run(JOB_LIVE[auction] if kind == "live" else JOB_CATCHUP, now=started)
-    out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "run": run}
+    out: dict[str, Any] = {"day": day.isoformat(), "auction": auction, "kind": kind, "run": run, **code_identity()}
     try:
         got = _decide(px, store, gw, session, auction, t, now=now, kind=kind, run=run, tickers=tickers, late=late)
     except (PX.PxCut, PxCutShort) as exc:
@@ -1497,7 +1525,7 @@ __all__ = ["K", "CONTROL_N", "Z_SEAT", "DROP_MOVE", "SURGE_MOVE", "SURGE_VOLUME"
            "JOB_MID", "RELEASE_KEY", "RAN_KEY", "AT_OF", "CLOSE_READS_UNTIL", "READ_CAP", "live_run", "live_features",
            "live_selections", "live_marks", "WHY_LIVE", "WHY_CATCHUP", "WHY_REMOVED", "AM_AT", "AM_BUDGET", "AM_UNTIL", "MID_AT",
            "OPEN_BOUND", "OPEN_UNTIL", "CLOSE_LAST_REQUEST", "CLOSE_DONE", "SCHEMA_8", "TABLES_8", "FEATURE_COLUMNS",
-           "PxCutShort", "registered", "program", "seats", "control", "auction_of", "event_id", "parse_event", "knowable",
+           "PxCutShort", "CODE_SHA", "release_id", "code_identity", "registered", "program", "seats", "control", "auction_of", "event_id", "parse_event", "knowable",
            "event_knowable", "tau", "spans", "ensure", "open_px", "read_only", "decided", "release_at", "mark_release",
            "live_allowed", "item_ciks", "reread", "drift_events", "morning", "pxu", "mid", "read_minutes", "values_on",
            "values_o1", "qualifies", "ranked", "control_population", "control_hash", "placebo_hash", "take", "write_rows",

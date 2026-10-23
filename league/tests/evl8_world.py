@@ -7,7 +7,8 @@ the hourly re-decisions as backfills. No figure here is a market's: every price 
 symbol and the day (`daily`).
 
 `pinned()` pins REGISTERED_AT_8 (before the week: Fri Oct 23, 2026, 12:00Z) and refreshes the registries;
-`unpinned()` sets it back to None (the tree as it ships). The week with PREREG-EVL-8 off and on, the same rows and the
+`pinned(None)` holds it None for the block (no row of this file in any registry), whatever the tree pins (A122's
+2026-10-22T18:43:24Z, release 1019n). The week with PREREG-EVL-8 off and on, the same rows and the
 same calls otherwise, is the proof's pair (`run_week`)."""
 
 from __future__ import annotations
@@ -345,9 +346,10 @@ def earlier(program: str, version: int) -> bool:
 
 
 def run_week(root: str | Path, *, eight: bool) -> dict[str, Any]:
-    """The week decided with PREREG-EVL-8 on (pinned, its runs made) or off (unpinned, no run of it): every intent and
-    every earlier seatable program's real-money picks (`W5.picks`)."""
-    ctx = pinned() if eight else contextlib.nullcontext()
+    """The week decided with PREREG-EVL-8 on (pinned, its runs made) or off (UNPINNED: REGISTERED_AT_8 None for the
+    block, whatever the tree pins, so no row of it is in any registry and no run of it is made): every intent and every
+    earlier seatable program's real-money picks (`W5.picks`)."""
+    ctx = pinned() if eight else pinned(None)
     with ctx:
         world = World8(root, eight=eight)
         try:

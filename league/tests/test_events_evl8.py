@@ -623,8 +623,7 @@ class TheJudge(unittest.TestCase):
 
     def test_equal_to_prereg_evl_6s_own_judge_at_cap_14(self):
         judge = getattr(SN, "v6_judge", None)
-        if judge is None:
-            self.skipTest("PREREG-EVL-6's code is not in this tree (feat/evl-6): the reproduction runs where it is")
+        self.assertIsNotNone(judge, "PREREG-EVL-6's code is in this tree (release 1019i on): the reproduction runs")
         rows = []
         rng = random.Random(8)
         for k, d in enumerate(self.days(30)):
@@ -649,7 +648,11 @@ class TheRuns(Pinned):
                 self.assertEqual(S8.BUDGET_HUNDREDTHS, 390)
                 ch = S8.charges(st)
                 self.assertEqual(ch["count"], 0.65)
-                self.assertEqual((ch["base"], ch["stress"]), (0.08, 0.53))
+                # (section 6.6 as frozen: base 0.02 a PX run and 0.03 a META run; stresses' worst 0.15 and 0.13)
+                self.assertEqual((ch["base"], ch["stress"]), (0.12, 0.71))
+                self.assertEqual(ch["per_version"], {"px": "0.214 (two runs within 120 sessions)",
+                                                     "meta": "0.10-0.14 (every run within 720 sessions), 0.23-0.32 "
+                                                             "(within 2,500-4,000)"})
                 # every PX seat's run 1 ended at its 60th block: the fresh runs start while the budget holds 0.13 each
                 for p in S8.seating8():
                     st.set_meta(S8.END_KEY.format(program=p.id, version=1, n=1),
@@ -769,6 +772,53 @@ class TheFamily(Pinned):
 
 
 # ================================================================================================ the money row
+class TheBirthsBudget(unittest.TestCase):
+    def test_reserved_releases_its_065_as_the_screen_counts_the_five_seats_and_a_waiting_run_is_held(self):
+        """A137's births.RESERVED holds PREREG-EVL-8's 0.65 while REGISTERED_AT_8 is unset; pinned, it is released and
+        the screen's own count (screen.py `budget6`, the SEATING sum) holds the five seatable versions at the frozen
+        0.13 each (section 6.6, F12), so the births' room is the same either side of the pin. A PX version whose run 1
+        ended waits for the budget as PREREG-EVL-6's do: the births count it before a seatable birth registers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                with W.pinned(None):
+                    before = BI.budget(st)
+                    reserved0, used0 = BI.budget_reserved_hundredths(), BI.budget_used_hundredths(st)
+                with W.pinned("2026-10-22T18:43:24Z"):
+                    after = BI.budget(st)
+                    self.assertEqual(BI.budget_reserved_hundredths(), reserved0 - 65, "RESERVED releases 0.65")
+                    self.assertEqual(BI.budget_used_hundredths(st), used0 + 5 * 13, "the five seats at 0.13 each")
+                    self.assertEqual(after["left_for_births"], before["left_for_births"], "the births' room unmoved")
+                    self.assertEqual(SN.V6_CHARGE_HUNDREDTHS, S8.CHARGE_HUNDREDTHS)
+                    waiting0 = BI.budget_waiting_hundredths(st)
+                    st.set_meta(S8.END_KEY.format(program="PX-DROP-ON", version=1, n=1),
+                                json.dumps({"at": "2026-12-01T21:00:00Z", "last_day": "2026-12-01", "n": 1}))
+                    self.assertEqual([x["program"] for x in S8.waiting_runs(st)], ["PX-DROP-ON"])
+                    self.assertEqual(BI.budget_waiting_hundredths(st), waiting0 + 13, "its next run held from births")
+            finally:
+                st.close()
+
+
+class TheControls(Pinned):
+    def test_screen_controls_gains_the_three_px_rows_and_nothing_earlier_moves(self):
+        """Section 3.2: "screen.CONTROLS gains these three rows" (PX-DROP-ON and PX-SURGE-ON against CTRL-PX-ALL-ON,
+        PX-GAP-O1 against CTRL-PX-ALL-O1), the rows this file's screen reads (screen8 `CONTROL_OF`); a look of a PX seat
+        freezes its group's re-decision (run.py `_group`: the seat, its control and the control's other seat), and no
+        earlier program's group moves."""
+        want = {"PX-DROP-ON": "CTRL-PX-ALL-ON", "PX-SURGE-ON": "CTRL-PX-ALL-ON", "PX-GAP-O1": "CTRL-PX-ALL-O1"}
+        self.assertEqual({k: v for k, v in SN.CONTROLS.items() if P.is_8(k)}, want)
+        self.assertEqual(S8.CONTROL_OF, want)
+        for seat, ctl in want.items():
+            self.assertFalse(P.BY_ID[ctl].seatable)
+            self.assertEqual(SN.control_of(seat), ctl)
+        from league.events import run as R
+        self.assertEqual(R._group("PX-DROP-ON"), frozenset({"PX-DROP-ON", "PX-SURGE-ON", "CTRL-PX-ALL-ON"}))
+        self.assertEqual(R._group("PX-GAP-O1"), frozenset({"PX-GAP-O1", "CTRL-PX-ALL-O1"}))
+        earlier = {k: v for k, v in SN.CONTROLS.items() if not P.is_8(k)}
+        for prog in earlier:
+            self.assertFalse(R._group(prog) & set(want) | R._group(prog) & set(want.values()), prog)
+
+
 class TheMoneyRow(unittest.TestCase):
     def test_one_row_bounded_zero_to_four_and_the_digests_moved_once(self):
         """Section 4.1 (A122): ONE money row, `event.max_open_v8.learning` 4 with bounds 0-4 (the frozen text's: no value

@@ -164,7 +164,7 @@ class TheBookWithAndWithout(TB.EventTest):
             px.close()
 
     def run_day(self, *, eight: bool):
-        ctx = W.pinned() if eight else mock.patch.object(P, "REGISTERED_AT_8", None)
+        ctx = W.pinned() if eight else W.pinned(None)      # (off: no row of this file in any registry)
         with ctx:
             root = self.root / ("on" if eight else "off")
             root.mkdir()
@@ -281,6 +281,118 @@ class TheLookAhead(unittest.TestCase):
                                  {"status": "terminal", "why": "limit at entry"},
                                  "F9: an entry printed above 1.25 x the previous close is no outcome")
             finally:
+                st.close()
+
+
+class TheStateClock(unittest.TestCase):
+    """Section 7.4 on stored rows: an EARLIER session's member whose outcome settles AFTER the state time sigma of D is
+    not in D's state (its session has not entered), and is once it settles before sigma; the state is the same
+    whenever it is computed (a catch-up a week later reads it as of sigma)."""
+
+    def test_an_outcome_settled_after_sigma_is_out_of_the_state_and_in_once_settled_before_it(self):
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                MT.ensure(st)
+                days = [dt.date(2026, 10, d) for d in (26, 27, 28, 29, 30)]
+                with st.tx() as db:
+                    for d in days:
+                        db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                                   (d.isoformat(), S.iso(et(d, 9, 30)), S.iso(et(d, 16, 0))))
+                prog = P.BY_KEY[("EVL-META-O1", 1)]
+                src = "EVL-CTRL-NEWS-ALL-O1"
+                first = days[0]
+                st.db.execute("INSERT INTO mrl_pool(program, version, day, cik, symbol, event, knowable_at, tags, features, "
+                              "xrules, eligible, adv20, prev_close, cost_rt) VALUES(?, 1, ?, '1', 'S', 'news:1', NULL, ?, ?, "
+                              "'[]', 1, 1e8, 20, 0.0014)", (prog.id, first.isoformat(), json.dumps([f"{src}:1"]),
+                                                            json.dumps(["adv>=100M", "px10-50"])))
+                st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                              "exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, 'news:1', 'S', '1', 'x', ?, "
+                              "'open', ?, 'close', NULL, 'shadow', 'exited', NULL)", (src, first.isoformat(), first.isoformat()))
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('S', ?, 'open', 20, "
+                              "'t', 'sip', 'x')", (first.isoformat(),))
+                st.db.execute("INSERT INTO universe(day, symbol, cik, name, exchange, prev_close, adv20, bench, sigma60) "
+                              "VALUES(?, 'S', '1', 'n', 'NASDAQ', 20, 1e8, 'SPY', NULL)", (first.isoformat(),))
+                d = days[2]
+                sig = MT.sigma_time(C.session(st, d), "o1")
+                st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                              "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, 1, "
+                              "'news:1', 20, 21, 'SPY', 1, 1, 7, 7, 0.05, 0, 0.05, 1, ?, 'settled')",
+                              (src, S.iso(sig + dt.timedelta(minutes=1))))
+                late = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(late["entered"], 0, "settled one minute after sigma: the session has not entered")
+                self.assertEqual(late["stats"], {})
+                again = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(again, late, "computed again (a catch-up), the same state")
+                st.db.execute("UPDATE outcomes SET settled_at=? WHERE event='news:1'", (S.iso(sig - dt.timedelta(minutes=1)),))
+                early = MT.compute_state(st, prog, d, sig)
+                self.assertEqual(early["entered"], 1, "settled before sigma: in the state")
+                self.assertIn("g:adv>=100M", early["stats"])
+            finally:
+                st.close()
+
+
+class TheCodeIdentity(unittest.TestCase):
+    """Section 8: every catch-up is decided "by the release's code, whose commit sha each receipt records": a
+    `decide-px` and a `decide-meta` catch-up's receipt names its code (the sha256 of px.py's and meta.py's own bytes,
+    PREREG-EVL-7's precedent) and the House release it ran from (None off the House box; the deploy log maps the id to
+    its commit)."""
+
+    def test_each_catch_up_receipt_records_its_code(self):
+        import hashlib
+
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            w = W.World8(Path(tmp) / "lane")
+            try:
+                w.st.set_meta("equity:2026-10-26", "1900")
+                w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+                w.at(et(D_DAY, 15, 50)).px_decide(D_DAY, "on", kind="catchup")
+                w.at(et(D_DAY, 15, 51)).meta_decide(D_DAY, "on", kind="catchup")
+                got = {}
+                for job, summary in w.st.db.execute("SELECT job, summary FROM receipts WHERE job LIKE 'decide-px:%' OR "
+                                                    "job LIKE 'decide-meta:%'"):
+                    got[str(job).split(":")[0]] = json.loads(summary)
+            finally:
+                w.close()
+        here = Path(PXL.__file__)
+        self.assertEqual(got["decide-px"]["code_sha"], hashlib.sha256(here.read_bytes()).hexdigest())
+        self.assertEqual(got["decide-meta"]["code_sha"], hashlib.sha256(Path(MT.__file__).read_bytes()).hexdigest())
+        self.assertIsNone(got["decide-px"]["release"], "off the House box")
+        self.assertIn("release", got["decide-meta"])
+        self.assertEqual(PXL.release_id(Path("/workspace/releases/20261023T040959Z-3ac3423732e2/league/events/px.py")),
+                         "20261023T040959Z-3ac3423732e2")
+        self.assertIsNone(PXL.release_id(Path("/home/x/Work/ltcm/league/events/px.py")))
+
+
+class ThePxMemberLimit(unittest.TestCase):
+    """F9 for a PX member (section 7.2, 4.4): its LIMIT AT ENTRY reads the raw entry print where the PX event's own
+    settlement read it, px.sqlite's `px_marks` (and px_universe's prev_close), never the lane's marks: a print above 1.25
+    x the raw previous close is NO OUTCOME even when the adjusted entry price (a split inside the window) is under it."""
+
+    def test_the_raw_print_of_a_px_event_is_px_sqlites(self):
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            px = PXL.open_px(st.root)
+            try:
+                day = dt.date(2026, 10, 27)
+                event = f"px:CTRL-PX-ALL-ON:{day}:0000001001"
+                intent = {"program": "CTRL-PX-ALL-ON", "version": 1, "event": event, "symbol": "PXA",
+                          "entry_day": day.isoformat(), "entry_at": "close"}
+                outcome = {"entry_px": 11.0}            # (adjusted: a 2-for-1 split later in the window)
+                px.put_result(day, "0000001001", S.LIVE_RULE, {"symbol": "PXA", "name": "PXA", "exchange": "NASDAQ",
+                                                               "prev_close": 20.0, "adv20": 4e7, "adv20sh": 2e6,
+                                                               "bench": "SPY", "adjusted61": 61, "inputs_at": "x"},
+                              why=None, run="u", now=dt.datetime(2026, 10, 27, 12, tzinfo=dt.timezone.utc))
+                px.db.execute("INSERT INTO px_marks(symbol, day, label, px, t, source, fetched_at) VALUES('PXA', ?, "
+                              "'close', 26.0, 't', 'sip:Q:6', 'x')", (day.isoformat(),))
+                self.assertFalse(MT._within_limit(st, intent, outcome), "the raw print $26 > 1.25 x $20: no outcome")
+                px.db.execute("UPDATE px_marks SET px=22.0 WHERE symbol='PXA'")
+                self.assertTrue(MT._within_limit(st, intent, outcome), "the raw print $22 <= $25")
+                st.db.execute("INSERT INTO marks(symbol, day, label, px, t, source, fetched_at) VALUES('PXA', ?, 'close', "
+                              "40.0, 't', 'sip', 'x')", (day.isoformat(),))
+                self.assertTrue(MT._within_limit(st, intent, outcome), "the lane's marks are never a PX event's")
+            finally:
+                px.close()
                 st.close()
 
 
@@ -663,14 +775,9 @@ class TheHouseTiming(Eight):
         clock.at = (tau - dt.timedelta(seconds=200)).timestamp()
         self.assertAlmostEqual(lane._deadline(w.st, lane.now(), record) - clock(), H.RECORD_BUDGET, places=3,
                                msg="before the lead: as before")
-        with mock.patch.object(P, "REGISTERED_AT_8", None):
-            P.refresh_8()
-            try:
-                clock.at = (tau - dt.timedelta(seconds=10)).timestamp()
-                self.assertIsNone(lane._eight_lead_tau(w.st, lane.now()), "nothing while unpinned")
-            finally:
-                pass
-        P.refresh_8()
+        with W.pinned(None):
+            clock.at = (tau - dt.timedelta(seconds=10)).timestamp()
+            self.assertIsNone(lane._eight_lead_tau(w.st, lane.now()), "nothing while unpinned")
 
     def test_iii_prereg_evl5s_pre_pass_runs_first_while_its_key_is_not_stored(self):
         w = self.world(rows=False)
