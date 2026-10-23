@@ -364,6 +364,62 @@ class TheCodeIdentity(unittest.TestCase):
         self.assertIsNone(PXL.release_id(Path("/home/x/Work/ltcm/league/events/px.py")))
 
 
+class ThePxSettlement(unittest.TestCase):
+    """Section 4.4 and 3.1 in the nightly score (league/events/score.py `px_event`): a PX event settles on PREREG-EVL-1
+    section 5's prints and costs read from px.sqlite alone (its px_universe row, its `px_marks` prints, its `px_bars`),
+    its outcome in the lane's `outcomes` as every program's; nothing of the lane's `marks`, `bars` or `universe` is
+    written; PREREG-EVL-2's LIMIT AT ENTRY applies (an entry above 1.25 x the raw previous close is skipped); the batched
+    pass never settles one from its cache."""
+
+    def test_a_px_event_settles_on_px_sqlite_alone_and_its_limit_at_entry_holds(self):
+        from league.events import score as SCO
+        from league.tests import test_events_score as TS
+
+        with W.pinned():
+            t = TS.ScoreTest("test_open_to_close_on_the_listing_exchanges_crosses_with_the_cost_allowance")
+            t.setUp()
+            self.addCleanup(t.tearDown)
+            st, d0 = t.st, t.d0
+            d1 = C.nth(st, d0.day, 2)
+            t.equity(dt.date(2026, 10, 19), 20000.0)
+            t.spy(d0)
+            t.spy(d1)
+            px = PXL.open_px(st.root)
+            try:
+                events = {}
+                for sym, cik, prev in (("PXQ", "0000005001", 49.0), ("PXR", "0000005002", 40.0)):
+                    t.tape(d0, sym, "N", None, 51.0, bar=(50.0, 51.0))
+                    t.tape(d1, sym, "N", 52.0, None, bar=(52.0, 52.5))
+                    px.put_result(d0.day, cik, S.LIVE_RULE, {"symbol": sym, "name": sym, "exchange": "NYSE",
+                                                             "prev_close": prev, "adv20": 5e7, "adv20sh": 1e6,
+                                                             "bench": "SPY", "adjusted61": 61, "inputs_at": "x"},
+                                  why=None, run="u", now=d0.open_at)
+                    event = PXL.event_id("PX-DROP-ON", d0.day, cik)
+                    st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                  "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('PX-DROP-ON', 1, ?, "
+                                  "?, ?, ?, ?, 'close', ?, 'open', 3, 'shadow', 'planned', 'px8 live')",
+                                  (event, sym, cik, S.iso(d0.close_decide), d0.day.isoformat(), d1.day.isoformat()))
+                    events[sym] = event
+            finally:
+                px.close()
+            out = SCO.settle(st, t.gw, now=d1.close_at + dt.timedelta(minutes=30))
+            self.assertEqual(out["settled"], 1, out)
+            o = t.outcome(events["PXQ"])
+            self.assertEqual((o["entry_px"], o["exit_px"], o["bench_entry"], o["status"]), (51.0, 52.0, 603.0, "settled"))
+            self.assertEqual(t.status(events["PXR"])["status"], "skipped:limit", "$51 above 1.25 x $40: PREREG-EVL-2's limit")
+            for table in ("marks", "bars", "universe"):
+                self.assertFalse(st.db.execute(f"SELECT 1 FROM {table} WHERE symbol IN ('PXQ', 'PXR')").fetchone(),
+                                 f"the lane's {table} never gains a PX event's row")
+            px = PXL.open_px(st.root)
+            try:
+                marks = {(r["symbol"], r["label"]): r["px"] for r in px.db.execute("SELECT * FROM px_marks")}
+                self.assertEqual((marks[("PXQ", "close")], marks[("PXQ", "open")]), (51.0, 52.0))
+                self.assertTrue(px.db.execute("SELECT 1 FROM px_bars WHERE symbol='PXQ'").fetchone())
+            finally:
+                px.close()
+            self.assertFalse(SCO.parity_sampled({"program": "PX-DROP-ON", "version": 1, "event": events["PXQ"]}))
+
+
 class ThePxMemberLimit(unittest.TestCase):
     """F9 for a PX member (section 7.2, 4.4): its LIMIT AT ENTRY reads the raw entry print where the PX event's own
     settlement read it, px.sqlite's `px_marks` (and px_universe's prev_close), never the lane's marks: a print above 1.25
