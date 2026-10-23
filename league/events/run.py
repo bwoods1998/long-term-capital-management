@@ -703,12 +703,20 @@ def _mark_1530(ctx: Context, symbol: str, day: dt.date, *, fetch: bool = True) -
 #: a name with no such bar in the answer gets no mark here and is read alone by `_mark_1530`, as every other row's is.
 MARK_BATCH = 100
 MARK_PAGES = 40
+#: THE CLOSE DECISION'S 15:30 MARKS READ TOGETHER (release 1019m-hotfix, the captain's A140): the earlier rows' REACT
+#: names (`decide_close`, `_react_marks`) are read first over this span before the mark's time only (15:00 to 15:30 ET on
+#: a full day: one page a request of `MARK_BATCH` names), then from the open for the names that span held no bar; a
+#: name no batch gave a mark is read alone by `_mark_1530`, as before. The last bar ending by 15:30 ET is the same bar
+#: whatever the span's start, so every mark is the one `_mark_1530` reads alone.
+MARK_SINCE = dt.timedelta(minutes=30)
 
 
-def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
+def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date, *, since: dt.datetime | None = None) -> int:
     """The 15:30 marks (label '1530') of `symbols` on session `day` that the store does not hold yet, read in batched
     SIP 1-minute requests (`MARK_BATCH` names each): the same rule and the same row `_mark_1530` writes. Returns how many
-    marks were stored. Nothing is read before the bar is on the Basic plan's tape (`U.SIP_DELAY` after 15:30 ET)."""
+    marks were stored. Nothing is read before the bar is on the Basic plan's tape (`U.SIP_DELAY` after 15:30 ET).
+    `since` (release 1019m-hotfix): the requests' start, the session's open when None (every caller before it); a name
+    whose bars from `since` hold none ending by the mark's time gets no mark here (read again from the open, or alone)."""
     st = ctx.store
     session = C.session(st, day)
     if session is None:
@@ -716,6 +724,7 @@ def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
     end = session.at(dt.time(15, 30)) if not session.early else session.close_at - dt.timedelta(minutes=30)
     if ctx.now() < end + U.SIP_DELAY:
         return 0
+    start = session.open_at if since is None else since
     have = {str(r[0]) for r in st.db.execute("SELECT symbol FROM marks WHERE day=? AND label='1530'", (day.isoformat(),))}
     names = sorted({str(x) for x in symbols if x} - have)
     stored = 0
@@ -725,7 +734,7 @@ def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
         token = None
         for _ in range(MARK_PAGES):
             page = ctx.gw.get_json("/v1/alpaca/v2/stocks/bars", {"symbols": ",".join(chunk), "timeframe": "1Min",
-                                                                 "start": S.iso(session.open_at), "end": S.iso(end),
+                                                                 "start": S.iso(start), "end": S.iso(end),
                                                                  "feed": "sip", "adjustment": "raw", "limit": 10000,
                                                                  "page_token": token}) or {}
             for sym, bars in (page.get("bars") or {}).items():
@@ -742,6 +751,27 @@ def _marks_1530(ctx: Context, symbols: Iterable[str], day: dt.date) -> int:
                           "?, ?, 'sip-1min', ?)", (sym, day.isoformat(), float(last["c"]), last["t"], S.iso(ctx.now())))
             stored += 1
     return stored
+
+
+#: The earlier rows' REACT families of the close decision whose reaction reads C1's 15:30 mark (`decide_close`'s
+#: `reaction`: PREREG-EVL-1's and -2's REACT rows and R3's births of these families); PREREG-EVL-4's EVL-8K-REACT-ON
+#: reads its own marks together in its part, PREREG-EVL-5's in theirs (`_rows_5`).
+REACT_CLOSE = ("ern-react", "news-react")
+
+
+def _react_marks(ctx: Context, day: dt.date, names: Iterable[str]) -> int:
+    """THE CLOSE DECISION'S 15:30 MARKS READ TOGETHER (release 1019m-hotfix, the captain's A140): the marks of `names`
+    the store does not hold yet, in `_marks_1530`'s batches (`MARK_BATCH` names a request), first from `MARK_SINCE`
+    before the mark's time (15:00 ET on a full day: one page a request), then from the open for the names that span
+    gave none; a name neither pass gave a mark is read alone by `_mark_1530` when its row's reaction is read, as
+    before. Each mark is the row `_mark_1530` writes (the same bar, price, time and source). Returns how many were
+    stored."""
+    session = C.session(ctx.store, day)
+    want = sorted({str(x) for x in names if x})
+    if session is None or not want:
+        return 0
+    end = session.at(dt.time(15, 30)) if not session.early else session.close_at - dt.timedelta(minutes=30)
+    return _marks_1530(ctx, want, day, since=end - MARK_SINCE) + _marks_1530(ctx, want, day)
 
 
 def _rows_4(ctx: Context, day: dt.date, window: tuple[dt.datetime, dt.datetime], by_ticker: Mapping[str, str],
@@ -1268,6 +1298,14 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     `ask_only`: as decide_open's (the verdicts the close decision will read, asked during the session: no intent, no
     receipt, and no reaction, whose 15:29 bar is not on the tape before the decision).
 
+    THE EARLIER ROWS' 15:30 MARKS ARE READ TOGETHER (release 1019m-hotfix, the captain's A140): before those rows are
+    decided, the marks their REACT rows' reaction reads (`react_names`: the eligible issuers of the rows of every
+    ern-react and news-react program decided here, never one a written look keeps) are read in `_marks_1530`'s batches
+    (`_react_marks`: from 15:00 ET, then from the open for the names that span gave none), so the decision no longer reads
+    them one name a request at the House's data interval. The same rule and the same stored row as `_mark_1530`'s, so
+    every intent is the same; a name no batch gave a mark is read alone, as before, and a batch that fails other than
+    by the task's time bound costs only time (the summary's `marks_error`; every name read alone).
+
     `evl4_only` (release 1019c's review): PREREG-EVL-4'S ROWS DECIDED BY THEMSELVES, for a close a release without them
     decided (league/events/screen.py `made_without`; the House's lane and the CLI's catchup run it once, as a backfill):
     the decision's reads and its eligibility call exactly as the whole decision makes them, then their rows as above
@@ -1476,6 +1514,26 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
         out["kept"][_key(prog)] |= _left_out(st, prog, rows, eligible=lambda c: table.get(c),
                                              reaction=lambda r, u: reaction(r, u, fetch=False))
 
+    def react_names() -> set[str]:
+        """The symbols whose 15:30 mark the earlier rows' REACT programs this decision decides may read (`reaction`):
+        the eligible issuer of each row knowable after the program's registration (a news row's issuer by its own
+        symbol), of every close-entry program of `REACT_CLOSE` but those a written look of its group keeps (`kept`: A66,
+        fetched nothing); with `births_only` the births' alone."""
+        names: set[str] = set()
+        for prog in P.PROGRAMS:
+            if prog.entry_at != "close" or prog.family not in REACT_CLOSE or (births_only and prog.spec is None) or \
+                    kept(prog) is not None:
+                continue
+            news = prog.family == "news-react"
+            for row in articles if news else e8k:
+                if S.parse_iso(row["knowable_at"]) <= prog.registered_at:
+                    continue
+                uni = elig.get(row.get("cik"))
+                if uni is None or not uni.get("symbol") or (news and uni["symbol"] != row.get("symbol")):
+                    continue
+                names.add(str(uni["symbol"]))
+        return names
+
     def four_part() -> None:
         """PREREG-EVL-4's part of the decision (A83 (3)(i)): its reads, `_skip_excluded`, its programs (the 15:30 marks
         and the verdicts they read, their intents) and what each of its kept programs leaves out."""
@@ -1578,6 +1636,19 @@ def decide_close(ctx: Context, day: dt.date, *, backfill_run: bool = False, ask_
     # nothing, fetched nothing, written nothing (no intent, no `skipped:excluded` move: `_skip_excluded` passes it
     # over). R3's registered births (close entry: ern-react, news-day, news-react) are decided in the earlier part,
     # after every PREREG row.
+    if not evl4_only and not evl5_only and not ask_only:
+        # THE EARLIER ROWS' 15:30 MARKS READ TOGETHER (release 1019m-hotfix, the captain's A140): the names whose mark
+        # their REACT rows' reaction reads, in batches, before those rows are decided, so the decision no longer reads
+        # them one name a request at the House's data interval (a day of several hundred names finished after the
+        # book's send line, 15:49 ET). The same rule and the same stored row as `_mark_1530`'s, so every intent is the
+        # same; a name no batch gave a mark is read alone by `reaction`, as before. A FAILED BATCH COSTS ONLY TIME: an
+        # exception that is not the task's time bound is noted (`marks_error`) and every name is read alone, as before.
+        try:
+            _react_marks(ctx, day, react_names())
+        except Deadline:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the per-name reads decide, as before
+            out["marks_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
     if not evl4_only and not evl5_only:       # (one file's rows by themselves: no earlier row is decided again)
         for prog in P.PROGRAMS:
             if prog.entry_at == "close" and prog.family not in P.CLOSE_FAMILIES_4 and \

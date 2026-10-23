@@ -371,6 +371,12 @@ HELD_RECUR_SESSIONS = 5
 #: Before then ROOM holds as release 1019g built it. The post-close alert (`_event_held_said`) is a WARNING whenever a
 #: later buy that ended unsent waiting for that room is a PREREG row (`book.prereg_row`: any file's, not a birth).
 HELD_OVERDUE_S = 60.0
+#: THE CAPTAIN'S A140 (release 1019m-hotfix): a PREREG-EVL-7 learner whose own live receipt of the close is still
+#: pending at the close window's last book minute (`HELD_OVERDUE_S` before its cut-off, as `HeldAhead.overdue`) takes
+#: nothing at that auction, and the births held back for it are given their names as they would be without it
+#: (`EquityBook._event_decide_lrn`; ROOM's order otherwise unchanged): a learner that late could not send anyway. No
+#: pick of it is read or planned, so no ledger row is written for it: its summary says this, and a warning is raised.
+LEARNER_LATE = "its live receipt was still pending at the close window's last book minute: it takes nothing (A140)"
 #: `eq_orders.tif` and `eq_orders.otype` (release R2: an auction order's time in force, `opg` or `cls`, and a market
 #: sale's type), added to a state from before it by these statements, guarded by PRAGMA table_info as `kind` is.
 ORDER_COLUMNS_DDL = {"tif": "ALTER TABLE eq_orders ADD COLUMN tif TEXT NOT NULL DEFAULT 'day'",
@@ -5831,10 +5837,13 @@ class EquityBook:
         once a session and auction, AFTER the auction's own decision (`_event_decide`, which gave every PREREG-EVL-1 to
         -6 row its names whatever its band, so none ever waits on a learner) and ONLY ONCE EACH LEARNER'S OWN LIVE
         RECEIPT OF THE AUCTION HAS FINISHED (`book.learner_pending`; league/events/learner.py `live_state`): while one
-        has not, this is tried again each minute of the window, with no other bound, and the births held back for the
+        has not, this is tried again each minute of the window, and the births held back for the
         learners (`learners.deferred` of the auction's summary, read as of its decision time: R3's births after the
         learners in ROOM, `book.after_learners`) wait with it (A113's reading: a waiting pick keeps room from the
-        births only). A learner whose first finished live receipt names it is asked for its picks (`book.picks`: its
+        births only), until THE CLOSE WINDOW'S LAST BOOK MINUTE (the captain's A140, `LEARNER_LATE`: from
+        `HELD_OVERDUE_S` before the close's cut-off a learner still pending takes nothing at that auction, its summary
+        `late` and a warning, and the births held back are given their names without it; the open waits as before).
+        A learner whose first finished live receipt names it is asked for its picks (`book.picks`: its
         LIVE decision's intents in its rank order, less its real-money gate, the ERN and 8-K guards and one position per
         issuer); one whose receipt does not name it takes nothing at the auction. Those births and the learners are
         given their names together by `book.allocate` in ROOM's order (a learner before R3's births; in Probe and Sized
@@ -5859,9 +5868,19 @@ class EquityBook:
             return
         decided_at = em.open_decide if at == "open" else em.close_decide
         waiting = [p.id for _, p in learners if adapter.learner_pending(lane, p, em.day)]
+        late: list[str] = []
         if waiting:
-            out["event_decide_lrn"] = f"waiting for the live receipt of {', '.join(waiting)} ({at} {day})"
-            return
+            if at != "close" or now < em.close_until - HELD_OVERDUE_S:
+                out["event_decide_lrn"] = f"waiting for the live receipt of {', '.join(waiting)} ({at} {day})"
+                return
+            # THE CAPTAIN'S A140 (release 1019m-hotfix): FROM THE CLOSE WINDOW'S LAST BOOK MINUTE (`HELD_OVERDUE_S`
+            # before its cut-off) a learner whose own live receipt is still pending TAKES NOTHING AT THIS AUCTION (a
+            # learner that late could not send anyway, so ROOM gives it nothing it could use), and the births held back
+            # for it are given their names and planned now, as they would be without it; ROOM's order is otherwise
+            # unchanged. Its picks are never read here (none is planned, so no ledger row is written): the warning
+            # below says so, and the auction's rows name it `late`.
+            late = waiting
+            learners = [(inst, program) for inst, program in learners if program.id not in late]
         moment = dt.datetime.fromtimestamp(decided_at, dt.timezone.utc)
         given_names = {str(r["symbol"]).upper() for r in self.state.rows(
             "SELECT symbol FROM eq_event_intents WHERE side='buy' AND day=? AND at=?", (day, at))}
@@ -5882,6 +5901,9 @@ class EquityBook:
             wanted[family] = [adapter.pick_of(x) for x in d.get("picks") or ()]
             rooms[family], bands[family], insts[family] = int(d.get("room") or 0), str(d.get("band")), (inst, program)
             summary["programs"][family] = {"picks": len(wanted[family]), "room": rooms[family], "after": "learners"}
+        for inst, program in self._event_learners(at, adapter) if late else ():
+            if program.id in late:      # (A140: its live receipt still pending at the window's last book minute)
+                summary["programs"][inst.family] = {"picks": None, "room": 0, "late": LEARNER_LATE}
         for inst, program in learners:
             room = _max_open(s, inst.band, program) - self._event_open_count(inst.id)
             insts[inst.family], bands[inst.family] = (inst, program), inst.band
@@ -5939,7 +5961,9 @@ class EquityBook:
             for family, row in taken.items():
                 later[family] = dict(later.get(family) or {}) | row
             merged["sale_to_later"] = later
-        merged["learners"] = dict(held_back) | {"decided": True}
+        merged["learners"] = dict(held_back) | {"decided": True} | ({"late": list(late)} if late else {})
+        if late:
+            summary["late"] = list(late)
         with self.state.transaction():
             for inst, program, pick in planned:
                 self._event_plan_buy(inst, program, pick, em, at, s, adapter, sigmas.get(pick.symbol), now)
@@ -5948,6 +5972,17 @@ class EquityBook:
                               "day, at")
             self.state.execute("UPDATE eq_event_decisions SET summary=? WHERE day=? AND at=?", (dumps(merged), day, at))
         out["event_decide_lrn"] = f"{at} {day}: {len(planned)} buys planned with and after the learners"
+        if late:
+            one = len(late) == 1
+            what = (f"PREREG-EVL-7: the live receipt of {', '.join(late)} for {day}'s close was still pending at the "
+                    f"close window's last book minute, so {'it takes' if one else 'they take'} nothing at that auction "
+                    f"(A140: unsent, no pick read, no ledger row) and the births held back for {'it' if one else 'them'} "
+                    f"({len(deferred)}) were given their names without {'it' if one else 'them'}; read the lane's "
+                    "decide-close seconds in lane.json: the receipts must finish before the close - 11 minutes")
+            out["event_decide_lrn"] += f"; {', '.join(late)}: {LEARNER_LATE}"
+            self.record("equity.alert", {"what": what, "day": day, "at": at, "learners_late": list(late),
+                                         "planned": len(planned)})
+            self.alert("warning", f"equity: {what}")
         if planned:
             self._event_publish(em.day, adapter, lane, out)
         self.record("equity.event_decide", {"day": day, "at": key, "exits": 0, "buys": len(planned),
