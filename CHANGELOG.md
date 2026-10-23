@@ -42,7 +42,7 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
-### Release 1019n: PREREG-EVL-8, the price lane (PX) and the meta-learners, FROZEN (A122) AND PINNED, on `feat/evl-8` (unreleased; the first build `b52f4bbe` and its saved WIP `686f1db2` merged with release 1019l `3df7dd9d`, then with main's releases 1019m-hotfix `bc33cf95`, 1019m `84de2f4a` and 1019m-cost `1c87837f` (rerere off), and finished to the frozen text; a draft PR with base `rel/1019l`; an owner deploy: THE GATEWAY FIRST, then THE HOUSE with THE NEW PAIR `77c3cfed` / `138ee8eb`, the standing grant re-ratified; SHIPPING IT STARTS THE FILE: `REGISTERED_AT_8 = "2026-10-22T18:43:24Z"`)
+### Release 1019n: PREREG-EVL-8, the price lane (PX) and the meta-learners, FROZEN (A122) AND PINNED, on `feat/evl-8` (unreleased; the first build `b52f4bbe` and its saved WIP `686f1db2` merged with release 1019l `3df7dd9d`, then with main's releases 1019m-hotfix `bc33cf95`, 1019m `84de2f4a` and 1019m-cost `1c87837f` (rerere off), and finished to the frozen text; PR 609 with base `main`; an owner deploy: THE GATEWAY FIRST, then THE HOUSE with THE NEW PAIR `77c3cfed` / `138ee8eb`, the standing grant re-ratified; SHIPPING IT STARTS THE FILE: `REGISTERED_AT_8 = "2026-10-22T18:43:24Z"`)
 
 The code of the frozen PREREG-EVL-8 ([docs/prereg/PREREG-EVL-8.md](docs/prereg/PREREG-EVL-8.md), tag `prereg-evl-8`, commit
 `a5eea816`, sha256 `37150fac`; its calibration record [docs/prereg/evl-8/](docs/prereg/evl-8/), 160 files, both byte for
@@ -125,15 +125,35 @@ test_events_evl8_proof.py, on invented data only: league/tests/evl8_world.py). T
   live rows alone again, sent exactly when it would be without this file (kv `eq_event_list`'s `base`), and this file's
   names go only in its own pass and send (live.py `_event_publish` `eight`); (3) THE TICK'S BOUND (section 4.6): this
   file's work in a book tick starts nothing at or after 30 s from the tick's start and every request's timeout ends by
-  it (`EIGHT_TICK_S`, `_timeout_at_most`), so a slow gateway never skips the 15:48 tick or an open minute (live/step.py
-  `_loop` counts the next :03 from the tick's end), a pass with under 10 s left waiting for the next tick; the minors:
+  it (`EIGHT_TICK_S`, `_timeout_at_most`), so this file's own work ends by about :33 whatever the gateway does (live/step.py
+  `_loop` counts the next :03 from the tick's end; the third round states the residual edge), a pass with under 10 s
+  left waiting for the next tick; the minors:
   a buy of this file is sent in the tick its late pass planned it or refused there (`EIGHT_UNSENT`; the room earlier
   rows' buys keep refuses it in its tick, never `HeldAhead`'s wait), F9's one reading (a member whose first tag may still
   settle is pending, for the POOL and the state alike: meta.py `member_outcome`), a benchmark's basis removes only the
   values that read its stored closes and never a name from PXU(D) (px.py `morning`, `bench_why`), and EVL-META-O1's
   guard calls E8's `ern_issuer` (book.py `meta_o1_guard`).
+- **THE THIRD FIX ROUND** (the re-reviews of `57a91f81`: the judges' one major and three minors, the money lens's two
+  minors; each code fix with a test that fails without it, checked by reverting): (1) SECTION 4.6'S OPEN ROW (the
+  major): "a PX part not finished gives EVL-META-O1 no member, section 7.2, and then the META part is decided only by
+  its catch-up"; `decide-open-px8:<D>` ran EVL-META-O1's part live whenever time was left, so after a failed or cut
+  PX-GAP-O1 part it traded real money and its block was judged; it now runs only when the PX part finished `ok`, else
+  `decide-meta:open:<D>` decides the session (a reported shadow, never traded, never judged; house.py `_eight_open`;
+  the close is unchanged: section 1.2's test (iv) keeps EVL-META-ON live with no PX member; with `events.px_data` off
+  there is no PX part and META's part runs live as before); (2) THE FREE RECORDS (sections 3.2, 3.3, 7.1 and 10): the
+  daily report's program rows of CTRL-PX-ALL-ON / -O1, the META POOL records and the placebos carry their settled
+  counts only, never a mean, a share or any other figure (report.py `free_record_8`, `FREE_8_SETTLED_KEYS`; the
+  secrecy test scans a settled PX control in the text and the JSON); (3) THE SITE (section 5): the five seats show no
+  PREREG-EVL-3 look countdown (site_lane.py: `look` null, as for PREREG-EVL-6's versions and the learners); (4) THE
+  RUNS' ORDER (section 6.6): `screen8.run` starts its waiting runs before and after its looks, as `screen.run` does,
+  so a run that ends at its 60th block in a night's looks starts that night when the budget holds it; (5) a test that
+  once this file's names are at the gateway, an earlier row's A80 re-send goes with no POST of its own list before it
+  (kv `eq_event_list`'s `base`); (6) the docs and comments state only what the tick's bound promises: this file's own
+  work ends by it, and the minute's later steps (the proof, the share lanes' windows, the exports, the fees read) that
+  need more than the rest can still end a 15:47 tick past 15:48:03 (a residual edge, narrow: a slow data host while
+  share-lane exits are re-priced at that tick).
 
-**Tests**: the full 3.14 suite in four shards, 13,425 tests OK (33 skipped; the shard that found the births leak this branch had, fixed, re-run whole: 3,438 OK); the events, equity, live, ci, constitution and ops modules on 3.11, 3,575 tests OK, and the modules changed after that run again on 3.11 (331 OK); the gateway's 509 tests and `npm run check`; `python -m league.ci --base origin/main --branch feat/evl-8 --no-tests` passed. The fix round, on its head: the full 3.14 suite in four shards, 13,443 tests (33 skipped), its one failure the public-wording test on the new docs' wording, fixed and re-run (36 OK); on 3.11 the events, equity, live, ci, constitution and ops modules, 3,328 OK, and test_evl_* with test_v3_walls, 65 OK; `league.ci --no-tests` passed. Known and not this branch's: on 3.14, test_equity_e2e and test_equity_etf_orders fail when test_equity_design ran before them in one process (a module-order artifact: the same 1 + 18 fail on release 1019l's own tree in that order) and pass alone. The second fix round, on its head (with releases 1019m and 1019m-cost merged): the full 3.14 suite in four shards, 13,494 tests OK (33 skipped); on 3.11 the events, equity, live, ci, constitution and ops modules with test_evl_*, test_v3_walls and release 1019m-cost's cost and report modules, 3,494 OK; the gateway's 509 tests and `npm run check`; `league.ci --base origin/main --branch feat/evl-8 --no-tests` passed; the identities above unchanged on both Pythons.
+**Tests**: the full 3.14 suite in four shards, 13,425 tests OK (33 skipped; the shard that found the births leak this branch had, fixed, re-run whole: 3,438 OK); the events, equity, live, ci, constitution and ops modules on 3.11, 3,575 tests OK, and the modules changed after that run again on 3.11 (331 OK); the gateway's 509 tests and `npm run check`; `python -m league.ci --base origin/main --branch feat/evl-8 --no-tests` passed. The fix round, on its head: the full 3.14 suite in four shards, 13,443 tests (33 skipped), its one failure the public-wording test on the new docs' wording, fixed and re-run (36 OK); on 3.11 the events, equity, live, ci, constitution and ops modules, 3,328 OK, and test_evl_* with test_v3_walls, 65 OK; `league.ci --no-tests` passed. Known and not this branch's: on 3.14, test_equity_e2e and test_equity_etf_orders fail when test_equity_design ran before them in one process (a module-order artifact: the same 1 + 18 fail on release 1019l's own tree in that order) and pass alone. The second fix round, on its head (with releases 1019m and 1019m-cost merged): the full 3.14 suite in four shards, 13,494 tests OK (33 skipped); on 3.11 the events, equity, live, ci, constitution and ops modules with test_evl_*, test_v3_walls and release 1019m-cost's cost and report modules, 3,494 OK; the gateway's 509 tests and `npm run check`; `league.ci --base origin/main --branch feat/evl-8 --no-tests` passed; the identities above unchanged on both Pythons. The third fix round, on its head: the full 3.14 suite (league/tests and ltcm/tests) in four shards, 15,513 tests OK (34 skipped), no failure needing a rerun; on 3.11 the touched modules (test_events_*, test_site_*, test_daily_report, test_v3_walls, test_evl_*, test_equity_book*, test_equity_money, test_equity_rehearsal, test_ci: 63 modules), 1,537 OK; the gateway is not touched; `league.ci --base origin/main --branch feat/evl-8 --no-tests` passed; the identities above unchanged on both Pythons.
 
 **Deploy and rollback**: docs/operations.md, **Release 1019n** (the gateway first, then the House with the pair and the
 grant re-ratified; rollbacks: `events.px_data` false, the row at 0, `REGISTERED_AT_8` None, or the House to main's
