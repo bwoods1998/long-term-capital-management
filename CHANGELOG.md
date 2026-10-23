@@ -42,48 +42,72 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
-### Release 1019j: PREREG-EVL-8, the price lane (PX) and the meta-learners, on `feat/evl-8` (unreleased; cut from `feat/infra-1019i` `069c0f54`; a draft PR with base `rel/1019h`; it joins the release with `feat/evl-6` and `feat/evl-7`; an owner deploy: THE GATEWAY FIRST; it SHIPS REGISTERING NOTHING, `REGISTERED_AT_8 = None`)
+### Release 1019n: PREREG-EVL-8, the price lane (PX) and the meta-learners, FROZEN (A122) AND PINNED, on `feat/evl-8` (unreleased; the first build `b52f4bbe` and its saved WIP `686f1db2` merged with release 1019l `3df7dd9d` (rerere off) and finished to the frozen text; a draft PR with base `rel/1019l`; an owner deploy: THE GATEWAY FIRST, then THE HOUSE with THE NEW PAIR `77c3cfed` / `138ee8eb`, the standing grant re-ratified; SHIPPING IT STARTS THE FILE: `REGISTERED_AT_8 = "2026-10-22T18:43:24Z"`)
 
-The code of PREREG-EVL-8 (goal-2026-10-19/evl8/PREREG-EVL-8.md, the fix round's final text, until it is frozen at tag
-`prereg-evl-8`), each part held by tests that fail without it (league/tests/test_events_evl8.py,
-test_events_evl8_proof.py, on invented data only: league/tests/evl8_world.py). With `REGISTERED_AT_8` None no row of it
-is in a registry: nothing decides, trades, judges or is charged.
+The code of the frozen PREREG-EVL-8 ([docs/prereg/PREREG-EVL-8.md](docs/prereg/PREREG-EVL-8.md), tag `prereg-evl-8`, commit
+`a5eea816`, sha256 `37150fac`; its calibration record [docs/prereg/evl-8/](docs/prereg/evl-8/), 160 files, both byte for
+byte from the tag), each part held by tests that fail without it (league/tests/test_events_evl8.py,
+test_events_evl8_proof.py, on invented data only: league/tests/evl8_world.py). The page is docs/events.md,
+**PREREG-EVL-8**; deploy, verify and rollback docs/operations.md, **Release 1019n**; the book INTERFACES.md section 29.
 
-- **PART A, THE PX LANE** (league/events/px.py, px_grid8.json): ONE CLOCK; the morning pass (c*_P, FLAGGED(D),
-  PXU(D) in px.sqlite only, written whole, serving O1 only when stored before 09:15); NO STORED ITEM; the three seats'
-  rules and rankings, K 40 after A72; the 200 hash-sampled controls; the live close and open runs with their bounds
-  (no read after tau + 45 s, each read's timeout capped at tau + 50 s, ended by tau + 55 s; the open's 60 s, never past
-  09:19:30); `decide-px` catch-ups (never judged, never traded); the hourly re-decision from the deciding run's stored
-  values; the pinned grid (canonical sha256 `bb0d50e4...`) and its evaluator; the bar-basis panel, `px_basis`, the 16
-  placebos and the canary; score.py settles `px:` events on px.sqlite.
-- **PART B, THE META-LEARNERS** (league/events/meta.py): MRL-EB (K 16, H 60, TAU 30 bp, SF 20 bp, Z 3, MINB 3, WARM 10)
-  over the 720 / 969 grid, program experts and the PX records' `x:` experts (never above 1,535); THE MEMBERS RULE FIXED
-  BY STORED TIMES (the lane's first finished decision naming a source, its real-money reading at tau over ELIGIBLE TO
-  PICK's rows with THE MARKS, `meta.AsOf`; PREREG-EVL-7's learners by their live intents; the live PX run's
-  selections), so live and catch-up write the same `mrl_pool`; the state as of 09:00 ET / the close - 30 minutes, the
-  pre-passes; F8 (rank_key a position, why "mrl"; every figure in mrl_* tables only); F9's member outcome.
-- **THE JUDGE** (league/events/screen8.py): PREREG-EVL-6 sections 1.2-3 as frozen with F4's constant cap (4 / 8 / 14 /
-  8), runs charged when they start, the lane's budget, registration order, stays, demotion, Sized; the placebo audit.
-- **THE HOUSE** (league/events/house.py): the runs at section 4.6's times, the lead held for this file, record and
-  verdict tasks inside the lead bounded to tau, the PX close run first after PREREG-EVL-5's pre-pass, every read
-  spaced and capped (`EightReads`), the lowest-priority tasks yielding; the runs' end marks for the book.
-- **REAL MONEY** (league/events/book.py, league/equity/live.py; league/equity/INTERFACES.md section 27): every buy of
-  the file in a LATE PASS, BY TIME, keeping no room; PX's learning room 4 by the money row
-  `event.max_open_v8.learning` (bounds 0-4); A85's reservation for a promoted version; the 150-order line's keep.
-- **BIRTHS, THE REPORT, THE ALARM**: births' `FACTS_DENY` gains every `px_*` and mrl_* table and the file's rows are
-  excluded from the facts' counts and the validator's Jaccard; the report's PX and META lines (counts only), the late
-  passes, the one-mechanism pairs, the session-block bound and the market-direction share beside Done's; the stall
-  cause `evl_price` (league/ops/evl_price.py; gateway/lib/email.mjs).
-- **IDENTITIES**: money `8e63ce64` -> `05fc8d09`, constitution `c3026eba` -> `84dc7041` (the one row); the row at 0
-  `f296820e` / `be76e760`; the options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity
-  `2f0083bc`, the gate contract `397b22b7`, the Done rule `54241925`, the births prompt `0cae215b` (`PARSE_VERSION` 4)
-  unchanged; `equity_money_problems()` []. The grant is re-ratified for `05fc8d09`.
+- **THE PIN** (programs.py): `REGISTERED_AT_8` A122's 2026-10-22T18:43:24Z, `FROZEN_SHA256_8` held to the frozen file by a
+  test (every calibration file its SHA256SUMS lists; the pinned grid equal to the code's, canonical `bb0d50e4`). The seven
+  rows follow PREREG-EVL-7's learners and precede R3's births whatever the freeze order; `refresh_7` is composed with
+  `refresh_8`. births.RESERVED releases the file's 0.65 exactly as screen.py `budget6` counts its five seats at 0.13.
+- **PART A, THE PX LANE** (px.py, px_grid8.json): ONE CLOCK; the morning pass (c*_P, FLAGGED(D), PXU(D) in px.sqlite
+  only, written whole, serving O1 only when stored before 09:15); NO STORED ITEM; the three seats' rules and rankings,
+  K 40 after A72; the 200 hash-sampled controls; the live close and open runs with their bounds; `decide-px` catch-ups
+  (never judged, never traded); the hourly re-decision from the deciding run's stored values; the pinned grid and its
+  evaluator; the bar-basis panel, `px_basis`; the 16 placebos (the 8 smallest hashes among the control's events, then
+  their settled outcomes: fixed here) and the canary; score.py settles `px:` events on px.sqlite alone (tested here).
+  screen.CONTROLS gains the three PX rows (section 3.2).
+- **THE DATA** (A128's major closed): every PX recorder read is spaced on the lane's one slot at DATA_INTERVAL
+  (pxdata.py `PxGateway`'s `space`, house.py `_px`); `events.px_data` SHIPS ON (league/config.json; false is the
+  rollback of every PX run).
+- **PART B, THE META-LEARNERS** (meta.py): MRL-EB (K 16, H 60, TAU 30 bp, SF 20 bp, Z 3, MINB 3, WARM 10, the
+  imputation at -30% after 3 sessions) over the 720 / 969 grid, program experts and the PX records' `x:` experts (never
+  above 1,535; no ledger expert while H6 has not shipped); THE MEMBERS RULE FIXED BY STORED TIMES; the state as of
+  09:00 ET / the close - 30 minutes, the pre-passes; F8; F9's member outcome with the limit at entry (a PX member's raw
+  print read from px.sqlite's `px_marks`: fixed here); its real money through the book tested here (its live intents,
+  its 8-K guard, never a catch-up's). The draft's successors v2 and v3 are withdrawn (section 7.7: runs).
+- **THE JUDGE** (screen8.py): PREREG-EVL-6 sections 1.2-3 as frozen with F4's constant cap (4 / 8 / 14 / 8), held equal
+  to `screen.v6_judge` at 14; runs charged when they start, registration order, stays, demotion, Sized; the placebo
+  audit; THE LOOKS' FINALITY by the lane's own controls of the auction (`final`: the first build's `final_until` of this
+  file's own ids left every close inside the 45-day look-back not made, so looks fell due about 45 days late: fixed
+  here); section 6.6's three ways (base 0.02 / 0.03, stresses 0.15 / 0.13, per version 0.214 and 0.10-0.14 / 0.23-0.32:
+  the draft's META figures fixed here); births count this file's waiting runs.
+- **THE HOUSE** (house.py): the runs at section 4.6's times, after the lane's decision call (so after PREREG-EVL-7's live
+  learner part), the lead held for this file, record and verdict tasks inside the lead bounded to tau, the PX close run
+  first after PREREG-EVL-5's pre-pass, every read spaced and capped (`EightReads`), the lowest-priority tasks yielding;
+  every PX and META receipt records its code's sha256 and the House release (section 8).
+- **REAL MONEY** (book.py, league/equity/live.py): every buy of the file in a LATE PASS, BY TIME, keeping no room, after
+  PREREG-EVL-7's learners' pass of the auction or when it has nothing to plan there (a learner of the other auction
+  alone held the first build's pass for ever: fixed here); PX's learning room 4 by `event.max_open_v8.learning` (bounds
+  0-4, through `Settings.max_open`); a promoted version's Probe and Sized buys PREREG-EVL-6 section 6's (`_v6_sized`);
+  A85's reservation for a promoted version; THE 150-ORDER LINE across the day's auctions (`_event_line_keep`, the
+  learners' rule with the learners kept for: the merge had dropped the first build's fixed keep). Stated effect: the
+  O1 entries buy nothing while the close rows' room holds the line, as EVL-LRN-O1's.
+- **BIRTHS, THE REPORT, THE ALARM, THE SITE**: births' `FACTS_DENY` holds every `px_*` and mrl_* table and the file's
+  rows are excluded from the facts' counts and the validator's Jaccard; the report's PX and META lines (counts only),
+  the late passes, the one-mechanism pairs, the session-block bound and the market-direction share beside Done's; the
+  stall cause `evl_price` (league/ops/evl_price.py, tested here; gateway/lib/email.mjs); a plain site name each.
+- **THE PROOF** (test_events_evl8_proof.py): on an invented week every earlier program's intents, every earlier seatable
+  program's real-money picks, the lane's eligibility, universe, bars and marks and R3's births' facts and Jaccards are
+  identical with the file pinned and unpinned; in the House's own book the earlier rows' buys are the same and this
+  file's come after them; a planted future bar and a planted future member outcome are ignored; noise in, noise out.
+- **IDENTITIES**: money `1687e4e3` -> `77c3cfed`, constitution `3feab26d` -> `138ee8eb` (the one row, in its own commit);
+  the row at 0 `2d112ae9` / `992cefd8`; `event.enabled` False `93bb7e4a` / `520fb41c`; the options execution
+  fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract `397b22b7`, the
+  Done rule `54241925`, the births prompt `1442a2a2` (`PARSE_VERSION` 5) unchanged on 3.14 and 3.11;
+  `equity_money_problems()` []. The grant is re-ratified for `77c3cfed`.
+- **THE EARLIER FILES' TESTS** run on the registries they were written on (evl7_fakes `unpinned_7` and `unpinned_8`,
+  evl6_fakes `table_1019h` hold this file unpinned; v2_walls leaves the new row and its bound out).
 
-**Tests**: @@TESTS@@
+**Tests**: the full 3.14 suite in four shards, 13,425 tests OK (33 skipped; the shard that found the births leak this branch had, fixed, re-run whole: 3,438 OK); the events, equity, live, ci, constitution and ops modules on 3.11, 3,575 tests OK, and the modules changed after that run again on 3.11 (331 OK); the gateway's 509 tests and `npm run check`; `python -m league.ci --base origin/main --branch feat/evl-8 --no-tests` passed. Known and not this branch's: on 3.14, test_equity_e2e and test_equity_etf_orders fail when test_equity_design ran before them in one process (a module-order artifact: the same 1 + 18 fail on release 1019l's own tree in that order) and pass alone.
 
-**Deploy and rollback**: docs/operations.md, **PREREG-EVL-8** (the gateway first, then the House with the release's pair
-and the grant re-ratified; the freeze is a later one-line owner deploy; PX's real money alone back by the row at 0, the
-whole file by `REGISTERED_AT_8` None).
+**Deploy and rollback**: docs/operations.md, **Release 1019n** (the gateway first, then the House with the pair and the
+grant re-ratified; rollbacks: `events.px_data` false, the row at 0, `REGISTERED_AT_8` None, or the House to release
+1019l).
 
 ### Release 1019l: THE OWNER'S GOAL V3's money rows (A138) on release 1019k, on `rel/1019l` (unreleased; cut from `fix/evl6-stays` `8afdcffe`, so it carries release 1019k; an owner-authorized captain deploy before 12:55Z Oct 23: the gateway is NOT touched, THEN THE HOUSE with THE NEW PAIR `1687e4e3` / `3feab26d`; the standing grant re-ratifies at the House's start): goal V3 (04:40Z Oct 23, 2026: "I accept losing my entire Alpaca balance. Use it ... every seatable program trades real money from its first event at up to 5% of equity a position ... a bug stop that pauses new entries after a 25% loss in one session") moved five money rows, three bounds and one code constant, nothing else: `equity_money.event.position_share.learning` 0.02 -> 0.05 (its bound with it) and `.probe` 0.035 -> 0.05 (a learning position is never larger than a Probe one; Probe and Sized past PREREG-EVL-1 section 8's frozen envelope, and the name's wall toward V3's 25% with the gateway's `STOCK_EVENT_SHARE_MAX`, are a later release); `options_money.probe.loss_budget_usd` 400 -> 1900 and `.loss_total_usd` 800 -> 1900 (their bounds with them; about the balance), `options_money.daily_stop_share` 0.35 -> 0.25 (V3's bug stop); league/events/done.py `LOSS_TOTAL_USD` 800 -> 1900. The shadows, the screens and every judge are unchanged: only real-money size and the loss lines. The options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move. Tests: league/tests/test_v3_walls.py on the table in force (the rows, the digests and the one-move check, the book's 5 shares at $20 of $2,000, the Done stop at $1,900); the earlier releases' tests of the same mechanisms run on release 1019i's table (league/tests/v2_walls.py, as `on_1019h` and `evl7_fakes` do); `equity_design.DIGESTS` regenerated, release 1019i's kept as `DIGESTS_1019I` (`before_1019l`). Rollback: the House to release 1019k's head (or 1019j's), the pair `d52a5af5` / `9c8b2221`.
 
