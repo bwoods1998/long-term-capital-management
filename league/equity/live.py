@@ -6000,7 +6000,22 @@ class EquityBook:
                 break
             if self._event_slot_programs(at, other, adapter) and not self._event_decided(day, f"{at}-{other}"):
                 return f"{other}'s pass of this auction is not decided yet"
+        live = {i.family for i in self._instances(alive=True) if i.kind == EVENT_KIND and i.live}
+        for key, programs in self._event_earlier_passes(at):
+            if live & set(programs) and not self._event_decided(day, key):
+                return f"the earlier pass {key} of this auction is not decided yet"
         return None
+
+    def _event_earlier_passes(self, at: str) -> list[tuple[str, tuple[str, ...]]]:
+        """THE BOOK PASSES OUTSIDE THE SCHEDULER THAT COME BEFORE EVERY LATER FILE'S (PREREG-EVL-10 section 2.5 (ii):
+        "the pass of every file whose close row precedes this file's ... PREREG-EVL-7's, -8's and -9's"): [(its
+        `eq_event_decisions` key, the programs it decides)] of auction `at`. PREREG-EVL-7's learners' pass is read on its
+        own (`_event_slot_waits`); PREREG-EVL-8's late passes are its `EIGHT_PASSES` once its code (feat/evl-8, PR 609,
+        not on main at release 1019n-r2) is in this class, and PREREG-EVL-9's join here with its code. [] on this tree."""
+        got = getattr(self, "EIGHT_PASSES", None)
+        if not isinstance(got, Mapping):
+            return []
+        return [(str(key), tuple(str(p) for p in programs)) for key, programs in got.get(at, ())]
 
     def _event_decide_slot(self, now: float, em: S.EventMoments, at: str, file: str, listed: Sequence[str], s: Any,
                            adapter: Any, out: dict) -> None:

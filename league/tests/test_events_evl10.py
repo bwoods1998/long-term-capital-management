@@ -1137,6 +1137,19 @@ class TheBook(TB.EventTest):
         self.assertEqual(row["programs"][P.R2_ON]["picks"], 3, "(e): its picks read by the one reading")
         self.assertEqual(h.book._event_summary(TB.DAY.isoformat(), "close")["programs"][P.R2_ON]["binding"], "window")
 
+    def test_it_waits_for_an_earlier_files_own_book_pass_too(self):
+        """(ii) for a file outside the scheduler (PREREG-EVL-8's late passes when its code is in the tree:
+        `EIGHT_PASSES`): while such a pass of a live program is not decided, this file's pass waits."""
+        h = self.build()
+        h.book.EIGHT_PASSES = {"close": (("close-meta8", ("EVL-NEWS-READ-ON",)),)}
+        h.tick(9, 15)
+        h.tick(15, 46)
+        self.assertIn("close-meta8", str(h.tick(15, 47).get("event_decide_evl10")))
+        h.state.upsert("eq_event_decisions", {"day": TB.DAY.isoformat(), "at": "close-meta8", "decided_at": "x",
+                                              "status": "done", "summary": "{}", "created_at": 0.0}, "day, at")
+        h.tick(15, 48)
+        self.assertIn((P.R2_ON, "GAMA"), [(p, s) for p, s, _ in self.buys(h)], "decided: it plans at the next tick")
+
     def test_a_receipt_that_is_not_ok_trades_nothing(self):
         h = self.harness()
         LR.ensure(h.lane.st.db)
