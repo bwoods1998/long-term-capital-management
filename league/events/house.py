@@ -81,8 +81,10 @@ which still decides each auction on the store as it stands (the instant stop of 
 Paid work: a verdict is asked only while the House is not paused (`PAUSE`), and only under THE LANE'S LINE of a UTC
 day (00:00-24:00 UTC: budget rule 3's day, on which the Sail guard, the router and the cap breach judge theirs; the
 review of r2/alarms, its major 1: held on New York days, the lane could spend one day's line after 20:00 ET and the next
-day's from 00:00 ET, two lines in one UTC day): the lower of `events.verdict_usd_day` ($3, the default too: release
-1019b's second review, the goal's cost rule, the House box's about $1.29 a day and the verdicts inside its $5 base) and
+day's from 00:00 ET, two lines in one UTC day): the lower of `events.verdict_usd_day` ($6, the default too, from
+release 1019m-cost: goal V3's cost rule, metered compute at most $10 a day plus half the trailing week's realized net
+profit, never above $50, whose base holds the lane's $6.00 beside the fixed costs, budget rule 4; $3 from release
+1019b's second review to release 1019l, the House box's about $1.29 a day and the verdicts inside goal V2's $5 base) and
 the budget rule's allowance for the lane's verdicts (league/ops/budget.py `lane_allowance`: the Claude meter's lane part
 in `<state>/budget.json`, its no-profit floor when the file is not usable, 0 under the cap breach hold), so the verdicts
 and every other metered dollar stay under the day's cap (budget rule 3; release 1019c). Over it, READ events wait
@@ -344,7 +346,7 @@ EIGHT_PANEL_AT = dt.time(21, 0)
 WARN_EVERY = 3600.0
 DATA_INTERVAL = 0.5
 ASSETS_TTL = 1800.0
-VERDICT_USD_DAY = 3.0                         # league/config.json events.verdict_usd_day (the goal's cost rule)
+VERDICT_USD_DAY = 6.0                         # league/config.json events.verdict_usd_day (goal V3's cost rule, rule 4)
 VERDICT_USD_UNKNOWN = 0.01                    # a verdict whose cost the gateway did not state
 #: R3's births call stored with no cost (league/events/births.py `propose` stores its worst case then; a NULL counts the
 #: night's whole cap, `births.NIGHT_USD`).

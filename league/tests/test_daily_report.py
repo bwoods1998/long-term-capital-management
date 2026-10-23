@@ -16,6 +16,7 @@ from league.events import calendar as C
 from league.events import programs as P
 from league.events import store as ES
 from league.ops import budget as B
+from league.tests.v2_cost import on_v2_cost
 from league.ops import daily_report as DR
 from league.ops import metered as MT
 from league.ops import stall as ST
@@ -132,8 +133,9 @@ class ReportCase(StallHarness):
         super().setUp()
         synthetic_lane(self.root)
         self.now_ = et(TUE, "22:20")
-        # The day's cap and its lines (budget rule 3 at no profit, Sail's fixed $1.50): budget.json, fresh, written by the
-        # budget job's run before Tuesday's UTC day began.
+        # The day's cap and its lines (the budget rule in force at no profit, Sail's fixed $1.50: rule 4, goal V3's $10, in
+        # `DailyReport`; rule 3's $5 under league/tests/v2_cost.py): budget.json, fresh, written by the budget job's run
+        # before Tuesday's UTC day began.
         doc = B.compute(budget_inputs(), now=et(MON, "19:50"))
         (self.root / "budget.json").write_text(json.dumps(doc))
         # The meters read at 00:00 UTC Tuesday (20:00 ET Monday), by a stall run at 00:00 ET Tuesday (which mails Monday's
@@ -176,9 +178,9 @@ class DailyReport(ReportCase):
         costs = facts["costs"]
         self.assertEqual((costs["sail_usd"], costs["claude_usd"], costs["cloudflare_usd"]), (1.2, 1.97, 0.16))
         self.assertEqual((costs["spent_usd"], costs["from"], costs["to"], costs["whole"]), (3.33, "00:00", "24:00", True))
-        self.assertEqual((costs["cap_usd"], costs["over"]), (5.0, False))
+        self.assertEqual((costs["cap_usd"], costs["over"]), (10.0, False), "goal V3's $10 at no profit")
         self.assertEqual(costs["verdicts_usd"], 0.01, "the UTC day's verdict dollars, inside Claude's")
-        self.assertEqual(costs["allowance"], {"cap_usd": 5.0, "fixed_usd": 1.66, "lane_usd": 3.0, "research_usd": 0.34,
+        self.assertEqual(costs["allowance"], {"cap_usd": 10.0, "fixed_usd": 1.66, "lane_usd": 6.0, "research_usd": 2.34,
                                               "source": "budget"})
         profit = facts["profit"]
         self.assertEqual(profit["day"], {"shown_usd": 2.94, "net_usd": round(2.94 - 3.3344, 2)})
@@ -326,7 +328,8 @@ class DailyReport(ReportCase):
         out = ST.run(self.ctx())
         [facts] = self.reports()
         self.assertEqual(facts["costs"]["allowance"]["source"], "floor")
-        self.assertEqual(facts["costs"]["allowance"]["research_usd"], 0.34)
+        self.assertEqual((facts["costs"]["allowance"]["cap_usd"], facts["costs"]["allowance"]["lane_usd"],
+                          facts["costs"]["allowance"]["research_usd"]), (10.0, 6.0, 2.34), "rule 4's floor")
         self.assertEqual(facts["costs"]["cap_usd"], B.BASE_USD_DAY, "the day's cap with no usable budget.json")
         self.assertTrue(out["report"]["sent"])
 
@@ -407,8 +410,10 @@ class TheBirths(ReportCase):
         self.assertEqual(facts["profit"]["day"]["shown_usd"], 52.94)
 
 
+@on_v2_cost
 class OverTheCap(ReportCase):
-    """Tuesday's UTC day spent $5.00 of Claude: over its $5 cap, said by the report and by `cap_breach`."""
+    """Tuesday's UTC day spent $5.00 of Claude: over its $5 cap (budget rule 3's figures, league/tests/v2_cost.py), said by
+    the report and by `cap_breach`."""
 
     end_claude = 55.0
 
@@ -429,6 +434,42 @@ class OverTheCap(ReportCase):
         stall = [c for c in self.notify.calls if c.get("kind") == "stall"]
         self.assertEqual([c["cause"] for c in stall[0]["causes"]], ["cap_breach"], "the cause keys its own stall notice")
 
+
+
+def run_tuesday(case, settled):
+    """The stall run at 22:20 ET Tuesday with the gateway's Claude meter at `settled` (Tuesday's UTC day read whole)."""
+    case.store.put("guard", {"last": {"balance": 400.0, "metered_spent": 101.2, "at": case.now_},
+                             "last_good": {"balance": 400.0, "at": case.now_}})
+    case.health = {"kill_switch": False, "claude": {"settled_usd": f"{settled:.6f}"}}
+    return ST.run(case.ctx())
+
+
+class InsideGoalV3sCap(ReportCase):
+    """Goal V3's cap (budget rule 4, $10 at no profit): Tuesday's UTC day at $6.36, a breach of rule 3's $5 (`OverTheCap`),
+    is inside it: no `cap_breach`, the report under its cap."""
+
+    end_claude = 55.0
+
+    def test_rule_3s_breach_is_inside_goal_v3s_cap(self):
+        out = run_tuesday(self, 55.0)
+        self.assertNotIn("cap_breach", out["stalled"])
+        [facts] = self.reports()
+        self.assertEqual((facts["costs"]["spent_usd"], facts["costs"]["cap_usd"], facts["costs"]["over"]), (6.36, 10.0, False))
+
+
+class OverGoalV3sCap(ReportCase):
+    """Tuesday's UTC day at $10.36: over goal V3's $10 cap, said by the report and by `cap_breach`."""
+
+    end_claude = 59.0
+
+    def test_over_goal_v3s_cap_the_report_says_so_and_cap_breach_stands(self):
+        out = run_tuesday(self, 59.0)
+        self.assertIn("cap_breach", out["stalled"])
+        self.assertIn("Metered compute on the UTC day 2026-10-20 was $10.36, over that day's cap of $10.00",
+                      out["checks"]["cap_breach"]["what"])
+        [facts] = self.reports()
+        self.assertEqual((facts["costs"]["spent_usd"], facts["costs"]["over"]), (10.36, True))
+        self.assertEqual(facts["alarms"], ["cap_breach"])
 
 @on_1019h
 class CostsToDate(StallHarness):

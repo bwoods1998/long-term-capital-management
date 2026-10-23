@@ -150,9 +150,10 @@ THE CAP BREACH (release 1019c, the goal of Oct 19, 2026, items 4 and 5: "alarms 
 league/ops/metered.py): every run reads the meters themselves (the Sail guard's meter, the gateway's Claude and OpenAI
 meters, at `/v1/health`) into `<state>/metered.json`, and `cap_breach` stands while today's MEASURED metered spend so far,
 or yesterday's whole day, is over that day's cap, and while Sail's or Claude's meter has gone 6 hours unread (the cap
-cannot be judged: it fails closed). THE DAY is the UTC day, the day budget rule 3 holds every line on, and its cap is
-the cap the rule set for it (the highest a usable budget.json gave while it ran; its no-profit $5 when none could be
-read). INFO: the budget holds every line it can, and a fixed cost it cannot; and while TODAY is over its cap for
+cannot be judged: it fails closed). THE DAY is the UTC day, the day the budget rule (rule 3 from release 1019c, rule 4
+from release 1019m-cost) holds every line on, and its cap is the cap the rule set for it (the highest a usable
+budget.json gave while it ran; its no-profit base, $10 under budget rule 4 (goal V3), $5 under rule 3, when none could
+be read). INFO: the budget holds every line it can, and a fixed cost it cannot; and while TODAY is over its cap for
 certain (what the readings put inside the day) the job writes THE CAP BREACH HOLD (`<state>/cap-hold.json`, below),
 which holds the lane's verdict line, Sail research and the Claude roles at 0 until 00:00 UTC.
 
