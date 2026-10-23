@@ -179,6 +179,16 @@ class World8(W5.World):
             self.st.set_meta("evl8:release", RELEASE)
             self.seed_px()
 
+    def close(self) -> None:
+        """The store closed and R3's births the week loaded UNLOADED (`programs.load_births(None)`, as PREREG-EVL-5's
+        tests clean up after `births`), so no later test of the process reads them in the registries."""
+        from league.events import programs as P
+
+        try:
+            super().close()
+        finally:
+            P.load_births(None)
+
     def px(self) -> Any:
         from league.events import px as PXL
 
