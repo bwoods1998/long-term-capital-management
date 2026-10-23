@@ -267,6 +267,27 @@ SEATABLE_A_NIGHT = 3
 #: seatable births). Records stay free.
 RESERVED = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
             ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
+#: GOAL V3'S WEEKLY RESTATEMENT OF THE FALSE-PASS BUDGET (item 3: "births ... under a false-pass budget you state and may
+#: restate each week"; the captain's A155): (the first session it holds for, hundredths added to the births' limit, why).
+#: The births' limit is the screen's own lifetime figure (V6_BUDGET_HUNDREDTHS, PREREG-EVL-6 section 5, unchanged in the
+#: screen) plus every restatement whose session has come; it never falls (a test that was run is never refunded) and it
+#: rations births only (a run's own start still reads the screen's figure). Each line is written before any birth it
+#: admits, from outcome-free reasons only, and never edited: a later week adds a line.
+RESTATED = (("2026-10-23", 260, "A155: goal V3's first week (twenty seatable births at 0.13; under V3's rows a false "
+                                "pass buys at learning size until PREREG-EVL-12 backs it, so its money cost is a "
+                                "learning lot's)"),)
+
+
+def restated_hundredths(day: dt.date | None = None) -> int:
+    """The hundredths `RESTATED` adds to the births' limit on session `day` (today's New York date when None)."""
+    if day is None:
+        day = dt.datetime.now(dt.timezone.utc).astimezone(C.NY).date()
+    return sum(int(h) for d, h, _ in RESTATED if dt.date.fromisoformat(d) <= day)
+
+
+def budget_limit_hundredths(day: dt.date | None = None) -> int:
+    """The births' limit on `day`: the screen's lifetime figure plus goal V3's weekly restatements (A155)."""
+    return BUDGET_HUNDREDTHS + restated_hundredths(day)
 
 #: THE PROPOSER (R3-SPEC section 2). THE ARCHITECT (the captain's A109, 06:05Z Oct 22, 2026; release 1019h): Claude
 #: Opus 5.5, in the gateway's CLAUDE_MODELS allowlist (gateway/wrangler.jsonc; a model absent from it is a 403). Release
@@ -1203,8 +1224,9 @@ def budget(store: Any, night: dt.date | None = None) -> dict[str, Any]:
     waiting = budget_waiting_hundredths(store)
     reserved = budget_reserved_hundredths()
     tonight = _tonight(store, night)
-    room = BUDGET_HUNDREDTHS - used - waiting - reserved
-    return {"used": used / 100, "limit": BUDGET_HUNDREDTHS / 100, "left": (BUDGET_HUNDREDTHS - used) / 100,
+    limit = budget_limit_hundredths(night)
+    room = limit - used - waiting - reserved
+    return {"used": used / 100, "limit": limit / 100, "left": (limit - used) / 100,
             "waiting_runs": waiting / 100, "reserved": reserved / 100, "left_for_births": room / 100,
             "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, room // CHARGE_HUNDREDTHS)),
             "charge": CHARGE_HUNDREDTHS / 100}
@@ -1291,8 +1313,9 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
         if spec["seatable"] and not why:
             if tonight_used + 1 > SEATABLE_A_NIGHT:
                 why.append(f"{SEATABLE_A_NIGHT} seatable births a night at most")
-            elif used + CHARGE_HUNDREDTHS > BUDGET_HUNDREDTHS:
-                why.append(f"the false-pass budget: {used / 100:.2f} of {BUDGET_HUNDREDTHS / 100:.2f} used or held for "
+            elif used + CHARGE_HUNDREDTHS > budget_limit_hundredths(night):
+                limit = budget_limit_hundredths(night)
+                why.append(f"the false-pass budget: {used / 100:.2f} of {limit / 100:.2f} used or held for "
                            f"the runs waiting for it, a seatable birth adds {CHARGE_HUNDREDTHS / 100:.2f} "
                            "(PREREG-EVL-6 section 5)" + (f"; {budget_reserved_hundredths() / 100:.2f} of it held for the "
                            "frozen files whose code is not live (A137)" if budget_reserved_hundredths() else ""))
@@ -1835,5 +1858,6 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
            "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
            "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED", "ASKED", "CHARGE_HUNDREDTHS",
-           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED",
+           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED", "RESTATED",
+           "restated_hundredths", "budget_limit_hundredths",
            "budget_reserved_hundredths"]

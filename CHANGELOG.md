@@ -42,6 +42,8 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
+### Release 1019n-budget: goal V3's weekly restatement of the births' false-pass budget (A155), on `feat/evl-8` with release 1019n: `births.RESTATED` adds 2.60 (twenty seatable births at 0.13) to the births' limit from the session of Oct 23, 2026 (`budget_limit_hundredths`: the screen's lifetime 3.9 plus every restatement whose session has come; it never falls and rations births only, a run's own start still reads the screen's figure); the validator, the budget's `limit` and `left` and the refusal's text read it; the 3.9 accounting's tests run without it, `TheRestatement` pins it; no digest moves
+
 ### Release 1019n: PREREG-EVL-8, the price lane (PX) and the meta-learners, FROZEN (A122) AND PINNED, on `feat/evl-8` (unreleased; the first build `b52f4bbe` and its saved WIP `686f1db2` merged with release 1019l `3df7dd9d`, then with main's releases 1019m-hotfix `bc33cf95`, 1019m `84de2f4a` and 1019m-cost `1c87837f` (rerere off), and finished to the frozen text; PR 609 with base `main`; an owner deploy: THE GATEWAY FIRST, then THE HOUSE with THE NEW PAIR `77c3cfed` / `138ee8eb`, the standing grant re-ratified; SHIPPING IT STARTS THE FILE: `REGISTERED_AT_8 = "2026-10-22T18:43:24Z"`)
 
 The code of the frozen PREREG-EVL-8 ([docs/prereg/PREREG-EVL-8.md](docs/prereg/PREREG-EVL-8.md), tag `prereg-evl-8`, commit

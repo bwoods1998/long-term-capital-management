@@ -1930,6 +1930,9 @@ class TheBirths(WorldCase):
     def test_a_births_night_runs_with_these_rows_and_reads_the_lanes_sum(self):
         """R3's validator reads the lane's own SEATING sum: 1.5 used with these rows and no birth (section 3; A92), 1.7
         with the two invented births; their facts list these rows (counted, never their prices)."""
+        _rs = mock.patch("league.events.births.RESTATED", ())   # (the 3.9 accounting, without goal V3's restatement)
+        _rs.start()
+        self.addCleanup(_rs.stop)
         from league.events import births as BI
 
         # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version of 3.9, in hundredths)
