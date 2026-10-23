@@ -1228,14 +1228,14 @@ A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E o
 open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
 next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+6 of 6 in the $1900 window alone; the window alone holds all 6 up to E = $12,666.
 Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
-0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+0.20 x E of open risk. The options Probe lane keeps $1900 less the window's realized loss less 0.20 x
+the equity lots: $1900 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
+Money digest `77c3cfed`, full digest `138ee8eb` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `92bca93b` / `779ca4d7`.
 <!-- equity-design:end -->
 
 - **`set_design SEATS SLEEVE`** (the captain's tool; not a module of the tree) rewrites exactly: the two rows of

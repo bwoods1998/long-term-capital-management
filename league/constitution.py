@@ -1042,10 +1042,10 @@ CONSTITUTION: dict[str, Any] = {
     #   open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
     #   next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
     #   6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-    #   6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+    #   6 of 6 in the $1900 window alone; the window alone holds all 6 up to E = $12,666.
     #   Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
-    #   0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-    #   the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+    #   0.20 x E of open risk. The options Probe lane keeps $1900 less the window's realized loss less 0.20 x
+    #   the equity lots: $1900 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
     #   equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
     #   collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
     #   0.50 x E.
@@ -1321,11 +1321,19 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # Use it. My only money walls: a cash account ..., a kill switch, a bug stop that pauses new entries after a 25% loss in
 # one session ... every seatable program trades real money from its first event at up to 5% of equity a position ...
 # up to 25% of equity a name; idle cash is a cost". So: learning 0.02 -> 0.05 (its bound with it), Probe 0.035 -> 0.05
-# (a learning position is never larger than a Probe one; Probe and Sized scale-up past PREREG-EVL-1 section 8's frozen
-# envelope is a later release with its own analysis; the name's wall stays 0.10 here and at the gateway's
-# STOCK_EVENT_SHARE_MAX until that release raises both toward V3's 25%); in the options
-# table the shared loss budget $400 a window and $800 in total -> $1,900 each (about the balance on Oct 23) and the
-# daily stop 0.35 -> 0.25 (V3's bug stop). The shadows, the screens and every judge are unchanged: only real-money size.
+# (Probe and Sized scale-up past PREREG-EVL-1 section 8's frozen envelope is a later release with its own analysis; the
+# name's wall stays 0.10 here and at the gateway's STOCK_EVENT_SHARE_MAX until that release raises both toward V3's
+# 25%); in the options table the shared loss budget $400 a window and $800 in total -> $1,900 each (about the balance
+# on Oct 23) and the daily stop 0.35 -> 0.25, its bound's loose end with it (release 1019m). The shadows, the screens
+# and every judge are unchanged: only real-money size.
+# STATED EFFECT AT PROBE (release 1019m, the independent review, A139): under the frozen envelope a PREREG-EVL-6
+# version's Probe buy is the fewest whole shares reaching 0.8 x 5% of E and never above 5% of E (its section 6, clause
+# 2), so a PROMOTED lot is never larger than a learning one at 5% (floor(5% E / limit)) and is often smaller, and a limit
+# with no whole count inside [4%, 5%] of E is skipped (at E $1,906: limits of about $24-25, $32-38 and $48-76), where
+# learning buys one share or more. No version can be at Probe before its 22nd settled block (about Nov 20); the
+# captain's A139 holds these rows until PREREG-EVL-12's sizes (V3's scale-up) or a Probe row of 0.04 replaces them
+# before then. THE 25% DAILY STOP IS V3's BUG STOP ONLY WITH ITS LATCH: league/equity/bugstop.py holds every new real
+# entry from the trip until the captain releases it (the stop itself clears at the next session).
 CONSTITUTION["equity_money"]["event"] = {
     "enabled": True,
     "position_share": {"learning": "0.05", "probe": "0.05", "sized": "0.10"},
@@ -1405,7 +1413,7 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "sized.min_probe_real_trades": ("5", "50"),
     "sized.min_probe_sessions": ("1", "20"),
     "book_share": ("0.50", "0.90"),
-    "daily_stop_share": ("0.15", "0.35"),
+    "daily_stop_share": ("0.15", "0.25"),     # (release 1019m: never above V3's 25%)
     "drawdown_stop_share": ("0.40", "0.60"),
     "tuition.day_usd": ("0", "200"),
     "tuition.week_usd": ("0", "600"),

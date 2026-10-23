@@ -23,6 +23,7 @@ import json
 from decimal import Decimal as D
 from unittest import mock
 
+from league.tests.v2_walls import in_force
 from league.tests.evl6_fakes import on_1019h
 from league.constitution import CONSTITUTION
 from league.equity import live as L
@@ -362,18 +363,20 @@ if __name__ == "__main__":
 
 
 @on_1019h
+@in_force    # (release 1019m, A139: on the table in force, never release 1019i's)
 class TheReservationInForce(EventTest):
-    """A85 ON THE TABLE IN FORCE (release 1019f's integration: the captain's A86 REVISED, Probe 3.5% of E with at most 6
-    open): the same two auctions as `TheReservation.overnight`, every figure read from `book.settings()`."""
+    """A85 ON THE TABLE IN FORCE (goal V3's rows, release 1019l: Probe 5% of E with at most 6 open, learning 5%): the
+    same two auctions as `TheReservation.overnight`, every figure read from `book.settings()`."""
 
     overnight = TheReservation.overnight
 
     def test_learning_close_buys_leave_the_next_opens_probe_its_room_at_its_share_in_force(self):
         s = EB.settings()
-        self.assertEqual((s.share("probe"), s.max_open("probe")), (D("0.035"), 6), "A86 REVISED")
+        self.assertEqual((s.share("probe"), s.max_open("probe"), s.share("learning")), (D("0.05"), 6, D("0.05")),
+                         "goal V3's rows")
         h, names, probe = self.overnight(band="probe")
-        held = min(s.max_open("probe"), 3) * s.share("probe") * D(2000)          # min(6, median 3) x 3.5% x E = $210
-        learning = 2 * D("20.00")                                                 # two shares at the $20.00 limit
+        held = min(s.max_open("probe"), 3) * s.share("probe") * D(2000)          # min(6, median 3) x 5% x E = $300
+        learning = (s.share("learning") * D(2000) / D("20.00")).to_integral_value(rounding="ROUND_DOWN") * D("20.00")
         on = [r for r in h.event_intents("buy") if r["program"] == LEARN_ON]
         filled = [r for r in on if r["status"] == "done"]
         self.assertEqual(len(filled), int((D(500) - held) // learning), "$500 available less R, $40 a learning buy")

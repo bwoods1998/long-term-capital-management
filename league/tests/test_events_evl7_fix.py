@@ -486,6 +486,11 @@ class TheRoom(TB.EventTest):
         from league.events import births as BI
         from league.tests.test_events_births import spec
 
+        # (release 1019m, A139: ROOM for a learner whose entry the day's order line TAKES; EVL-LRN-O1 on the line
+        # in force, refused while the close rows hold its room (R5), holds nothing back: test_events_1019m_learners)
+        patch = mock.patch.object(L.EquityBook, "_event_line_refuses", lambda *a, **k: None)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.addCleanup(P.load_births, None)
         self.h = self.harness()
         sp = spec(BIRTH, "8k", {"items": ["5.02"]})
