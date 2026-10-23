@@ -1037,6 +1037,41 @@ class TheOneLiveRun(Eight):
             px.close()
 
 
+class TheMidBound(Eight):
+    """SECTION 4.6 (the money review of release 1019n): THE 09:30 OPENS (`px8-mid`, from 10:00 ET) keep their task's
+    bound, as every PX recorder does: no read is sent past it, and the task YIELDS before each read to any other lane
+    task due, so its 11-31 SIP reads never reach the next decision's turn on the lane's one slot."""
+
+    lane = TheHouseTiming.lane
+    ctx = staticmethod(TheHouseTiming.ctx)
+
+    def test_no_read_past_its_bound_and_it_yields(self):
+        w = self.world(rows=False)
+        w.at(et(D_DAY, 9, 5)).morning(D_DAY)
+        s = C.session(w.st, D_DAY)
+        lane, clock = self.lane(w, et(D_DAY, 10, 5))
+        ok = {"size_bytes": 0, "free_bytes": 10 ** 12, "ok": True, "why": None}
+        with mock.patch.object(H.PXS, "room", lambda root: dict(ok)):
+            task = lane._eight_due(w.st, lane.now(), D_DAY, s, [])
+            self.assertEqual(task.name, "px8-mid")
+            reads = len(w.gw.px_gets)
+            got = task.run(self.ctx(lane, w), clock() - 1.0)          # (its bound passed already)
+            self.assertEqual(len(w.gw.px_gets), reads, "no read sent past the task's bound")
+            self.assertEqual(got["_status"], "cut")
+            with mock.patch.object(lane, "_eight_yield", lambda st, me: True):
+                got = task.run(self.ctx(lane, w), clock() + 60.0)
+            self.assertEqual((len(w.gw.px_gets), got["_status"]), (reads, "cut"), "it yields before its read")
+            with mock.patch.object(lane, "_eight_yield", lambda st, me: False):     # (the slot free: it reads)
+                got = task.run(self.ctx(lane, w), clock() + 60.0)
+            self.assertEqual(got["_status"], "ok", got)
+            self.assertGreater(len(w.gw.px_gets), reads)
+        px = w.px()
+        try:
+            self.assertIsNotNone(PXL._meta(px.db, PXL.MID_KEY.format(day=D_DAY.isoformat())))
+        finally:
+            px.close()
+
+
 class TheLatePasses(TB.EventTest):
     """SECTION 4.6's TEST (v) AND THE LATE PASSES BY TIME (league/equity/live.py `_event_decide_8`): PX-DROP-ON's buys
     are planned at the first tick at which the lane's close receipt is in, after every PREREG-EVL-7 row of the close is

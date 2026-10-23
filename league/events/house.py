@@ -2575,7 +2575,8 @@ class EventLane:
             if db is not None:
                 db.close()
             if not done:
-                return Task("px8-mid", lambda ctx, deadline: self._eight_mid(ctx, today), EIGHT_BUDGET, cut=True)
+                return Task("px8-mid", lambda ctx, deadline: self._eight_mid(ctx, today, deadline), EIGHT_BUDGET,
+                            cut=True)
         owed = self._eight_owed(st, now, today)
         if owed is not None and not self._quiet(f"eight-{owed[0]}", now, soon):
             what, day, auction = owed
@@ -2659,10 +2660,16 @@ class EventLane:
                                assets=c.assets(True), late=late, clock=self.now)
         return self._px(ctx, deadline, "px8-am", work, late=late)
 
-    def _eight_mid(self, ctx: LaneContext, day: dt.date) -> dict[str, Any]:
-        """THE 09:30 OPENS (`px-mid:<D>`, league/events/px.py `mid`)."""
-        return self._px(ctx, None, "px8-mid", lambda c, px, gw, run, dl: PXL.mid(px, gw, c.store, day, now=c.now(),
-                                                                                   run=run))
+    def _eight_mid(self, ctx: LaneContext, day: dt.date, deadline: float | None) -> dict[str, Any]:
+        """THE 09:30 OPENS (`px-mid:<D>`, league/events/px.py `mid`) UNDER ITS TASK'S BOUND (`deadline`: no read sent
+        after it, `PX.PxGateway`'s `until` and `late`), YIELDING before each read to any other lane task due
+        (`_eight_yield`), as the morning pass does: a cut run keeps nothing half-read (`mid` writes once every read
+        returned) and goes again at the slot's next free turn, never past the next decision's turn."""
+        def late() -> bool:
+            return self.late(deadline) or self._eight_yield(ctx.store, "px8-mid")
+
+        return self._px(ctx, deadline, "px8-mid", lambda c, px, gw, run, dl: PXL.mid(px, gw, c.store, day, now=c.now(),
+                                                                                       run=run), late=late)
 
     def _eight_prepass(self, ctx: LaneContext, day: dt.date, auction: str, deadline: float | None) -> dict[str, Any]:
         """THE STATE PRE-PASS (`prepass-meta:<open|close>:<D>`, league/events/meta.py `prepass`): it YIELDS before each
