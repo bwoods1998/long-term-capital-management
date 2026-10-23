@@ -317,18 +317,28 @@ def record_rows(store: Any, prog: Any) -> list[dict[str, Any]]:
     return out
 
 
-def control_rows(store: Any, prog: Any) -> list[dict[str, Any]] | None:
+def control_rows(store: Any, prog: Any, *, now: dt.datetime | None = None) -> list[dict[str, Any]] | None:
     """A version's control record: a PX seat's control's settled rows of live decisions knowable after the seat's
-    registration; a meta-learner's POOL (league/events/meta.py `pool_rows`)."""
+    registration; a meta-learner's POOL (league/events/meta.py `pool_rows`, its outcomes settled before `now`)."""
+    return control_record(store, prog, now=now)[0]
+
+
+def control_record(store: Any, prog: Any, *, now: dt.datetime | None = None
+                   ) -> tuple[list[dict[str, Any]] | None, list[tuple[dt.date, dt.date]]]:
+    """(the control's rows as `control_rows` reads them, the control's PENDING intents (entry_day, scheduled exit)):
+    PREREG-EVL-6 section 2's FINALITY holds a look as of the close X until every intent of the version AND OF ITS
+    CONTROL scheduled to exit by X has settled. A PX seat's control: its intents not yet resolved (screen.py
+    `_pending`); a meta-learner's POOL: its members whose outcome may still come (league/events/meta.py
+    `pool_record`), each row with its scheduled `exit_day`, so `screen.covered` reads the POOL as it reads any control."""
     from . import meta as MT
 
     if P.is_meta8(prog):
-        return MT.pool_rows(store, prog)
+        return MT.pool_record(store, prog, before=now)
     ctl = CONTROL_OF.get(prog.id)
     if ctl is None:
-        return None
+        return None, []
     c = P.BY_KEY.get((ctl, 1))
-    return [] if c is None else record_rows(store, c)
+    return ([] if c is None else record_rows(store, c)), SN._pending(store, ctl, 1)
 
 
 # ----------------------------------------------------------------------------------------------------- finality
@@ -546,9 +556,8 @@ def run_looks(store: S.Store, prog: Any, today: dt.date, *, now: dt.datetime, dr
     if not record:
         return out
     ctl = "POOL" if P.is_meta8(prog) else CONTROL_OF.get(prog.id)
-    ctl_rows = control_rows(store, prog)
-    pend = SN._pending(store, prog.id, prog.version) + (SN._pending(store, CONTROL_OF[prog.id], 1)
-                                                        if prog.id in CONTROL_OF else [])
+    ctl_rows, ctl_pend = control_record(store, prog, now=now)
+    pend = SN._pending(store, prog.id, prog.version) + ctl_pend
     on = written(store, prog, "run", run["n"])
     tg = tag("run", run["n"])
     plan = schedule(store, record, today, pending=pend, consumed=on["consumed"], after=on["last"],
@@ -796,8 +805,8 @@ def review8(store: S.Store, prog: Any, *, now: Any = None, draws: int = B) -> li
     real = stay_events(store, prog, since)
     record = [r for r in record_rows(store, prog) if _after(r, since)]
     ctl = "POOL" if P.is_meta8(prog) else CONTROL_OF.get(prog.id)
-    ctl_rows = control_rows(store, prog)
-    pend = SN._pending(store, prog.id, prog.version)
+    ctl_rows, ctl_pend = control_record(store, prog, now=now)
+    pend = SN._pending(store, prog.id, prog.version) + ctl_pend     # (the version's and its control's: section 2)
     on = written(store, prog, "stay", n)
     j = max(on["consumed"]) if on["consumed"] else 0
     tg = tag("stay", n)
@@ -1088,7 +1097,7 @@ __all__ = ["LOOKS", "ALPHAS", "MARGIN", "MIN_EVENTS", "MIN_ISSUERS", "MIN_BLOCKS
            "READ_EVERY", "READ_P", "STOP_SHARE", "SIZED_MIN", "FILL_BP", "STUCK_AFTER", "RUN_KEY", "END_KEY",
            "STAY_KEY", "STAY_BASE", "CONTROL_OF", "AUDIT_CANARY", "alpha", "tag", "seed_string", "look_key", "key_of",
            "count_p", "Block8", "rank_order", "blocks", "values", "lower", "judge_blocks", "minimums", "part_of",
-           "cap_of", "record_rows", "control_rows", "runs", "run_record", "written", "schedule", "look_row", "on_look",
-           "run_looks", "budget", "waiting_runs", "start_runs", "charges", "stays", "stay_events", "read_p",
-           "money_stop", "sized_conditions", "review8", "next_look", "seating8", "run", "review", "audit",
+           "cap_of", "record_rows", "control_rows", "control_record", "runs", "run_record", "written", "schedule",
+           "look_row", "on_look", "run_looks", "budget", "waiting_runs", "start_runs", "charges", "stays",
+           "stay_events", "read_p", "money_stop", "sized_conditions", "review8", "next_look", "seating8", "run", "review", "audit",
            "ONE_MECHANISM_SESSIONS", "PX_SOURCED", "PAIRED", "one_mechanism", "FEED_CONTROLS", "final"]

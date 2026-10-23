@@ -717,7 +717,8 @@ def member_outcome(store: Any, cik: str, day: dt.date, auction: str, tags: Seque
         if not row["tradable"]:
             return {"status": "terminal", "why": "not tradable"}
         return {"status": "settled", "a": float(row["a"]), "r": None if row["r"] is None else float(row["r"]),
-                "tradable": True, "program": pid, "version": int(ver), "event": str(intent["event"])}
+                "tradable": True, "program": pid, "version": int(ver), "event": str(intent["event"]),
+                "exit_day": None if intent["exit_day"] is None else str(intent["exit_day"])}
     return {"status": "pending"} if pending else {"status": "terminal", "why": "no outcome"}
 
 
@@ -1084,22 +1085,52 @@ def live_picks(db: Any, prog: Any, day: dt.date) -> list[dict[str, Any]]:
                                         "ORDER BY rank_key DESC, event", (prog.id, prog.version, day.isoformat(), WHY))]
 
 
-def pool_rows(store: Any, prog: Any, *, before: dt.datetime | None = None) -> list[dict[str, Any]]:
-    """THE POOL RECORD (EVL-META-O1-POOL / -ON-POOL, section 7.1), the meta-learner's control: each LIVE decision's
-    members ELIGIBLE TO PICK with their OUTCOMES (F9), as settled rows {entry_day, issuer, event, a, r, tradable}."""
-    out = []
+def member_exit(store: Any, day: dt.date, auction: str) -> dt.date:
+    """A member's SCHEDULED EXIT SESSION (hold 1, section 7.1): D itself for EVL-META-O1 (D's open to D's close), the
+    session after D for EVL-META-ON (D's close to the next open); while the calendar does not hold that session yet,
+    the day after D (no later session can be its exit: the reading that waits)."""
+    if auction == "o1":
+        return day
+    nxt = C.nth(store, day, 2)
+    return nxt.day if nxt is not None else day + dt.timedelta(days=1)
+
+
+def pool_record(store: Any, prog: Any, *, before: dt.datetime | None = None
+                ) -> tuple[list[dict[str, Any]], list[tuple[dt.date, dt.date]]]:
+    """THE POOL RECORD (EVL-META-O1-POOL / -ON-POOL, section 7.1), the meta-learner's control, as THE META SCREEN reads
+    it (section 5.2: PREREG-EVL-6 sections 1.2-2 as frozen): (rows, pending). ROWS: each LIVE decision's members
+    ELIGIBLE TO PICK with their settled TRADABLE OUTCOMES (F9) as settled rows {entry_day, exit_day, issuer, event, a,
+    r, tradable}, `exit_day` the scheduled exit of the tag intent whose outcome it is (else `member_exit`), so a look as
+    of the close X covers the members whose scheduled exits are at or before it, as it covers every control's events.
+    PENDING: (entry_day, scheduled exit) of every such member whose outcome may still come (`member_outcome`
+    "pending"): PREREG-EVL-6 section 2's FINALITY, "every intent of the version and of its control scheduled to exit by
+    X has settled", holds a look as of X while one exits by X. A member with NO OUTCOME (its limit at entry, not
+    tradable, none ever) is neither."""
+    out: list[dict[str, Any]] = []
+    pending: list[tuple[dt.date, dt.date]] = []
     now = before or S.utc_now()
+    auction = auction_of(prog)
     for d in store.db.execute("SELECT day FROM mrl_decisions WHERE program=? AND version=? AND kind='live' AND status='ok' "
-                              "ORDER BY day", (prog.id, prog.version)):
+                              "ORDER BY day", (prog.id, prog.version)).fetchall():
         day = dt.date.fromisoformat(str(d[0]))
+        scheduled = member_exit(store, day, auction)
         for r in store.db.execute("SELECT * FROM mrl_pool WHERE program=? AND version=? AND day=? AND eligible=1",
-                                  (prog.id, prog.version, day.isoformat())):
-            got = member_outcome(store, str(r["cik"]), day, auction_of(prog), json.loads(r["tags"]), now)
+                                  (prog.id, prog.version, day.isoformat())).fetchall():
+            got = member_outcome(store, str(r["cik"]), day, auction, json.loads(r["tags"]), now)
+            if got["status"] == "pending":
+                pending.append((day, scheduled))
+                continue
             if got["status"] != "settled":
                 continue
-            out.append({"entry_day": day, "issuer": str(r["cik"]), "event": str(r["event"]), "a": got["a"],
-                        "r": got.get("r"), "tradable": True})
-    return out
+            exit_day = dt.date.fromisoformat(str(got["exit_day"])[:10]) if got.get("exit_day") else scheduled
+            out.append({"entry_day": day, "exit_day": exit_day, "issuer": str(r["cik"]), "event": str(r["event"]),
+                        "a": got["a"], "r": got.get("r"), "tradable": True})
+    return out, pending
+
+
+def pool_rows(store: Any, prog: Any, *, before: dt.datetime | None = None) -> list[dict[str, Any]]:
+    """THE POOL RECORD's settled rows (`pool_record`'s first part)."""
+    return pool_record(store, prog, before=before)[0]
 
 
 def report_lines(store: Any, day: dt.date) -> dict[str, Any]:
@@ -1135,6 +1166,6 @@ __all__ = ["K", "H", "TAU", "SF", "Z", "HURDLE", "MINB", "WARM", "WINSOR", "VAR_
            "GROUPS_O1", "GROUPS_ON", "GROUPS", "group_of", "grid_rules", "et_hour_bin", "features", "rules_of",
            "session_stats", "state", "sigma2_of", "posterior", "walk", "qualified", "cbar_of", "rule_hash", "ensure",
            "has_tables", "sources", "first_decision", "entry_at", "AsOf", "source_picks", "members", "event_knowable",
-           "inputs", "member_outcome", "family", "tau", "sigma_time", "auction_of", "learner", "state_sessions",
-           "compute_state", "stored_state", "write_state", "prepass", "decided", "live_allowed", "decide", "live_picks",
-           "pool_rows", "report_lines"]
+           "inputs", "member_outcome", "member_exit", "family", "tau", "sigma_time", "auction_of", "learner",
+           "state_sessions", "compute_state", "stored_state", "write_state", "prepass", "decided", "live_allowed",
+           "decide", "live_picks", "pool_record", "pool_rows", "report_lines"]

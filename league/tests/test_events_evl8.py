@@ -890,6 +890,160 @@ class TheLookFallsDue(unittest.TestCase):
                 st.close()
 
 
+class TheMetaLook(unittest.TestCase):
+    """Section 5.2, THE META SCREEN: EVL-META-ON's run look with its POOL control (EVL-META-ON-POOL, section 7.1: each
+    LIVE decision's members ELIGIBLE TO PICK with their settled TRADABLE outcomes). The POOL is covered by its members'
+    scheduled exits as every control is (screen.covered reads `exit_day`: the review's KeyError, before which no META
+    look was ever written once its POOL held a row), and the look waits while a POOL member's outcome may still come
+    (PREREG-EVL-6 section 2: "every intent of the version and of its control scheduled to exit by X has settled")."""
+
+    SRC = "CTRL-PX-ALL-ON"
+
+    def build(self, st, days, now_day, *, open_member=None):
+        cal = []
+        d = days[0] - dt.timedelta(days=7)
+        while d <= now_day + dt.timedelta(days=3):
+            if d.weekday() < 5:
+                cal.append(d)
+            d += dt.timedelta(days=1)
+        keys = {SN.program_key(p.id, p.version): {"intents": 0} for p in P.PROGRAMS if not P.is_8(p)}
+        with st.tx() as db:
+            for x in cal:
+                db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                           (x.isoformat(), S.iso(et(x, 9, 30)), S.iso(et(x, 16, 0))))
+        for x in cal:
+            for kind, at in (("open", et(x, 9, 15)), ("close", et(x, 15, 47))):
+                rid = st.start_receipt(f"decide-{kind}:{x.isoformat()}", now=at)
+                st.finish_receipt(rid, "ok", keys, now=at + dt.timedelta(seconds=30))
+            st.set_meta(f"evl:backfill:{x.isoformat()}", "done")
+        MT.ensure(st)
+        rng = random.Random(85)
+        px = PXL.open_px(st.root)
+        try:
+            with st.tx() as db:
+                for k, day in enumerate(days):
+                    nxt = cal[cal.index(day) + 1]
+                    db.execute("INSERT INTO mrl_decisions(program, version, day, kind, receipt, started_at, finished_at, "
+                               "status, code_sha, members, eligible, picks) VALUES('EVL-META-ON', 1, ?, 'live', 1, ?, ?, "
+                               "'ok', 'x', 4, 4, 2)", (day.isoformat(), S.iso(et(day, 15, 47, 40)),
+                                                      S.iso(et(day, 15, 47, 50))))
+                    for i in range(4):
+                        cik = str(40000 + 100 * k + i)
+                        event = PXL.event_id(self.SRC, day, cik)
+                        a = (0.02 if i < 2 else -0.004) + rng.gauss(0, 0.002)
+                        status = "entered" if (k, i) == open_member else "exited"
+                        db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                   "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, ?, ?, ?, ?, ?, "
+                                   "'close', ?, 'open', NULL, 'shadow', ?, 'px8 live')",
+                                   (self.SRC, event, f"S{cik}", cik, S.iso(et(day, 15, 46)), day.isoformat(),
+                                    nxt.isoformat(), status))
+                        if status == "exited":
+                            db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                                       "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) "
+                                       "VALUES(?, 1, ?, 20, 21, 'SPY', 1, 1, 7, 7, ?, 0, ?, 1, ?, 'settled')",
+                                       (self.SRC, event, a + 0.001, a, S.iso(et(nxt, 20, 30))))
+                        db.execute("INSERT INTO mrl_pool(program, version, day, cik, symbol, event, knowable_at, tags, "
+                                   "features, xrules, eligible, adv20, prev_close, cost_rt) VALUES('EVL-META-ON', 1, ?, ?, "
+                                   "?, ?, ?, ?, '[]', '[]', 1, 2e7, 20, 0.0014)",
+                                   (day.isoformat(), cik, f"S{cik}", event, S.iso(et(day, 15, 30)),
+                                    json.dumps([f"{self.SRC}:1"])))
+                        if i < 2:       # (the meta-learner's two picks of the session: its own record)
+                            db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                       "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-META-ON', 1, "
+                                       "?, ?, ?, ?, ?, 'close', ?, 'open', ?, 'shadow', 'exited', 'mrl')",
+                                       (event, f"S{cik}", cik, S.iso(et(day, 15, 46)), day.isoformat(), nxt.isoformat(),
+                                        17.0 - i))
+                            db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                                       "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) "
+                                       "VALUES('EVL-META-ON', 1, ?, 20, 21, 'SPY', 1, 1, 7, 7, ?, 0, ?, 1, ?, 'settled')",
+                                       (event, a + 0.001, a, S.iso(et(nxt, 20, 30))))
+                        # (PREREG-EVL-2's LIMIT AT ENTRY of a PX member, read on px.sqlite: its raw print and P's close)
+                        px.put_result(day, cik, S.LIVE_RULE, {"symbol": f"S{cik}", "name": "x", "exchange": "NASDAQ",
+                                                              "prev_close": 20.0, "adv20": 2e7, "adv20sh": 1e6,
+                                                              "bench": "IWM", "adjusted61": 61, "inputs_at": "x"},
+                                      why=None, run="u", now=et(day, 7, 40))
+                        px.db.execute("INSERT INTO px_marks(symbol, day, label, px, t, source, fetched_at) VALUES(?, ?, "
+                                      "'close', 20, 'x', 'x', 'x')", (f"S{cik}", day.isoformat()))
+        finally:
+            px.close()
+        return cal
+
+    @staticmethod
+    def days(n: int) -> list[dt.date]:
+        out = []
+        d = dt.date(2026, 10, 26)
+        while len(out) < n:
+            if d.weekday() < 5:
+                out.append(d)
+            d += dt.timedelta(days=1)
+        return out
+
+    def test_the_22nd_block_look_reads_its_pool_control(self):
+        days = self.days(24)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                cal = self.build(st, days, now_day)
+                prog = P.BY_KEY[("EVL-META-ON", 1)]
+                rows, pending = MT.pool_record(st, prog, before=now)
+                self.assertEqual((len(rows), pending), (96, []))
+                self.assertEqual({r["exit_day"] for r in rows if r["entry_day"] == days[0]},
+                                 {cal[cal.index(days[0]) + 1]}, "a POOL member exits at the next open (hold 1)")
+                got = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual([w["S"] for w in got["written"]], [22], got)
+                self.assertEqual(got["written"][0]["cap"], 8, "F4: a META run's cap")
+                self.assertEqual(got["written"][0]["band"], "probe", got["written"][0]["why"])
+                detail = SN.look_detail(st, prog.id, prog.version, S8.look_key("run", 1, 22)) or {}
+                self.assertTrue(detail["v6"]["guards"]["control"], "the picks' blocks beat their POOL's")
+                self.assertEqual((detail["control"]["program"], detail["control"]["blocks"]), ("POOL", 22),
+                                 "the POOL's 22 blocks")
+            finally:
+                st.close()
+
+    def test_the_screens_run_writes_the_meta_look_and_no_error(self):
+        days = self.days(24)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                self.build(st, days, now_day)
+                got = S8.run(st, now_day, now=now, draws=999)
+                self.assertEqual(got["errors"], [])
+                self.assertEqual([(w["program"], w["S"], w["band"]) for w in got["written"]],
+                                 [("EVL-META-ON", 22, "probe")], "its POOL read as of the screen's own time")
+            finally:
+                st.close()
+
+    def test_a_pool_members_outcome_still_to_come_holds_the_look(self):
+        days = self.days(24)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                cal = self.build(st, days, now_day, open_member=(3, 2))
+                prog = P.BY_KEY[("EVL-META-ON", 1)]
+                rows, pending = MT.pool_record(st, prog, before=now)
+                exit_ = cal[cal.index(days[3]) + 1]
+                self.assertEqual((len(rows), pending), (95, [(days[3], exit_)]))
+                got = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual(got["written"], [], "the POOL's member scheduled to exit by then has not settled")
+                self.assertTrue(any("has not settled" in str(w["why"]) for w in got["waiting"]), got)
+                event = PXL.event_id(self.SRC, days[3], str(40000 + 300 + 2))
+                st.db.execute("UPDATE intents SET status='exited' WHERE program=? AND event=?", (self.SRC, event))
+                st.db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, bench_entry, "
+                              "bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, settled_at, status) VALUES(?, 1, "
+                              "?, 20, 21, 'SPY', 1, 1, 7, 7, 0.0, 0, -0.001, 1, ?, 'settled')",
+                              (self.SRC, event, S.iso(et(now_day, 20, 30))))
+                got = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual([w["S"] for w in got["written"]], [22], "settled: the look is written")
+            finally:
+                st.close()
+
+
 class TheAudit(unittest.TestCase):
     def test_an_edge_no_selection_made_alarms_the_canary_and_the_placebos_and_moves_no_band(self):
         """Section 3.3's AUDIT (screen8 `audit`, records only): a control whose own no-news pool earns (an invented +5%
