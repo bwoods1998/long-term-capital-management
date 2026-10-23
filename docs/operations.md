@@ -10,6 +10,24 @@ is built and not deployed); the running House release is release 1019g (live sin
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019m (Oct 23, 2026): the independent review's fixes of the live code (A139) on release 1019l: `fix/1019m`
+
+On release 1019m-hotfix (`fix/close-marks`, A140: the close decision's 15:30 marks read together; a learner still
+pending at the close's last book minute takes nothing): the same minute at the open; EVL-LRN-O1, refused by the day's
+line, holds no birth back; a post-close alarm for births held for the learners and never planned; the learners' lost
+live parts in the daily report; THE BUG STOP latched. Deploy: the gateway is not touched; the House by `ship_house.sh <head> <PR> r1019m
+1687e4e3 3feab26d` (no digest moves). Rollback: the House to the hotfix's head (or release 1019l's `3df7dd9d`; 1019j's `3bb1abe3`
+with the pair `d52a5af5` / `9c8b2221`). Watch at the first close: `decide-close:<D>` finishes by about 15:47:30 ET (lane.json's
+seconds); `eq_evl5_held_unsent` gains no day; `eq_event_decisions` has a `close-lrn` row; no PREREG-EVL-7 warning.
+
+THE BUG STOP (goal V3, wall 1): when the options path's daily stop trips (a settled day's P&L at or past 25% of the
+day's base), the equity book writes the latch `eq_bug_stop` in live.sqlite and alerts (error); from then every new real
+entry, options and shares, is refused ("equity reconciliation: THE BUG STOP ..."), on every later session too, while
+exits and cancels go on. Read why, then release it on the box (it is read at the House's next minute):
+
+    python3 -m league.equity.bugstop --root /workspace/state                                  # the latch, read only
+    python3 -m league.equity.bugstop --root /workspace/state --release "<what was read: why the session lost 25%>"
+
 ## Release 1019l (Oct 23, 2026): the owner's goal V3's money rows (A138) on release 1019k: `rel/1019l`
 
 Goal V3 makes the owner's balance the loss line. The release moves `equity_money.event.position_share.learning` and
@@ -3919,14 +3937,14 @@ A lot in every seat asks for 0.75 x E of ETFs; the lane holds at most 0.75 x E o
 open risk at weight 0.20. One ETF across programs (the instrument cap, 0.50 x E): 4 whole lots fit; the
 next program's lot of it is 0.00 x E. At E = $2,000, the account all cash and nothing realized: 6 of
 6 whole lots fit under the invested cap (1.00 x E) and the $50 cash reserve alone, and
-6 of 6 in the $400 window alone; the window alone holds all 6 up to E = $2,666.
+6 of 6 in the $1900 window alone; the window alone holds all 6 up to E = $12,666.
 Whole sleeves (programs that hold several ETFs) ask for 1.50 x E; the lane holds at most 1.00 x E,
-0.20 x E of open risk. The options Probe lane keeps $400 less the window's realized loss less 0.20 x
-the equity lots: $400 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
+0.20 x E of open risk. The options Probe lane keeps $1900 less the window's realized loss less 0.20 x
+the equity lots: $1900 - 0.15 x E against the one-ETF lots above. The gateway's day line (4x
 equity of buys a day, a cancelled one too) admits 32 sends of such a lot: 6 entries can each climb the
 collar's ladder of 5 sends. A Sized sleeve (the step is parked) would be between 0.25 x E and
 0.50 x E.
-Money digest `d52a5af5`, full digest `9c8b2221` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `ba532204` / `30aceaf8`.
+Money digest `1687e4e3`, full digest `3feab26d` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is `baaa5ad6` / `e865fed5`.
 <!-- equity-design:end -->
 
 - **Its source.** The pair is the captain's to set, before Monday's open, from the verdict of the pre-registered

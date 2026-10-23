@@ -37,7 +37,8 @@ def v2_walls() -> Iterator[None]:
         patches.append(mock.patch.dict(node, {path[-1]: value}))
     for table, key, bound in ((K.EQUITY_MONEY_BOUNDS, "event.position_share.learning", ("0", "0.02")),
                               (K.OPTIONS_MONEY_BOUNDS, "probe.loss_budget_usd", ("0", "400")),
-                              (K.OPTIONS_MONEY_BOUNDS, "probe.loss_total_usd", ("0", "800"))):
+                              (K.OPTIONS_MONEY_BOUNDS, "probe.loss_total_usd", ("0", "800")),
+                              (K.OPTIONS_MONEY_BOUNDS, "daily_stop_share", ("0.15", "0.35"))):
         patches.append(mock.patch.dict(table, {key: bound}))
     patches.append(mock.patch.object(K, "PINNED_DIGEST", PINNED_1019I))
     # (a test module that bound the pin by name at its import: `from league.constitution import PINNED_DIGEST`)
@@ -81,6 +82,30 @@ def on_v2(cls: type) -> type:
 _HELD: list[contextlib.AbstractContextManager] = []
 
 
+def in_force(cls: type) -> type:
+    """A TestCase class decorator for a module run on release 1019i's table (`setUpModule`): every test of the class
+    (its setUp included) reads THE TABLE IN FORCE (the module's walls lifted for the test and set again after it).
+    Release 1019m (the independent review, A139): an invariant or a test named for the table in force never runs on the
+    old one."""
+    original = cls.setUp
+
+    @functools.wraps(original)
+    def setUp(self: Any) -> None:  # noqa: N802 - unittest's name
+        held = len(_HELD)
+        while _HELD:
+            _HELD.pop().__exit__(None, None, None)
+
+        def again() -> None:
+            for _ in range(held):
+                ctx = v2_walls()
+                ctx.__enter__()
+                _HELD.append(ctx)
+        self.addCleanup(again)
+        original(self)
+    cls.setUp = setUp
+    return cls
+
+
 def setUpModule() -> None:  # noqa: N802 - unittest's name
     """A module's tests on release 1019i's table (the module imports this and `tearDownModule`)."""
     ctx = v2_walls()
@@ -108,4 +133,4 @@ def tearDownModule_7() -> None:  # noqa: N802 - unittest's name
     F7.tearDownModule()
 
 
-__all__ = ["v2_walls", "on_v2", "setUpModule", "tearDownModule", "setUpModule_7", "tearDownModule_7", "PINNED_1019I"]
+__all__ = ["v2_walls", "on_v2", "in_force", "setUpModule", "tearDownModule", "setUpModule_7", "tearDownModule_7", "PINNED_1019I"]
