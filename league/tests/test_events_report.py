@@ -173,8 +173,13 @@ class ProgramTableTest(unittest.TestCase):
         self.assertEqual(set(SC.SEATABLE), {p.id for p in P.PROGRAMS if p.seatable})
         self.assertEqual(set(SC.SEATABLE) | set(SC.RECORDS), {p.id for p in P.PROGRAMS})
         self.assertEqual(SC.HOLDS, {p.id: p.hold for p in P.PROGRAMS})
-        self.assertEqual(set(SC.CONTROLS), {p.id for p in P.PROGRAMS if p.seatable and p.reads})
+        # (release 1019n-r2: PREREG-EVL-10's EVL-R2-ON -> EVL-R2-ON-SET is in the table whether or not its rows are
+        # registered; this module runs on the registries before them, league/tests/evl7_fakes.py)
+        later = set() if P.reader2_rows() else {p.id for p in P.READER2_ROWS}
+        self.assertEqual(set(SC.CONTROLS) - later, {p.id for p in P.PROGRAMS if p.seatable and p.reads})
         for prog, ctl in SC.CONTROLS.items():
+            if prog in later:
+                continue
             self.assertEqual(P.BY_ID[ctl].family, P.BY_ID[prog].family)
             self.assertFalse(P.BY_ID[ctl].reads or P.BY_ID[ctl].seatable)
 

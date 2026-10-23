@@ -157,6 +157,36 @@ CREATE TABLE IF NOT EXISTS score_parity(program TEXT NOT NULL, version INTEGER N
   night TEXT NOT NULL, equal INTEGER NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(program, version, event));
 """
 
+#: RELEASE 1019n-r2'S FOUR ADDITIVE TABLES (PREREG-EVL-10 section 1.3; made by `Store` beside `SCHEMA`, so
+#: `SCHEMA_VERSION` stays 1: an older release never reads them, and a rollback opens the store as before), each
+#: written by league/events/reader2.py only:
+#: - `reads2`: one row per READER-2 read (event, request spec sha, model): its answer, its parsed fields, its cost and
+#:   tokens, its response model, the sha of its rendered user text and its priors; THE FIRST STORED ROW IS FINAL;
+#: - `r2_qual`: write-once, every event that qualified for D's ON SET, read or not, with its hash draw, share and choice;
+#: - `r2_scan`: write-once, one row for each qualification scan (section 1.4's COMPLETE);
+#: - `r2_features`: write-once per (event, decision), FEATURES-R2 v1's 21 columns (section 1.6).
+#: Every one is on league/events/births.py's `FACTS_DENY` (RS-2's inputs: section 2.7).
+SCHEMA_1019N = """
+CREATE TABLE IF NOT EXISTS reads2(event TEXT NOT NULL, prompt_sha TEXT NOT NULL, model TEXT NOT NULL, window TEXT,
+  day TEXT, request_id TEXT, asked_at TEXT, answered_at TEXT, status TEXT NOT NULL, answer TEXT, fields TEXT, usd REAL,
+  in_tokens INTEGER, out_tokens INTEGER, response_model TEXT, user_sha TEXT, prior_ids TEXT,
+  PRIMARY KEY(event, prompt_sha, model));
+CREATE INDEX IF NOT EXISTS reads2_day ON reads2(day, status);
+CREATE INDEX IF NOT EXISTS reads2_answered ON reads2(answered_at);
+CREATE TABLE IF NOT EXISTS r2_qual(window TEXT NOT NULL, day TEXT NOT NULL, cik TEXT NOT NULL, event TEXT NOT NULL,
+  kind TEXT NOT NULL, qualified_at TEXT NOT NULL, v1_score INTEGER, h REAL, q REAL, chosen INTEGER NOT NULL,
+  PRIMARY KEY(window, day, event));
+CREATE TABLE IF NOT EXISTS r2_scan(day TEXT NOT NULL, scanned_at TEXT NOT NULL, PRIMARY KEY(day, scanned_at));
+CREATE TABLE IF NOT EXISTS r2_features(event TEXT NOT NULL, decision TEXT NOT NULL, columns TEXT NOT NULL,
+  written_at TEXT NOT NULL, PRIMARY KEY(event, decision));
+CREATE TRIGGER IF NOT EXISTS r2_qual_once BEFORE UPDATE ON r2_qual BEGIN SELECT RAISE(ABORT, 'r2_qual is write-once'); END;
+CREATE TRIGGER IF NOT EXISTS r2_scan_once BEFORE UPDATE ON r2_scan BEGIN SELECT RAISE(ABORT, 'r2_scan is write-once'); END;
+CREATE TRIGGER IF NOT EXISTS r2_features_once BEFORE UPDATE ON r2_features BEGIN
+  SELECT RAISE(ABORT, 'r2_features is write-once'); END;
+CREATE TRIGGER IF NOT EXISTS reads2_final BEFORE UPDATE ON reads2 WHEN OLD.status != 'asked' BEGIN
+  SELECT RAISE(ABORT, 'a stored READER-2 answer is final'); END;
+"""
+
 #: The two rules of PREREG-EVL-1 section 2 an eligibility result is made by (the `eligibility` table's `rule`).
 LIVE_RULE = "live"
 BACKFILL_RULE = "backfill"
@@ -237,6 +267,7 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
         self.db.executescript(SCHEMA_1019I)     # (release 1019i: `real_attempts` and `score_parity`, additive)
+        self.db.executescript(SCHEMA_1019N)     # (release 1019n-r2: PREREG-EVL-10's four tables, additive)
         have = self.meta("schema_version")
         if have is None:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -398,6 +429,6 @@ def _legacy_rule(db: sqlite3.Connection, day: str) -> str:
     return LIVE_RULE if dt.timedelta(0) <= late <= LEGACY_LIVE_WITHIN else BACKFILL_RULE
 
 
-__all__ = ["Store", "SCHEMA", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
+__all__ = ["Store", "SCHEMA", "SCHEMA_1019N", "SCHEMA_VERSION", "iso", "parse_iso", "sha256", "utc_now", "INTENT_ORDER", "LIVE_RULE",
            "BACKFILL_RULE", "ELIGIBILITY_FROM", "LEGACY_LIVE_WITHIN", "MARKER_PREFIX", "has_markers", "FILL_COLUMNS_DDL",
            "migrate_fills", "SCHEMA_1019I"]

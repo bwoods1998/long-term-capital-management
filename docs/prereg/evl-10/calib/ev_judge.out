@@ -1,0 +1,204 @@
+{
+ "r2": {
+  "cells": {
+   "c0": {
+    "pick_mean_a_bp": 0.0,
+    "P_pass_by120": 0.019,
+    "pass_session": 30.0,
+    "pnl_120_usd": 0.0,
+    "net_lo_usd": -16.6,
+    "pnl_per_metered_usd_lo": 0.0,
+    "net_mid_usd": -49.1,
+    "pnl_per_metered_usd_mid": 0.0,
+    "net_line_usd": -90.0,
+    "pnl_per_metered_usd_line": 0.0
+   },
+   "c0.3|sd0.8": {
+    "pick_mean_a_bp": 16.6,
+    "P_pass_by120": 0.0515,
+    "pass_session": 25.8,
+    "pnl_120_usd": 47.3,
+    "net_lo_usd": 30.7,
+    "pnl_per_metered_usd_lo": 2.85,
+    "net_mid_usd": -1.8,
+    "pnl_per_metered_usd_mid": 0.96,
+    "net_line_usd": -42.7,
+    "pnl_per_metered_usd_line": 0.53
+   },
+   "c0.5|sd0.8": {
+    "pick_mean_a_bp": 35.7,
+    "P_pass_by120": 0.1495,
+    "pass_session": 26.7,
+    "pnl_120_usd": 110.1,
+    "net_lo_usd": 93.5,
+    "pnl_per_metered_usd_lo": 6.65,
+    "net_mid_usd": 61.0,
+    "pnl_per_metered_usd_mid": 2.24,
+    "net_line_usd": 20.1,
+    "pnl_per_metered_usd_line": 1.22
+   },
+   "c0.7|sd0.8": {
+    "pick_mean_a_bp": 55.2,
+    "P_pass_by120": 0.2985,
+    "pass_session": 26.9,
+    "pnl_120_usd": 189.0,
+    "net_lo_usd": 172.4,
+    "pnl_per_metered_usd_lo": 11.41,
+    "net_mid_usd": 139.9,
+    "pnl_per_metered_usd_mid": 3.85,
+    "net_line_usd": 99.0,
+    "pnl_per_metered_usd_line": 2.1
+   },
+   "c0.5|sd1.5": {
+    "pick_mean_a_bp": 78.7,
+    "P_pass_by120": 0.5215,
+    "pass_session": 27.3,
+    "pnl_120_usd": 309.2,
+    "net_lo_usd": 292.6,
+    "pnl_per_metered_usd_lo": 18.67,
+    "net_mid_usd": 260.1,
+    "pnl_per_metered_usd_mid": 6.3,
+    "net_line_usd": 219.2,
+    "pnl_per_metered_usd_line": 3.44
+   },
+   "c0.5|sd0.4": {
+    "pick_mean_a_bp": 11.0,
+    "P_pass_by120": 0.048,
+    "pass_session": 25.5,
+    "pnl_120_usd": 31.3,
+    "net_lo_usd": 14.7,
+    "pnl_per_metered_usd_lo": 1.89,
+    "net_mid_usd": -17.8,
+    "pnl_per_metered_usd_mid": 0.64,
+    "net_line_usd": -58.7,
+    "pnl_per_metered_usd_line": 0.35
+   },
+   "c0.7|sd1.5": {
+    "pick_mean_a_bp": 116.2,
+    "P_pass_by120": 0.827,
+    "pass_session": 26.7,
+    "pnl_120_usd": 539.9,
+    "net_lo_usd": 523.3,
+    "pnl_per_metered_usd_lo": 32.6,
+    "net_mid_usd": 490.8,
+    "pnl_per_metered_usd_mid": 11.0,
+    "net_line_usd": 449.9,
+    "pnl_per_metered_usd_line": 6.0
+   }
+  },
+  "prior": {
+   "c0": 0.4,
+   "c0.3|sd0.8": 0.25,
+   "c0.5|sd0.8": 0.2,
+   "c0.7|sd0.8": 0.08,
+   "c0.5|sd1.5": 0.07
+  },
+  "expected": {
+   "pnl_120_usd": 70.61,
+   "net_mid_usd": 21.51,
+   "net_lo_usd": 54.01,
+   "net_line_usd": -19.39,
+   "pnl_per_metered_usd_mid": 1.44,
+   "true_promotions_per_charge": 0.103,
+   "false_promotions_per_charge_base_worst": [
+    0.008,
+    0.047
+   ],
+   "A102_sessions_of_done_time_per_day": {
+    "lo": 0.8,
+    "mid": 2.5,
+    "line": 4.5
+   }
+  },
+  "fp_base": 0.019,
+  "fp_worst_seen": 0.1172
+ },
+ "idn": {
+  "red team": {
+   "prior": {
+    "-30": 0.2,
+    "-15": 0.25,
+    "0": 0.25,
+    "20": 0.15,
+    "30": 0.1,
+    "60": 0.05
+   },
+   "cells": {
+    "-30": {
+     "P_pass_by120": 0.005,
+     "pnl_120_usd": -82.3
+    },
+    "-15": {
+     "P_pass_by120": 0.005,
+     "pnl_120_usd": -41.2
+    },
+    "0": {
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0
+    },
+    "20": {
+     "P_pass_by120": 0.048,
+     "pnl_120_usd": 56.3
+    },
+    "30": {
+     "P_pass_by120": 0.103,
+     "pnl_120_usd": 87.2
+    },
+    "60": {
+     "P_pass_by120": 0.264,
+     "pnl_120_usd": 189.8
+    }
+   },
+   "E_pnl_120_usd": -0.1,
+   "metered_usd": 0.0,
+   "true_promotions_per_charge": 0.031,
+   "false_promotions_per_charge_base_worst": [
+    0.005,
+    0.032
+   ]
+  },
+  "gated": {
+   "prior": {
+    "-15": 0.3,
+    "0": 0.35,
+    "20": 0.18,
+    "30": 0.12,
+    "60": 0.05
+   },
+   "cells": {
+    "-15": {
+     "P_pass_by120": 0.005,
+     "pnl_120_usd": -41.2
+    },
+    "0": {
+     "P_pass_by120": 0.019,
+     "pnl_120_usd": 0.0
+    },
+    "20": {
+     "P_pass_by120": 0.048,
+     "pnl_120_usd": 56.3
+    },
+    "30": {
+     "P_pass_by120": 0.103,
+     "pnl_120_usd": 87.2
+    },
+    "60": {
+     "P_pass_by120": 0.264,
+     "pnl_120_usd": 189.8
+    }
+   },
+   "E_pnl_120_usd": 17.7,
+   "metered_usd": 0.0,
+   "true_promotions_per_charge": 0.034,
+   "false_promotions_per_charge_base_worst": [
+    0.007,
+    0.045
+   ]
+  },
+  "tuition_zero_edge_per_session_usd": {
+   "h_eff 5 bp": 0.46,
+   "h_eff 10 bp": 0.69,
+   "h_eff 15 bp": 0.92
+  }
+ }
+}

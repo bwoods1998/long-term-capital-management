@@ -1,0 +1,40 @@
+{
+ "news": {
+  "http": 200,
+  "seconds": 3.2,
+  "stop": "end_turn",
+  "usage": {
+   "input_tokens": 1659,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 79,
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard",
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   }
+  },
+  "model": "claude-sonnet-5-5",
+  "usd": "0.004108",
+  "parse": "ok",
+  "fields": {
+   "type": "earnings",
+   "new": 2,
+   "corroborated": 0,
+   "price_story": false,
+   "consensus": "beat",
+   "vs_own_guidance": "raised",
+   "magnitude": 2,
+   "specific": 1,
+   "surprise": 1,
+   "p_up": 50
+  },
+  "error": null
+ },
+ "spent_usd": 0.00411
+}

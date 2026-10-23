@@ -407,6 +407,13 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
             cost_verdicts = float(store.db.execute(
                 f"SELECT COALESCE(SUM(COALESCE(usd, {B.VERDICT_USD_UNKNOWN})), 0) FROM verdicts WHERE answered_at>=? "
                 "AND answered_at<?", (ulo, uhi)).fetchone()[0] or 0.0)
+            # (release 1019n-r2: PREREG-EVL-10's READER-2's dollars are the lane's too, inside its line and the Claude
+            # figure: counted here beside its verdicts' (league/events/reader2.py `usd_between`). The facts keep the
+            # gateway's shape (league/tests/fixtures/daily_report.json): R2's READER block is the lane's own report's,
+            # league/events/report.py `_reader2`.)
+            from ..events import reader2 as R2
+
+            cost_verdicts += R2.usd_between(store.db, ulo, uhi)
             fills, first_fill = [], None
             if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone():
                 fills = store.db.execute("SELECT side, COUNT(*) AS n, COALESCE(SUM(fee), 0) AS fees FROM real_fills "

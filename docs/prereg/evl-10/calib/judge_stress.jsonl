@@ -1,0 +1,4 @@
+{"cell": "S|idn|TC-skew|phi.40|rho.30|AR20|cnt|n5", "R": 2000, "run1_120": 0.195, "se": 0.0089}
+{"cell": "S|idn|TC-skew|phi.40|rho.30|AR20|cnt|n8", "R": 2000, "run1_120": 0.1695, "se": 0.0084}
+{"cell": "S|r2|NV|phi.40|rho.30|AR20|n5|cnt|finf", "R": 2000, "run1_120": 0.1755, "se": 0.0085}
+{"cell": "S|r2|NV|phi.40|rho.30|AR20|n14|finf", "R": 2000, "run1_120": 0.1535, "se": 0.0081}

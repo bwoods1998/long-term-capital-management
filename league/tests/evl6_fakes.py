@@ -34,7 +34,7 @@ def table_1019h() -> dict[str, Any]:
 def before_evl6() -> Iterator[None]:
     """RELEASE 1019h'S PROGRAM TABLE for the block: REGISTERED_AT_6 unpinned and no PREREG-EVL-6 row (`table_1019h`);
     the births a store holds load at version 1 alone. Restored on exit, whatever `load_births` rebound inside."""
-    patch = mock.patch.multiple(P, REGISTERED_AT_6=None, **table_1019h())
+    patch = mock.patch.multiple(P, REGISTERED_AT_6=None, REGISTERED_AT_10=None, **table_1019h())
     patch.start()
     try:
         yield
@@ -49,7 +49,7 @@ def on_1019h(cls: type) -> type:
 
     @functools.wraps(original)
     def setUp(self: Any) -> None:  # noqa: N802 - unittest's name
-        patch = mock.patch.multiple(P, REGISTERED_AT_6=None, **table_1019h())
+        patch = mock.patch.multiple(P, REGISTERED_AT_6=None, REGISTERED_AT_10=None, **table_1019h())
         patch.start()
         self.addCleanup(patch.stop)
         original(self)

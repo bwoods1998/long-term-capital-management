@@ -154,7 +154,7 @@ class TheRows(unittest.TestCase):
             self.assertIs(P.BY_ID[p.id], p)
         self.assertEqual([(p.id, p.version) for p in P.PREREG_SEATING],
                          [(i, 2) for i in NINE] + [(i, 1) for i in FOUR] + [(i, 1) for i in FIVE])
-        self.assertEqual(P.SEATING_PREREGS, (3, 4, 5))
+        self.assertEqual(P.SEATING_PREREGS[:3], (3, 4, 5))   # (release 1019n-r2: PREREG-EVL-10's seat, 10, after them)
         self.assertEqual(P.CLOSE_FAMILIES_5, ("ern-drop", "ern-under", "news-night2"))
         self.assertFalse(set(P.CLOSE_FAMILIES_5) & set(P.REACT_FAMILIES), "the >= 1.04 rule never applies to them")
 

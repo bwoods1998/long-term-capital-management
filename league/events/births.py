@@ -360,6 +360,10 @@ UNREAD_IN_BAND = {"ern-drop": P.DROP_RATIO, "ern-under": 1.0}
 #: costs7.py `TABLES`: costs7 and cost_basis), nor the intents, whose `rank_key` holds a learner's fitted ahat (check
 #: 2's minor 10 (3): the facts never read intents).
 FACTS_DENY = FACTS_DENY | frozenset({"learner_fits", "learner_cands", "learner_stats", "costs7", "cost_basis", "intents"})
+#: PREREG-EVL-10 section 2.7: READER-2's four tables (league/events/store.py `SCHEMA_1019N`: its reads, its
+#: qualification record, its scans and FEATURES-R2 v1) are RS-2's inputs, for the captain and the owner only: the facts,
+#: and so no designer of a later file, never read them.
+FACTS_DENY = FACTS_DENY | frozenset({"reads2", "r2_qual", "r2_scan", "r2_features"})
 
 
 class SpecError(ValueError):

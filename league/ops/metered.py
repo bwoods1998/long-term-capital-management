@@ -18,7 +18,8 @@ THE METERS, each read by the stall job at every run (:20 and :50, league/ops/sta
   every fall of Sail's balance between two good readings since the guard first ran, as of `last_good.at`): every box and
   model call on the Sail account, the House box and the data box among them, booked or not;
 - `claude`: THE GATEWAY'S CLAUDE METER (`GET /v1/health` `claude.settled_usd`, spent less the holds in flight): every
-  settled Claude call through the gateway, the event lane's verdicts and every role alike;
+  settled Claude call through the gateway, the event lane's verdicts, R3's births call, PREREG-EVL-10's READER-2 reads
+  (release 1019n-r2; inside the lane's line, league/events/reader2.py) and every role alike;
 - `openai`: the gateway's OpenAI meter (`frontier.settled_usd` of its month; a new month carries on from the old month's
   `previous.settled_usd`): closed by the budget (no room), counted whenever it moves;
 - `cloudflare`: the Workers plan, a fixed fee (`budget.CLOUDFLARE_USD_DAY` for every day); `data`: `budget.DATA_USD_DAY`.

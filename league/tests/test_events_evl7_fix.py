@@ -38,6 +38,7 @@ from league.tests import test_events_book as TB
 from league.tests import test_events_evl7 as T7
 from league.tests import test_events_house as TH
 from league.tests import test_events_1019h_minors as M19
+from league.tests.evl10_fakes import off_10
 
 O1, ON = T7.O1, T7.ON
 et, pin, learner = T7.et, T7.pin, T7.learner
@@ -605,6 +606,7 @@ class TheRoom(TB.EventTest):
         self.assertEqual(self.buys(), [(read.id, "ACME"), (O1, "BRTH")], "then the learner, then nothing for the birth")
 
 
+@off_10
 class TheLine(TB.EventTest):
     def setUp(self):
         super().setUp()
@@ -689,6 +691,7 @@ class TheLine(TB.EventTest):
 
 
 # --------------------------------------------------------------------------------------------------------- the site
+@off_10
 class TheSite(T7.WorldCase):
     """The site's lane rows with the learners pinned (league/site_lane.py, lane_v1 unchanged): each learner has a plain
     name of its own (two rows reading "Event rule" before), and no next look, PREREG-EVL-3's being never theirs."""

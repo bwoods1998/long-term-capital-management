@@ -1,0 +1,32 @@
+shift: 1/28 6s
+shift: 2/28 6s
+shift: 3/28 6s
+shift: 4/28 6s
+shift: 5/28 12s
+shift: 6/28 12s
+shift: 7/28 12s
+shift: 8/28 12s
+shift: 9/28 17s
+shift: 10/28 18s
+shift: 11/28 18s
+shift: 12/28 18s
+shift: 13/28 23s
+shift: 14/28 24s
+shift: 15/28 24s
+shift: 16/28 24s
+shift: 17/28 29s
+shift: 18/28 30s
+shift: 19/28 30s
+shift: 20/28 30s
+shift: 21/28 34s
+shift: 22/28 36s
+shift: 23/28 36s
+shift: 24/28 36s
+shift: 25/28 39s
+shift: 26/28 41s
+shift: 27/28 41s
+shift: 28/28 41s
+{"cell": "idn|TC-skew|AR20|cnt|n5|delta3", "R": 4000, "run1_120": 0.1412, "se": 0.0055, "by30": 0.112, "by60": 0.1383, "two_runs_120": 0.2505, "retire_120": 0.0135, "mw_mean_a_bp": 5.38, "mean_n": 5.0}
+{"cell": "idn|TC-skew|AR20|cnt|n5|delta5", "R": 4000, "run1_120": 0.1328, "se": 0.0054, "by30": 0.1047, "by60": 0.1305, "two_runs_120": 0.2525, "retire_120": 0.0135, "mw_mean_a_bp": 6.18, "mean_n": 5.0}
+{"cell": "idn|TC-skew|AR20|cnt|n5|delta8", "R": 4000, "run1_120": 0.144, "se": 0.0056, "by30": 0.1182, "by60": 0.1422, "two_runs_120": 0.269, "retire_120": 0.0088, "mw_mean_a_bp": 8.53, "mean_n": 5.0}
+{"cell": "idn|base|n8|delta5", "R": 2000, "run1_120": 0.026, "se": 0.0036, "by30": 0.0225, "by60": 0.026, "two_runs_120": 0.0505, "retire_120": 0.028, "mw_mean_a_bp": 4.37, "mean_n": 8.0}

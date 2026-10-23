@@ -1151,9 +1151,12 @@ def picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.dateti
     EVL-8K-READ-O1's at the next open (`next_open_event`); no later filing of the issuer stands in for it. PREREG-EVL-5's
     rows (section 1.3) read `rows_5` with `reaction`, EVL-NEWS-NIGHT2-ON its `gap(row, universe_row)` (`gap_reader`; a
     price it cannot read is not bought), and its two earnings rows the guard with `raised` (`RAISED_GUARD`).
-    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`)."""
+    PREREG-EVL-7's learners: their own written live decision, `learner_picks` (never `select`). PREREG-EVL-10's four
+    rows: section 2.4's ONE READING, `r2_picks` (the live receipt's own intents, whatever `decided_at`)."""
     if P.is_learner(program):
         return learner_picks(lane, program, day, decided_at=decided_at, held=held)
+    if P.is_reader2(program):
+        return r2_picks(lane, program, day, decided_at=decided_at, held=held)
     uni = universe_rows(lane, day)
     news = program.family in P.NEWS_FAMILIES
     guard = program.id in NEXT_OPEN_GUARD
@@ -1614,6 +1617,85 @@ def learner_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: d
     return out
 
 
+# ----------------------------------------------------------------------------------------------------- PREREG-EVL-10
+def r2_picks(lane: Lane, program: P.Program, day: dt.date, *, decided_at: dt.datetime | None = None,
+             held: Callable[[str], bool] | None = None) -> list[Pick]:
+    """THE REAL-MONEY PICKS OF A PREREG-EVL-10 ROW (EVL-R2-ON, EVL-R2-ON-SET, REC-R2-ON-PASS, REC-R2-ON-AVOID), section
+    2.4's ONE READING (league/events/reader2.py `one_reading`): the intents of `program` its live `decide-close-r2:<D>`
+    receipt with status `ok` wrote, in rank_key order, then adv20 descending, then event id, LESS REAL MONEY'S OWN
+    HELD-LOT SKIP (`held(cik)`: the book's lots and buys; the version's own five-session rule is already in the
+    decision). `decided_at` is NOT READ: every input is cut at this file's tau of D, so a read answered after tau or an
+    8-K stored after it never reaches real money or a member of PREREG-EVL-8's EVL-META-ON. Empty with no such receipt."""
+    from . import reader2 as R2
+
+    out: list[Pick] = []
+    for r in R2.one_reading(lane, program, day):
+        if held is not None and held(str(r["cik"])):
+            continue
+        try:
+            prev = Decimal(str(r["prev_close"]))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not prev.is_finite() or prev <= 0:
+            continue
+        out.append(Pick(program.id, program.version, r["event"], r["symbol"], r["cik"], r["rank"], r["adv20"], prev,
+                        str(r["knowable_at"] or "")))
+    return out
+
+
+# ----------------------------------------------------------------------------------- the decision scheduler (1019i)
+def slot_of(program: Any) -> str:
+    """Which file's slot of the timing table decides `program` (a Program or an id; league/events/scheduler.py
+    `file_of`): "main" for every row of PREREG-EVL-1 to -6 and the births, a later file's key once its part is
+    registered. The book's main pass plans buys only of main programs; a file's buys are planned by its own pass
+    (league/equity/live.py `_event_decide_slot`), once its live receipt is made, inside its own send window."""
+    from . import scheduler as X
+
+    return X.file_of(program)
+
+
+def slot_files(at: str) -> list[str]:
+    """The files with a live slot at auction `at` whose part is registered (table order): the book's per-file passes."""
+    from . import scheduler as X
+
+    return [s.file for s in X.live_files(at)]
+
+
+def send_window(file: str, at: str, open_at: float, close_at: float) -> tuple[float, float] | None:
+    """The file's send window at auction `at` of a session (epoch seconds: [from, until)), from the timing table;
+    None for a file with no slot there (the book sends nothing of it at that auction)."""
+    from . import scheduler as X
+
+    s = X.slot(file, at)
+    return None if s is None else X.send_window(s, open_at, close_at)
+
+
+def slot_catchup(file: str, at: str) -> bool:
+    """Whether the file's slot at auction `at` has a catch-up (its rows of a session with no live run decided later by
+    themselves, shadow only), False for a file with none (PREREG-EVL-10: such a session has no decision of its rows)."""
+    from . import scheduler as X
+
+    s = X.slot(file, at)
+    return s is not None and s.catchup is not None
+
+
+def slot_receipt(lane: Lane | None, file: str, at: str, day: dt.date) -> str | None:
+    """The status of the file's LATEST live receipt of (`at`, `day`) (`decide-<kind>:<day>` of its slot): "ok" or
+    "pending" (made: the book plans its buys), "failed" / "cut" / "missed" (final, never traded at that auction),
+    "running", or None while there is none (the book waits inside the file's window). Unreadable reads as None."""
+    from . import scheduler as X
+
+    s = X.slot(file, at)
+    if s is None or lane is None:
+        return None
+    try:
+        row = lane.db.execute("SELECT status FROM receipts WHERE job=? ORDER BY id DESC LIMIT 1",
+                              (s.receipt(day),)).fetchone()
+    except sqlite3.Error:
+        return None
+    return None if row is None else str(row["status"] or "")
+
+
 #: The words of `part_hold`'s wait for the lane's close decision, which every such buy's why carries to its end: the
 #: book counts the buys that end unsent so (league/equity/live.py `_event_held_said`), and so does the lane's report
 #: (league/events/report.py `HELD_UNSENT`, the same words).
@@ -1747,6 +1829,7 @@ __all__ = ["KIND", "LANE", "TAG", "EXIT_TAG", "LATE_TAG", "REAL_VERSION", "BANDS
 #: last, so release 1019i's other branches append below without touching these lines)
 __all__ += ["is_learner", "ern_issuer", "issuer_8k_guard", "learner_gate", "learner_cut", "after_learners",
             "learner_pending", "learner_picks", "pick_record", "pick_of", "LINE_ACROSS_AUCTIONS"]
+__all__ += ["slot_of", "slot_files", "send_window", "slot_receipt", "slot_catchup", "r2_picks"]
 #: (release 1019f: the probe size's record)
 __all__ += ["SCHEMA_COLUMNS", "BINDINGS", "SIZING_BINDINGS", "binding_of"]
 #: (release 1019f: A85's reservation and round-robin, with R3's births' tier)

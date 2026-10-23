@@ -453,7 +453,21 @@ def build(store: S.Store, day: dt.date, *, now: dt.datetime | None = None) -> di
         "births": _births(store), "jobs": jobs(store, day, now), "evl5": evl5(store, day),
         "settle": settle_pace(store, day), "fill_rates": _fill_rates(store, day),
         "learners": _learners(store, day),
+        "reader2": _reader2(store, day, now),
     }
+
+
+def _reader2(store: S.Store, day: dt.date, now: dt.datetime) -> dict[str, Any] | None:
+    """PREREG-EVL-10's READER block (league/events/reader2.py `session_counts`, `alarms`): counts only, no field, text or
+    figure of any read; None while REGISTERED_AT_10 is None."""
+    from . import reader2 as R2
+
+    if not R2.pinned():
+        return None
+    try:
+        return R2.session_counts(store, day) | {"alarms": R2.alarms(store, now)}
+    except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
 
 def settle_pace(store: S.Store, night: dt.date) -> dict[str, Any] | None:
@@ -615,6 +629,21 @@ def render(report: Mapping[str, Any]) -> str:
     fam.append(f"news {ev['news']['total']} (live {ev['news']['live']})")
     lines.append("Events: " + " | ".join(fam) + f"; recorded today {ev['recorded_today']}")
     lines.append("Verdicts: " + " | ".join(f"{s} {v['n']} ${v['usd']:.2f}" for s, v in vd.items()))
+    r2 = report.get("reader2")
+    if isinstance(r2, Mapping):                 # (PREREG-EVL-10: counts only)
+        if "error" in r2:
+            lines.append(f"Reader-2: {r2['error']}")
+        elif r2.get("session"):
+            reads = r2.get("reads") or {}
+            lines.append(f"Reader-2: scans {r2.get('scans', 0)} ({'complete' if r2.get('complete') else 'not complete'}); "
+                         f"qualified {sum((r2.get('qualified') or {}).values())}, chosen "
+                         f"{sum((r2.get('chosen') or {}).values())}; reads "
+                         + (", ".join(f"{k} {v}" for k, v in sorted(reads.items())) or "none")
+                         + f" (${float(r2.get('usd') or 0.0):.2f}); answered by tau {r2.get('answered_by_tau', 0)}; "
+                         f"decision {r2.get('decision') or 'none'}; intents "
+                         + ", ".join(f"{k} {v}" for k, v in (r2.get("intents") or {}).items()))
+            for a in r2.get("alarms") or []:
+                lines.append(f"Reader-2 alarm {a.get('kind')}: {a.get('what')}"[:300])
     for x in report.get("learners") or []:     # (PREREG-EVL-7: counts only)
         from . import learner as LR
 

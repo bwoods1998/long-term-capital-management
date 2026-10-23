@@ -1,0 +1,50 @@
+M  THE MARGIN RATCHET: margin (bp) after k sessions, 6 real gaps a session on the side, 2,000 lanes a cell
+   cell (mu, sd, tails)       | reading A (n >= 2): k=5 / 20 / 60 / 120 median [p90] | reading B (n >= 30): 20 / 120
+   mu +0 sd    5 nrm            | 5.0 [6.0] / 5.0 [6.0] / 5.0 [6.0] / 5.0 [6.0] | 5.0 / 5.0
+   mu +0 sd    5 t3             | 5.0 [6.0] / 5.0 [6.0] / 5.0 [6.1] / 5.0 [6.2] | 5.0 / 5.0
+   mu +0 sd   10 nrm            | 7.0 [12.3] / 7.0 [12.3] / 7.1 [12.3] / 7.1 [12.3] | 5.0 / 5.5
+   mu +0 sd   10 t3             | 5.9 [12.0] / 6.1 [12.0] / 6.5 [12.2] / 7.0 [12.5] | 5.0 / 5.7
+   mu +0 sd   20 nrm            | 14.0 [24.9] / 14.0 [24.9] / 14.1 [24.9] / 14.3 [24.9] | 8.4 / 11.1
+   mu +0 sd   20 t3             | 11.4 [24.6] / 11.8 [24.8] / 12.8 [25.8] / 13.6 [26.2] | 7.8 / 11.4
+   mu +0 sd   30 nrm            | 20.9 [37.3] / 21.0 [37.3] / 21.1 [37.3] / 21.3 [37.3] | 12.6 / 16.5
+   mu +0 sd   30 t3             | 16.9 [36.3] / 17.7 [36.4] / 19.2 [37.3] / 20.6 [39.0] | 11.3 / 17.0
+   mu +3 sd    5 nrm            | 6.5 [9.3] / 6.5 [9.3] / 6.5 [9.3] / 6.5 [9.3] | 5.1 / 5.8
+   mu +3 sd    5 t3             | 5.9 [8.9] / 6.0 [9.0] / 6.2 [9.1] / 6.4 [9.3] | 5.0 / 5.8
+   mu +3 sd   10 nrm            | 9.9 [15.1] / 9.9 [15.1] / 10.0 [15.1] / 10.1 [15.1] | 7.2 / 8.5
+   mu +3 sd   10 t3             | 8.8 [14.8] / 8.9 [15.0] / 9.4 [15.2] / 9.8 [15.4] | 6.9 / 8.7
+   mu +3 sd   20 nrm            | 17.1 [27.5] / 17.2 [27.5] / 17.3 [27.5] / 17.4 [27.5] | 11.4 / 14.1
+   mu +3 sd   20 t3             | 14.4 [27.4] / 14.8 [27.5] / 15.8 [28.1] / 16.8 [28.4] | 10.8 / 14.4
+   mu +3 sd   30 nrm            | 24.0 [40.6] / 24.0 [40.6] / 24.3 [40.6] / 24.5 [40.6] | 15.6 / 19.7
+   mu +3 sd   30 t3             | 19.9 [38.2] / 20.6 [38.6] / 22.0 [39.5] / 23.4 [41.5] | 14.5 / 20.1
+   (the margin a lane should charge is about mu; every bp above it is charged to every later event of the seat
+    and of its control, for good)
+
+H  THE EXECUTION HOLD: P(real entries stopped for good) by session 60 / 120, share of sessions with entries
+   allowed over 120; 6 entries a session; 2,000 lanes a cell; entry gaps mean mu sd sigma (t(3)); exit gaps 0, 5 bp
+   mu +0 sd  10: stopped for good by 60 0.015, by 120 0.028; sessions with entries 0.986
+   mu +0 sd  20: stopped for good by 60 0.239, by 120 0.436; sessions with entries 0.765
+   mu +0 sd  30: stopped for good by 60 0.812, by 120 0.970; sessions with entries 0.305
+   mu +0 sd  40: stopped for good by 60 0.985, by 120 1.000; sessions with entries 0.153
+   mu +3 sd  10: stopped for good by 60 0.025, by 120 0.054; sessions with entries 0.975
+   mu +3 sd  20: stopped for good by 60 0.504, by 120 0.771; sessions with entries 0.537
+   mu +3 sd  30: stopped for good by 60 0.916, by 120 0.995; sessions with entries 0.219
+   mu +3 sd  40: stopped for good by 60 0.995, by 120 1.000; sessions with entries 0.132
+   mu +6 sd  10: stopped for good by 60 0.317, by 120 0.554; sessions with entries 0.693
+   mu +6 sd  20: stopped for good by 60 0.941, by 120 0.999; sessions with entries 0.197
+   mu +6 sd  30: stopped for good by 60 0.996, by 120 1.000; sessions with entries 0.128
+   mu +6 sd  40: stopped for good by 60 1.000, by 120 1.000; sessions with entries 0.103
+
+F  THE FEES at E = $1,900 (penny fees: CAT $0.01 a side; TAF $0.01 and the SEC fee rounded up to $0.01 on a sale)
+   learning lots (2% target $38, whole shares): proceeds $19.01-$76.00; round-trip penny fees 5.3-21.0 bp (median 9.9); sale-side fees over proceeds up to 15.8 bp (the draft's f ratchets to this maximum)
+   PREREG-EVL-1's convention at the Probe notional N = $95: entry 1.05 bp, exit 2.11 bp (+0.5 bp a side): 4.16 bp a round trip; with the SEC cent 5.21 bp
+   the draft's replay before any posted sale: entry 0 bp of fees, exit f = 0.30 bp -> under-charged by 3.9-4.9 bp a round trip against PREREG-EVL-1's basis; after the first small learning sale f locks at up to 15.8 bp, over-charged by about 13.7 bp on every later event
+
+H2 THE HOLD, entry side only, three readings: 'fill' = the draft (after every fill), 'close' = once at each
+   session's close, 'close_t' = once at each close and also |t| >= 2.5; 1,000 lanes a cell, 6 entries a session
+   mu +0 sd   5 | fill: stop-for-good by 120 0.002, a hold by 20 0.000 | close: stop-for-good by 120 0.000, a hold by 20 0.000 | close_t: stop-for-good by 120 0.000, a hold by 20 0.000
+   mu +0 sd  10 | fill: stop-for-good by 120 0.016, a hold by 20 0.000 | close: stop-for-good by 120 0.012, a hold by 20 0.003 | close_t: stop-for-good by 120 0.000, a hold by 20 0.000
+   mu +0 sd  20 | fill: stop-for-good by 120 0.457, a hold by 20 0.110 | close: stop-for-good by 120 0.179, a hold by 20 0.084 | close_t: stop-for-good by 120 0.014, a hold by 20 0.024
+   mu +3 sd  20 | fill: stop-for-good by 120 0.797, a hold by 20 0.277 | close: stop-for-good by 120 0.412, a hold by 20 0.200 | close_t: stop-for-good by 120 0.183, a hold by 20 0.125
+   mu +0 sd  30 | fill: stop-for-good by 120 0.970, a hold by 20 0.517 | close: stop-for-good by 120 0.724, a hold by 20 0.392 | close_t: stop-for-good by 120 0.116, a hold by 20 0.095
+   mu +15 sd  20 | fill: stop-for-good by 120 1.000, a hold by 20 1.000 | close: stop-for-good by 120 1.000, a hold by 20 1.000 | close_t: stop-for-good by 120 1.000, a hold by 20 1.000
+   mu +20 sd  20 | fill: stop-for-good by 120 1.000, a hold by 20 1.000 | close: stop-for-good by 120 1.000, a hold by 20 1.000 | close_t: stop-for-good by 120 1.000, a hold by 20 1.000

@@ -270,6 +270,18 @@ PENDING_GATEWAY += ("league/events/attempts.py", "league/events/pxstore.py", "le
 #: wait here for the gateway's merge-list follow-up, as the lane's judges do. league/events/judge7.py (the review round)
 #: is their judge's runner: their looks, band moves, runs and the real-money gate.
 PENDING_GATEWAY += ("league/events/learner.py", "league/events/costs7.py", "league/events/judge7.py")
+#: THE DECISION SCHEDULER'S TIMING TABLE (release 1019i, A120): league/events/scheduler.py holds the pre-registered
+#: slot of every file at each auction (its start, its bound, the book's send window for its buys: when real money's
+#: buys of a file go and when they do not), a rule input like calendar.py's decision times, so no main commit the
+#: in-box updater would ship can move a file's slot without the owner's deploy. It waits here for the gateway's
+#: merge-list follow-up, as the lane's rule inputs do.
+PENDING_GATEWAY += ("league/events/scheduler.py",)
+#: PREREG-EVL-10'S READER-2 (release 1019n-r2): league/events/reader2.py is a pre-registered reader version and its
+#: consumer seat's rule (the frozen request specs copied verbatim, the qualification and choice rules, the line R2 asks
+#: within, inside the lane's line and the cost rule's cap, the decision real money buys from), so no main commit the
+#: in-box updater would ship can change it without the owner's deploy. It waits here for the gateway's merge-list
+#: follow-up, as the lane's rule inputs do.
+PENDING_GATEWAY += ("league/events/reader2.py",)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to

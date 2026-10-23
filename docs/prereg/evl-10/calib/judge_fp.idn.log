@@ -1,0 +1,26 @@
+idn: 1/20 jobs 11s
+idn: 2/20 jobs 11s
+idn: 3/20 jobs 11s
+idn: 4/20 jobs 12s
+idn: 5/20 jobs 22s
+idn: 6/20 jobs 23s
+idn: 7/20 jobs 24s
+idn: 8/20 jobs 25s
+idn: 9/20 jobs 34s
+idn: 10/20 jobs 34s
+idn: 11/20 jobs 36s
+idn: 12/20 jobs 38s
+idn: 13/20 jobs 46s
+idn: 14/20 jobs 46s
+idn: 15/20 jobs 48s
+idn: 16/20 jobs 50s
+idn: 17/20 jobs 57s
+idn: 18/20 jobs 58s
+idn: 19/20 jobs 58s
+idn: 20/20 jobs 60s
+idn|T-skew|AR20|cnt|n5       R  2000 n  5.0 | run1 by120 0.1135 (+-0.0071) by30 0.096 by60 0.112 | two runs 0.1985 | retire 0.009 | mw a +0.8 bp
+idn|TC-skew|AR10|cnt|n5      R  4000 n  5.0 | run1 by120 0.1153 (+-0.0050) by30 0.094 by60 0.113 | two runs 0.2177 | retire 0.012 | mw a +1.0 bp
+idn|TC-skew|AR20|cnt|n3      R  4000 n  3.0 | run1 by120 0.1325 (+-0.0054) by30 0.096 by60 0.131 | two runs 0.2375 | retire 0.011 | mw a +1.9 bp
+idn|TC-skew|AR20|cnt|n5      R  4000 n  5.0 | run1 by120 0.1278 (+-0.0053) by30 0.102 by60 0.126 | two runs 0.2350 | retire 0.012 | mw a +1.0 bp
+idn|TC-skew|AR20|cnt|n8      R  4000 n  8.0 | run1 by120 0.1115 (+-0.0050) by30 0.095 by60 0.110 | two runs 0.2030 | retire 0.022 | mw a -0.6 bp
+idn|base|n8                  R  2000 n  8.0 | run1 by120 0.0190 (+-0.0031) by30 0.018 by60 0.019 | two runs 0.0415 | retire 0.042 | mw a -0.3 bp

@@ -786,6 +786,9 @@ class House:
                        # And the Kalshi shard funder (`league/shards.py`): a pass a refusal asked for
                        # must not wait behind Merton, the backup or a repair; one at a time.
                        "shards": threading.Semaphore(1),
+                       # PREREG-EVL-10's READER-2 (league/events/house.py `READER_KEY`): its streamed calls, one at a
+                       # time, never on the event lane's one feeds slot nor on the ops workers the backup shares.
+                       "reader": threading.Semaphore(1),
                        # H5 (Sept 25, 2026): the tick's own bookkeeping, moved beside it (`_house_job`):
                        # research scheduling and the foundry's step. Behind Merton's three ops slots they
                        # would wait out a pass of minutes; one at a time, never two of the same.
@@ -4555,7 +4558,8 @@ class House:
 
         lane_name = ("research" if key.startswith("research:") else "replay" if key.startswith("replay")
                      else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:")
-                     else "shards" if key.startswith("shards:") else "house" if key.startswith("house:") else "ops")
+                     else "shards" if key.startswith("shards:") else "house" if key.startswith("house:")
+                     else "reader" if key.startswith("reader:") else "ops")
         lane = self._lanes[lane_name]
         # The House's own bookkeeping runs every minute (`_house_job`): a started and a finished `ops.job`
         # row for each would be 5,760 ledger rows a day that say nothing. Its last run is in health.json

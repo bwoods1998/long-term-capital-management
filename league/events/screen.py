@@ -98,7 +98,10 @@ CONTROLS: dict[str, str] = {"EVL-ERN-READ-O1": "EVL-CTRL-ERN-ALL-O1", "EVL-8K-RE
                             # PREREG-EVL-4 section 4 (EVL-8K-REACT-ON reads no verdict and has no control condition)
                             "EVL-8K-READ-ON": "EVL-CTRL-8K-ON", "EVL-NEWSPM-READ-ON": "EVL-CTRL-NEWSPM-ON",
                             # PREREG-EVL-5 section 4 (EVL-ERN-DROP-ON and EVL-NEWS-NIGHT2-ON read no verdict and have none)
-                            "EVL-ERN-UNDER-ON": "EVL-CTRL-ERN-UNDER-ON"}
+                            "EVL-ERN-UNDER-ON": "EVL-CTRL-ERN-UNDER-ON",
+                            # PREREG-EVL-10 section 3: EVL-R2-ON is a READ version whose control is EVL-R2-ON-SET (every
+                            # candidate of the same live decisions, whatever the filter: PREREG-EVL-6 section 1.4's READ)
+                            "EVL-R2-ON": "EVL-R2-ON-SET"}
 #: Sessions held as the prereg counts them (C1, close to next close, holds one; PREREG-EVL-2's, PREREG-EVL-4's and
 #: PREREG-EVL-5's close-to-next-open programs hold one). The screen judges only the seatable programs, every one a one-session hold,
 #: so each of their blocks is one entry session.
@@ -1081,6 +1084,8 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
     prog = BY_KEY.get((str(program), int(version)))
     if prog is None:
         return None, f"{program} v{version} is no registered program"
+    if getattr(prog, "prereg", None) == R2_FILE:
+        return _final_r2(store, prog, today, now)
     first = prog.registered_at.astimezone(C.NY).date()
     reach_sessions, reach_lookback, reach_weekdays = _reach()
     kind = prog.entry_at
@@ -1169,6 +1174,32 @@ def final_until(store: S.Store, program: str, version: int, today: dt.date,
             why = f"the daily-index backfill of {day.isoformat()} has not run"
             break
     return _fast_until(store, prog, first, horizon, why, unmade, today, now)
+
+
+#: PREREG-EVL-10's file (league/events/programs.py `FILE_10`): its rows are decided ONLY by the live scheduler slot
+#: `decide-close-r2:<D>` (section 2.4), never again and never by a catch-up, so a session is FINAL for them once that
+#: slot's window has closed: decided (`ok`), or with no decision at all (failed, cut, missed, or no run: section 2.4's
+#: "a session whose slot did not run live ... has NO decision of this file", a block that does not exist).
+R2_FILE = 10
+
+
+def _final_r2(store: Any, prog: Any, today: dt.date, now: dt.datetime) -> tuple[dt.date | None, str]:
+    """`final_until` for a PREREG-EVL-10 row: the last session through `today` whose slot can no longer run (its
+    `never_past` passed by `now`, from REGISTERED_AT_10's day on), None when none has."""
+    from . import scheduler as X
+
+    slot = X.slot("evl10", "close")
+    first = prog.registered_at.astimezone(C.NY).date()
+    last: dt.date | None = None
+    for x in C.sessions(store, first, today):
+        never = slot.never_past.at(x) if slot is not None and slot.never_past is not None else x.close_decide
+        if never < now:
+            last = x.day
+        else:
+            break
+    if last is None:
+        return None, "no session's PREREG-EVL-10 slot has closed yet"
+    return last, f"PREREG-EVL-10's slot closed through {last.isoformat()} (its rows are decided once, live)"
 
 
 def _fast_until(store: S.Store, prog: Any, first: dt.date, horizon: dt.date | None, why: str,
@@ -2114,6 +2145,8 @@ def waiting_runs(store: Any, now: dt.datetime | None = None) -> list[dict[str, A
     for p in _v6_programs():
         if band_of.get((p.id, p.version), "learning") != "learning":
             continue
+        if getattr(p, "prereg", None) == R2_FILE:
+            continue    # (PREREG-EVL-10 section 3: its run starts at the close it is due or never: `start_runs_r2`)
         runs = runs6(store, p.id, p.version)
         last = runs[-1]
         ended = last.get("ended")
@@ -2186,7 +2219,94 @@ def start_runs(store: Any, now: dt.datetime) -> list[dict[str, Any]]:
         if cur.rowcount == 1:
             used += V6_CHARGE_HUNDREDTHS
             started.append({"program": item["program"], "version": item["version"]} | record)
+    started += start_runs_r2(store, now)
     return started
+
+
+def _r2_due(store: Any, p: Any) -> dict[str, Any] | None:
+    """The run of a PREREG-EVL-10 version that falls due (`waiting_runs`' two cases: its last run ended at its 60th block,
+    or it was demoted after its last run passed), None when none is due or it was refused for good."""
+    from .reader2 import NORUN_KEY
+
+    runs = runs6(store, p.id, p.version)
+    last = runs[-1]
+    ended = last.get("ended")
+    if ended is None:
+        return None
+    n = last["n"] + 1
+    if _meta_json(store, NORUN_KEY.format(program=p.id, version=int(p.version), n=n)) is not None:
+        return None
+    item = {"program": p.id, "version": p.version, "n": n, "registered_at": S.iso(p.registered_at)}
+    if ended["why"] == "horizon":
+        return item | {"why": f"run {last['n']} reached its {V6_RUN_BLOCKS}th block unpassed",
+                       "after_day": ended.get("last_day"), "at": ended.get("at"), "after": None}
+    if ended["why"] == "pass":
+        stays = stays6(store, p.id, p.version)
+        demoted = [s for s in stays if s.get("ended") == "learning" and s["until"] is not None]
+        if not demoted:
+            return None
+        return item | {"why": f"demoted from its stay {demoted[-1]['n']}", "after_day": None, "at": None,
+                       "after": S.iso(demoted[-1]["until"])}
+    return None
+
+
+def start_runs_r2(store: Any, now: dt.datetime) -> list[dict[str, Any]]:
+    """PREREG-EVL-10 SECTION 3's RUNS, which FOR THIS FILE'S VERSION REPLACE PREREG-EVL-6 SECTION 3's WAIT FOR ROOM: a
+    due run (`_r2_due`) reads the lane's budget ONCE, at the close at which it would start (this, the night's start of
+    runs after every earlier waiting run was drawn): it starts, charged 0.13 (the version's start record, `V6_RUN_KEY`),
+    when THE LANE'S COUNT holds 0.13 more of 3.9; else it NEVER STARTS (meta league/events/reader2.py `NORUN_KEY`, written
+    once: no later restatement revives it, the version continues as a shadow record and READER-2 asks nothing more), as
+    is a fourth run (at most three runs over the id's life). Returns the runs started (a refused one is not).
+
+    THE LANE'S COUNT IS R3's VALIDATOR'S SUM (sections 3 and 4 as frozen: "USED_before_this_file (the sum R3's validator
+    reads, the reservations of EVL-8 and EVL-9 in it)"; release 1019n-r2's judges review): `budget6`'s used, 0.13 for
+    every earlier run still waiting, AND births.RESERVED's holds of the frozen files whose pins are unset
+    (league/events/births.py `budget_reserved_hundredths`: PREREG-EVL-8's 0.65 and PREREG-EVL-9's 0.30 on release
+    1019n-r2; this file's own 0.13 is released at its pin, REGISTERED_AT_10), the same three terms `births.validate`
+    adds. A run that fits only by leaving a reservation out is refused for good."""
+    from . import births as BI
+    from .reader2 import NORUN_KEY, RUNS_MAX
+
+    out: list[dict[str, Any]] = []
+    budget = budget6(store)
+    reserved = BI.budget_reserved_hundredths()
+    room = int(budget["used"]) + V6_CHARGE_HUNDREDTHS * int(budget["waiting"]) + reserved
+    close = last_close(store, now)
+    for p in _v6_programs():
+        if getattr(p, "prereg", None) != R2_FILE:
+            continue
+        from . import bands as BA
+
+        if BA.bands(store).get((p.id, p.version), "learning") != "learning":
+            continue
+        item = _r2_due(store, p)
+        if item is None:
+            continue
+        n = item["n"]
+        if n > RUNS_MAX or room + V6_CHARGE_HUNDREDTHS > V6_BUDGET_HUNDREDTHS:
+            why = (f"a run {n} would be due: the id's {RUNS_MAX} runs are spent" if n > RUNS_MAX else
+                   f"the lane's count {room / 100:.2f} (with every earlier waiting run held and births.RESERVED's "
+                   f"{reserved / 100:.2f}) cannot hold 0.13 more of {V6_BUDGET_HUNDREDTHS / 100:.2f} at this close")
+            store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
+                             (NORUN_KEY.format(program=p.id, version=int(p.version), n=n),
+                              json.dumps({"n": n, "why": why, "at": S.iso(now), "after": item["why"]}, sort_keys=True)))
+            continue
+        bound = item.get("after")
+        if item.get("at"):
+            end_close = S.parse_iso(str(item["at"]))
+            if close is not None and close.close_at > end_close:
+                bound = S.iso(close.close_at)
+        elif bound is not None and close is not None and close.close_at > S.parse_iso(bound):
+            bound = S.iso(close.close_at)
+        record = {"n": n, "after_day": item.get("after_day"), "after": bound, "started": S.iso(now),
+                  "why": item["why"], "charge": V6_CHARGE}
+        cur = store.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
+                               (V6_RUN_KEY.format(program=p.id, version=int(p.version), n=n),
+                                json.dumps(record, sort_keys=True)))
+        if cur.rowcount == 1:
+            room += V6_CHARGE_HUNDREDTHS
+            out.append({"program": p.id, "version": p.version} | record)
+    return out
 
 
 def next_look6(store: Any, program: str, version: int, today: dt.date) -> dict[str, Any]:

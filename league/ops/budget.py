@@ -1286,6 +1286,9 @@ VERDICT_USD_UNKNOWN = 0.01
 #: R3's births call stored with no cost counts the night's whole cap (league/events/house.py `BIRTH_USD_UNKNOWN`,
 #: league/events/births.py `NIGHT_USD`), as the lane's own line counts it.
 BIRTH_USD_UNKNOWN = 0.25
+#: A READER-2 read stored with no cost (none is: its row holds its worst-case hold from before the call) counts the
+#: larger hold, a doc read's (league/events/reader2.py `HOLD_USD`).
+READER2_USD_UNKNOWN = 0.1036
 
 
 def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) -> dict[str, Any]:
@@ -1293,7 +1296,8 @@ def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) ->
     read-only), the gateway's settled cost of every verdict answered over the trailing `days` days and of R3's births
     call (`birth_calls`, by the time it was answered: the births job's one call a night, Claude Opus 5.5 from release
     1019h (A109), goes through the lane's gateway, on the same Claude meter, and the swarm books none of it; release
-    1019e's review), a day (`usd_day`), its
+    1019e's review) and of PREREG-EVL-10's READER-2 (`reads2`, release 1019n-r2: its reads go through the lane's gateway
+    on the same meter, inside the lane's line, a read in flight or unpriced at its worst-case hold), a day (`usd_day`), its
     heaviest UTC day of them (`peak_usd_day`, today's part included: what sizes the lane's part, `cost_rule`), and since
     00:00 UTC (`today_usd`). A verdict with no cost on record counts `VERDICT_USD_UNKNOWN`, a births call
     `BIRTH_USD_UNKNOWN`, as the lane's own line counts them. {usd_day: None, peak_usd_day: None, ...} with no store or
@@ -1313,6 +1317,11 @@ def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) ->
             if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='birth_calls'").fetchone() is not None:
                 calls += (f" UNION ALL SELECT answered_at, COALESCE(usd, {BIRTH_USD_UNKNOWN}) AS usd, 'births' AS kind "
                           "FROM birth_calls WHERE answered_at IS NOT NULL")
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reads2'").fetchone() is not None:
+                # (PREREG-EVL-10's READER-2, release 1019n-r2: each read at its stored cost, a lost or unpriced one at
+                # its worst-case hold, which the row holds from before its call; inside the lane's line)
+                calls += (f" UNION ALL SELECT answered_at, COALESCE(usd, {READER2_USD_UNKNOWN}) AS usd, 'reader2' AS kind "
+                          "FROM reads2 WHERE answered_at IS NOT NULL")
             window = conn.execute(f"SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(kind='verdict'), 0), "
                                   f"COALESCE(SUM(kind='births'), 0) FROM ({calls}) WHERE answered_at>=? AND answered_at<=?",
                                   (_iso(now - days * 86400), _iso(now))).fetchone()
@@ -1327,6 +1336,7 @@ def lane_spend(root: str | Path, now: float, *, days: int = LANE_WINDOW_DAYS) ->
         return {**none, "source": f"the event lane store could not be read ({type(exc).__name__})"}
     spent, count, births = _amount(window[0]) or 0.0, int(window[1] or 0), int(window[2] or 0)
     what = f"{count} verdicts" + (f" and {births} births calls" if births else "")
+    # (the window's count of READER-2's reads is in its dollars: `spent` sums every kind)
     return {"usd_day": round(spent / days, 4), "peak_usd_day": round(_amount(peak[0]) or 0.0, 4),
             "today_usd": round(_amount(today[0]) or 0.0, 4),
             "source": f"{what} answered in the last {days} days, ${spent:.2f}"}

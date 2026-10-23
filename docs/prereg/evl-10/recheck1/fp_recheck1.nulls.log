@@ -1,0 +1,25 @@
+nulls: knife mu for 10 cells
+nulls: pilot 24/240 49s
+nulls: pilot 48/240 97s
+nulls: pilot 72/240 147s
+nulls: pilot 96/240 193s
+nulls: pilot 120/240 245s
+nulls: pilot 144/240 304s
+nulls: pilot 168/240 344s
+nulls: pilot 192/240 384s
+nulls: pilot 216/240 416s
+nulls: pilot 240/240 448s
+nulls: eval 24/80 36s
+nulls: eval 48/80 75s
+nulls: eval 72/80 111s
+nulls: eval 80/80 125s
+RC|NI|corner|AR20|n5|cnt|finf|f0.3                         R  4000 run1 0.0968 (+-0.0047) ver 0.1237 pps 1.42 ma -0.11+-1.52 mu +35.42 (knife +35.82, pilot +0.40+-0.68)
+RC|N1|corner|AR20|n5|cnt|finf|f0.3                         R  4000 run1 0.0990 (+-0.0047) ver 0.1370 pps 1.45 ma +2.50+-0.90 mu +35.67 (knife +35.82, pilot +0.15+-0.57)
+RC|NK|corner|AR20|n5|cnt|finf|f0.3                         R  4000 run1 0.1065 (+-0.0049) ver 0.1422 pps 1.45 ma -2.17+-0.65 mu -0.17 (knife +1.03, pilot +1.20+-0.84)
+RC|NVK b0.5 sda0.006|corner|AR20|n5|cnt|finf|f0.3          R  4000 run1 0.1250 (+-0.0052) ver 0.1720 pps 1.45 ma +2.12+-1.97 mu +19.53 (knife +52.94, pilot +33.41+-0.67)
+RC|NVK b0.5 sda0.01|corner|AR20|n5|cnt|finf|f0.3           R  4000 run1 0.1232 (+-0.0052) ver 0.1673 pps 1.45 ma -0.09+-1.12 mu -1.09 (knife +52.94, pilot +54.03+-0.64)
+RC|NVK b0.5 sda0.01|corner|AR20|n8|cnt|finf|f0.3           R  4000 run1 0.1210 (+-0.0052) ver 0.2198 pps 2.25 ma +3.06+-1.54 mu -6.52 (knife +44.72, pilot +51.24+-0.74)
+RC|NVK b0.5 sda0.01|corner|AR20|n5|cnt|finf|f0.6           R  4000 run1 0.1135 (+-0.0050) ver 0.2070 pps 2.73 ma +0.47+-1.64 mu +4.58 (knife +36.32, pilot +31.74+-0.64)
+RC|NVK b0.5 sda0.01|corner|AR20|n42|cnt|finf|f0.15         R  4000 run1 0.1050 (+-0.0048) ver 0.1903 pps 4.79 ma -0.67+-0.43 mu -55.04 (knife +17.68, pilot +72.72+-0.55)
+RC|NV|crasht3|skew|AR20|n5|cnt|finf|f0.3                   R  4000 run1 0.1077 (+-0.0049) ver 0.1395 pps 1.45 ma -2.15+-1.97 mu +43.58 (knife +45.73, pilot +2.15+-1.06)
+RC|NV|crashcl|skew|AR20|n5|cnt|finf|f0.3                   R  4000 run1 0.1087 (+-0.0049) ver 0.1497 pps 1.46 ma -1.22+-1.18 mu +48.78 (knife +48.37, pilot -0.41+-1.07)

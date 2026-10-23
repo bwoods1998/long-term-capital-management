@@ -1,0 +1,12 @@
+stress: knife mu done for 9 cells
+stress: 10/18 jobs 43s
+stress: 18/18 jobs 83s
+S|NK|AR30|n12                            R  1000 run1 0.0670 (+-0.0079) version 0.1230 by40 0.063 by60 0.066 picks/s 5.36 mean a -1.1 bp mu -7.3
+S|NK|phi.25|AR20|n12                     R  1000 run1 0.0710 (+-0.0081) version 0.1370 by40 0.067 by60 0.070 picks/s 5.35 mean a -0.5 bp mu -7.4
+S|NK|rho.30|AR20|n12                     R  1000 run1 0.0870 (+-0.0089) version 0.1460 by40 0.085 by60 0.087 picks/s 5.36 mean a +1.5 bp mu -7.5
+S|NS|AR30|n12                            R  1000 run1 0.0710 (+-0.0081) version 0.1360 by40 0.068 by60 0.070 picks/s 5.35 mean a +0.6 bp mu +0.3
+S|NS|phi.25|AR20|n12                     R  1000 run1 0.0780 (+-0.0085) version 0.1450 by40 0.077 by60 0.078 picks/s 5.34 mean a +0.7 bp mu +0.6
+S|NS|rho.30|AR20|n12                     R  1000 run1 0.0840 (+-0.0088) version 0.1360 by40 0.079 by60 0.083 picks/s 5.35 mean a +3.6 bp mu +0.9
+S|NV|AR30|n12                            R  1000 run1 0.0640 (+-0.0077) version 0.1190 by40 0.061 by60 0.063 picks/s 5.36 mean a -0.1 bp mu -0.1
+S|NV|phi.25|AR20|n12                     R  1000 run1 0.0800 (+-0.0086) version 0.1590 by40 0.074 by60 0.078 picks/s 5.35 mean a +2.1 bp mu -0.2
+S|NV|rho.30|AR20|n12                     R  1000 run1 0.0780 (+-0.0085) version 0.1440 by40 0.072 by60 0.074 picks/s 5.36 mean a +1.4 bp mu -0.4

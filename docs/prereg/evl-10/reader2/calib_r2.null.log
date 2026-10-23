@@ -1,0 +1,71 @@
+null: knife mu done for 41 cells
+null: 10/284 jobs 76s
+null: 20/284 jobs 129s
+null: 30/284 jobs 197s
+null: 40/284 jobs 261s
+null: 50/284 jobs 308s
+null: 60/284 jobs 362s
+null: 70/284 jobs 396s
+null: 80/284 jobs 452s
+null: 90/284 jobs 491s
+null: 100/284 jobs 543s
+null: 110/284 jobs 585s
+null: 120/284 jobs 636s
+null: 130/284 jobs 686s
+null: 140/284 jobs 730s
+null: 150/284 jobs 775s
+null: 160/284 jobs 812s
+null: 170/284 jobs 856s
+null: 180/284 jobs 888s
+null: 190/284 jobs 915s
+null: 200/284 jobs 944s
+null: 210/284 jobs 979s
+null: 220/284 jobs 1029s
+null: 230/284 jobs 1069s
+null: 240/284 jobs 1118s
+null: 250/284 jobs 1168s
+null: 260/284 jobs 1210s
+null: 270/284 jobs 1244s
+null: 280/284 jobs 1281s
+null: 284/284 jobs 1298s
+N1|base|n26                              R  2000 run1 0.0145 (+-0.0027) version 0.0320 by40 0.014 by60 0.015 picks/s 7.17 mean a +0.0 bp mu +0.1
+N1|corner|AR10|n12                       R  4000 run1 0.0625 (+-0.0038) version 0.1182 by40 0.061 by60 0.062 picks/s 5.35 mean a -0.2 bp mu -0.2
+N1|corner|AR10|n26                       R  4000 run1 0.0693 (+-0.0040) version 0.1285 by40 0.068 by60 0.069 picks/s 7.16 mean a +0.8 bp mu +0.3
+N1|corner|AR10|n5|cnt                    R  4000 run1 0.0845 (+-0.0044) version 0.1630 by40 0.077 by60 0.083 picks/s 2.73 mean a +0.9 bp mu +25.9
+N1|corner|AR20|n12                       R  4000 run1 0.0648 (+-0.0039) version 0.1222 by40 0.062 by60 0.064 picks/s 5.35 mean a +1.1 bp mu -0.2
+N1|corner|AR20|n26                       R  4000 run1 0.0648 (+-0.0039) version 0.1318 by40 0.064 by60 0.064 picks/s 7.16 mean a +1.3 bp mu +0.3
+N1|corner|AR20|n5|cnt                    R  4000 run1 0.0828 (+-0.0044) version 0.1542 by40 0.077 by60 0.082 picks/s 2.75 mean a -2.7 bp mu +25.9
+NI|base|n26                              R  2000 run1 0.0285 (+-0.0037) version 0.0525 by40 0.029 by60 0.029 picks/s 7.17 mean a +0.5 bp mu +0.1
+NI|corner|AR10|n12                       R  4000 run1 0.0710 (+-0.0041) version 0.1288 by40 0.067 by60 0.070 picks/s 5.36 mean a +0.9 bp mu -0.2
+NI|corner|AR10|n26                       R  4000 run1 0.0675 (+-0.0040) version 0.1217 by40 0.067 by60 0.068 picks/s 7.17 mean a +1.0 bp mu +0.3
+NI|corner|AR10|n5|cnt                    R  4000 run1 0.0823 (+-0.0043) version 0.1540 by40 0.076 by60 0.081 picks/s 2.75 mean a -1.2 bp mu +25.9
+NI|corner|AR20|n12                       R  4000 run1 0.0707 (+-0.0041) version 0.1265 by40 0.067 by60 0.070 picks/s 5.35 mean a +1.3 bp mu -0.2
+NI|corner|AR20|n26                       R  4000 run1 0.0630 (+-0.0038) version 0.1258 by40 0.061 by60 0.063 picks/s 7.17 mean a +0.7 bp mu +0.3
+NI|corner|AR20|n5|cnt                    R  4000 run1 0.0897 (+-0.0045) version 0.1668 by40 0.082 by60 0.088 picks/s 2.74 mean a -1.5 bp mu +25.9
+NK|base|n26                              R  2000 run1 0.0185 (+-0.0030) version 0.0350 by40 0.018 by60 0.018 picks/s 7.17 mean a -1.3 bp mu -19.1
+NK|corner|AR10|n12                       R  4000 run1 0.0645 (+-0.0039) version 0.1190 by40 0.064 by60 0.064 picks/s 5.35 mean a -1.0 bp mu -7.4
+NK|corner|AR10|n26                       R  4000 run1 0.0757 (+-0.0042) version 0.1328 by40 0.074 by60 0.076 picks/s 7.16 mean a -0.9 bp mu -19.0
+NK|corner|AR10|n5|cnt                    R  4000 run1 0.0848 (+-0.0044) version 0.1640 by40 0.079 by60 0.083 picks/s 2.75 mean a +0.5 bp mu +24.5
+NK|corner|AR20|n12                       R  4000 run1 0.0673 (+-0.0040) version 0.1280 by40 0.065 by60 0.067 picks/s 5.35 mean a +0.3 bp mu -7.4
+NK|corner|AR20|n26                       R  4000 run1 0.0685 (+-0.0040) version 0.1365 by40 0.066 by60 0.068 picks/s 7.17 mean a -2.1 bp mu -19.0
+NK|corner|AR20|n5|cnt                    R  4000 run1 0.0872 (+-0.0045) version 0.1595 by40 0.081 by60 0.086 picks/s 2.74 mean a -0.1 bp mu +24.5
+NK|crashcl|skew|AR20|n12                 R  2000 run1 0.0635 (+-0.0055) version 0.1170 by40 0.061 by60 0.062 picks/s 5.35 mean a -0.8 bp mu -7.2
+NK|crasht3|skew|AR20|n12                 R  2000 run1 0.0520 (+-0.0050) version 0.1145 by40 0.049 by60 0.052 picks/s 5.35 mean a -1.1 bp mu -7.5
+NK|crash|skew|AR20|n12                   R  2000 run1 0.0685 (+-0.0056) version 0.1235 by40 0.068 by60 0.069 picks/s 5.36 mean a -0.7 bp mu -7.1
+NS|base|n26                              R  2000 run1 0.0365 (+-0.0042) version 0.0675 by40 0.035 by60 0.036 picks/s 7.16 mean a +1.8 bp mu -0.2
+NS|corner|AR10|n12                       R  4000 run1 0.0670 (+-0.0040) version 0.1215 by40 0.064 by60 0.067 picks/s 5.35 mean a +0.8 bp mu +0.6
+NS|corner|AR10|n26                       R  4000 run1 0.0688 (+-0.0040) version 0.1280 by40 0.068 by60 0.069 picks/s 7.16 mean a +1.0 bp mu +0.0
+NS|corner|AR10|n5|cnt                    R  4000 run1 0.0920 (+-0.0046) version 0.1608 by40 0.084 by60 0.091 picks/s 2.75 mean a +0.1 bp mu +25.8
+NS|corner|AR20|n12                       R  4000 run1 0.0650 (+-0.0039) version 0.1265 by40 0.064 by60 0.065 picks/s 5.35 mean a +0.9 bp mu +0.6
+NS|corner|AR20|n26                       R  4000 run1 0.0745 (+-0.0042) version 0.1355 by40 0.074 by60 0.074 picks/s 7.17 mean a +1.0 bp mu +0.0
+NS|corner|AR20|n5|cnt                    R  4000 run1 0.0877 (+-0.0045) version 0.1605 by40 0.083 by60 0.087 picks/s 2.75 mean a +0.1 bp mu +25.8
+NV|base|n26                              R  2000 run1 0.0215 (+-0.0032) version 0.0405 by40 0.021 by60 0.021 picks/s 7.16 mean a +1.4 bp mu +0.2
+NV|corner|AR10|n12                       R  4000 run1 0.0612 (+-0.0038) version 0.1220 by40 0.059 by60 0.061 picks/s 5.35 mean a +0.3 bp mu -0.2
+NV|corner|AR10|n26                       R  4000 run1 0.0798 (+-0.0043) version 0.1470 by40 0.078 by60 0.080 picks/s 7.17 mean a +1.5 bp mu +0.4
+NV|corner|AR10|n5|cnt                    R  4000 run1 0.0938 (+-0.0046) version 0.1825 by40 0.085 by60 0.091 picks/s 2.74 mean a +1.4 bp mu +30.2
+NV|corner|AR20|n12                       R  4000 run1 0.0685 (+-0.0040) version 0.1290 by40 0.065 by60 0.068 picks/s 5.36 mean a +0.9 bp mu -0.2
+NV|corner|AR20|n26                       R  4000 run1 0.0833 (+-0.0044) version 0.1545 by40 0.081 by60 0.083 picks/s 7.17 mean a +0.3 bp mu +0.4
+NV|corner|AR20|n5|cnt                    R  4000 run1 0.1057 (+-0.0049) version 0.1880 by40 0.098 by60 0.103 picks/s 2.74 mean a +0.1 bp mu +30.2
+NV|crashcl|skew|AR20|n12                 R  2000 run1 0.0760 (+-0.0059) version 0.1380 by40 0.073 by60 0.075 picks/s 5.36 mean a +0.3 bp mu -0.2
+NV|crasht3|skew|AR20|n12                 R  2000 run1 0.0665 (+-0.0056) version 0.1300 by40 0.064 by60 0.066 picks/s 5.35 mean a +0.0 bp mu -0.3
+NV|crash|skew|AR20|n12                   R  2000 run1 0.0575 (+-0.0052) version 0.1185 by40 0.054 by60 0.058 picks/s 5.36 mean a +0.4 bp mu -0.2
