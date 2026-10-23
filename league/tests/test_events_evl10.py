@@ -578,6 +578,32 @@ class TheAsks(Case):
         self.assertEqual(R2.job(lane)["stopped"]["kind"], "schema")
         self.assertIn("reader_schema", [k for k, _ in lane.warned])
 
+    def test_one_call_a_job_inside_the_window_and_a_read_that_cannot_be_rendered_never_holds_the_queue(self):
+        a, sa = self.issuer()
+        b, sb = self.issuer()
+        self.w.eight_k("acc-a", a, knowable=et(D_DAY, 8, 0), score=0)
+        self.w.news_item("n-b", sb, knowable=et(D_DAY, 9, 30), score=3)
+        doc = self.st.db.execute("SELECT d.path FROM documents d JOIN filings f ON f.text_sha=d.sha WHERE f.accession="
+                                 "'acc-a'").fetchone()[0]
+        (self.st.root / doc).unlink()                          # (its TEXT document is gone from the store)
+        root = self.w.root / "events"
+        clock = [et(D_DAY, 7, 29)]
+        lane = Lane(root, Gateway(), clock)
+        self.assertEqual(R2.job(lane), {"skipped": "outside R2's window"}, "before 07:30:00 ET")
+        clock[0] = et(D_DAY, 10, 0)
+        first = R2.job(lane)
+        self.assertEqual(first["ask"]["status"], "unrendered")
+        self.assertEqual(lane.gw.calls, [], "nothing sent, nothing stored")
+        clock[0] += dt.timedelta(seconds=90)
+        second = R2.job(lane)
+        self.assertEqual((second["ask"]["status"], second["ask"]["event"]), ("ok", "news:n-b"), "the next one asked")
+        self.assertEqual(len(lane.gw.calls), 1, "one call a job")
+        clock[0] += dt.timedelta(seconds=90)
+        self.assertEqual(R2.job(lane)["due"], None)
+        clock[0] = R2.ask_until(self.s)
+        self.assertEqual(R2.job(lane), {"skipped": "outside R2's window"}, "from tau - 30 s: nothing")
+        self.assertEqual(self.st.db.execute("SELECT COUNT(*) FROM r2_scan").fetchone()[0], 3)
+
     def test_what_a_read_sees_its_priors_newest_first_received_before_the_ask_and_the_item_left_out(self):
         cik, symbol = self.issuer()
         for i in range(45):
@@ -1066,6 +1092,30 @@ class TheBook(TB.EventTest):
         self.assertEqual(with_[1][:len(without[1])], without[1], "the same bodies, sent first, in the same order")
         self.assertEqual([(p, s) for p, s, *_ in mine], [(P.R2_ON, "GAMA")], "then this file's, BETA given before it")
         self.assertEqual(len(with_[1]), len(without[1]) + 1)
+
+    def test_r3s_births_buy_before_it_its_place_in_room_is_after_every_earlier_row(self):
+        """ROOM AFTER BIRTHS (section 2.5, F2): a close-entry birth at learning (R3's tier after every PREREG row) is
+        given its name and sent before this file's buy; this file passes over the birth's name."""
+        from league.tests import test_events_1019m_learners as TM
+
+        T7.pin(self, None)
+        h = self.harness()
+        LR.ensure(h.lane.st.db)
+        birth = TM.register(h, TM.CLOSE_BIRTH, "news-day", {"score_max": -2}, exit_="open")
+        h.lane.article("n-b", "BRTH", knowable=TB.iso(TB.DAY, 11, 0))
+        h.lane.verdict("n-b", -3, answered=TB.iso(TB.DAY, 11, 5), news=True)
+        h.lane.universe(TB.DAY, "BRTH", TB.CIK2, 16.0)
+        h.lane.intent(birth, "news:n-b", "BRTH", TB.CIK2, TB.DAY, TB.NEXT)
+        r2_live(h.lane, [(TB.CIK2, "BRTH", 16.0), (TB.CIK3, "GAMA", 16.0)])
+        self.ready(h)
+        for sym in ("BRTH", "GAMA"):
+            h.symbol(sym, last=17.0, sd=0.02)
+        for hh, mm in ((9, 15), (15, 46), (15, 47)):
+            h.tick(hh, mm)
+        self.assertEqual([(p, s) for p, s, _ in self.buys(h)], [(TM.CLOSE_BIRTH, "BRTH"), (P.R2_ON, "GAMA")])
+        self.assertEqual(self.sent(h), ["BRTH", "GAMA"], "the birth's buy is sent first")
+        self.assertEqual(EB.room_key(P.R2_ON, "learning")[0], EB.PRIORITY["learning"],
+                         "its ROOM tier is unchanged (A85 reads it); its send order is after every main row's")
 
     def test_with_evl7s_receipt_at_154820_no_buy_of_it_at_the_1548_tick_nor_at_that_close(self):
         """Section 2.5's TEST: a learner live at the close whose own receipt comes only at 15:48:20 keeps the learners'

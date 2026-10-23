@@ -359,8 +359,10 @@ LINE_REFUSED_KEY = "evl10:line-refused:{utc}"
 V1_RESERVE_KEY = "evl10:v1-reserve:{utc}"
 CAP_KEY = "evl10:cap:{day}"
 NORUN_KEY = "evl10:norun:{program}:{version}:{n}"
-#: Section 2.1's E10 BAR's PROMPT-DOC thresholds (PREREG-EVL-7 section 1.9's reading): score >= 2, or >= 1 with
-#: guidance "raised" (league/events/programs.py `READ_MIN_SCORE`, `GUIDE_MIN_SCORE`).
+#: An event whose read cannot be rendered from the store (its row or its TEXT document missing): skipped for the session
+#: (meta, {day: [events]}), a missing read like any other (the reading that asks less), so it never holds the queue.
+UNRENDERED_KEY = "evl10:unrendered:{day}"
+#: FEATURES-R2 v1 (section 1.6): its version and its 21 columns' names, in their frozen order.
 FEATURES_VERSION = 1
 FEATURE_COLUMNS = ("kind_doc", "new", "corroborated", "magnitude", "specific", "surprise", "p_up", "price_story",
                    "routine", "material", "tone", "dilution", "one_offs", "consensus_beat", "consensus_miss",
@@ -691,11 +693,15 @@ def scan(store: S.Store, day: dt.date, now: dt.datetime) -> dict[str, Any]:
 def next_due(store: Any, day: dt.date, session: C.Session) -> dict[str, Any] | None:
     """THE NEXT CALL DUE of D (section 1.5): the earliest chosen `r2_qual` row (8K-ON and NEWS-ON interleaved by
     qualified_at) with no `reads2` row for its request spec and the model, that qualified no later than 30 seconds
-    before tau; None when every chosen event is read."""
+    before tau and whose read could be rendered (`UNRENDERED_KEY`); None when every chosen event is read."""
     last = S.iso(ask_until(session))
+    raw = _meta(store, UNRENDERED_KEY.format(day=day.isoformat()))
+    skip = set(json.loads(raw)) if raw else set()
     for r in store.db.execute("SELECT * FROM r2_qual WHERE window=? AND day=? AND chosen=1 AND qualified_at<=? ORDER BY "
                               "qualified_at, rowid", (WINDOW, day.isoformat(), last)):
         row = dict(r)
+        if str(row["event"]) in skip:
+            continue
         kind = str(row["kind"])
         if store.db.execute("SELECT 1 FROM reads2 WHERE event=? AND prompt_sha=? AND model=?",
                             (row["event"], sha(kind), MODEL)).fetchone() is None:
@@ -1124,7 +1130,16 @@ def job(lane: Any) -> dict[str, Any]:
             lane.warn("reader_line", f"READER-2 asks nothing over its line today ({why})")
             return out | {"refused": why}
         gw = _own_gateway(lane)
-        out["ask"] = ask(st, gw, due, day, now=lane.now)
+        try:
+            out["ask"] = ask(st, gw, due, day, now=lane.now)
+        except (LookupError, KeyError, OSError, RuntimeError, UnicodeDecodeError) as exc:
+            # (its read cannot be rendered from the store: nothing was sent or stored; the event is a missing read and
+            # the next one is asked at the next job)
+            key = UNRENDERED_KEY.format(day=day.isoformat())
+            have = json.loads(_meta(st, key) or "[]")
+            st.set_meta(key, json.dumps(sorted(set(have) | {str(due["event"])})))
+            lane.warn("reader", f"READER-2 could not render the read of {due['event']} ({type(exc).__name__}): missing")
+            out["ask"] = {"status": "unrendered", "event": str(due["event"])}
         if out["ask"].get("pin") is False:
             lane.warn("reader_pin", f"READER-2's answer carried another model than the pin {PIN!r}: R2 asks nothing more "
                                     "for good (a new reader version is a later file's)")
