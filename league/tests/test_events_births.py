@@ -506,6 +506,10 @@ class Validation(unittest.TestCase):
     AS_OF = dt.date(2026, 11, 6)
 
     def setUp(self):
+        # (the mechanics as they stand without A137's reservations; `TheReservations` below holds them)
+        patch = mock.patch.object(BI, "RESERVED", ())
+        patch.start()
+        self.addCleanup(patch.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(unload)
@@ -619,7 +623,7 @@ class Validation(unittest.TestCase):
         """PREREG-EVL-6 section 5 (release 1019i): 0.13 a seatable birth, the lane's restated 3.9 (15 x 0.13 used by the
         fifteen new versions), three a night, records free."""
         st = self.s.st
-        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.95, "limit": 3.9, "left": 1.95, "waiting_runs": 0.0,
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 1.95, "limit": 3.9, "left": 1.95, "waiting_runs": 0.0, "reserved": 0.0,
                                                      "left_for_births": 1.95, "seatable_left_tonight": 3,
                                                      "charge": 0.13})
         four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
@@ -670,7 +674,7 @@ class Validation(unittest.TestCase):
             self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
                             night=f"2026-09-{10 + i}", seq=i)
         P.load_births(st)
-        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 3.9, "limit": 3.9, "left": 0.0, "waiting_runs": 0.0,
+        self.assertEqual(BI.budget(st, self.AS_OF), {"used": 3.9, "limit": 3.9, "left": 0.0, "waiting_runs": 0.0, "reserved": 0.0,
                                                      "left_for_births": 0.0, "seatable_left_tonight": 0,
                                                      "charge": 0.13})
         [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])], night=self.AS_OF)
@@ -690,6 +694,43 @@ class Validation(unittest.TestCase):
         [seat] = BI.validate(st, BI.Facts(st, self.AS_OF, sessions=10), [self.candidate("EVL-B-8K-102", ["1.02"])])
         self.assertTrue(seat["ok"], "a seatable birth: its rate over the sessions holding a complete record pass")
         self.assertEqual(seat["per_session"], 4.0)
+
+
+class TheReservations(Validation):
+    """A137: the charges of frozen files whose code is not live are held from the births' room (PREREG-EVL-8 0.65,
+    PREREG-EVL-9 0.30, PREREG-EVL-10 0.13 in A129's order), released as each file's pin appears; records stay free."""
+
+    def test_the_frozen_files_hold_their_charges_until_their_pins_and_the_births_see_only_what_is_left(self):
+        st = self.s.st
+        held = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
+                ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
+        with mock.patch.object(BI, "RESERVED", held):
+            self.assertEqual(BI.budget_reserved_hundredths(), 108, "none of the three is pinned in this code")
+            got = BI.budget(st, self.AS_OF)
+            self.assertEqual((got["used"], got["reserved"], got["left_for_births"]), (1.95, 1.08, 0.87))
+            for i in range(6):          # 1.95 + 0.78 + 1.08 = 3.81: a seventh seatable birth would pass 3.9
+                self.s.register(spec(f"EVL-B-OLD-{i}", "8k", {"items": ["9.01"]}), "2026-10-01T00:00:00Z",
+                                night=f"2026-09-{10 + i}", seq=i)
+            P.load_births(st)
+            self.assertEqual(BI.budget(st, self.AS_OF)["seatable_left_tonight"], 0)
+            [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                night=self.AS_OF)
+            self.assertFalse(out["ok"])
+            self.assertIn("1.08 of it held for the frozen files whose code is not live (A137)", out["reasons"][0])
+            [rec] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"], seatable=False)],
+                                night=self.AS_OF)
+            self.assertTrue(rec["ok"], "records are free")
+            with mock.patch.object(P, "REGISTERED_AT_8", "2026-10-22T18:43:24Z", create=True):
+                self.assertEqual(BI.budget_reserved_hundredths(), 43, "PREREG-EVL-8 pinned: its 0.65 released")
+                [out] = BI.validate(st, BI.Facts(st, self.AS_OF), [self.candidate("EVL-B-8K-102", ["1.02"])],
+                                    night=self.AS_OF)
+                self.assertTrue(out["ok"], "3.9 - 2.73 - 0.43 holds one more")
+
+
+class TheLiveReservations(unittest.TestCase):
+    def test_the_live_tree_holds_all_three(self):
+        self.assertEqual([f for f, pin, _ in BI.RESERVED if getattr(P, pin, None) is None],
+                         ["PREREG-EVL-8", "PREREG-EVL-9", "PREREG-EVL-10"])
 
 
 class SeatableRate(unittest.TestCase):

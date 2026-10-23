@@ -1082,10 +1082,15 @@ class TheCount(LaneCase):
 
     def test_r3s_validator_reads_the_restated_charge_and_the_budget_after_every_waiting_run(self):
         self.assertEqual((BI.CHARGE_HUNDREDTHS, BI.BUDGET_HUNDREDTHS), (13, 390))
-        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3):
+        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3), \
+                mock.patch.object(BI, "RESERVED", ()):
             got = BI.budget(self.st)
         self.assertEqual((got["used"], got["waiting_runs"], got["left_for_births"], got["seatable_left_tonight"]),
                          (1.95, 0.39, 1.56, 3))
+        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3):
+            got = BI.budget(self.st)
+        self.assertEqual((got["reserved"], got["left_for_births"]), (1.08, 0.48),
+                         "A137: the frozen files' charges held too (league/tests/test_events_births.py TheReservations)")
         with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 15):
             self.assertEqual(BI.budget(self.st)["seatable_left_tonight"], 0, "the waiting runs hold the whole room")
 
