@@ -31,7 +31,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "triggers": { "crons": [] },
   "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
   "kv_namespaces": [{ "binding": "LIBRARY", "id": "a10ad6b1d601401293db6040b249b5f6" }],
