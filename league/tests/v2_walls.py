@@ -8,7 +8,8 @@ position_share.learning` 0.02 -> 0.05 and `.probe` 0.035 -> 0.05, `options_money
 loss budget's windows and refusals, the stops, the standing grant's digests and the reports were written with those
 figures in their fixtures (2 shares at $20 = 2% of $2,000, "the $400 window", "the 800 stop", the 1019i pair).
 `v2_walls` runs such a test on release 1019i's table exactly: the five rows and three bounds set back (league/tests/equity_design.py
-`before_1019l`), `PINNED_DIGEST` and `equity_design.DIGESTS` release 1019i's, `LOSS_TOTAL_USD` 800. The mechanisms
+`before_1019l`), release 1019n's row and bound left out (PREREG-EVL-8's PX learning room, `before_1019n`), `PINNED_DIGEST`
+and `equity_design.DIGESTS` release 1019i's, `LOSS_TOTAL_USD` 800. The mechanisms
 they test are the same code; THE V3 ROWS' OWN EFFECTS are league/tests/test_v3_walls.py's, on the table in force.
 """
 from __future__ import annotations
@@ -47,8 +48,14 @@ def v2_walls() -> Iterator[None]:
             patches.append(mock.patch.object(module, "PINNED_DIGEST", PINNED_1019I))
     patches.append(mock.patch.dict(X.DIGESTS, X.DIGESTS_1019I))
     patches.append(mock.patch.object(DN, "LOSS_TOTAL_USD", 800.0))
+    # (release 1019n's row, PREREG-EVL-8's PX learning room, and its bound: left out, as release 1019i had neither;
+    # each dict is restored whole when its patch stops)
+    event, bounds = K.CONSTITUTION["equity_money"]["event"], K.EQUITY_MONEY_BOUNDS
+    patches += [mock.patch.dict(event, {}), mock.patch.dict(bounds, {})]
     for p in patches:
         p.start()
+    event.pop(X.V8_SLOTS_ROW, None)
+    bounds.pop("event.max_open_v8.learning", None)
     # (league/ops/dlane_report.py's two statements, written at its import from the table in force)
     from league.ops import dlane_report as R
 

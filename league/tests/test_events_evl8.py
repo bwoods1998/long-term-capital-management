@@ -771,19 +771,24 @@ class TheFamily(Pinned):
 # ================================================================================================ the money row
 class TheMoneyRow(unittest.TestCase):
     def test_one_row_bounded_zero_to_four_and_the_digests_moved_once(self):
+        """Section 4.1 (A122): ONE money row, `event.max_open_v8.learning` 4 with bounds 0-4 (the frozen text's: no value
+        above 4 exists for the PX seats), in one commit; the pair moved once, from release 1019l's 1687e4e3 / 3feab26d
+        to 77c3cfed / 138ee8eb, and with the row left out every candidate is back on release 1019l's pins."""
         e = K.CONSTITUTION["equity_money"]["event"]
         self.assertEqual(e["max_open_v8"], {"learning": 4})
         self.assertEqual(K.EQUITY_MONEY_BOUNDS["event.max_open_v8.learning"], ("0", "4"))
-        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("05fc8d09", "84dc7041"))
+        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("77c3cfed", "138ee8eb"))
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
-        before = X.before_1019j()
-        self.assertEqual((K.money_digest(before)[:8], K.digest(before)[:8]), ("8e63ce64", "c3026eba"),
-                         "release 1019h's pair with the row left out")
+        before = X.before_1019n()
+        self.assertEqual((K.money_digest(before)[:8], K.digest(before)[:8]), ("1687e4e3", "3feab26d"),
+                         "release 1019l's pair with the row left out")
         for candidate in X.CANDIDATES:
             at = X.constitution_at(*candidate)
             self.assertEqual((K.money_digest(at), K.digest(at)), X.DIGESTS[candidate])
-            back = X.before_1019j(at)
-            self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_1019H[candidate])
+            back = X.before_1019n(at)
+            self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_1019L[candidate])
+            self.assertEqual((K.money_digest(X.before_1019i(at)), K.digest(X.before_1019i(at))),
+                             X.DIGESTS_1019H[candidate], "every older table's helper leaves the row out too")
         for bad in ("5", "-1", "x", 4.0):
             c = copy.deepcopy(K.CONSTITUTION)
             c["equity_money"]["event"]["max_open_v8"]["learning"] = bad

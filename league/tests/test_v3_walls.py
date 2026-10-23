@@ -41,7 +41,12 @@ class TheRows(unittest.TestCase):
         self.assertEqual(DN.LOSS_TOTAL_USD, 1900.0)
 
     def test_the_digests_moved_once_with_the_rows_and_nothing_else(self):
-        self.assertEqual((K.money_digest()[:8], K.digest()[:8]), ("1687e4e3", "3feab26d"))
+        # (release 1019n's row, PREREG-EVL-8's `event.max_open_v8.learning`, moved the pair once more: release 1019l's
+        # table is the one in force with that row left out, `before_1019n`; league/tests/test_events_evl8.py holds
+        # that move)
+        at_1019l = X.before_1019n()
+        self.assertEqual((K.money_digest(at_1019l)[:8], K.digest(at_1019l)[:8]), ("1687e4e3", "3feab26d"))
+        self.assertEqual((K.money_digest(at_1019l), K.digest(at_1019l)), X.DIGESTS_1019L[X.in_force()])
         self.assertEqual(K.digest(), K.PINNED_DIGEST)
         self.assertEqual((K.money_digest(), K.digest()), X.DIGESTS[X.in_force()])
         before = X.before_1019l()
@@ -54,13 +59,15 @@ class TheRows(unittest.TestCase):
             for k, v in c.items():
                 out.update(flat(v, f"{prefix}{k}.") if isinstance(v, dict) else {f"{prefix}{k}": v})
             return out
-        moved = {k for k, v in flat(K.CONSTITUTION).items() if flat(before).get(k, "absent") != v}
+        moved = {k for k, v in flat(at_1019l).items() if flat(before).get(k, "absent") != v}
         self.assertEqual(moved, {"equity_money.event.position_share.learning", "equity_money.event.position_share.probe",
                                  "options_money.probe.loss_budget_usd", "options_money.probe.loss_total_usd",
                                  "options_money.daily_stop_share"})
         for candidate in X.CANDIDATES:
             at = X.constitution_at(*candidate)
             self.assertEqual((K.money_digest(at), K.digest(at)), X.DIGESTS[candidate])
+            back = X.before_1019n(at)
+            self.assertEqual((K.money_digest(back), K.digest(back)), X.DIGESTS_1019L[candidate])
             self.assertEqual((K.money_digest(X.before_1019l(at)), K.digest(X.before_1019l(at))), X.DIGESTS_1019I[candidate])
 
     def test_the_book_and_the_options_table_read_them(self):

@@ -1233,6 +1233,18 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 #   about 49% of E at target"; 6 x 0.035 = 0.21 before), its worst case 14 lots at the 5% envelope 0.70 x E, every lot
 #   still under the name's 10%, the 100% book, the cash, the loss budget at the lot's weight and A85's reservation; no
 #   wall moves and the book's open-risk ceiling is unchanged (cash binds: synth_sim's p95 peak open risk $156-157).
+# - `max_open_v8` (release 1019n; PREREG-EVL-8 section 4.1, F4, frozen at A122): THE PX SEATS' LEARNING ROOM. PREREG-EVL-8's
+#   three PX seats (PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1) hold AT MOST 4 OPEN LEARNING POSITIONS a program, read for them
+#   ALONE (league/events/book.py `Settings.max_open` with the program; every other program, PREREG-EVL-8's two
+#   meta-learners included, keeps `max_open.learning` 8). Its bound is 0-4 (the frozen text's: "no value above 4 exists
+#   for them"; check 2's minor 9 closed the draft's 0-8): 4 is the registered loose end, so a change may only trade less,
+#   and 0 stops every PX learning buy. The red team's reason (goal-2026-10-19/evl8/redteam/rt_budget.py): five more
+#   programs' full learning books would hold loss-budget and cash room the Probe tier needs. The judge never reads this
+#   row: PREREG-EVL-8 section 5.1 fixes the PX run's CAP at 4 as a constant of the text (league/events/screen8.py `CAP`).
+#   ITS COST, PLAINLY (goal V3's learning target, A138: 5% of E a position): at most 3 x 4 = 12 more learning lots, about
+#   0.60 x E at target if every one filled, every lot under the name's 10%, the 100% book, the cash, the loss budget at
+#   the lot's weight and A85's reservation; no wall moves; this file's buys are planned in late passes after every
+#   earlier row's (league/equity/live.py `_event_decide_8`), so they take only the room the earlier rows leave.
 # - A86 REVISED, PROBE SMALLER, INSIDE THE TRADE-LESS ENVELOPE (the captain's amendment of 20:30Z Oct 21, 2026,
 #   replacing A86's proposal; decided before any Probe event; a sizing rule inside the frozen envelope: no program's
 #   rule and no judge, look, alpha or Done rule moves): the Probe band was PREREG-EVL-1 section 8's 5% of E with at
@@ -1321,6 +1333,7 @@ CONSTITUTION["equity_money"]["event"] = {
     "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
     "max_open_v6": {"probe": 14},
+    "max_open_v8": {"learning": 4},
     "per_name_share": "0.10",
     "limit_ratio": "1.25",
     "open_risk": {"floor": "0.10", "z": "1.65", "sigma_sessions": 60},
@@ -1574,6 +1587,9 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # RELEASE 1019i (PREREG-EVL-6 section 6, A99, A100): the Probe slots of the versions registered at or after
     # REGISTERED_AT_6 alone; `event.max_open.probe` keeps 6 and its bound for every version before it.
     "event.max_open_v6.probe": ("0", "14"),
+    # RELEASE 1019n (PREREG-EVL-8 section 4.1, A122): the PX seats' learning room alone; every other program keeps
+    # `event.max_open.learning` 8 and its bound.
+    "event.max_open_v8.learning": ("0", "4"),
     "event.per_name_share": ("0", "0.10"),
     "event.limit_ratio": ("1.00", "1.25"),
     "event.open_risk.floor": ("0.10", "1.00"),
@@ -1667,6 +1683,7 @@ _EQUITY_COUNTS = ("probe.max_programs", "probe.seat.idle_sessions", "panel.seats
                   "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
                   "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS),
                   "event.max_open.learning", "event.max_open.probe", "event.max_open.sized", "event.max_open_v6.probe",
+                  "event.max_open_v8.learning",
                   "event.open_risk.sigma_sessions", *(f"event.order_path.{name}" for name in EVENT_ORDER_OFFSETS),
                   "event.max_orders_day")
 EQUITY_CLASSES = ("etf", "stock")
@@ -1826,4 +1843,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '3feab26da60f48ac72d156b81f02261ffb08556adeeb97ccb1f922ab74c12614'
+PINNED_DIGEST = '138ee8eb8aa3a54b1633a87e3f9499b3a6d78e28adce97cbe1aed26167e846ca'

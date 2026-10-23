@@ -503,6 +503,10 @@ class Settings:
     #: for the versions registered at or after REGISTERED_AT_6 (`max_open`'s `program`, league/events/programs.py
     #: `Program.evl6`). Empty when unread (the table's FALLBACK: nothing opens anyway).
     max_opens_v6: Mapping[str, int] = dataclasses.field(default_factory=dict)
+    #: PREREG-EVL-8 SECTION 4.1's PX LEARNING ROOM (`event.max_open_v8`, release 1019n, A122): read only for its three PX
+    #: seats at learning (`max_open`'s `program`, league/events/programs.py `is_px8`). Empty when unread: a PX seat then
+    #: opens nothing at learning (the reading that trades less).
+    max_opens_v8: Mapping[str, int] = dataclasses.field(default_factory=dict)
 
     def share(self, band: str) -> Decimal:
         return Decimal(self.shares.get(str(band), ZERO))
@@ -510,10 +514,20 @@ class Settings:
     def max_open(self, band: str, program: Any = None) -> int:
         """The open positions a program may hold at `band`: `event.max_open` (learning 8, Probe 6, Sized 8), and for a
         version registered at or after REGISTERED_AT_6 (`program.evl6`: PREREG-EVL-6 section 6, A100's row read by the
-        version's registration time) at Probe `event.max_open_v6.probe` (14)."""
-        if program is not None and getattr(program, "evl6", False) and str(band) in self.max_opens_v6:
-            return int(self.max_opens_v6[str(band)])
-        return int(self.max_opens.get(str(band), 0))
+        version's registration time) at Probe `event.max_open_v6.probe` (14). PREREG-EVL-8's versions (section 4.1,
+        registered after REGISTERED_AT_6): a PX seat at learning `event.max_open_v8.learning` (4; unread: 0), at Probe
+        `event.max_open_v6.probe` (14) as every version registered at or after REGISTERED_AT_6; a meta-learner
+        PREREG-EVL-3's learning band (8), Probe as a PX seat's; Sized 8 for both."""
+        band = str(band)
+        if program is not None and P.is_8(program):
+            if band == "learning" and P.is_px8(program):
+                return int(self.max_opens_v8.get("learning", 0))
+            if band in self.max_opens_v6:
+                return int(self.max_opens_v6[band])
+            return int(self.max_opens.get(band, 0))
+        if program is not None and getattr(program, "evl6", False) and band in self.max_opens_v6:
+            return int(self.max_opens_v6[band])
+        return int(self.max_opens.get(band, 0))
 
     def reach_bar(self, band: str) -> Decimal:
         """The band's Done size bar for S2's round-up (`reach_bars`), 0 (no round-up) at learning and when unread."""
@@ -551,7 +565,8 @@ def settings(constitution: Mapping[str, Any] | None = None) -> Settings:
             offsets={name: int(e["order_path"][name]) for name in EVENT_ORDER_OFFSETS},
             max_orders_day=int(e["max_orders_day"]),
             reach_bars={band: Decimal(str(e["reach_bar"][band])) for band in PROBE_UP},
-            max_opens_v6={band: int(n) for band, n in dict(e["max_open_v6"]).items()})
+            max_opens_v6={band: int(n) for band, n in dict(e["max_open_v6"]).items()},
+            max_opens_v8={band: int(n) for band, n in dict(e.get("max_open_v8") or {}).items()})
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return FALLBACK
 
