@@ -102,6 +102,20 @@ test_events_evl8_proof.py, on invented data only: league/tests/evl8_world.py). T
   `equity_money_problems()` []. The grant is re-ratified for `77c3cfed`.
 - **THE EARLIER FILES' TESTS** run on the registries they were written on (evl7_fakes `unpinned_7` and `unpinned_8`,
   evl6_fakes `table_1019h` hold this file unpinned; v2_walls leaves the new row and its bound out).
+- **THE FIX ROUND** (the reviews of `f5f8adde`, seven majors, each with a test that fails without its fix):
+  (1) THE META SCREEN: the POOL's rows carry their scheduled `exit_day` (screen.covered raised KeyError, so no META look
+  was written once its POOL held a row and no run's 60th-block END either), the POOL read as of the screen's own time,
+  and a run or stay look waits for the control's intents scheduled to exit by it (meta.py `pool_record`, screen8.py
+  `control_record`, review8 too); (2) THE BASIS: a window session with no c*_P stored before its decision time is
+  FLAGGED (section 1.1) and needs a full re-read after it (`px_rereads` or the first night's read, `reread_at`), h52's
+  252 sessions are checked the same way, a benchmark's closes share cb*_P's basis, and the morning pass re-reads such
+  a name before PXU(D) (px.py `_basis_ok`, `_bench_basis`; the review's split gave sigma60 0.065 against 0.011); (3) ONE
+  LIVE RUN: the parts run on the lane's first finished decision of (D, X) alone and a live part never runs twice
+  (house.py `_eight_first`, px.py `live_ran`); (4) EVL-META-ON's 8-K guard is E10's own (`issuer_8k_guard`, A131's late
+  filing); (5)-(6) THE SENDS: the earlier rows' buys go before this file's pass and keep their room from its buys
+  (live.py `_event_send(which=...)`, `_event_kept_8`); (7) `px8-mid` keeps its task's bound and yields. The test world
+  seeds the first night as a backfill run with c*_P read each session after it and dates its daily bars at New York
+  midnight.
 
 **Tests**: the full 3.14 suite in four shards, 13,425 tests OK (33 skipped; the shard that found the births leak this branch had, fixed, re-run whole: 3,438 OK); the events, equity, live, ci, constitution and ops modules on 3.11, 3,575 tests OK, and the modules changed after that run again on 3.11 (331 OK); the gateway's 509 tests and `npm run check`; `python -m league.ci --base origin/main --branch feat/evl-8 --no-tests` passed. Known and not this branch's: on 3.14, test_equity_e2e and test_equity_etf_orders fail when test_equity_design ran before them in one process (a module-order artifact: the same 1 + 18 fail on release 1019l's own tree in that order) and pass alone.
 

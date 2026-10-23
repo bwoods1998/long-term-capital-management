@@ -57,7 +57,19 @@ when the lane's close receipt and PREREG-EVL-7's learners' pass are in before th
 needs its own part done by then too (its 15 s bound often comes after EVL-LRN-ON's 120 s part: then it is decided by
 its catch-up and buys nothing). THE 150-ORDER LINE refuses this file's entries before every earlier PREREG row's,
 across the day's auctions (A130 R5's reading), so PX-GAP-O1's and EVL-META-O1's open entries buy nothing while the
-close rows' learning room holds the line, as EVL-LRN-O1's do. The shadow, the judged record, keeps every event.
+close rows' learning room holds the line, as EVL-LRN-O1's do. The shadow, the judged record, keeps every event. An
+earlier row's buy held for a retryable reading (a 424, A80's re-send) keeps its room from this file's buys, and every
+earlier row's buy of a tick is sent before this file's late pass reads anything: a PX or META buy that fits only but
+for that room waits (its why: "earlier rows' buys still to go at this auction").
+
+WHAT TO EXPECT OF PXU(D) (section 1.3, the fix round): a session of a name's 61-session window with no c*_P stored
+before its decision time (a name out of the base that morning, a morning pass that never ran) is FLAGGED; the morning
+pass makes the name's full adjusted re-read (`px_rereads`, one request a name) before it decides PXU(D), and a name
+it cannot re-read in time is out of PXU(D). So after a missed morning the next one re-reads every base name once (up
+to about 6,000 requests at the slot's 120 a minute, yielding: PXU(D) then may land after 09:15 and serve only the ON
+auction that day). h52 needs its 252 sessions on one basis the same way (else it is none). A PX or META part that did
+not finish on the lane's first finished decision of (D, X) is decided by its catch-up alone: a later live receipt of
+that decision (a pending decision's retry, the hourly re-decision while it is still live) never runs it again.
 
 **Deploy, in order** (an owner deploy with the release that carries it; never 12:55-20:05Z on a trading day
 (12:55-21:05Z from Nov 2), never with an order in flight, CI green on the exact head; rerere off; THE HOUSE MUST BE ON

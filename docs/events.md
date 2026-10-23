@@ -741,7 +741,11 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   sent after tau + 45 s, each read's timeout min(45 s, tau + 50 s - now), ended by tau + 55 s) and `decide-open-px8:<D>`
   on the lane's open receipt (60 s, never past 09:19:30). A part not finished trades nothing at that auction and is
   decided later by `decide-px:<open|close>:<D>`: a reported shadow, never a judged block, never traded, never a
-  meta-learner's member. The hourly re-decision re-takes the K 40 and the 200 from the stored values of the run that
+  meta-learner's member. ONE LIVE RUN (release 1019n's fix round): the parts run on THE LANE'S FIRST FINISHED DECISION
+  of (D, X) alone (house.py `_eight_first`; never a pending decision's retry, never the hourly re-decision of today's
+  open inside LIVE_WITHIN), and px.py `decide` / meta.py `decide` refuse a live run once any receipt of their live job
+  exists, whatever its status (`px.live_ran`). The 09:30 opens (`px8-mid`, from 10:00 ET) run under their task's bound
+  and yield before each read, as the morning pass does. The hourly re-decision re-takes the K 40 and the 200 from the stored values of the run that
   decided (D, X) under the shadow's reading of items stored after tau (`px.redecide`). screen.CONTROLS gains the three
   PX rows (section 3.2), so a PX look freezes its group's re-decision (run.py `_group`). Every PX and META receipt,
   live or catch-up, records its code: the sha256 of px.py's or meta.py's own bytes and the House release it ran from
@@ -768,14 +772,20 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   settlement read the print: the lane's marks, or px.sqlite's `px_marks` for a PX event). EVL-META-O1 decides inside
   the open run after PX-GAP-O1 (`decide-open-meta8:<D>`), EVL-META-ON on the lane's close receipt
   (`decide-close-meta8:<D>`, 15 s, never past the close - 11:20); catch-ups `decide-meta:<open|close>:<D>`, oldest
-  first, once the lane's first finished decision of (D, X) is in. F8: an intent's rank_key is K + 1 - its walk position
+  first, once the lane's first finished decision of (D, X) is in. EVL-META-ON's 8-K guard is PREREG-EVL-7's E10 itself
+  (book.py `meta_on_guard` calls `issuer_8k_guard`: every 8-K stored before tau, no upper bound on its knowable time,
+  A131). F8: an intent's rank_key is K + 1 - its walk position
   and its why "mrl"; no LCB, sub-rule or figure leaves the mrl_* tables (births' `FACTS_DENY`, the report's deny list).
   The draft's successor versions v2 and v3 are withdrawn (section 7.7): runs take their place.
 - THE JUDGE (section 5; screen8.py): PREREG-EVL-6 sections 1.2-3 as frozen, word for word, through one narrow
   interface (`judge_blocks`, held equal to PREREG-EVL-6's own `screen.v6_judge` at CAP 14), with F4's CAP a constant
   (4 a PX run, 8 a META run, 14 a Probe stay, 8 a Sized stay), looks from the 22nd block, runs (never retirement by
   exhaustion), each run charged 0.13 when it starts and started only when the lane's budget (3.9) holds it, in
-  registration order. The rows' own `evl6` is False, so PREREG-EVL-6's machinery never judges them a second time. The
+  registration order. A META look's control is its POOL (meta.py `pool_record`: each LIVE decision's members eligible
+  to pick, with their settled TRADABLE outcomes and the tag intent's scheduled `exit_day`, read as of the screen's own
+  time), covered by scheduled exits as every control is; a run or stay look as of X waits while an intent of the
+  version or of its control (a POOL member's outcome to come) scheduled to exit by X has not settled (PREREG-EVL-6
+  section 2; screen8.py `control_record`). The rows' own `evl6` is False, so PREREG-EVL-6's machinery never judges them a second time. The
   report's expected false passes three ways (section 6.6): 0.13 a version or run; the base model 0.02 a PX run and 0.03
   a META run; the stresses' worst 0.15 and 0.13; per version 0.214 (PX) and 0.10-0.14 / 0.23-0.32 (META). THE BUDGET:
   births.RESERVED's 0.65 is released at the pin exactly as screen.py `budget6` counts the five seats at 0.13 each (the
@@ -790,7 +800,11 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   close's PX pass at the first tick at which the lane's close receipt is in, EVL-META-ON's once its part has finished
   too; each after PREREG-EVL-7's learners' pass of the auction is planned or has failed (or has nothing to plan there:
   `_event_lrn_settled`), from the room left, sent in the same tick; a pass not ready inside the window is never
-  planned. ROOM's order: Sized, Probe, learning, then PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON,
+  planned. SECTION 4.2 IN THE SENDS (release 1019n's fix round): every earlier row's buy of the tick goes BEFORE this
+  file's late pass (its first send, a retry, A80's re-send: no earlier row waits for this file's reads), this file's
+  after it; and each buy of this file is sized against the room every earlier row's buy of the auction still to go
+  keeps (live.py `_event_kept_8`: one held for a retryable reading or A80's re-send keeps its worst case at its limit),
+  so an earlier row's retry is sized as without this file; a buy of this file that fits only but for it waits. ROOM's order: Sized, Probe, learning, then PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON,
   after every earlier file's row and before the births at learning. A85: a promoted version is among the other
   auction's Probe and Sized programs the reservation keeps room for. THE 150-ORDER LINE (section 4.3) refuses this
   file's entries first among the PREREG rows, after PREREG-EVL-7's: an entry of this file keeps every order every

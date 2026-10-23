@@ -1993,6 +1993,16 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   (`EIGHT_ROOM`: Sized 6, Probe 7, learning 8, after every earlier file's tiers and before the births at learning;
   round-robin inside Sized and Probe), planned with `_event_plan_buy` and sent after every earlier buy (`send_key`);
   its row `eq_event_decisions(day, key)`.
+- **The sends** (section 4.2, release 1019n's money review; `_event_step`, `_event_send(which=...)`, `_event_kept_8`,
+  `HELD_EARLIER`): at each tick of the auction's window the earlier rows' buys are sent FIRST (`which="earlier"`, after
+  the main pass and the learners' pass, BEFORE `_event_decide_8`), so no earlier row's send, retry or A80 re-send waits
+  for the file's reads (its picks' bars, the eligible list); the file's buys after the pass (`which="eight"`). Each buy
+  of the file is sized and counted with THE ROOM EVERY EARLIER ROW'S BUY OF THE AUCTION STILL TO GO KEEPS (its intent
+  live and `_event_last` letting a new order go: not sent yet, refused for a reading the gateway could not make, A80's
+  re-send to come): its worst case at its limit by `_event_keep_room` (as PREREG-EVL-5's waiting buys keep theirs) out
+  of the cash, the invested room, the loss budget and its name's wall; the orders those buys may still send are kept on
+  the lines by `_event_line_keep` already (`kept.orders` 0). A buy of the file that fits only but for that room waits,
+  its why `HELD_ROOM (n HELD_EARLIER)`, words of its own that PREREG-EVL-5's counts of its wait never read.
 - **The line** (section 4.3; `_event_line_keep`): an entry of the file keeps every order every earlier PREREG row, the
   learners included, may still send on the day's line across its auctions (section 28's rule, A130 R5's reading), so the
   line refuses the file's entries first among the PREREG rows, after PREREG-EVL-7's; an exit is never stopped by it.
@@ -2018,4 +2028,6 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   in by the 15:48 tick: planned; after it: never; after the tree's own learners' pass, in the same tick; a learner of
   the other auction alone never holds the pass; the open pass after the open run), `TheLine8` (an open entry's keep
   is a learner's plus EVL-LRN-ON's close room; the stated effect), `ThePromotedSizing` (16 shares at goal V3's 5%, S2's
-  18 without section 4.1's sizing); league/tests/test_events_evl8.py `TheMoneyRow`, `TheRoom`.
+  18 without section 4.1's sizing), `TheEarlierBuysFirst` (an earlier row's 424 retry sized as without the file, PXA
+  beside its kept room; A80's re-send at 15:48:03 before a 70 s read of the file's pass), `TheMetaMoney` (EVL-META-ON's
+  guard is E10's, the late filing barring its issuer); league/tests/test_events_evl8.py `TheMoneyRow`, `TheRoom`.
