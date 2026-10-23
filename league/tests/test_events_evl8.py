@@ -344,12 +344,39 @@ class TheMorning(WorldCase):
         self.assertEqual(small["in_pxu"], 1, small.get("why"))
         self.assertAlmostEqual(small["cb_star"], round(W.daily("IWM", P_DAY)["c"] * 0.99, 4), places=6)
 
-    def test_a_benchmark_flagged_at_d_without_its_re_read_has_no_value(self):
+    def test_a_benchmark_flagged_at_d_without_its_re_read_has_no_value_that_reads_its_closes(self):
+        """Section 1.3, ONLY WHERE IT SAYS A VALUE DOES NOT EXIST (release 1019n's second judges review): with IWM FLAGGED
+        at D and no full re-read, its stored closes are on another basis than cb*_P, so the values that read them (z1,
+        z5, z20, the DRIFT values) do not exist; cb*_P is the morning's own read, so it stays (zd and zg read it with D's
+        marks), and the issuer stays in PXU(D), which section 1.1 decides by the issuer's own state alone."""
         self.w.gw.adjust.update({("IWM", d.day): 0.99 for d in C.previous(self.w.st, D_DAY, 270)})
         self.run_morning(reread=False)
         small = self.am("PXZ")
-        self.assertEqual(small["in_pxu"], 0)
-        self.assertIn("benchmark IWM: flagged at D with no full re-read", small["why"])
+        self.assertEqual(small["in_pxu"], 1, small["why"])
+        self.assertAlmostEqual(small["cb_star"], round(W.daily("IWM", P_DAY)["c"] * 0.99, 4), places=6)
+        self.assertEqual((small["z1"], small["z5"], small["z20"], small["drift"]), (None, None, None, {}))
+        self.assertIn("benchmark IWM: flagged at D with no full re-read", small["bench_why"])
+        self.assertIsNotNone(small["sigma60"], "the issuer's own values exist")
+        spy = next(self.am(t) for t in W.PX_NAMES if self.am(t)["bench"] == "SPY")
+        self.assertIsNotNone(spy["z1"], "a SPY name's values are untouched")
+        self.assertIsNone(spy["bench_why"])
+
+    def test_a_benchmark_flagged_on_a_window_session_keeps_its_names_in_pxu(self):
+        """The review's case: IWM FLAGGED (a dividend) on a session of the 61 with no full re-read the pass can make:
+        its names stay in PXU(D) and keep cb*_P, so the controls' and the panel's population hold them and zd and zg
+        exist for the seats; only the values that read IWM's stored closes do not."""
+        px = self.px()
+        window = [x.day for x in C.previous(self.w.st, D_DAY, 61)]
+        px.db.execute("UPDATE px_flags SET flagged=1, c_adj=c_raw*0.997, ratio=0.997 WHERE symbol='IWM' AND day=?",
+                      (window[-3].isoformat(),))
+        self.run_morning(reread=False)
+        small = self.am("PXZ")
+        self.assertEqual(small["in_pxu"], 1, small["why"])
+        self.assertIsNotNone(small["cb_star"])
+        self.assertIsNone(small["z1"])
+        self.assertIn(f"benchmark IWM: flagged {window[-3].isoformat()} with no full re-read", small["bench_why"])
+        values = PXL.values_on(PXL.pxu(px.db, D_DAY), set(), {"PXZ": (20.0, "t", "e"), "IWM": (200.0, "t", "e")}, {}, {})
+        self.assertIsNotNone(values[W.PX_CIK["PXZ"]]["zd"], "zd reads cb*_P and D's marks: it exists")
 
     def h52_world(self) -> tuple[list[dt.date], dt.date]:
         """PXD's 252 sessions before D on the calendar (Sep 2025 on), its first full read on the night of the 251st

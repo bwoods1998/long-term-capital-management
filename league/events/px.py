@@ -619,12 +619,17 @@ def morning(px: Any, store: Any, gw: Any, day: dt.date, *, now: dt.datetime, run
     for b in PX.BENCHMARKS:
         f = _flag(px, day, b, now + dt.timedelta(seconds=1))
         closes = _bars_between(px, b, prior[0].day, p_day, "all")
-        # (section 1.3: the benchmark's closes in a value are on one basis too, cb*_P's: FLAGGED at D or a window
-        # session FLAGGED with no full re-read, it has none, and no value that needs it exists)
+        # SECTION 1.3 FOR A BENCHMARK, ONLY WHERE IT SAYS A VALUE DOES NOT EXIST (release 1019n's second judges review):
+        # cb*_P is the morning's own read ("c*_P's basis is its own read"), so it exists whenever it was stored, and with
+        # it zd, zg and zo (D's marks over cb*_P); the benchmark's STORED closes share its basis only when `_bench_basis`
+        # holds (FLAGGED at D, or a window session FLAGGED with no full re-read, they do not), and with none the values
+        # that read them (z1, z5, z20, the DRIFT values) do not exist. Neither ever takes an issuer out of PXU(D):
+        # section 1.1 decides it by the issuer's own FLAGGED state and its own 61 sessions.
+        c_star = _pos((f or {}).get("c_adj"))
         why = _bench_basis(px, b, f, prior[-WINDOW_SESSIONS:], stamp)
-        bench[b] = {"c_star": _pos((f or {}).get("c_adj")) if why is None else None,
-                    "closes": {d: _pos(r.get("c")) for d, r in closes.items()},
-                    "why": None if why is None else f"benchmark {b}: {why}"}
+        bench[b] = {"c_star": c_star, "closes": {d: _pos(r.get("c")) for d, r in closes.items()} if why is None else {},
+                    "why": None if c_star is not None else f"benchmark {b}: no benchmark c*_P stored",
+                    "window": None if why is None else f"benchmark {b}: {why}"}
     drift = drift_events(store, day)
     rows: dict[str, dict[str, Any]] = {}
     for cik, base_row in sorted(base.items()):
@@ -681,9 +686,8 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
     if why is not None:
         return why, value
     b = str(base_row.get("bench") or "")
-    bc = bench.get(b) or {}
-    if bc.get("c_star") is None:
-        return bc.get("why") or "no benchmark c*_P stored", value
+    bc = bench.get(b) or {"why": f"benchmark {b or 'none'}: no benchmark c*_P stored"}
+    cb = bc.get("c_star")
     first = prior[0].day
     adj = _bars_between(px, sym, first, window[-1], "all")
     raw = _bars_between(px, sym, first, window[-1], "raw")
@@ -692,7 +696,9 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
     if any(c is None for c in closes):
         return "adjusted-bars", value
     c_star = float(f["c_adj"])
-    value.update(c_star=c_star, c_raw=_pos(f.get("c_raw")), cb_star=bc["c_star"])
+    value.update(c_star=c_star, c_raw=_pos(f.get("c_raw")), cb_star=cb)
+    # (a value that reads cb*_P, or the benchmark's stored closes, does not exist without them: why, beside the values)
+    value["bench_why"] = bc.get("why") or bc.get("window")
     rets = [closes[i] / closes[i - 1] - 1.0 for i in range(1, len(closes))]
     value["sigma60"] = _sd(rets[-SIGMA_SESSIONS:])
     on = [opens[i] / closes[i - 1] - 1.0 for i in range(1, len(closes)) if opens[i] is not None]
@@ -704,12 +710,12 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
         return bcl.get(d.isoformat())
 
     def zk(k: int) -> float | None:
-        if not sig or len(window) < k + 1:
+        if not sig or cb is None or len(window) < k + 1:
             return None
         ck, bk = closes[-1 - k], bench_close(window[-1 - k])
         if ck is None or bk is None:
             return None
-        return (c_star / ck - bc["c_star"] / bk) / (sig * math.sqrt(k))
+        return (c_star / ck - cb / bk) / (sig * math.sqrt(k))
     value["z1"], value["z5"], value["z20"] = zk(1), zk(5), zk(20)
     value["ratio1"] = c_star / closes[-2] if closes[-2] else None
     # (h52 reads the 252 sessions' adjusted highs: on one basis too, section 1.3, else it does not exist)
@@ -727,9 +733,9 @@ def _am_value(px: Any, sym: str, cik: str, base_row: Mapping[str, Any], day: dt.
         ce = _pos((adj.get(e.isoformat()) or {}).get("c"))
         be = bench_close(e)
         n = sum(1 for d in window if d > e)
-        if ce is None or be is None or n < 1:
+        if ce is None or be is None or cb is None or n < 1:
             continue
-        zs[key] = (c_star / ce - bc["c_star"] / be) / (sig * math.sqrt(n))
+        zs[key] = (c_star / ce - cb / be) / (sig * math.sqrt(n))
     value["drift"] = zs
     fetched = [str(r["fetched_at"]) for r in list(adj.values()) + list(raw.values())]
     value["inputs_at"] = max(fetched + [str(f["read_at"])]) if fetched else str(f["read_at"])
