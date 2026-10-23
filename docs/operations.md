@@ -10,6 +10,16 @@ is built and not deployed); the running House release is release 1019g (live sin
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Release 1019l (Oct 23, 2026): the owner's goal V3's money rows (A138) on release 1019k: `rel/1019l`
+
+Goal V3 makes the owner's balance the loss line. The release moves `equity_money.event.position_share.learning` and
+`.probe` to 0.05 of E, `options_money.probe.loss_budget_usd` and `.loss_total_usd` to $1,900 and
+`options_money.daily_stop_share` to 0.25 (V3's bug stop), and the Done reader's total to $1,900; the name's wall stays
+0.10 here and at the gateway. Deploy: the gateway is not touched; the House by `ship_house.sh <head> <PR> r1019l
+1687e4e3 3feab26d` (the grant re-ratifies at its start). Rollback: the House to release 1019k's head (pair `d52a5af5` /
+`9c8b2221`). Watch: event buys of about 5% of E (whole shares), the loss budget's room (`fast_lane.probe_budget`), the
+daily stop at 25%.
+
 ## Release 1019j (Oct 23, 2026): release 1019i + PREREG-EVL-7's learners + the batched score and attempts ledger (A130-A132): `rel/1019j`, not deployed
 
 Release 1019i (PREREG-EVL-6's code, the section below) ships ALONE first (A132: its D7 guard must be live before the Oct 28

@@ -1299,7 +1299,8 @@ class TheDocs(unittest.TestCase):
 
 # (release 1019j's merge: PREREG-EVL-6's rules on its own table, written before PREREG-EVL-7's learners registered;
 # the lane's count with them is league/tests/test_events_evl7*.py's)
-from league.tests.evl7_fakes import setUpModule, tearDownModule  # noqa: E402,F401
+# (release 1019l: these mechanisms on release 1019i's money table too, league/tests/v2_walls.py)
+from league.tests.v2_walls import setUpModule_7 as setUpModule, tearDownModule_7 as tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

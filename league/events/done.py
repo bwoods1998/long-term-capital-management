@@ -70,7 +70,7 @@ FILL_BP = 15.0
 PROBE_SIZE_SHARE = 0.8
 QUIET_LAST = 100
 PIVOT_AT = 400
-LOSS_TOTAL_USD = 800.0
+LOSS_TOTAL_USD = 1900.0   # (the owner's goal V3, A138: about the whole balance; V2's $800 before)
 #: The stall causes that are news, not an owner step (league/ops/dlane_report.py NEWS_CAUSES).
 NEWS_CAUSES = ("done",)
 OPS_DB = "ops.sqlite"
@@ -574,7 +574,7 @@ def _stop(loss: Mapping[str, Any] | None, now: dt.datetime) -> dict[str, Any]:
     used = realized + risk
     return {**out, "realized_total_usd": round(realized, 2), "at_risk_usd": round(risk, 2), "total_budget_usd": budget,
             "used_usd": round(used, 2), "spent": used >= budget,
-            "why": "the $800 loss budget is spent: stop all spend and report" if used >= budget else None}
+            "why": f"the ${LOSS_TOTAL_USD:.0f} loss budget is spent: stop all spend and report" if used >= budget else None}
 
 
 def items(rows: Sequence[Mapping[str, Any]], *, excluded: int, profit: Mapping[str, Any],

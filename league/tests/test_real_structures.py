@@ -184,7 +184,7 @@ class OneSourceOfTruth(unittest.TestCase):
             self.assertTrue(any(var in p for p in refused), (var, refused))
 
     def test_a_money_row_outside_its_range_is_refused(self):
-        refused = self.tree(replace={'"daily_stop_share": "0.35",': '"daily_stop_share": "0.50",'})
+        refused = self.tree(replace={'"daily_stop_share": "0.25",': '"daily_stop_share": "0.50",'})   # (V3's 0.25, A138)
         self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.35]", " ".join(refused))
         refused = self.tree(replace={'"max_orders_day": 250,': '"max_orders_day": 400,'})
         self.assertIn("order_path.max_orders_day", " ".join(refused))
@@ -814,6 +814,10 @@ class TheReviewOfDeployG(RealStructuresHouse):
         self.house.seat(agent)  # its real book: not moving between practice books
         self.assertNotIn(agent.id, self.house._state["structure_moving"])
 
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests.v2_walls import setUpModule, tearDownModule  # noqa: E402,F401
 
 if __name__ == "__main__":
     unittest.main()

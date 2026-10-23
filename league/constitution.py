@@ -932,12 +932,12 @@ CONSTITUTION: dict[str, Any] = {
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 1, "family_share": "0.15", "floor_usd": "0",
-                  "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
+                  "max_open": 8, "loss_budget_usd": "1900", "loss_window_sessions": 20, "loss_total_usd": "1900",
                   "loss_basis": "net", "demotion": "dm1"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.90",
-        "daily_stop_share": "0.35",
+        "daily_stop_share": "0.25",
         "drawdown_stop_share": "0.60",
         "tuition": {"day_usd": "200", "week_usd": "300"},
         "calibration": {"day_usd": "50"},
@@ -1305,9 +1305,18 @@ CONSTITUTION["equity_money"]["panel"] = {"seats": 1, "sleeve_share": "0.10"}
 # sold by it: every open event lot exits at its own scheduled auction). Its reader is league/events/book.py `settings`
 # (league/live/money.py's `EquityTable`, inside the options execution fingerprint, reads its rows by name and does not
 # read this one).
+# THE OWNER'S GOAL V3 (04:40Z Oct 23, 2026; the captain's A138, release 1019l): "I accept losing my entire Alpaca balance.
+# Use it. My only money walls: a cash account ..., a kill switch, a bug stop that pauses new entries after a 25% loss in
+# one session ... every seatable program trades real money from its first event at up to 5% of equity a position ...
+# up to 25% of equity a name; idle cash is a cost". So: learning 0.02 -> 0.05 (its bound with it), Probe 0.035 -> 0.05
+# (a learning position is never larger than a Probe one; Probe and Sized scale-up past PREREG-EVL-1 section 8's frozen
+# envelope is a later release with its own analysis; the name's wall stays 0.10 here and at the gateway's
+# STOCK_EVENT_SHARE_MAX until that release raises both toward V3's 25%); in the options
+# table the shared loss budget $400 a window and $800 in total -> $1,900 each (about the balance on Oct 23) and the
+# daily stop 0.35 -> 0.25 (V3's bug stop). The shadows, the screens and every judge are unchanged: only real-money size.
 CONSTITUTION["equity_money"]["event"] = {
     "enabled": True,
-    "position_share": {"learning": "0.02", "probe": "0.035", "sized": "0.10"},
+    "position_share": {"learning": "0.05", "probe": "0.05", "sized": "0.10"},
     "one_share_max": {"learning": "0.05", "probe": "0.05"},
     "reach_bar": {"probe": "0.8", "sized": "0.8"},
     "max_open": {"learning": 8, "probe": 6, "sized": 8},
@@ -1367,9 +1376,9 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # since Oct 10). 2000 sessions is the CON-only rollback's window (every close since the fast lane); a longer window
     # is never looser, under either basis (the table's comment: under "net" the window's figure is its worst net
     # stretch).
-    "probe.loss_budget_usd": ("0", "400"),
+    "probe.loss_budget_usd": ("0", "1900"),
     "probe.loss_window_sessions": ("20", "2000"),
-    "probe.loss_total_usd": ("0", "800"),
+    "probe.loss_total_usd": ("0", "1900"),
     "probe.open_per_family": ("1", "5"),
     "probe.family_share": ("0.08", "0.15"),
     "probe.floor_usd": ("0", "100"),
@@ -1547,7 +1556,7 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # values are the loose end of each row (a lower share, a lower one-share cap, fewer open positions, a lower limit, a
     # stricter floor or z may only trade less); the moments the rules fix are exact. The captain's A86 REVISED moves the
     # Probe share's VALUE inside its row (0.035) and adds the Probe one-share row; no bound is loosened.
-    "event.position_share.learning": ("0", "0.02"),
+    "event.position_share.learning": ("0", "0.05"),
     "event.position_share.probe": ("0", "0.05"),
     "event.position_share.sized": ("0", "0.10"),
     "event.one_share_max.learning": ("0", "0.05"),
@@ -1817,4 +1826,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '9c8b2221396c88f9ea8cb51c57f4e0060ffb07bfd859f1d945617c0f23b9412d'
+PINNED_DIGEST = '3feab26da60f48ac72d156b81f02261ffb08556adeeb97ccb1f922ab74c12614'

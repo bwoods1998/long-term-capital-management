@@ -41,9 +41,9 @@ if HAVE:
 E = D("1289.34")        # the sizing equity at the start of day Oct 8, 2026 (the plan's E)
 #: THE ROLLING PROBE BUDGET at the owner's ceilings ($400 in any 20 sessions, $800 in total), the two envelopes at
 #: different figures; the constitution set the total to $400 on Oct 9 and to $800 since Oct 10 (PREREG-T).
-CEILING = table(loss_total_usd="800")
+CEILING = table(loss_budget_usd="400", loss_total_usd="800")   # (V2's ceilings, named: release 1019l moved the rows)
 #: Release L-D's setting of Oct 9: both envelopes at $400 (THE PROBE TOTAL AT $800's rollback, `loss_total_usd` "400").
-AS_SET = table(loss_total_usd="400")
+AS_SET = table(loss_budget_usd="400", loss_total_usd="400")
 
 
 # ===================================================================================== fast lane v2, frozen (ccfa48d5)
@@ -1221,6 +1221,19 @@ class TheRollingBudgetLive(LiveCase):
         self.assertIn("realized $0.00 in the window and $790.00 in total, held or working $0.00", told)
         self.assertIn("exits go on", told)
 
+
+# (release 1019l, the owner's goal V3: these mechanisms on release 1019i's money table, league/tests/v2_walls.py;
+# the V3 rows' own effects are league/tests/test_v3_walls.py's)
+from league.tests import v2_walls as _V2  # noqa: E402
+from league.tests.v2_walls import tearDownModule  # noqa: E402,F401
+
+
+def setUpModule() -> None:  # noqa: N802 - unittest's name
+    """Release 1019i's table (league/tests/v2_walls.py), and this module's two tables built again on it."""
+    _V2.setUpModule()
+    global CEILING, AS_SET
+    CEILING = table(loss_budget_usd="400", loss_total_usd="800")
+    AS_SET = table(loss_budget_usd="400", loss_total_usd="400")
 
 if __name__ == "__main__":
     unittest.main()
