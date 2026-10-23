@@ -25,7 +25,8 @@ on 3.14 and 3.11): the standing grant stands, nothing to ratify. The timing tabl
   `r2_qual`; at 15:40-15:44 ET `slots.close-evl10` `ok` and a `decide-close-r2:<day>` receipt `ok`; the close decision
   `decide-close:<day>` still starts at 15:47:00 ET; the book's `eq_event_decisions` has a `close-evl10` row after its
   `close` (and `close-lrn`) rows; EVL-R2-ON's buys, if any, after every other close buy. `reads2` dollars appear in the
-  lane's line (`verdict_usd_today` counts them) and the daily report's `costs.reader2_usd`.
+  lane's line (`verdict_usd_today` counts them) and the daily report's `costs.verdicts_usd` (the lane's Claude dollars:
+  its verdicts', R3's births call's and READER-2's); the lane's own report (`reports/<day>.txt`) has the Reader-2 lines.
 - STOP R2 AT ONCE without a deploy: the lane's `STOP` file (idles the lane and R2's job), or the House's maintenance
   `PAUSE` (no paid call: R2 asks nothing); its decision then has no reads and picks nothing. The event kind's switch
   (`equity_money.event.enabled` False, or the gateway's `STOCK_EVENT_BUYS` off) stops every event buy, R2's included.
@@ -33,7 +34,7 @@ on 3.14 and 3.11): the standing grant stands, nothing to ratify. The timing tabl
   re-ratify). The four tables stay in the lane's store (additive; an older release never reads them); EVL-R2-ON's open
   lots, if any, are exited by an older release's book as any event lot whose program it does not know is (their plan is
   on the lot); its shadow rows stay and are scored by nothing older.
-- ALARMS (House warnings, once an hour each, and the daily report's Reader-2 lines): `reader_line` (R2's line or the
+- ALARMS (House warnings, once an hour each, and the lane report's Reader-2 lines, `reports/<day>.txt`): `reader_line` (R2's line or the
   lane's refused an ask, or v1 spent over 1.5 V: binding `v1_reserve`), `reader_pin` (another response model: R2 stopped
   for good; a new reader version is a later file's), `reader_schema` (the schema stop: for good), `reader_stop` (three
   gateway 4xx today), `r2_cap` (64 news reads reached), `r2_starve` and the scheduler's `decision slot evl10 close` (no

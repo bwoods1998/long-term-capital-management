@@ -638,7 +638,7 @@ the frozen text wins. As built (league/events/reader2.py; league/tests/test_even
   of the answered reads on two consecutive sessions of 10 or more) and spend that follows the seat (EVL-R2-ON retired,
   or a shadow record because its run could not start) stop R2 for good; three gateway 4xx stop it for the UTC day.
   R2's dollars count in the lane's line (`_spend_today`), the budget's measured lane spend, the site's Claude total,
-  the daily report and evl_health.
+  the daily report's lane dollars (`costs.verdicts_usd`) and evl_health; the lane report has its Reader-2 lines.
 - THE DECISION (section 2.4): `decide-close-r2:<D>`, the LAST row of the scheduler's close table (a clock start at
   tau, the close - 20 minutes; 10 s; never past 15:44:20 ET; no catch-up), SQL over rows stored before tau, one
   transaction with its receipt. EVL-R2-ON's picks are the first 8 candidates passing the filter in key order (p_up,

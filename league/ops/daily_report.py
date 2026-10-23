@@ -407,16 +407,13 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
             cost_verdicts = float(store.db.execute(
                 f"SELECT COALESCE(SUM(COALESCE(usd, {B.VERDICT_USD_UNKNOWN})), 0) FROM verdicts WHERE answered_at>=? "
                 "AND answered_at<?", (ulo, uhi)).fetchone()[0] or 0.0)
-            # (release 1019n-r2: PREREG-EVL-10's READER-2, inside the lane's line and the Claude figure; its READER block
-            # counts only, league/events/reader2.py `session_counts`, `alarms`)
+            # (release 1019n-r2: PREREG-EVL-10's READER-2's dollars are the lane's too, inside its line and the Claude
+            # figure: counted here beside its verdicts' (league/events/reader2.py `usd_between`). The facts keep the
+            # gateway's shape (league/tests/fixtures/daily_report.json): R2's READER block is the lane's own report's,
+            # league/events/report.py `_reader2`.)
             from ..events import reader2 as R2
 
-            cost_reader2 = R2.usd_between(store.db, ulo, uhi)
-            reader2 = None
-            if R2.pinned() and store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reads2'"
-                                                ).fetchone():
-                reader2 = R2.session_counts(store, on) | {
-                    "alarms": [a["kind"] for a in R2.alarms(store, dt.datetime.fromtimestamp(now, dt.timezone.utc))]}
+            cost_verdicts += R2.usd_between(store.db, ulo, uhi)
             fills, first_fill = [], None
             if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='real_fills'").fetchone():
                 fills = store.db.execute("SELECT side, COUNT(*) AS n, COALESCE(SUM(fee), 0) AS fees FROM real_fills "
@@ -440,7 +437,6 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
     entries = day_entries(root, day)
     verdicts_usd = sum(_num(v.get("usd")) or 0.0 for v in vd.values() if isinstance(v, Mapping))
     costs = _costs(ledger, on, now, cost_verdicts, budget)
-    costs["reader2_usd"] = _round(cost_reader2)
     # ACCOUNT-SHOWN FIRST, NET AFTER COSTS BESIDE IT: the day's realized real P&L against the day's measured spend, and to
     # date from the lane's first real fill against the measured spend since (as far as metered.json covers it).
     day_spend = _num(costs["spent_usd"])
@@ -510,8 +506,6 @@ def _facts(ctx: Any, root: str | Path, now: float, day: str, *, ledger: Mapping[
                    "news": total("news"), "failed": sum(total(f, "failed") for f in ("8-K 2.02", "8-K other", "Form 4"))},
         "verdicts": {s: int((vd.get(s) or {}).get("n") or 0) for s in ("ok", "unparsed", "refused")}
                     | {"usd": round(verdicts_usd, 2)},
-        # (release 1019n-r2: PREREG-EVL-10's READER-2, counts only; an older gateway ignores the key)
-        "reader2": reader2,
         "intents": [row for row in intents if row["n"] or row["skipped"]],
         "fills": {"buys": by_side.get("buy", (0, 0.0))[0], "sells": by_side.get("sell", (0, 0.0))[0],
                   "fees_usd": round(sum(f for _, f in by_side.values()), 2), "gap": gap},

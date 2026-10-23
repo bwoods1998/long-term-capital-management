@@ -71,7 +71,8 @@ reading for real money and PREREG-EVL-8's EVL-META-ON; real money at learning (5
 own pass after every earlier one. Four additive write-once tables (`reads2`, `r2_qual`, `r2_scan`, `r2_features`;
 SCHEMA_VERSION stays 1), on births' FACTS_DENY. Its 0.13 is counted by the screen's own sum and released from
 births.RESERVED by the pin: the lane's count is the same 3.81. R2's dollars count in the lane's line, the budget's
-measured lane spend, the site, the daily report and evl_health. The daily report's READER block and the alarms
+measured lane spend, the site, the daily report's lane dollars and evl_health (the mail's facts keep the gateway's
+shape: no gateway change). The lane report's READER block and the alarms
 (`reader_line`, `reader_pin`, `reader_schema`, `reader_stop`, `reader_missing`, `r2_starve`, `r2_cap`) say counts
 only; RS-2's tables are the captain's and the owner's.
 
