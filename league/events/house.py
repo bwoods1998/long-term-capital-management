@@ -298,8 +298,9 @@ FETCH_TRIES = 6                               # ... and a failed fetch is tried 
 FETCH_BACKOFF = tuple(dt.timedelta(minutes=2 ** k) for k in range(1, FETCH_TRIES))
 
 #: RELEASE 1019i, THE PRICE LANE'S RECORDERS (PREREG-EVL-8's harness plan H2; league/events/pxdata.py), behind
-#: league/config.json `events.px_data` (a missing key or false is OFF; on, they only WARM px.sqlite: no decision reads
-#: it). Each is a task of its own, the LAST of the plan's (`_px_due`): never inside the live close decision's lead,
+#: league/config.json `events.px_data` (a missing key or false is OFF; release 1019i shipped it off, release 1019n on:
+#: they feed PREREG-EVL-8's price lane, pinned at A122, whose own runs read px.sqlite; every read of theirs is spaced on
+#: the lane's one slot at DATA_INTERVAL, A128's major closed: `_px`). Each is a task of its own, the LAST of the plan's (`_px_due`): never inside the live close decision's lead,
 #: never within `PX_CLEAR` of the next decision, bounded by `PX_BUDGET` (and, as every task, to end DECISION_MARGIN
 #: before the next decision), its reads cut at the bound (`PX.PxGateway`) and through the lane's bucket after the lane's
 #: own (`PX.TokenBucket`, THE LANE FIRST), its failure its own (a warning; that recorder waits FAIL_BACKOFF, every other
