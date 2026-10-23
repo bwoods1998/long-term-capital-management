@@ -760,8 +760,9 @@ def _react_marks(ctx: Context, day: dt.date, names: Iterable[str]) -> int:
     """THE CLOSE DECISION'S 15:30 MARKS READ TOGETHER (release 1019m-hotfix, the captain's A140): the marks of `names`
     the store does not hold yet, in `_marks_1530`'s batches (`MARK_BATCH` names a request), first from `MARK_SINCE`
     before the mark's time (15:00 ET on a full day: one page a request), then from the open for the names that span
-    gave none; a name neither gave a mark is read alone by `_mark_1530` when its row's reaction is read, as before.
-    Each mark is the row `_mark_1530` writes (the same bar, price, time and source). Returns how many were stored."""
+    gave none; a name neither pass gave a mark is read alone by `_mark_1530` when its row's reaction is read, as
+    before. Each mark is the row `_mark_1530` writes (the same bar, price, time and source). Returns how many were
+    stored."""
     session = C.session(ctx.store, day)
     want = sorted({str(x) for x in names if x})
     if session is None or not want:

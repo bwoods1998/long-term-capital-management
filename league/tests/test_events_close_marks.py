@@ -370,6 +370,11 @@ class TheCloseEntriesGoBeforeTheLine(TB.EventTest):
     receipt to name its program: `book.part_hold`), EVL-LRN-ON's live pick (GAMA, waiting for its own live receipt) and
     a registered close-entry birth at learning (BETA), which ROOM holds behind the learner (`book.after_learners`)."""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.sim = landing(300)      # (the lane's simulated timing, on the program table in force: before any birth loads)
+
     def setUp(self):
         super().setUp()
         T7.pin(self)
@@ -425,7 +430,7 @@ class TheCloseEntriesGoBeforeTheLine(TB.EventTest):
         self.assertEqual((lrn["programs"][ON]["planned"], lrn["programs"][self.born.id]["planned"]), (1, 1))
 
     def test_with_the_receipts_landing_when_the_lanes_simulated_decision_finishes_them_all_three_go_before_1549(self):
-        got = landing(300)["batched"]
+        got = self.sim["batched"]
         house = got["house"]
         learner = got["learner"] or house + dt.timedelta(seconds=25)
         self.assertLessEqual(max(house, learner), W.et(D_DAY, 15, 47, 40), "both land by about 15:47:40 ET")
@@ -438,7 +443,7 @@ class TheCloseEntriesGoBeforeTheLine(TB.EventTest):
     def test_with_the_receipts_landing_as_the_per_name_path_finished_them_the_waiting_buys_are_lost(self):
         """The defect as the House's receipts made it (the per-name path's timing, after 15:49:00 ET): the DROP buy and
         the learner's pick are never sent (the birth goes at the last minute only by A140)."""
-        got = landing(300)["per_name"]
+        got = self.sim["per_name"]
         sent = self.minutes({"house": on_day(got["house"]), "learner": on_day(got["learner"] or got["house"])})
         buys = {sym for side, sym, _ in sent if side == "buy"}
         self.assertNotIn("ACME", buys, "the DROP buy is lost")
