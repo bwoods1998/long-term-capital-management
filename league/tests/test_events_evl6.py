@@ -923,6 +923,26 @@ class TheMoneyInTheBook(unittest.TestCase):
             mine = self.summary(h2)["programs"]["EVL-ERN-READ-O1"]
             self.assertEqual((mine["planned"], mine["room"]), (1, 6), "release 1019h's S2: bought under the bar, 6 slots")
 
+    def test_the_reach_bar_row_below_0_8_switches_a_v6_probe_buy_off_and_never_sizes_it_under_the_bar(self):
+        """Section 6, clause 2 is literal (A123, A134): a PREREG-EVL-6 version's Probe and Sized buys are sized and
+        gated on Done's own 0.8 (`V6_SIZE_BAR` = done.PROBE_SIZE_SHARE, the row in force), and the `reach_bar` row can
+        only switch them OFF: at the row's "0" (S2's switch) or anything under 0.8 nothing is bought (release 1019h's
+        S2 would floor the buy under the bar: the reading that trades more)."""
+        from league.events import done as DN
+
+        self.assertEqual(L.V6_SIZE_BAR, D(str(DN.PROBE_SIZE_SHARE)))
+        self.assertEqual(EB.settings().reach_bar("probe"), L.V6_SIZE_BAR, "the row in force is the bar")
+        for row in ("0", "0.5"):
+            off = dataclasses.replace(EB.settings(), reach_bars={"probe": D(row), "sized": D(row)})
+            with mock.patch.object(EB, "settings", lambda *a, **k: off):
+                h = self.fresh()
+                self.probe_pick(h, version=3, prev_close=48.0)      # limit $60: one share reaches 0.8 x $70 at 0.8
+                h.tick(9, 15)
+                mine = self.summary(h)["programs"]["EVL-ERN-READ-O1"]
+                self.assertEqual((mine["picks"], mine.get("planned"), mine.get("skipped")), (1, 0, {"reach_bar_off": 1}),
+                                 f"row {row}: switched off, not floored")
+                self.assertEqual(h.event_intents("buy"), [], row)
+
     def fresh(self):
         case = self.TB.EventTest("run")
         case.setUp()

@@ -230,6 +230,10 @@ SHARE_TOLERANCE = Decimal("1e-9")
 CLIENT_PREFIX = _pkg.CLIENT_PREFIX
 
 ZERO = Decimal(0)
+#: PREREG-EVL-6 section 6, clause 2, LITERAL (A123, A134): a version it judges sizes its Probe and Sized buys on Done's
+#: own 0.8 (league/events/done.py `PROBE_SIZE_SHARE`, pinned equal), never on the `reach_bar` row; the row can only
+#: switch those buys OFF (below 0.8: no buy, the reading that trades less), never size them under the bar.
+V6_SIZE_BAR = Decimal("0.8")
 CENT = Decimal("0.01")
 SUBPENNY = Decimal("0.0001")
 SHARE_PLACES = Decimal("1e-9")
@@ -5915,9 +5919,11 @@ class EquityBook:
             # (`book.under_bar`; the shadow keeps it); release 1019h's S2 alone would buy it under the bar
             if band in adapter.PROBE_UP:
                 program = adapter.program_of(pick.program, pick.version)
-                if program is not None and getattr(program, "evl6", False) and \
-                        adapter.under_bar(band, s.share(band) * E, limit, walls, bar=s.reach_bar(band)):
-                    return "under_bar"
+                if program is not None and getattr(program, "evl6", False):
+                    if s.reach_bar(band) < V6_SIZE_BAR:
+                        return "reach_bar_off"      # (the row below clause 2's 0.8 switches these buys OFF: A123, A134)
+                    if adapter.under_bar(band, s.share(band) * E, limit, walls, bar=V6_SIZE_BAR):
+                        return "under_bar"
             return None
         return skip, ""
 
@@ -6754,14 +6760,21 @@ class EquityBook:
                            min_order_usd=Decimal(str(et.min_order_usd)))
         adapter = self._event_adapter()
         program = adapter.program_of(inst.family, inst.version) if adapter is not None else None
-        if getattr(program, "evl6", False) and inst.band in adapter.PROBE_UP and s.reach_bar(inst.band) > 0:
+        if getattr(program, "evl6", False) and inst.band in adapter.PROBE_UP:
             # PREREG-EVL-6 section 6, clause 2 (A99), for the versions it judges: the buy takes THE FEWEST whole shares
             # whose value at the limit reaches Done's size bar (`book.at_size_count`, never above the band's frozen
             # envelope of the walls' equity), and that ask is judged again by every cap (`size_entry`: the name wall,
             # the 100% book, cash, the loss budget at the lot's weight, A85's reservation and the buys ahead); a cap that
             # cuts it under the bar skips the buy (section 7: the reading that trades less). The target stays the band's.
+            # The bar is clause 2's own 0.8 (`V6_SIZE_BAR`, A123's literal reading), never the `reach_bar` row: that row
+            # below 0.8 switches these versions' Probe and Sized buys OFF (A134; S2's row sizes no v6 buy under the bar).
             cent = Decimal("0.01")
-            bar = s.reach_bar(inst.band)
+            if s.reach_bar(inst.band) < V6_SIZE_BAR:
+                record(target, None, ZERO)
+                return ZERO, (f"the {inst.band} reach_bar row ({s.reach_bar(inst.band)}) is below PREREG-EVL-6 section "
+                              f"6's 0.8: a version it judges buys nothing at {inst.band} while the row is below the bar "
+                              f"(the switch, the reading that trades less){held_note}")
+            bar = V6_SIZE_BAR
             n = adapter.at_size_count(inst.band, target, limit, walls, bar=bar)
             if n is None:
                 record(target, None, ZERO)
