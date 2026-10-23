@@ -4,11 +4,42 @@ How to pause, deploy, roll back, inspect and recover the House, the gateway, the
 Gym, and the switches that govern them. The design is in [design.md](design.md). Commands run from
 the repository root on the owner's machine unless they say "on the box". Sections that depend on
 the swarm or live path describe their implementation, not evidence that production trading is
-enabled. This page describes the tree it is in (release 1019i's infrastructure branch, **Release 1019i infrastructure** below,
-is built and not deployed); the running House release is release 1019g (live since 05:36Z Oct 22,
+enabled. This page describes the tree it is in (release 1019n-r2's branch, **Release 1019n-r2** below, is built and not
+deployed; the running House release is release 1019m-cost, main `1c87837f`, live since 09:23Z Oct 23, 2026); the running House release is release 1019g (live since 05:36Z Oct 22,
 2026, **Release 1019g** below), on V3-A part 1's machinery (live since Oct 3, 2026: **Now** says what that production
 ran). Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
+
+## Release 1019n-r2 (Oct 23, 2026): the decision scheduler and PREREG-EVL-10's READER-2 (A120, A144, A152): `feat/evl-10`, not deployed
+
+What it is: docs/events.md, **PREREG-EVL-10** and THE DECISION SCHEDULER, [SCHEDULER.md](SCHEDULER.md); the CHANGELOG's
+entry. THE HOUSE ONLY (the gateway is not touched); NO IDENTITY MOVES (`1687e4e3` / `3feab26d`, `b60410ad`, `78022ca6`
+on 3.14 and 3.11): the standing grant stands, nothing to ratify. The timing table's digest is `3514111b`.
+
+- DEPLOY: by the captain's ship script from a deploy window (never 12:55-20:05Z on a trading day, never with an order in
+  flight, CI green on the exact head), and (A152) only after both re-reviews say ship and a full close has run on
+  release 1019m's timing. Its record is live-only (section 2.6): every session before the release is a block that does
+  not exist, so a later release costs sessions, never evidence.
+- VERIFY ON THE BOX: `lane.json` shows `timing_table` `3514111b`; from 07:30 ET `tasks.reader` (R2's job, the
+  House's 'reader' lane, `reader:r2` in health.json's background lanes) and rows in the lane's `r2_scan` and
+  `r2_qual`; at 15:40-15:44 ET `slots.close-evl10` `ok` and a `decide-close-r2:<day>` receipt `ok`; the close decision
+  `decide-close:<day>` still starts at 15:47:00 ET; the book's `eq_event_decisions` has a `close-evl10` row after its
+  `close` (and `close-lrn`) rows; EVL-R2-ON's buys, if any, after every other close buy. `reads2` dollars appear in the
+  lane's line (`verdict_usd_today` counts them) and the daily report's `costs.reader2_usd`.
+- STOP R2 AT ONCE without a deploy: the lane's `STOP` file (idles the lane and R2's job), or the House's maintenance
+  `PAUSE` (no paid call: R2 asks nothing); its decision then has no reads and picks nothing. The event kind's switch
+  (`equity_money.event.enabled` False, or the gateway's `STOCK_EVENT_BUYS` off) stops every event buy, R2's included.
+- ROLLBACK: the House to release 1019m-cost's head `1c87837f` (`floor_box.py rollback`; the pair does not move, nothing to
+  re-ratify). The four tables stay in the lane's store (additive; an older release never reads them); EVL-R2-ON's open
+  lots, if any, are exited by an older release's book as any event lot whose program it does not know is (their plan is
+  on the lot); its shadow rows stay and are scored by nothing older.
+- ALARMS (House warnings, once an hour each, and the daily report's Reader-2 lines): `reader_line` (R2's line or the
+  lane's refused an ask, or v1 spent over 1.5 V: binding `v1_reserve`), `reader_pin` (another response model: R2 stopped
+  for good; a new reader version is a later file's), `reader_schema` (the schema stop: for good), `reader_stop` (three
+  gateway 4xx today), `r2_cap` (64 news reads reached), `r2_starve` and the scheduler's `decision slot evl10 close` (no
+  live decision of the session: no intent, block, record or money), `reader_missing` (under 85% of chosen reads answered
+  by tau two sessions running). None is a new stall-job cause: the gateway's mail words none, so the gateway needs no
+  deploy for this release.
 
 ## Release 1019m-cost (Oct 23, 2026): goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145): `fix/cost-v3`, not deployed
 

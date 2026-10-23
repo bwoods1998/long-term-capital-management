@@ -42,6 +42,49 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
+### Release 1019n-r2: the decision scheduler and PREREG-EVL-10's READER-2 (A120, A144, A152), on `feat/evl-10` (unreleased; cut from main `1c87837f`, release 1019m-cost, live since 09:23Z Oct 23; THE HOUSE ONLY: the gateway is not touched (Claude Sonnet 5.5 is in its CLAUDE_MODELS row since release 1019h and the captain's smoke test passed through it, A144); NO IDENTITY MOVES: the money digest `1687e4e3` and the constitution `3feab26d` (release 1019l's pair: the text's sizes are the money table's, and BUYABLE's 5% is this file's own constant, never a money row), the options execution fingerprint `b60410ad` and the equity identity `78022ca6`, read with the tree's own functions on 3.14 and 3.11; THE TIMING TABLE `scheduler.digest()` is `3514111b` (release 1019i's main rows alone `40a08163`); an owner deploy, never 12:55-20:05Z on a trading day, never with an order in flight, CI green on the exact head, and (A152) only after both re-reviews say ship and a full close has run on release 1019m's timing)
+
+Two parts in one deploy, the second needing the first (PREREG-EVL-10 section 2.4: "THIS FILE NEEDS THE SCHEDULER").
+
+**Part 1, the decision scheduler** (`origin/feat/scheduler`, PR 603, `702ec107`, built on release 1019h and never
+reviewed; merged with rerere off, every conflict resolved onto today's code). `league/events/scheduler.py` (behind the
+wall) holds the timing table, one pinned constant per auction, its main rows read from the House's and the book's own
+constants; a file's slot runs in its own run with its own bound and receipts, a slot before the main decision ends
+5 s before it, a window closed with no run is `missed` with a House warning. AS RESOLVED ON TODAY'S CODE: the hotfix's
+batched 15:30 marks and A140's last-minute rule at both auctions, PREREG-EVL-7's learners' own pass and ROOM (R3's
+births after the learners, PREREG-EVL-7 section 1.9: the design notes' adoption of the learners as a scheduler file is
+NOT taken), release 1019m's line refusal and alarms, V3's sizes and the bug-stop latch are main's, untouched; a later
+file's book pass (`_event_decide_slot`) waits for the main pass, the learners' pass and every earlier file's, carries
+release 1019l's per-program rules (`max_open(band, program)` less the seat's count, the unsettled hold, its summary in
+the auction's own row, the window row at the last book minute), and its buys go after every main row's; a file may have
+no catch-up; after a clock-started slot the House's turn goes on into the task that was due, so a slot never takes an
+earlier file's turn. With no part registered nothing of it runs.
+
+**Part 2, PREREG-EVL-10's READER-2** (the frozen text docs/prereg/PREREG-EVL-10.md, sha256 `ab7e587c`, and its record
+docs/prereg/evl-10/, 129 files, byte for byte from the tag; REGISTERED_AT_10 `2026-10-23T07:10:45Z`, A144):
+league/events/reader2.py (behind the wall; the fix round's r2_spec.py verbatim, R2-NEWS `a8239614`, R2-DOC `127c19f3`,
+THE PIN `claude-sonnet-5-5`): the qualification scans and the hash share, one streamed call a job on the House's own
+lane 'reader' (key `reader:r2`), R2_LINE inside the lane's line, the pin, the schema, day and seat stops; the slot
+`decide-close-r2:<D>` (15:40:00 ET, 10 s, never past 15:44:20, no catch-up), EVL-R2-ON (seatable, a PREREG-EVL-6
+version), its control EVL-R2-ON-SET and the free records REC-R2-ON-PASS and REC-R2-ON-AVOID, FEATURES-R2 v1; the one
+reading for real money and PREREG-EVL-8's EVL-META-ON; real money at learning (5%) from its first live decision, in its
+own pass after every earlier one. Four additive write-once tables (`reads2`, `r2_qual`, `r2_scan`, `r2_features`;
+SCHEMA_VERSION stays 1), on births' FACTS_DENY. Its 0.13 is counted by the screen's own sum and released from
+births.RESERVED by the pin: the lane's count is the same 3.81. R2's dollars count in the lane's line, the budget's
+measured lane spend, the site, the daily report and evl_health. The daily report's READER block and the alarms
+(`reader_line`, `reader_pin`, `reader_schema`, `reader_stop`, `reader_missing`, `r2_starve`, `r2_cap`) say counts
+only; RS-2's tables are the captain's and the owner's.
+
+**Tests** (league/tests/test_events_evl10.py; league/tests/evl10_week.py with league/tests/fixtures/evl10_week_main.json
+recorded on main `1c87837f`): THE PROOF (on the invented week every program's intents, every decision receipt with its
+times and every seatable program's real-money picks are main's; with READER-2 reading and deciding, every earlier
+program's are the same as without it; in real money every earlier row's buys and bodies the same, this file's after
+them), THE LOOK-AHEAD TEST, no ask when the line is spent or a cap hold names the day, the freeze's sha256 and the
+spec's bytes, section 2.5's TEST, the House's slot keeping the close decision's time and receipt. The older mechanism
+tests run on the registries before this file (league/tests/evl10_fakes.py). The test counts and CI are in the PR.
+
+**Deploy and rollback**: docs/operations.md, **Release 1019n-r2**.
+
 ### Release 1019m-cost: goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145)
 
 On `fix/cost-v3` (unreleased; cut from `rel/1019l` `3df7dd9d`, live since 06:12Z Oct 23; an owner deploy of the House

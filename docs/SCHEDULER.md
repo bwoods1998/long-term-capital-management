@@ -7,6 +7,28 @@ hooks in `league/events/book.py` (`slot_of`, `slot_files`, `send_window`, `slot_
 `league/equity/live.py` (`_event_decide_slots`, `_event_send`'s per-file windows). Tests:
 `league/tests/test_events_scheduler.py`.
 
+## As merged (release 1019n-r2, onto release 1019m-cost; A152)
+
+The branch below was built on release 1019h and is merged onto today's main with these readings, each held by a test:
+
+- **PREREG-EVL-7's learners are NOT a scheduler file.** Their own live receipt (`decide-<at>-lrnlive:<D>`, run by
+  run.py's `learner_part` after the House's receipt) and the book's learners' pass (`_event_decide_lrn`: R3's births
+  after the learners in ROOM, A140's last-minute rule at both auctions) stay exactly as live since release 1019j:
+  PREREG-EVL-7 section 1.9's ROOM, which the "feat/evl-7" adoption below would have moved into the main slot. Every
+  later file's pass waits for the learners' pass.
+- **A later file's book pass** (`_event_decide_slot`) plans at the first tick inside its window at which the main pass,
+  the learners' pass and every earlier file's pass are decided and its own live receipt is made, carrying release
+  1019l's per-program rules (`max_open(band, program)` less the seat's count, the `evl6` flag's Probe slots, the
+  unsettled-stay hold, its summary merged into the auction's own row, the window row at the last book minute, A140's
+  late learners' pass read as a pass still waiting); its buys go after every main row's (`_file_rank`) and its entries
+  keep the earlier rows' orders on the day's line.
+- **A file may have no catch-up** (`catchup` None: PREREG-EVL-10's session with no live run has no decision).
+- **A slot never takes an earlier file's turn**: after a clock-started slot before the main decision the House's turn goes
+  on into the task that was due (house.py `_clock_slot`).
+- **The registered parts are imported by every reader of them** (`PART_MODULES`, `load_parts`), so no reader ever sees
+  a file's program as a main row. The one registered part is PREREG-EVL-10's READER-2 (league/events/reader2.py), its
+  row the close table's last (docs/events.md's timing table; the digest `3514111b`, the main rows alone `40a08163`).
+
 ## The problem it removes
 
 The House makes ONE open decision (09:15 ET) and ONE close decision (its first tick at or after 15:47:00 ET, orders
@@ -93,7 +115,7 @@ X.register(X.Part("evl7", run=live_part, catchup=catchup_part, programs=lambda: 
 Nothing to adopt: PREREG-EVL-6's versions are rows of the main slot (the same families, the same decision), as
 today.
 
-### feat/evl-7 (PREREG-EVL-7 sections 1.7 and 1.11)
+### feat/evl-7 (PREREG-EVL-7 sections 1.7 and 1.11): NOT TAKEN on release 1019n-r2 (the section above)
 
 Replace run.py's `learner_part` call after the receipt with two rows (open: after main, 90 s, never past 09:25:30,
 sends 09:16-09:27, kinds `open-lrnlive` / `open-lrn`; close: after main (or after `meta8` when PREREG-EVL-8's row

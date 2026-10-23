@@ -597,7 +597,8 @@ Nothing above changes; these are added beside it.
 - league/live/__main__.py (book, a pure addition): `--flatten-equity WHY`, `--clear-equity-freeze WHY`,
   `EQUITY_FLATTEN`, `EQUITY_CLEAR_FREEZE`, `equity_ask(why)`, and the status's `equity` block {freeze, reconciliation,
   pending_owner_actions}.
-- THE DECISION SCHEDULER (release 1019i, A120; league/events/scheduler.py, docs/SCHEDULER.md), additive in live.py:
+- THE DECISION SCHEDULER (release 1019n-r2, A120; league/events/scheduler.py, docs/SCHEDULER.md; section 30 below
+  for what it adds on today's book), additive in live.py:
   `EVENT_MAIN_SLOT` ("main"), `EVENT_SLOT_WAIT`, `_slot_of(adapter, program)`, `_send_window(adapter, file, at,
   open_at, close_at)`; `EquityBook._event_decide_slots` (after `_event_decide` in `_event_step`) and
   `_event_decide_slot` (one file's pass: the row `(day, "<at>-<file>")` of `eq_event_decisions`, planned once the
@@ -1978,3 +1979,32 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   sent and A80's re-sends, at the open the close's remaining room x 2 while `book.LINE_ACROSS_AUCTIONS` holds, plus one)
   to a `_count_refusal(..., keep=)` of its own, before the count every entry meets (whose call is release 1019h's), kept
   on the event line and the House-wide line; an exit never meets it. Nothing here changes for any other program.
+
+## 30. The decision scheduler's later files and PREREG-EVL-10's READER-2 in the event book (release 1019n-r2; `feat/evl-10`; book, as built; after section 28 and PREREG-EVL-8's section 29 on its own branch)
+
+Each addition is additive; nothing here changes for a main row (every row of PREREG-EVL-1 to -6, PREREG-EVL-7's
+learners and R3's births).
+
+- `EquityBook._event_decide_slots` runs after `_event_decide_lrn` in `_event_step`; for each file `book.slot_files(at)`
+  lists (the timing table's order) `_event_decide_slot` decides it once (row `(day, "<at>-<file>")`) at the first tick
+  inside its window (`book.send_window`) at which `_event_slot_waits` says nothing (the main pass made; the learners'
+  pass `(day, "<at>-lrn")` made when the auction's summary held names for them or a learner is live there, and not
+  decided by A140's last-minute rule; every earlier file's pass decided) and `book.slot_receipt` is `ok` or `pending`.
+  Its room is `s.max_open(band, program)` less `_event_seat_count`; a Probe or Sized version PREREG-EVL-6 judges that
+  `_event_unsettled` names is held (picks None, room 0, "unsettled"); its picks are `book.picks` (PREREG-EVL-10's rows:
+  `book.r2_picks`, section 2.4's one reading), every name given at the auction passed over (binding "given"),
+  `_event_gate` applied, `book.allocate` in ROOM's order; its summary and `sale_to_later` are merged into the auction's
+  own row in the same transaction as its intents (so `_event_recent`, A85's reservation, reads them). From the window's
+  last book minute (`HELD_OVERDUE_S` before the cut-off) a pass that still waits writes both rows with planned 0 and
+  binding `EVENT_SLOT_WINDOW` ("window"). A receipt `failed`, `cut` or `missed` decides the file with no buy.
+- `_event_send` orders an auction's buys by `_file_rank` (0 for the main file, then the timing table's order) before
+  `book.send_key`, so every later file's buy is sent after every main row's; a later file's buy goes only inside its
+  own window (`book.send_window`).
+- `_event_line_keep` gives a later file's entry the keep of every order the auction's main rows may still send there
+  (planned buys 2 each at the close, a sent one with no re-send 1, plus its own exit), so the day's line refuses its
+  entries after every earlier row's; a learner's keep counts no later file's row.
+- The adapter (league/events/book.py) adds `slot_catchup(file, at)` and `r2_picks(lane, program, day, *, decided_at,
+  held)`; `book.picks` routes PREREG-EVL-10's four rows to `r2_picks` (league/events/reader2.py `one_reading`: the
+  intents its live `decide-close-r2:<D>` receipt `ok` wrote, in rank_key order, then adv20 descending, then event id,
+  less `held`; `decided_at` is not read).
+

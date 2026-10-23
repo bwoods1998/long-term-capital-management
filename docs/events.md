@@ -608,6 +608,63 @@ gets their every p, q and decision):
   and without the change while no version is promoted, the release before the week or inside it; no superseded version
   moves a band after REGISTERED_AT_6.
 
+## PREREG-EVL-10: READER-2, a stronger reader, and its one seat EVL-R2-ON (release 1019n-r2, not deployed)
+
+The frozen text is [prereg/PREREG-EVL-10.md](prereg/PREREG-EVL-10.md) (sha256 `ab7e587c`, REGISTERED_AT_10
+2026-10-23T07:10:45Z, the captain's A144); its design, checks, fix rounds and synthetic calibration are
+[prereg/evl-10/](prereg/evl-10/SHA256SUMS.all), byte for byte from the tag `prereg-evl-10`. Where anything here differs,
+the frozen text wins. As built (league/events/reader2.py; league/tests/test_events_evl10.py):
+
+- READER-2 (section 1): `claude-sonnet-5-5` through the gateway's `/v1/claude/messages`, structured outputs, adaptive
+  thinking with its display omitted, effort low, streamed (a byte at least every 30 s, the whole answer within 90 s),
+  no temperature; the request specs are the fix round's `fix1/r2_spec.py` copied verbatim (a test compares the block
+  byte for byte and recomputes R2-NEWS `a8239614` and R2-DOC `127c19f3`). THE PIN: the response model
+  `claude-sonnet-5-5` (A144's smoke test); another one is stored `refused` and stops R2 for good.
+- WHAT IT READS (section 1.4), as stored at each qualification scan of its own lane: NEWS-ON, a DAY(D) article of an
+  eligible, LIQUID (ADV20 >= $10M), BUYABLE (1.25 x the previous close <= 5% of E_prev) issuer with a stored `ok`
+  PROMPT-NEWS score >= 2; 8K-ON, an F8K(D) 8-K of an issuer not EXCLUDED on D, TEXT of 200 characters or more, a stored
+  `ok` PROMPT-DOC score <= 1. Each written once to `r2_qual`. CHOSEN: an issuer's first article when its hash draw
+  h(D, cik) < q, else its first of score 3, and once more for a later one strictly higher (at most 2 an issuer, 64 a
+  session); an issuer's first filing (8 a session). q = min(1, 40 / m) over the last 5 COMPLETE sessions (no gap over
+  5 minutes between stored scans, counting 07:30:00 ET and tau - 30 s), 0.5 with none, fixed at the session's first
+  scan. A read sees the item and the issuer's stored articles and 8-Ks of the 30 days before it (section 1.2).
+- THE ASKS (section 1.5): per-call jobs on the House's own lane 'reader' (key `reader:r2`, Semaphore(1); never
+  'feeds:', never 'ops:'), started on each House publish while R2's last job has finished, from 07:30:00 ET to tau -
+  30 s, one call a job in qualification order. A call goes only while R2's own dollars of the UTC day plus its
+  worst-case hold ($0.0552 news, $0.1036 doc) fit R2_LINE = max(0, min($0.75, L - 1.5 V - $0.25)) (L the lane's line,
+  V v1's heaviest UTC day of the trailing 7; fixed at the day's first ask, rounded down to the cent), no cap hold names
+  the day, and the lane's whole spend plus the hold fits L. Stored once in `reads2` (ok, unparsed, refused, cut, lost:
+  the first stored row is final); a call refused before sending stores nothing. THE SCHEMA STOP (unparsed + cut >= 10%
+  of the answered reads on two consecutive sessions of 10 or more) and spend that follows the seat (EVL-R2-ON retired,
+  or a shadow record because its run could not start) stop R2 for good; three gateway 4xx stop it for the UTC day.
+  R2's dollars count in the lane's line (`_spend_today`), the budget's measured lane spend, the site's Claude total,
+  the daily report and evl_health.
+- THE DECISION (section 2.4): `decide-close-r2:<D>`, the LAST row of the scheduler's close table (a clock start at
+  tau, the close - 20 minutes; 10 s; never past 15:44:20 ET; no catch-up), SQL over rows stored before tau, one
+  transaction with its receipt. EVL-R2-ON's picks are the first 8 candidates passing the filter in key order (p_up,
+  surprise, magnitude, specific, corroborated, then the lower h) that it holds no position in within 5 sessions,
+  `rank_key` 9 - position; EVL-R2-ON-SET every candidate (the control), REC-R2-ON-PASS every passing one,
+  REC-R2-ON-AVOID every failing one; a candidate is BARRED by an 8-K of its issuer after 09:00 ET scored 2, or 1 with
+  guidance raised, or unanswered by tau (the E10 bar). FEATURES-R2 v1 (21 columns) of every candidate in
+  `r2_features`. A session whose slot did not run live has no decision of these rows (alarm `r2_starve`).
+- THE ONE READING: `book.picks` of the four rows is the live receipt's own intents whatever the time it is read, empty
+  with no `ok` receipt; real money, PREREG-EVL-8's EVL-META-ON (`reader2.meta_sources`, `one_reading`: the narrow
+  interface while feat/evl-8 is not on main) and the shadow read the same picks.
+- REAL MONEY (section 2.5): learning at the money table's 5% from the first live decision; its buys are planned in its
+  own pass (`_event_decide_slot`) after the main pass, the learners' pass and every earlier file's, at the first tick
+  in [15:47:00, 15:49:00) where its receipt is `ok`, and sent after every earlier row's; at the window's last book
+  minute a pass that still waits plans none (binding `window`), and so does one whose learners' pass was decided by
+  A140's last-minute rule. EVL-R2-ON is a PREREG-EVL-6 version (`Program.evl6`: 14 Probe slots, the at-size and
+  unsettled-stay rules) and its summary goes into the close's own decision row, so A85's reservation reads it.
+- THE JUDGE (section 3): PREREG-EVL-6 as frozen against EVL-R2-ON-SET (`screen.CONTROLS`); its finality is its slot's
+  clock; a run reads the budget once at the close it would start, else it never starts (`screen.start_runs_r2`,
+  `reader2.NORUN_KEY`); three runs at most. Its 0.13 is counted by the screen's own sum and released from
+  births.RESERVED by the pin.
+- THE PROOF (league/tests/test_events_evl10.py `TheProof`, league/tests/evl10_week.py): on release 1019e's and
+  PREREG-EVL-5's invented week every program's intents, every decision receipt with its times and every seatable
+  program's real-money picks are main's (recorded on main 1c87837f, league/tests/fixtures/evl10_week_main.json), and
+  with READER-2 reading and deciding in its slot every earlier program's are the same as without it.
+
 ## The code
 
 `league/events/` (standard library only): `store.py` (one SQLite file and a document store; the schema is pinned),
@@ -748,16 +805,18 @@ turn, the most urgent due first.
 | 5 | the ticker snapshot | 07:00 ET, weekdays | one read |
 | 6 | early verdicts (today's open decision's, then its close decision's) | from 07:30 ET | 90 s |
 | 7 | the backfill of a weekday's EDGAR daily index | from 05:00 ET the next day | 90 s, resumable |
-| 1 | THE DECISION SCHEDULER'S SLOTS (release 1019i, below): a file's live slot (`slot-<auction>-<file>`) at its pre-registered start of the timing table, in the same turn as the main decision's receipt when it follows it | each auction, each registered file, inside its window; never inside the main decision | the slot's own bound from its own start; a slot before the main decision ends 5 s before it |
-| - | a file's catch-up (`catchup-<auction>-<file>`): its rows of an auction whose live slot was not made, decided by themselves | after the record pass, oldest first, once each | 150 s |
+| 1 | THE DECISION SCHEDULER'S SLOTS (release 1019n-r2, below): a file's live slot (`slot-<auction>-<file>`) at its pre-registered start of the timing table, in the same turn as the main decision's receipt when it follows it; after a slot with a clock start before the main decision (PREREG-EVL-10's `close-r2` at 15:40:00 ET) the turn goes on into the task that was due, so the slot never takes an earlier file's turn | each auction, each registered file, inside its window; never inside the main decision | the slot's own bound from its own start; a slot before the main decision ends 5 s before it |
+| - | a file's catch-up (`catchup-<auction>-<file>`): its rows of an auction whose live slot was not made, decided by themselves (none for PREREG-EVL-10: its session with no live run has no decision) | after the record pass, oldest first, once each | 150 s |
+| - | PREREG-EVL-10's READER-2 job (`reader:r2`, the House's own 'reader' lane, never this lane's slot): a qualification scan and the next due call | started on each House publish while its last has finished, 07:30:00 ET to tau - 30 s | one streamed call, 90 s at most; never a decision's |
 | 8 | a file's pre-pass (`prepass-<auction>-<file>`): its reads ahead of its decision | last of all, inside the row's window | the row's bound (at most 120 s); before any decision |
 
-THE DECISION SCHEDULER (release 1019i, A120; league/events/scheduler.py, [SCHEDULER.md](SCHEDULER.md)): the House
+THE DECISION SCHEDULER (release 1019n-r2, A120: PR 603's branch merged onto release 1019m-cost; league/events/
+scheduler.py, [SCHEDULER.md](SCHEDULER.md)): the House
 made ONE open decision and ONE close decision, and every new file added its isolated part inside it (PREREG-EVL-5's
 45 s; PREREG-EVL-7's 90 / 120 s; PREREG-EVL-8's 60 and 30 s; PREREG-EVL-9's warm part), so the parts could not all
 fit before the send line and a late part cost the rows behind it. Now each file's part runs in ITS OWN RUN at its own
 pre-registered slot of THE TIMING TABLE (one pinned constant per auction, sha256 `scheduler.digest()`, in force
-`40a08163`): its start (a wall time of the session, or the finish of the slots it follows), its bound from its own
+`3514111b` with PREREG-EVL-10's row; the main rows alone `40a08163`): its start (a wall time of the session, or the finish of the slots it follows), its bound from its own
 start, the book's send window for its buys, its receipts (`decide-<kind>:<day>` live, `decide-<catchup>:<day>` by
 itself). THE MAIN SLOT, every row of PREREG-EVL-1 to -6 and the births, keeps EXACTLY today's timing (its rows are
 read from the House's and the book's own constants and pinned by a test; run.py's decisions, PREREG-EVL-5's part,
@@ -769,7 +828,14 @@ House warning (`decision slot <file> <auction>`, the alarm; the health page's `s
 auction are decided later by themselves by the catch-up, shadow only, never traded. The book plans a file's buys in
 ITS OWN PASS (`eq_event_decisions` row `(day, "<at>-<file>")`) once the main pass is done and the file's live receipt
 is made, inside the file's own window, after every main row; nothing of a file goes at or after its own line. A row
-with no registered part is inert, so the table may hold a file's row before its code ships. The table in force:
+with no registered part is inert, so the table may hold a file's row before its code ships. ON THIS TREE (release
+1019n-r2): PREREG-EVL-7's learners keep their own pass as live since release 1019j (`_event_decide_lrn`, PREREG-EVL-7
+section 1.9's ROOM: R3's births after the learners; the scheduler's design notes' adoption of evl7 is NOT taken), and
+a later file's pass waits for the main pass, the learners' pass and every earlier file's pass, and carries release
+1019l's per-program rules (PREREG-EVL-10 section 2.5 (a)-(e): `max_open(band, program)` less the seat's count, the
+`evl6` flag's Probe slots, the unsettled hold, its summary merged into the auction's own row, the window row at the
+last book minute); its buys go after every main row's (the learners' and the births' included). The one registered
+part is PREREG-EVL-10's (`scheduler.PART_MODULES`). The table in force:
 
 **The open auction** (times ET on a full day; an early close moves every close-side row with the session):
 
@@ -782,6 +848,7 @@ with no registered part is inert, so the table may hold a file's row before its 
 | file | starts | never past | bound | sends | receipt | catch-up | after |
 |---|---|---|---|---|---|---|---|
 | main | 15:47:00 | - | 150 s | 15:47:00-15:49:00 | `decide-close:<day>` | - | - |
+| evl10 | 15:40:00 | 15:44:20 | 10 s | 15:47:00-15:49:00 | `decide-close-r2:<day>` | - | - |
 
 The rows PREREG-EVL-7's, -8's and -9's texts imply, their adoption (a row and a `register` call each) and their
 worst case when every part runs to its bound are in [SCHEDULER.md](SCHEDULER.md): at the open every slot fits; at the
