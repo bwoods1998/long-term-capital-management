@@ -349,6 +349,11 @@ HELD_ROOM = "waits for the room kept for the buys ahead of it in ROOM's order"
 #: line kept for them): the auction's end and the lane's report count those that end unsent by them
 #: (league/events/report.py `ROOM_WAIT`, the same words).
 HELD_AHEAD = "wait for the lane's close decision"
+#: PREREG-EVL-8 section 4.2 (release 1019n): the words a buy of that file's late pass carries while no whole share of
+#: it fits only because earlier rows' buys of the auction still to go keep their room (`EquityBook._event_kept_8`): it
+#: waits, never refused for it. Words of their own, so PREREG-EVL-5's counts of the wait (`HELD_AHEAD`, the lane's
+#: report `ROOM_WAIT`) never count them.
+HELD_EARLIER = "earlier rows' buys still to go at this auction"
 #: kv: the closes whose PREREG-EVL-5 buys ended UNSENT while they waited for the lane's close decision
 #: (`_event_held_said`): {"said": the last day said, "days": {day: how many}} (the last HELD_DAYS such closes), written
 #: only on such a close.
@@ -1056,6 +1061,13 @@ def _eight(adapter: Any, inst: Any) -> bool:
     return bool(test is not None and getattr(inst, "kind", None) == EVENT_KIND and test(inst.family))
 
 
+def _eight_family(adapter: Any, family: Any) -> bool:
+    """Whether an event row's program is one of PREREG-EVL-8's (`_eight` by its program id alone)."""
+    progs = getattr(adapter, "P", None)
+    test = getattr(progs, "is_8", None) if progs is not None else None
+    return bool(test is not None and test(str(family)))
+
+
 @dataclass
 class HeldAhead:
     """PREREG-EVL-5 section 1.3's ROOM WHILE A BUY WAITS FOR THE LANE'S CLOSE DECISION (league/events/book.py
@@ -1076,6 +1088,7 @@ class HeldAhead:
     names: dict = field(default_factory=dict)
     held: list = field(default_factory=list)
     overdue: bool = False
+    words: str = HELD_AHEAD
 
     def for_buy(self, free: bool) -> "HeldAhead":
         """The room kept from a later buy: all of it, or, once `overdue` and for a buy whose program `free` says is a
@@ -5261,12 +5274,18 @@ class EquityBook:
                     self._event_decide_lrn(now, em, at, s, adapter, out)
                 except Exception as exc:  # noqa: BLE001 - decided again next minute; no earlier row waits on it
                     self._error(f"event decide {at} learners", exc, out)
+                # PREREG-EVL-8 SECTION 4.2: "no earlier file's row ever waits for a read, a write or a room of this
+                # file". Every earlier row's buy of the tick (its first send, a retry, A80's re-send) goes BEFORE this
+                # file's late pass, whose reads (the picks' bars, the eligible list) it never waits for; this file's
+                # buys go after, in their own send.
+                if sending:
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",), which="earlier")
                 try:    # (PREREG-EVL-8: this file's late passes of the auction, after every earlier row's)
                     self._event_decide_8(now, em, at, s, adapter, out)
                 except Exception as exc:  # noqa: BLE001 - planned again next minute; no earlier row waits on it
                     self._error(f"event decide {at} PREREG-EVL-8", exc, out)
                 if sending:
-                    self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",))
+                    self._event_send(now, em, at, s, adapter, real_block, killed, out, sides=("buy",), which="eight")
         try:
             self._event_fills(adapter, out)     # (the real fills handed back to the lane, PREREG-EVL-3; any day)
         except Exception as exc:  # noqa: BLE001 - written again next minute
@@ -6550,44 +6569,98 @@ class EquityBook:
     # ---------------------------------------------------------------- the sends
     def _event_send(self, now: float, em: S.EventMoments, at: str, s: Any, adapter: Any,
                     real_block: Callable[..., str | None], killed: Callable[[], bool], out: dict,
-                    sides: Sequence[str] = ("sell", "buy")) -> None:
+                    sides: Sequence[str] = ("sell", "buy"), which: str = "all") -> None:
         """THE AUCTION'S SENDS, every minute of its window: the sales first, then the buys in the tables' order and
         each program's rank; a send refused by a reading the gateway could not make goes again next minute; nothing goes
         at or after the window's cut-off (`_send`'s wall clock). `sides`: the sales alone (sent before the auction's
-        decision, `_event_step`), the buys alone (after it), or both."""
+        decision, `_event_step`), the buys alone (after it), or both. `which` (release 1019n, PREREG-EVL-8 section 4.2):
+        every buy ("all"), the earlier rows' alone ("earlier", sent before this file's late pass) or this file's alone
+        ("eight", after it). A BUY OF PREREG-EVL-8 is sized and counted with THE ROOM EVERY EARLIER ROW'S BUY OF THE
+        AUCTION STILL TO GO KEEPS (`_event_kept_8`), so it never takes what such a buy may still need at its retry."""
         day = em.day.isoformat()
         rows = self.state.rows("SELECT i.*, e.side AS e_side, e.band AS e_band FROM eq_intents i JOIN eq_event_intents e "
                                "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.day=? AND e.at=? ORDER BY i.iid",
                                (day, at))
         sells = [r for r in rows if r["e_side"] == "sell"] if "sell" in sides else []
-        # ROOM (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then learning's; within Sized and
-        # within Probe ROUND-ROBIN (A85, `book.send_key`: every program's first buy, in the tables' order, before any
-        # program's second); learning in the tables' order; within a program its own ranking (the decision planned
-        # them in it, so its iids are in it).
-        buys = []
-        if "buy" in sides:
-            nth: dict[str, int] = {}
-            ranked = []
-            for r in sorted((r for r in rows if r["e_side"] == "buy"), key=lambda r: int(r["iid"])):
-                n = nth.get(str(r["family"]), 0)
-                nth[str(r["family"])] = n + 1
-                ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
-            buys = [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
+        buys = self._event_buy_order(rows, adapter) if "buy" in sides else []
+        if which == "earlier":
+            buys = [r for r in buys if not _eight_family(adapter, r["family"])]
+        elif which == "eight":
+            buys = [r for r in buys if _eight_family(adapter, r["family"])]
         until = em.open_until if at == "open" else em.close_until
         # (PREREG-EVL-5 section 1.3: a buy that waits for the lane's close decision keeps its room from every buy after
         # it in this order, `HeldAhead`, made afresh each minute; release 1019h, the captain's option 1: from one book
         # minute before the close's cut-off, `HELD_OVERDUE_S`, from R3's births only)
         ahead = HeldAhead(overdue=at == "close" and now >= until - HELD_OVERDUE_S)
+        kept: HeldAhead | None = None
         for r in sells + buys:
             try:
                 side = self._event_row(r["iid"])
                 if r["e_side"] == "sell":
                     self._event_work_exit(Intent.of(r), side, now, day, at, until, killed)
-                else:
-                    self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out,
-                                           ahead=ahead)
+                    continue
+                room = ahead
+                if _eight_family(adapter, r["family"]):
+                    if kept is None:        # (read once, after every earlier buy of the tick has gone or not)
+                        kept = self._event_kept_8(day, at, s, adapter)
+                    room = kept
+                self._event_work_entry(Intent.of(r), side, now, day, at, until, s, adapter, real_block, killed, out,
+                                       ahead=room)
             except Exception as exc:  # noqa: BLE001 - the next intent goes on
                 self._error(f"event {r['e_side']} {r['iid']}", exc, out)
+
+    @staticmethod
+    def _event_buy_order(rows: Sequence[Mapping[str, Any]], adapter: Any) -> list[Mapping[str, Any]]:
+        """An auction's buys in ROOM's order (PREREG-EVL-3 section 2): Sized programs' buys first, then Probe's, then
+        learning's; within Sized and within Probe ROUND-ROBIN (A85, `book.send_key`: every program's first buy, in the
+        tables' order, before any program's second); learning in the tables' order; within a program its own ranking
+        (the decision planned them in it, so its iids are in it)."""
+        nth: dict[str, int] = {}
+        ranked = []
+        for r in sorted((r for r in rows if r["e_side"] == "buy"), key=lambda r: int(r["iid"])):
+            n = nth.get(str(r["family"]), 0)
+            nth[str(r["family"])] = n + 1
+            ranked.append(((*adapter.send_key(r["family"], r["e_band"], n), int(r["iid"])), r))
+        return [r for _, r in sorted(ranked, key=lambda pair: pair[0])]
+
+    def _event_kept_8(self, day: str, at: str, s: Any, adapter: Any) -> HeldAhead:
+        """PREREG-EVL-8 SECTION 4.2 (release 1019n's money review): "an earlier file's row ... is never refused, at its
+        own auction, because of this file's buys". THE ROOM EVERY EARLIER ROW'S BUY OF THE AUCTION STILL TO GO KEEPS from
+        this file's buys, read as stored now (after the tick's earlier sends): each earlier row's buy whose intent is
+        live and may send a new order (`_event_last`: not sent yet, its last order refused for a reading the gateway
+        could not make, or A80's one re-send after the venue's cancel), in ROOM's order, keeps its worst case at its
+        limit (`_event_keep_room`, as PREREG-EVL-5's waiting buys keep theirs: its dollars out of the cash and the
+        invested room, at its weight out of the loss budget, out of its name's wall, and one held order on the lines).
+        A working order is counted by the sizing itself; a buy finished keeps nothing. Made afresh each tick, so a buy
+        that has gone or ended keeps nothing the next one. A row whose figures cannot be read keeps the most its band may
+        ask (`_event_keep_room`). The orders those buys may still send are kept on the lines by `_event_line_keep`
+        already, so none is counted here again. A buy of this file that fits only but for this room WAITS (its words
+        `HELD_EARLIER`), and goes, or is refused, once those buys have gone or ended."""
+        kept = HeldAhead(words=HELD_EARLIER)
+        rows = self.state.rows("SELECT i.*, e.side AS e_side, e.band AS e_band FROM eq_intents i JOIN eq_event_intents e "
+                               "ON e.iid=i.iid WHERE i.status IN ('planned', 'sent') AND e.side='buy' AND e.day=? AND "
+                               "e.at=? ORDER BY i.iid", (day, at))
+        for r in self._event_buy_order([r for r in rows if not _eight_family(adapter, r["family"])], adapter):
+            try:
+                intent = Intent.of(r)
+                _, may = self._event_last(intent, entry=True)
+                inst = self._instance(intent.instance)
+                side = self._event_row(intent.iid)
+                if not may or inst is None or side is None:
+                    continue
+                self._event_keep_room(intent, inst, side, day, s, kept)
+            except Exception:  # noqa: BLE001 - unreadable: the most its band may ask (the reading that keeps more)
+                E = self.sizing_equity()
+                usd = adapter.most_ask(s, str(r["e_band"]), E) if E is not None and E > 0 else ZERO
+                if usd > 0:
+                    kept.usd += usd
+                    kept.risk += usd
+                    kept.names[str(r["symbol"]).upper()] = kept.names.get(str(r["symbol"]).upper(), ZERO) + usd
+                    kept.held.append(int(r["iid"]))
+        # (the lines: this file's entry keeps every order those buys may still send already, `_event_line_keep`'s keep,
+        # three a planned buy at the open and two at the close, one a re-send to come; counted once, not again here)
+        kept.orders = 0
+        return kept
 
     def _event_last(self, intent: Intent, *, entry: bool = False) -> tuple[Order | None, bool]:
         """(the intent's last order, whether a new one may go now): none yet, or the last one refused with nothing sent
@@ -6732,7 +6805,7 @@ class EquityBook:
             if free is not None and free[0] >= 1:
                 # (PREREG-EVL-5 section 1.3: it fits but for the room ROOM keeps for the buys ahead of it that wait for
                 # the lane's close decision: it waits with them, and goes, or is refused, once they are decided)
-                text = held + f"{HELD_ROOM} ({len(room.held)} {HELD_AHEAD}): {why}"
+                text = held + f"{HELD_ROOM} ({len(room.held)} {room.words}): {why}"
                 if intent.why != text[:400]:
                     intent.why = text[:400]
                     self._save_intent(intent)

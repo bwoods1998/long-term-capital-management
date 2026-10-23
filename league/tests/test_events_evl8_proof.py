@@ -197,6 +197,111 @@ class TheBookWithAndWithout(TB.EventTest):
             self.assertEqual(sent[0], "ACME", "the earlier row's buy is sent first")
 
 
+class TheEarlierBuysFirst(TB.EventTest):
+    """SECTION 4.2 IN THE HOUSE'S OWN BOOK (the money review of release 1019n): "an earlier file's row ... is never
+    refused, at its own auction, because of this file's buys", and "no earlier file's row ever waits for a read, a write
+    or a room of this file". (1) An earlier row's buy the gateway refused with a reading it could not make (424 `bars`)
+    keeps its room from this file's buys until its retry (league/equity/live.py `_event_kept_8`): with PREREG-EVL-8 on,
+    its retry is sized as without it. (2) Every earlier row's send of a tick (A80's re-send) goes BEFORE this file's late
+    pass, so a slow read of that pass (its picks' bars) never holds it past the window's cut-off."""
+
+    def harness_of(self, name: str, *, eight: bool, venue=None):
+        root = self.root / name
+        root.mkdir()
+        h = TB.Harness(root)
+        if venue is not None:
+            h.venue = venue(h)
+            h.book = h.new_book()
+        self.addCleanup(h.state.close)
+        self.addCleanup(h.lane.st.close)
+        self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+        TheBookWithAndWithout.seed(self, h, eight=eight)      # (ACME for an earlier close row; PX-DROP-ON's picks)
+        learners_failed(h, "on")
+        return h
+
+    def retry_day(self, *, eight: bool):
+        from league.live.venue import Submitted
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            def venue(h):       # (its gateway refuses the FIRST buy of ACME with 424 `bars`: nothing sent, a retry)
+                v = TB.AuctionVenue(h.market, h.clock)
+                real = v.submit
+                refused: list[int] = []
+
+                def submit(body, *, exit):
+                    if body["side"] == "buy" and body["symbol"] == "ACME" and not refused:
+                        refused.append(1)
+                        v.sent.append(dict(body))
+                        return Submitted(False, {"error": "bars", "cap": "bars"}, "HTTP 424 bars", status=424)
+                    return real(body, exit=exit)
+                v.submit = submit
+                return v
+            h = self.harness_of("on" if eight else "off", eight=eight, venue=venue)
+            h.options.reserved_usd = 1800.0         # (the cash the event buys may take: $2,000 - $1,800 - the $50 reserve)
+            self.ready(h)
+            h.day(upto=(15, 48))
+            return h
+
+    def test_an_earlier_buys_retry_is_sized_as_without_this_file(self):
+        off = self.retry_day(eight=False)
+        on = self.retry_day(eight=True)
+        mine = lambda h: [b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]  # noqa: E731
+        self.assertEqual([(b["qty"], b["limit_price"]) for b in mine(off)], [("5", "20.00"), ("5", "20.00")],
+                         "without PREREG-EVL-8: refused (424) at 15:47, five shares at its 15:48 retry")
+        self.assertEqual([(b["qty"], b["limit_price"]) for b in mine(on)], [("5", "20.00"), ("5", "20.00")],
+                         "with it: the same retry, the same five shares")
+        acme = [r for r in on.event_intents("buy") if r["symbol"] == "ACME"]
+        self.assertEqual([r["status"] for r in acme], ["sent"])
+        px = {r["symbol"]: r for r in on.event_intents("buy") if P.is_8(r["program"])}
+        self.assertEqual(px["PXA"]["status"], "sent", "PX's buys take what ACME's retry leaves")
+        sent = [b["symbol"] for b in on.bodies() if b["side"] == "buy"]
+        self.assertEqual(sent[0], "ACME")
+        self.assertLess(sent.index("PXA"), len(sent) - 1, "PXA went at 15:47, sized beside ACME's kept room")
+        self.assertEqual([(b["symbol"], b["qty"]) for b in on.bodies() if b["side"] == "buy"],
+                         [("ACME", "5"), ("PXA", "2"), ("ACME", "5")],
+                         "at 15:47 PXA takes two shares beside ACME's kept $100, PXB to PXD wait for it")
+        waits = [r["why"] for r in on.event_intents("buy") if r["symbol"] in ("PXB", "PXC", "PXD")]
+        self.assertTrue(all("sizing" in w for w in waits), waits)
+
+    def slow_day(self, *, eight: bool):
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            def venue(h):
+                v = VC.CancellingVenue(h.market, h.clock)
+                v.venue_cancels = [0.005]       # (ACME's first buy, cancelled by the venue 5 ms after it: A80's re-send)
+                return v
+            h = self.harness_of("slow-on" if eight else "slow-off", eight=eight, venue=venue)
+            real = h.market.bars
+            reads: list[float] = []
+
+            def bars(symbols, **kw):        # (this file's picks' bars: a read that takes 70 s)
+                if any(str(x).startswith("PX") for x in symbols):
+                    h.clock.set(h.clock() + 70.0)
+                    reads.append(h.clock())
+                return real(symbols, **kw)
+            h.market.bars = bars
+            h.lane.decided(TB.DAY, "open")
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            h.lane.decided(TB.DAY, "close")         # (the lane's close receipt at 15:47:40: PX's pass at the 15:48 tick)
+            h.tick(15, 48)
+            return h, reads
+
+    def test_an_earlier_rows_re_send_never_waits_for_this_files_reads(self):
+        off, _ = self.slow_day(eight=False)
+        on, reads = self.slow_day(eight=True)
+        acme = lambda h: [b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"]  # noqa: E731
+        self.assertEqual(len(acme(off)), 2, "without PREREG-EVL-8: the buy and A80's re-send at 15:48")
+        self.assertEqual(len(acme(on)), 2, "with it: A80's re-send goes at 15:48:03, before this file's slow read")
+        self.assertTrue(reads, "this file's pass read its picks' bars in that tick")
+        self.assertEqual([b["symbol"] for b in on.bodies() if b["side"] == "buy" and P.is_8(
+            next(r["program"] for r in on.event_intents("buy") if r["symbol"] == b["symbol"]))], [],
+            "this file's buys, planned after a read that ended past 15:49:00, are not sent")
+
+
 class TheLookAhead(unittest.TestCase):
     """Section 1.2: nothing read after tau. A future bar in the vendor's answer and a future member outcome are planted:
     both are ignored."""
