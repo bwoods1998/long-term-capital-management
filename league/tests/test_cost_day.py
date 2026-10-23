@@ -28,6 +28,7 @@ from league.swarm import settings as SS
 from league.swarm.guard import SailGuard
 from league.swarm.models import ModelRouter
 from league.swarm.store import SwarmStore
+from league.tests.v2_cost import on_v2_cost
 from league.tests.swarm_fakes import Clock
 from league.tests.test_ops_budget import Meter, inputs
 
@@ -35,8 +36,10 @@ UTC = dt.timezone.utc
 NY = H.C.NY
 MON, TUE, WED = dt.date(2026, 10, 19), dt.date(2026, 10, 20), dt.date(2026, 10, 21)
 STEP = 600.0   # ten minutes: the holders spend, then the next step's stall run reads the meters
-#: A profitable trading week: the cap at the owner's $25 (fixed 1.66, the lane 3.00, Sail research 16.27, the Claude
-#: roles 4.07), every prefund far above its runway, so no meter tapers.
+#: A profitable trading week: the cap at rule 3's ceiling of $25 (fixed 1.66, the lane 3.00, Sail research 16.27, the
+#: Claude roles 4.07; `EveryLineOnOneDay`, on rule 3's figures), and under goal V3's rule 4 a $30 cap ($10 + $20: fixed
+#: 1.66, the lane 6.00, Sail research 17.87, the Claude roles 4.47; `EveryLineOnOneDayGoalV3`), every prefund far above
+#: its runway, so no meter tapers.
 WEEK = dict(week_net=280.0, sail=5000.0, claude=5000.0, lane_peak=2.0)
 
 
@@ -193,7 +196,13 @@ class Holders(unittest.TestCase):
         return sum(usd for who, at, usd in self.spent if lo <= at < hi and (holder is None or who == holder))
 
 
+@on_v2_cost
 class EveryLineOnOneDay(Holders):
+    """Every line on one day, on budget rule 3's figures (league/tests/v2_cost.py: the $25 the week reaches)."""
+
+    #: The cap the week's $280 of net gives: rule 3's ceiling.
+    CAP = 25.0
+
     def lines(self) -> dict[str, float]:
         claude = self.doc["meters"]["claude"]
         return {"lane": claude["lane_usd_day"], "roles": claude["research_usd_day"],
@@ -204,7 +213,7 @@ class EveryLineOnOneDay(Holders):
         metered.py measures the day at the cap, never over it, and nothing was held."""
         self.simulate(utc(WED, "12:05"), **run)
         lines, cap = self.lines(), self.doc["cap_usd_day"]
-        self.assertEqual((cap, self.doc["cap"]["fixed_usd_day"]), (25.0, 1.6644))
+        self.assertEqual((cap, self.doc["cap"]["fixed_usd_day"]), (self.CAP, 1.6644))
         for holder, line in lines.items():
             self.assertAlmostEqual(self.within(TUE, holder), line, places=6, msg=holder)
         fixed = self.doc["cap"]["fixed_usd_day"]
@@ -213,7 +222,7 @@ class EveryLineOnOneDay(Holders):
         ledger = MT.load(self.root)
         figure = ledger["days"][TUE.isoformat()]
         self.assertTrue(figure["whole"] and figure["final"])
-        self.assertEqual(figure["cap"], 25.0)
+        self.assertEqual(figure["cap"], self.CAP)
         self.assertFalse(figure["over"], figure)
         self.assertLessEqual(figure["spent"], cap + MT.OVER_EPSILON)
         self.assertFalse(MT.cap_check(ledger, utc(WED, "12:05"))["stalled"])
@@ -251,6 +260,21 @@ class EveryLineOnOneDay(Holders):
             self.assertEqual((day, ES.parse_iso(start).timestamp(), ES.parse_iso(end).timestamp()), (TUE, lo, hi))
             self.assertEqual(at - at % 86400, lo, "the Sail guard's and the router's own midnight")
             self.assertEqual(MT.utc_day(at), TUE)
+
+
+
+class EveryLineOnOneDayGoalV3(Holders):
+    """Every line on one day on the figures in force, goal V3's budget rule 4 (release 1019m-cost): the same week's $280
+    of net is a $30 cap ($10 plus half the week over its 7 days), the lane's part $6.00; each holder spends exactly its
+    line in the judged UTC day and, with the fixed costs, they are the cap, never over it."""
+
+    CAP = 30.0
+    lines = EveryLineOnOneDay.lines
+    judged = EveryLineOnOneDay.judged
+
+    def test_each_holders_line_over_the_judged_day_adds_up_to_goal_v3s_cap_at_most(self):
+        self.judged()
+        self.assertEqual((B.BASE_USD_DAY, B.CEILING_USD_DAY, self.lines()["lane"]), (10.0, 50.0, 6.0))
 
 
 class TheCapBreachHold(Holders):

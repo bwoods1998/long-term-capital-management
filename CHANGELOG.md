@@ -42,6 +42,35 @@ since release 1019b (the desktop's store migrated there at 21:11Z Oct 19 and sta
 backup, its timers stopped); version 2 of its nine seatable programs, PREREG-EVL-4's three and PREREG-EVL-5's three
 (their version 1) trade real money at learning size, and R3's births run nightly (release 1019e, `events.births`).
 
+### Release 1019m-cost: goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145)
+
+On `fix/cost-v3` (unreleased; cut from `rel/1019l` `3df7dd9d`, live since 06:12Z Oct 23; an owner deploy of the House
+alone: THE GATEWAY IS NOT TOUCHED, it enforces no daily compute cap (`CLAUDE_USD` is the funded total); never
+12:55-20:05Z on a trading day, never with an order in flight, CI green on the exact head; NO IDENTITY MOVES: the money
+digest `1687e4e3` and the constitution `3feab26d` (release 1019l's pair), the options execution fingerprint `b60410ad`
+and the equity identity `78022ca6`, read with the tree's own functions on 3.14 and 3.11). The owner's goal V3, item 5:
+"Cost: metered compute <= $10 a day plus half the trailing week's realized net profit, never above $50". Budget rule 4
+(league/ops/budget.py `RULE_VERSION` 3 -> 4, its text quoting goal V3; budget.json `SCHEMA` 3 -> 4, the same fields, so
+neither side of the deploy or a rollback runs on the other rule's dollars): `BASE_USD_DAY` 5 -> 10, `CEILING_USD_DAY`
+25 -> 50, the lane's part `LANE_USD_DAY` 3 -> 6 (its $3 was the base's part beside the House box, so it keeps 6 of the
+10), and the lane's own line `events.verdict_usd_day` (league/config.json; league/events/house.py's default
+`VERDICT_USD_DAY`) 3.00 -> 6.00. Unchanged: half the trailing week's realized net profit (5 sessions, spread over 7
+days), prepaid credit first (each meter's runway taper; nothing is bought), the split (Sail 0.8, Claude 0.2), the lane's
+headroom (1.5 times its heaviest day), the reserves, the gate's holds, the floor's Sail fixed cost ($1.50), the births'
+night cap ($0.25), the two-day funding lead; no money row, position size, wall or judge. At no profit the $10 is fixed
+$1.66, the lane $6.00 (verdicts, births, and readers inside the lane's line: PREREG-EVL-10's R2 gets its full $0.75
+while v1's heaviest day is under $3.33) and research $2.34 (Sail $1.87, the Claude roles $0.47, unspent while research
+is off, A60); the walls Sail $40 and the Claude roles $10; the cap reaches $50 at $560 of the week's net. The alarms
+(`cap_breach`, the cap breach hold) and the daily report's costs and allowance read the rule's constants and
+budget.json, so they follow it; metered.json keeps each past day's cap as rule 3 set it. The Claude meter's line at no
+profit is $6.47 (was $3.07), so its funding notice comes sooner for the same balance; the notice id is `:r4`.
+league/ops/budget.py and league/events/house.py stay FORBIDDEN to the updater (league/ci.py unchanged): the owner's goal
+V3 authorizes this change, shipped by the captain's release. Tests: league/tests/test_ops_budget.py `CostRule` and
+`LaneAllowance` and the V3 tests in test_cost_day.py, test_daily_report.py, test_ops_metered.py and
+test_events_house.py on the figures in force; the earlier mechanism tests run on rule 3's figures explicitly
+(league/tests/v2_cost.py). Rollback: the House to release 1019l's head `3df7dd9d` (rule 3 reads schema 4 as no file:
+its floor until its own budget job has run).
+
 ### Release 1019l: THE OWNER'S GOAL V3's money rows (A138) on release 1019k, on `rel/1019l` (unreleased; cut from `fix/evl6-stays` `8afdcffe`, so it carries release 1019k; an owner-authorized captain deploy before 12:55Z Oct 23: the gateway is NOT touched, THEN THE HOUSE with THE NEW PAIR `1687e4e3` / `3feab26d`; the standing grant re-ratifies at the House's start): goal V3 (04:40Z Oct 23, 2026: "I accept losing my entire Alpaca balance. Use it ... every seatable program trades real money from its first event at up to 5% of equity a position ... a bug stop that pauses new entries after a 25% loss in one session") moved five money rows, three bounds and one code constant, nothing else: `equity_money.event.position_share.learning` 0.02 -> 0.05 (its bound with it) and `.probe` 0.035 -> 0.05 (a learning position is never larger than a Probe one; Probe and Sized past PREREG-EVL-1 section 8's frozen envelope, and the name's wall toward V3's 25% with the gateway's `STOCK_EVENT_SHARE_MAX`, are a later release); `options_money.probe.loss_budget_usd` 400 -> 1900 and `.loss_total_usd` 800 -> 1900 (their bounds with them; about the balance), `options_money.daily_stop_share` 0.35 -> 0.25 (V3's bug stop); league/events/done.py `LOSS_TOTAL_USD` 800 -> 1900. The shadows, the screens and every judge are unchanged: only real-money size and the loss lines. The options execution fingerprint `b60410ad` and the equity identity `78022ca6` do not move. Tests: league/tests/test_v3_walls.py on the table in force (the rows, the digests and the one-move check, the book's 5 shares at $20 of $2,000, the Done stop at $1,900); the earlier releases' tests of the same mechanisms run on release 1019i's table (league/tests/v2_walls.py, as `on_1019h` and `evl7_fakes` do); `equity_design.DIGESTS` regenerated, release 1019i's kept as `DIGESTS_1019I` (`before_1019l`). Rollback: the House to release 1019k's head (or 1019j's), the pair `d52a5af5` / `9c8b2221`.
 
 ### Release 1019k: the stay look's two re-review majors (feat/evl-6's, A123/A134), on `fix/evl6-stays` (unreleased; cut from release 1019j's head `15353d07`): whether a stay look falls due at a close is decided only on that close's final, settled and copied record (a late block never moves or loses the look: section 2 applied to section 3), and an older real-money Probe lot still on the ladder holds the look as the close's own lots do, with Sized refused past the ladder until the next look (`v6.sized.unsettled`); and the sizing reading of A123 made literal (the re-review's [6]): a PREREG-EVL-6 version's Probe and Sized buys are sized and gated on clause 2's own 0.8 (live.py `V6_SIZE_BAR`), the `reach_bar` row below 0.8 switching them OFF (`reach_bar_off`) instead of flooring them under the bar; three tests that fail on release 1019i's code; and THE BIRTHS BUDGET'S RESERVATIONS (A137): the charges of frozen files whose code is not live (PREREG-EVL-8 0.65, PREREG-EVL-9 0.30, PREREG-EVL-10 0.13 in A129's order) are held from the births' room until each file's pin appears, so births can never spend what those files already hold of the stated 3.9 (`births.RESERVED`, `budget()['reserved']`); records stay free; no digest moves

@@ -765,12 +765,16 @@ failing waits as a failed one). Verdicts are asked from
 07:30 ET because a session's universe is fixed then
 (its tickers copy is the latest before 07:30 ET), with the decision's own code (`decide_open` / `decide_close`
 `ask_only`), so the 09:15 decision finds them stored and asks none. Verdicts wait while the House is paused (`PAUSE`) and
-over the lane's own line of a day: from release 1019c the lower of `events.verdict_usd_day` ($3, from release
-1019b's second review: the goal's cost rule, metered compute at most $5 a day plus half the trailing week's realized
-net profit, with the House box at about $1.29 a day) and budget rule 3's
-allowance for the lane (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`,
-$3 a day at no profit, half as much again after a day held at it, never more than the cap's room, 0 under the cap
-breach hold; `lane.json` `verdict_line_usd`), held on the UTC day (00:00-24:00 UTC, 20:00 ET to 20:00 ET in summer),
+over the lane's own line of a day: from release 1019c the lower of `events.verdict_usd_day` ($6 from release
+1019m-cost: the owner's goal V3, item 5, metered compute at most $10 a day plus half the trailing week's realized net
+profit, never above $50, budget rule 4, whose lane part at no profit is $6.00 of the $10; $3 from release 1019b's second
+review to release 1019l: goal V2's $5 a day, with the House box at about $1.29 a day) and the budget rule's allowance
+for the lane (league/ops/budget.py `lane_allowance`: the Claude meter's lane part in `<state>/budget.json`, $6 a day at
+no profit under rule 4 ($3 under rule 3), half as much again after a day held at it, never more than the cap's room,
+0 under the cap breach hold; `lane.json` `verdict_line_usd`). The births' call (at most $0.25 a night) counts in it,
+and so does every reader a later file puts inside the lane's line (PREREG-EVL-10, tag `prereg-evl-10`: its R2 asks
+within R2_LINE = max(0, min($0.75, L - 1.5 V - $0.25)), L this line). Held on the UTC day (00:00-24:00 UTC, 20:00 ET to
+20:00 ET in summer),
 the day every other line of the rule is held and the cap judged on (New York days before 1019c): a READ event then
 waits, as PREREG-EVL-1 section 4 lets it. The lane writes a receipt
 for every task in the store (their contract with the House is league/events/__init__.py, THE EVENT LANE'S RECEIPTS) and

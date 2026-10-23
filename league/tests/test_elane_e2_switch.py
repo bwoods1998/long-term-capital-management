@@ -28,6 +28,7 @@ from league.swarm import settings as S
 from league.tests import REAL_POLICY_PATH
 from league.tests import elane_e2_fakes as fx
 from league.tests.test_swarm_loop import LoopCase
+from league.tests.v2_cost import on_v2_cost
 
 REPO = Path(__file__).resolve().parents[2]
 E2_MODULES = (elane_births, elane_train, elane_review, elane_yield)
@@ -424,6 +425,7 @@ class TheLoop(LoopCase):
         key = f"swarm:elane:train:e2-wired:{n}:sail:pro_asap"
         self.store.add_spend("sail_model", usd, family="e2-wired", detail={"profile": "pro_asap", "key": key, "desk": "e2-wired"})
 
+    @on_v2_cost
     def test_e2s_dollars_never_pause_the_researchers_and_e2_waits_at_its_own_pace(self):
         # The review's blocker (loop-1, merge-1), on the real loop, router, Provider and the committed policy.json: E2's
         # calls are booked as `sail_model` with keys "swarm:elane:...", the meter the researchers' hourly pace sums, and

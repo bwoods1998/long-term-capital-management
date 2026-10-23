@@ -28,8 +28,9 @@ activity. The lane's page is [docs/events.md](docs/events.md).
   fifteen seatable versions of PREREG-EVL-1 to -5), three a night (A81; [docs/events.md](docs/events.md), "Births").
 - **Money**: at most 10% of equity in one name, at most 100% invested, no margin; a loss budget of $400 net in any 20
   sessions and $800 net in total; the kill switch, the daily stop and the drawdown stop are never weakened.
-- **Cost follows profit**: metered compute at most $5 a day plus half the trailing week's realized net profit, never
-  above $25 a day.
+- **Cost follows profit**: metered compute at most $10 a day plus half the trailing week's realized net profit, never
+  above $50 a day (the owner's goal V3, item 5, from release 1019m-cost: budget rule 4; goal V2's $5 and $25 before it);
+  prepaid credit first.
 - **Done**: at least 300 settled real-money events from at least 3 programs (50 each), realized after-fee profit, the
   95% lower bound of the per-event after-cost return above zero, four weeks' profit at least the metered cost, fills
   within 15 bp of the shadow prices, and 14 days without a captain. **Kill**: at 400 events, if the 95% upper bound is
@@ -146,11 +147,14 @@ since 20:06Z Oct 21, 2026) the budget rule's version 3 is the goal's cost rule: 
 (Sail models and boxes, Claude, OpenAI, data, Cloudflare) at most $5 plus half the trailing week's realized net profit
 of every real book (the last 5 sessions' net, its half spread over the week's 7 days), never above $25, the fixed costs
 inside it and the event lane's verdicts first on the Claude line, held there by the lane itself; a cheap day is never a
-failed day. The stall alarm then also watches the event lane by its progress (a clean record pass, each decision made
-in its window, its verdicts, the nightly settling, its real fills against the auction prints) and the day's measured
-spend against the cap (`cap_breach`; every line is held on the UTC day the cap is judged on, and a day measured over its
-cap holds every line at 0 until 00:00 UTC), and the owner gets the lane's daily one-screen report by mail
-([operations](docs/operations.md), **Release 1019c, alarms and costs**).
+failed day. Under the owner's goal V3 (Oct 23, 2026, item 5; release 1019m-cost) the budget rule's version 4 is the same
+rule at $10 plus half the trailing week's realized net profit, never above $50: at no profit the fixed costs about
+$1.66, the event lane's part $6.00 (its verdicts, births and readers; $3.00 of rule 3's $5) and the old research roles
+the $2.34 left, prepaid credit first as before. The stall alarm then also watches the event lane by its progress (a
+clean record pass, each decision made in its window, its verdicts, the nightly settling, its real fills against the
+auction prints) and the day's measured spend against the cap (`cap_breach`; every line is held on the UTC day the cap is
+judged on, and a day measured over its cap holds every line at 0 until 00:00 UTC), and the owner gets the lane's daily
+one-screen report by mail ([operations](docs/operations.md), **Release 1019c, alarms and costs**).
 
 ## The game
 
