@@ -513,6 +513,9 @@ class Validation(unittest.TestCase):
         restated = mock.patch.object(BI, "RESTATED", ())     # (and without goal V3's weekly restatement: TheRestatement)
         restated.start()
         self.addCleanup(restated.stop)
+        caps = mock.patch.object(BI, "NIGHT_CAPS", ())       # (and R3's 3 a night: TheRestatement holds A156's 6)
+        caps.start()
+        self.addCleanup(caps.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(unload)
@@ -734,6 +737,16 @@ class TheRestatement(Validation):
     """Goal V3 item 3 (A155): the births' limit is the screen's 3.9 plus every weekly restatement whose session has come;
     it rations births only, never falls, and a later week adds a line."""
 
+    def test_six_seatable_births_a_night_from_the_lines_session(self):
+        st = self.s.st
+        with mock.patch.object(BI, "RESTATED", (("2026-10-23", 260, "invented"),)), \
+                mock.patch.object(BI, "NIGHT_CAPS", (("2026-10-23", 6),)):
+            self.assertEqual((BI.seatable_a_night(dt.date(2026, 10, 22)), BI.seatable_a_night(self.AS_OF)), (3, 6))
+            self.assertEqual(BI.budget(st, self.AS_OF)["seatable_left_tonight"], 6)
+            four = [self.candidate(f"EVL-B-8K-{i}", [item]) for i, item in enumerate(("5.02", "1.02", "2.03", "3.01"))]
+            out = BI.validate(st, BI.Facts(st, self.AS_OF), four, night=self.AS_OF)
+            self.assertEqual([c["ok"] for c in out], [True, True, True, True], "a fourth seatable birth is admitted")
+
     def test_the_limit_from_the_restatements_session_and_never_before(self):
         st = self.s.st
         line = (("2026-10-23", 260, "invented"),)
@@ -763,6 +776,7 @@ class TheLiveReservations(unittest.TestCase):
     def test_the_restatement_in_force_is_a155s(self):
         self.assertEqual(tuple((d, h) for d, h, _ in BI.RESTATED), (("2026-10-23", 260),))
         self.assertIn("A155", BI.RESTATED[0][2])
+        self.assertEqual(BI.NIGHT_CAPS, (("2026-10-23", 6),), "A156")
 
     def test_the_live_tree_holds_all_three(self):
         self.assertEqual([f for f, pin, _ in BI.RESERVED if getattr(P, pin, None) is None],

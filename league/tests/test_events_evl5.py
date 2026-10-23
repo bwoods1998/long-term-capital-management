@@ -1933,6 +1933,9 @@ class TheBirths(WorldCase):
         _rs = mock.patch("league.events.births.RESTATED", ())   # (the 3.9 accounting, without goal V3's restatement)
         _rs.start()
         self.addCleanup(_rs.stop)
+        _nc = mock.patch("league.events.births.NIGHT_CAPS", ())
+        _nc.start()
+        self.addCleanup(_nc.stop)
         from league.events import births as BI
 
         # (release 1019i: PREREG-EVL-6 section 5 restates the count, 0.13 a version of 3.9, in hundredths)

@@ -258,6 +258,22 @@ BUDGET_HUNDREDTHS = SN.V6_BUDGET_HUNDREDTHS
 CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
+#: GOAL V3'S WEEKLY LINE ON SEATABLE BIRTHS A NIGHT (the captain's A156, with A155's restatement): (the first session it
+#: holds for, the night's cap). Before any line, `SEATABLE_A_NIGHT`; a later line replaces an earlier one from its own
+#: session. Every seatable birth is still charged and still needs the budget's room.
+NIGHT_CAPS = (("2026-10-23", 6),)
+
+
+def seatable_a_night(night: dt.date | None = None) -> int:
+    """The seatable births night `night` may register (today's New York date when None): the latest `NIGHT_CAPS` line
+    whose session has come, else `SEATABLE_A_NIGHT`."""
+    if night is None:
+        night = dt.datetime.now(dt.timezone.utc).astimezone(C.NY).date()
+    cap = SEATABLE_A_NIGHT
+    for d, n in sorted(NIGHT_CAPS):
+        if dt.date.fromisoformat(d) <= night:
+            cap = int(n)
+    return cap
 #: THE CHARGES OF FROZEN FILES WHOSE CODE IS NOT LIVE YET (the captain's A137): (file, its pin in league/events/programs.py,
 #: hundredths). The screen's own sum (`budget6`) counts only what this code registers, so without this a frozen file's
 #: reservation (PREREG-EVL-8's five seats at 0.13 a run, A122; PREREG-EVL-9's 0.30 reserved at registration, A127)
@@ -1228,7 +1244,7 @@ def budget(store: Any, night: dt.date | None = None) -> dict[str, Any]:
     room = limit - used - waiting - reserved
     return {"used": used / 100, "limit": limit / 100, "left": (limit - used) / 100,
             "waiting_runs": waiting / 100, "reserved": reserved / 100, "left_for_births": room / 100,
-            "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, room // CHARGE_HUNDREDTHS)),
+            "seatable_left_tonight": max(0, min(seatable_a_night(night) - tonight, room // CHARGE_HUNDREDTHS)),
             "charge": CHARGE_HUNDREDTHS / 100}
 
 
@@ -1311,8 +1327,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             why.append(f"a duplicate of {worst[1]}: Jaccard {worst[0]:.2f} >= {JACCARD_MAX} over the last {SESSIONS} "
                        "sessions' selected events")
         if spec["seatable"] and not why:
-            if tonight_used + 1 > SEATABLE_A_NIGHT:
-                why.append(f"{SEATABLE_A_NIGHT} seatable births a night at most")
+            if tonight_used + 1 > seatable_a_night(night):
+                why.append(f"{seatable_a_night(night)} seatable births a night at most")
             elif used + CHARGE_HUNDREDTHS > budget_limit_hundredths(night):
                 limit = budget_limit_hundredths(night)
                 why.append(f"the false-pass budget: {used / 100:.2f} of {limit / 100:.2f} used or held for "
@@ -1854,7 +1870,7 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "select", "unread_reaction", "outcome_free", "Facts", "jaccard", "budget", "budget_used_tenths", "validate",
            "SYSTEM", "USER", "prompt_sha", "render", "request_body", "worst_usd", "parse_answer", "propose", "path_of",
            "line_of", "register", "reconcile", "night", "summary", "SESSIONS", "MIN_RATE", "MIN_RECORDED",
-           "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT",
+           "RECORD_MIN_RATE", "recorded_sessions", "JACCARD_MAX", "CHARGE_TENTHS", "BUDGET_TENTHS", "SEATABLE_A_NIGHT", "NIGHT_CAPS", "seatable_a_night",
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
            "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
            "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED", "ASKED", "CHARGE_HUNDREDTHS",

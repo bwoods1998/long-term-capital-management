@@ -1084,6 +1084,9 @@ class TheCount(LaneCase):
         _rs = mock.patch.object(BI, "RESTATED", ())   # (the 3.9 accounting, without goal V3's restatement)
         _rs.start()
         self.addCleanup(_rs.stop)
+        _nc = mock.patch("league.events.births.NIGHT_CAPS", ())
+        _nc.start()
+        self.addCleanup(_nc.stop)
         self.assertEqual((BI.CHARGE_HUNDREDTHS, BI.BUDGET_HUNDREDTHS), (13, 390))
         with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3), \
                 mock.patch.object(BI, "RESERVED", ()):
