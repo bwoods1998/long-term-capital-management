@@ -37,7 +37,7 @@ const STOCK_VARS = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK
   STOCK_DAY_EQUITY_MULTIPLE: '4' };
 //: The stock vars exactly as wrangler.jsonc deploys them (release R2: a single stock at 10% of equity, the book at 1x
 //: equity; release 1019b: the event lane's buys on).
-const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_EVENT_BUYS: 'on' };
+const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.12', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_EVENT_BUYS: 'on' };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
   OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put',
@@ -81,14 +81,14 @@ const refused = (result, status, cap, pattern, message = '') => {
 
 // ------------------------------------------------------------------------------------------------ the numbers
 
-test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 10%, the book at most 1x (no margin), a day 4x, event buys off', () => {
+test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 12%, the book at most 1x (no margin), a day 4x, event buys off', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const deployed = name => {
     const lines = config.split('\n').filter(line => line.includes(`"${name}"`));
     return lines.length === 1 ? JSON.parse(/:\s*("(?:[^"\\]|\\.)*")/.exec(lines[0])[1]) : lines.length;
   };
   for (const [name, value] of Object.entries(DEPLOYED)) assert.equal(deployed(name), value, name);
-  assert.deepEqual(stockCaps(DEPLOYED), { etfShare: 500000n, stockShare: 100000n, maxMultiple: 1000000n, dayMultiple: 4000000n });
+  assert.deepEqual(stockCaps(DEPLOYED), { etfShare: 500000n, stockShare: 120000n, maxMultiple: 1000000n, dayMultiple: 4000000n });
   assert.equal(stockBuysEnabled(DEPLOYED), true);
 });
 
@@ -148,11 +148,12 @@ test('the switch: only "on" (any case, trimmed) admits buys; anything else, a ty
   for (const raw of ['off', '', 'yes', 'true', '1', 'onn', undefined, null]) assert.equal(stockBuysEnabled({ STOCK_BUYS_REAL: raw }), false, String(raw));
 });
 
-test('the list: 17 ETFs (the index four, the eleven SPDR sectors, TLT, GLD) and 18 large US stocks, each flagged', () => {
+test('the list: 19 ETFs (the index four, the eleven SPDR sectors, TLT, GLD, SOXL, NVDL) and 38 US stocks, each flagged', () => {
   const etfs = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'etf');
   const stocks = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'stock');
-  assert.deepEqual(etfs, ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD']);
-  assert.deepEqual(stocks, ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST']);
+  assert.deepEqual(etfs, ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL']);
+  assert.deepEqual(stocks, ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
+    'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI']);
   assert.ok(Object.isFrozen(STOCK_UNIVERSE));
   assert.deepEqual(['SPY', 'BRK.B', 'TSLA', 'spy', 'toString', '__proto__'].map(stockKind), ['etf', 'stock', null, null, null, null]);
 });
@@ -1151,8 +1152,9 @@ test('health reports the stock route: the switch, the shares, the list, today\'s
     enabled: true, event_buys: { enabled: false, equity_share: '0.1', eligible: { day: null, count: 0, sha: null, at: null }, admitted: false },
     etf_equity_share: '0.5', stock_equity_share: '0.2', max_equity_multiple: '2', day_equity_multiple: '4',
     symbols: {
-      etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD'],
-      stock: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST'],
+      etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL'],
+      stock: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
+        'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI'],
     },
     day_buys_usd: '271.50', in_flight: 0, in_flight_usd: '0.00', closes_in_flight: 0, buys_admitted: true,
   });

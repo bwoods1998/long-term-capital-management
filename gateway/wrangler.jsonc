@@ -31,7 +31,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "triggers": { "crons": [] },
   "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
   "kv_namespaces": [{ "binding": "LIBRARY", "id": "a10ad6b1d601401293db6040b249b5f6" }],
@@ -217,7 +217,7 @@
     // buy's name is held to it, never above 10%, by a code ceiling either way.
     "STOCK_BUYS_REAL": "on",
     "STOCK_ETF_EQUITY_SHARE": "0.5",
-    "STOCK_SINGLE_EQUITY_SHARE": "0.1",
+    "STOCK_SINGLE_EQUITY_SHARE": "0.12",
     "STOCK_MAX_EQUITY_MULTIPLE": "1",
     "STOCK_DAY_EQUITY_MULTIPLE": "4",
     // THE EVENT LANE'S BUYS (release R2, gateway G2; PREREG-EVL-1 section 8; lib/caps.mjs "event-lane stock buys"): a

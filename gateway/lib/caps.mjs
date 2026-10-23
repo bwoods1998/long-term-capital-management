@@ -802,6 +802,11 @@ export const STOCK_UNIVERSE = Object.freeze({
   AAPL: 'stock', MSFT: 'stock', NVDA: 'stock', AMZN: 'stock', GOOGL: 'stock', META: 'stock', 'BRK.B': 'stock', JPM: 'stock',
   V: 'stock', UNH: 'stock', XOM: 'stock', JNJ: 'stock', PG: 'stock', MA: 'stock', HD: 'stock', AVGO: 'stock', LLY: 'stock',
   COST: 'stock',
+  // The owner's AI build-out portfolio (Oct 23, 2026 restart): two leveraged funds and the single names the House did not list.
+  SOXL: 'etf', NVDL: 'etf',
+  MU: 'stock', TSM: 'stock', AMD: 'stock', SKHY: 'stock', ALAB: 'stock', LITE: 'stock', DELL: 'stock', VRT: 'stock', GEV: 'stock',
+  SNDK: 'stock', INTC: 'stock', NBIS: 'stock', ASML: 'stock', BE: 'stock', PLTR: 'stock', CAMT: 'stock', IREN: 'stock', ASX: 'stock',
+  AMAT: 'stock', SMCI: 'stock',
 });
 
 /** What STOCK_UNIVERSE says a symbol is: "etf", "stock", or null when it is not on the list. */
