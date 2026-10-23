@@ -1,0 +1,13 @@
+COST RULE at no profit: fixed 1.6644 + lane 3.00 + research rest 0.3356 = 5.0000 (the cap 5.00: every dollar allocated)
+R2 outside every line: lines + R2's own line = 5.7500 > cap 5.00 by 0.75 when every line is spent
+  without the old research roles spending: 5.4144
+  v1 heaviest day $1.30: lane line 3.00, R2 sub-line 0.75
+  v1 heaviest day $1.42: lane line 3.00, R2 sub-line 0.62
+  v1 heaviest day $1.60: lane line 3.00, R2 sub-line 0.35
+  v1 heaviest day $1.83: lane line 3.00, R2 sub-line 0.00
+  v1 heaviest day $2.00: lane line 3.00, R2 sub-line 0.00
+at the caps (64 news, 8 docs), lo per-read cost: $0.216 a day (cost_r2.py's on_only assumed +2 score-3 reads: $0.138)
+at the caps (64 news, 8 docs), mid per-read cost: $0.598 a day (cost_r2.py's on_only assumed +2 score-3 reads: $0.409)
+at the caps (64 news, 8 docs), hi per-read cost: $1.340 a day (cost_r2.py's on_only assumed +2 score-3 reads: $0.965)
+worst case if every capped call is lost at its hold: $4.34 (R2's line stops it at $0.75)
+judge's prior: net at the mid cost $+21.51 over 120 sessions at $0.409/day; at the caps' $0.598/day it is $-1.13 (120 x $0.189 more)

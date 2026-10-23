@@ -1,0 +1,28 @@
+r2filter: 1/24 4s
+r2filter: 2/24 4s
+r2filter: 3/24 4s
+r2filter: 4/24 4s
+r2filter: 5/24 8s
+r2filter: 6/24 8s
+r2filter: 7/24 8s
+r2filter: 8/24 8s
+r2filter: 9/24 11s
+r2filter: 10/24 12s
+r2filter: 11/24 12s
+r2filter: 12/24 12s
+r2filter: 13/24 15s
+r2filter: 14/24 15s
+r2filter: 15/24 15s
+r2filter: 16/24 15s
+r2filter: 17/24 19s
+r2filter: 18/24 19s
+r2filter: 19/24 19s
+r2filter: 20/24 19s
+r2filter: 21/24 22s
+r2filter: 22/24 23s
+r2filter: 23/24 23s
+r2filter: 24/24 23s
+{"cell": "r2|NV|corner|AR20|n14|finf|f0.3", "R": 2000, "pass_run1_120": 0.0805, "se": 0.0061, "per_version_120": 0.148, "by_session": {"25": 0.044, "30": 0.064, "40": 0.077, "60": 0.0805, "90": 0.0805, "120": 0.0805}, "retired_120": 0.031, "picks_per_session": 3.71, "realized_mean_a_bp": 1.26, "mu_bp": 0.04}
+{"cell": "r2|NV|corner|AR20|n5|cnt|finf|f0.3|rep", "R": 2000, "pass_run1_120": 0.114, "se": 0.0071, "per_version_120": 0.1515, "by_session": {"25": 0.002, "30": 0.0265, "40": 0.0885, "60": 0.1105, "90": 0.114, "120": 0.114}, "retired_120": 0.009, "picks_per_session": 1.45, "realized_mean_a_bp": -1.08, "mu_bp": 52.94}
+{"cell": "r2|NV|corner|AR20|n8|cnt|finf|f0.15", "R": 4000, "pass_run1_120": 0.1197, "se": 0.0051, "per_version_120": 0.1268, "by_session": {"25": 0.00025, "30": 0.0145, "40": 0.07425, "60": 0.11325, "90": 0.11825, "120": 0.11975}, "retired_120": 0.0095, "picks_per_session": 1.18, "realized_mean_a_bp": 2.01, "mu_bp": 58.87}
+{"cell": "r2|NV|corner|AR20|n8|cnt|finf|f0.3", "R": 4000, "pass_run1_120": 0.1177, "se": 0.0051, "per_version_120": 0.2095, "by_session": {"25": 0.02075, "30": 0.07675, "40": 0.10725, "60": 0.116, "90": 0.11775, "120": 0.11775}, "retired_120": 0.015, "picks_per_session": 2.25, "realized_mean_a_bp": 0.25, "mu_bp": 44.72}

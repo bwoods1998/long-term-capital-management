@@ -1,0 +1,71 @@
+{
+ "basis": {
+  "lifetime": 3.9,
+  "charge": 0.13,
+  "used_by_frozen_files": {
+   "PREREG-EVL-6 (15 versions)": 1.95,
+   "PREREG-EVL-7 (2 learners)": 0.26,
+   "PREREG-EVL-8 (5 seats)": 0.65,
+   "PREREG-EVL-9 (2 x c9 reserved)": 0.3
+  },
+  "USED_before_any_birth": 3.16,
+  "LEFT_before_any_birth": 0.74
+ },
+ "scenarios": [
+  {
+   "seatable births registered before EVL-10's freeze": 0,
+   "USED before": 3.16,
+   "LEFT before": 0.74,
+   "EVL-10 seat registers": true,
+   "USED after EVL-10": 3.29,
+   "LEFT after EVL-10": 0.61,
+   "whole charges left": 4,
+   "EVL-11 gated seat can start later (LEFT >= 0.13 then)": true,
+   "META-W's two seats (0.26) fit after EVL-10": true
+  },
+  {
+   "seatable births registered before EVL-10's freeze": 1,
+   "USED before": 3.29,
+   "LEFT before": 0.61,
+   "EVL-10 seat registers": true,
+   "USED after EVL-10": 3.42,
+   "LEFT after EVL-10": 0.48,
+   "whole charges left": 3,
+   "EVL-11 gated seat can start later (LEFT >= 0.13 then)": true,
+   "META-W's two seats (0.26) fit after EVL-10": true
+  },
+  {
+   "seatable births registered before EVL-10's freeze": 2,
+   "USED before": 3.42,
+   "LEFT before": 0.48,
+   "EVL-10 seat registers": true,
+   "USED after EVL-10": 3.55,
+   "LEFT after EVL-10": 0.35,
+   "whole charges left": 2,
+   "EVL-11 gated seat can start later (LEFT >= 0.13 then)": true,
+   "META-W's two seats (0.26) fit after EVL-10": true
+  },
+  {
+   "seatable births registered before EVL-10's freeze": 3,
+   "USED before": 3.55,
+   "LEFT before": 0.35,
+   "EVL-10 seat registers": true,
+   "USED after EVL-10": 3.68,
+   "LEFT after EVL-10": 0.22,
+   "whole charges left": 1,
+   "EVL-11 gated seat can start later (LEFT >= 0.13 then)": true,
+   "META-W's two seats (0.26) fit after EVL-10": false
+  }
+ ],
+ "lifetime_draws": {
+  "EVL-10 (one seat, at most three runs, PREREG-EVL-7 s1.10's rule)": 0.39,
+  "EVL-11 (one gated seat, at most three runs)": 0.39
+ },
+ "owed_later_if_nothing_passes": {
+  "PREREG-EVL-6 second runs (15 x 0.13, from about the 60th session after REGISTERED_AT_6)": 1.95,
+  "PREREG-EVL-7 later runs (4 x 0.13)": 0.52,
+  "PREREG-EVL-8 later runs (0.13 each when one starts; its text sets no cap), five seats x one more run": 0.65,
+  "PREREG-EVL-9 later runs (4 x 0.15)": 0.6
+ },
+ "note": "Every charge is made only when the budget holds it (PREREG-EVL-6 s3, s5), so the lane's expected false passes never exceed 3.9; whatever registers now takes room that later runs and births would use. Restating the budget is the captain's, with its cost stated (each 0.13 = one more expected false pass)."
+}

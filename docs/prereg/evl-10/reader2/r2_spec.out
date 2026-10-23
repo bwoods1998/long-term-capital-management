@@ -1,0 +1,6 @@
+news sha 617f8979922b38f3fc5e95f1a2c830b4c02a248131d6865b9ad20c3c390a11be system+user chars 1863 schema bytes 1113
+doc sha 65d79226d019cce1ce7e249553f225781ecb85e74960b3a323c35f8e7914e650 system+user chars 2408 schema bytes 1472
+parse self-test: ok unparsed unparsed (expect ok unparsed unparsed)
+consumer_pass on the ok sample: True
+h uniformity: mean 0.4997, share < 0.25 0.2521
+share(): 0.5 1.0 0.39087947882736157

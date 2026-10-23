@@ -1,0 +1,13 @@
+worst: knife mu / line pilots done for 7 cells
+worst: 8/40 16s
+worst: 16/40 31s
+worst: 24/40 44s
+worst: 32/40 58s
+worst: 40/40 70s
+X|NV|corner|AR20|n5|cnt|finf|f0.3                R  4000 run1 0.1123 (+-0.0050) version 0.1560 picks/s 1.46 mean a +1.19 bp mu +52.94
+X|NV|corner|AR20|n5|cnt|finf|f0.15               R  4000 run1 0.1108 (+-0.0050) version 0.1108 picks/s 0.75 mean a +3.30 bp mu +61.68
+X|NV|corner|AR20|n8|cnt|finf|f0.1                R  4000 run1 0.1003 (+-0.0047) version 0.1003 picks/s 0.79 mean a -5.35 bp mu +62.87
+X|NV|corner|AR20|n3|cnt|finf|f0.3                R  2000 run1 0.1135 (+-0.0071) version 0.1135 picks/s 0.89 mean a +2.11 bp mu +55.87
+X|NV|corner|AR10|n5|cnt|finf|f0.3                R  2000 run1 0.1185 (+-0.0072) version 0.1655 picks/s 1.45 mean a +4.22 bp mu +52.94
+X|NK|corner|AR20|n5|cnt|finf|f0.3                R  2000 run1 0.1040 (+-0.0068) version 0.1465 picks/s 1.45 mean a +1.55 bp mu +1.03
+X|NS|corner|AR20|n5|cnt|finf|f0.3                R  2000 run1 0.0995 (+-0.0067) version 0.1565 picks/s 1.56 mean a +1.27 bp mu +34.66

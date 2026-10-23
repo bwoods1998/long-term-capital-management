@@ -1,0 +1,10 @@
+sens: knife mu for 4 cells
+sens: pilot 24/72 42s
+sens: pilot 48/72 78s
+sens: pilot 72/72 111s
+sens: eval 24/32 32s
+sens: eval 32/32 43s
+SENS|NV|corner|AR20|n5|cnt|finf|f0.3|mu-3bp                R  4000 run1 0.1098 (+-0.0049) ver 0.1445 pps 1.45 ma -3.69+-1.67 mu +48.22 (knife +52.94, pilot +1.72+-0.73)
+SENS|NV|corner|AR20|n5|cnt|finf|f0.3|mu+0bp                R  4000 run1 0.1030 (+-0.0048) ver 0.1432 pps 1.45 ma -1.56+-1.45 mu +50.50 (knife +52.94, pilot +2.44+-0.70)
+SENS|NV|corner|AR20|n5|cnt|finf|f0.3|mu+3bp                R  4000 run1 0.1190 (+-0.0051) ver 0.1605 pps 1.46 ma +1.14+-1.46 mu +53.20 (knife +52.94, pilot +2.74+-0.88)
+SENS|NV|corner|AR20|n5|cnt|finf|f0.3|knife_mu (designer centring) R  4000 run1 0.1197 (+-0.0051) ver 0.1693 pps 1.45 ma +1.76+-1.24 mu +52.94 (knife +52.94)

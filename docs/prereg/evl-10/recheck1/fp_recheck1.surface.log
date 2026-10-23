@@ -1,0 +1,34 @@
+surface: knife mu for 14 cells
+surface: pilot 24/336 68s
+surface: pilot 48/336 120s
+surface: pilot 72/336 163s
+surface: pilot 96/336 216s
+surface: pilot 120/336 268s
+surface: pilot 144/336 322s
+surface: pilot 168/336 385s
+surface: pilot 192/336 455s
+surface: pilot 216/336 525s
+surface: pilot 240/336 587s
+surface: pilot 264/336 651s
+surface: pilot 288/336 710s
+surface: pilot 312/336 766s
+surface: pilot 336/336 821s
+surface: eval 24/120 58s
+surface: eval 48/120 114s
+surface: eval 72/120 169s
+surface: eval 96/120 226s
+surface: eval 120/120 275s
+RC|NV|corner|AR20|n5|cnt|finf|f0.3                         R  8000 run1 0.1115 (+-0.0035) ver 0.1532 pps 1.45 ma -0.75+-1.25 mu +49.47 (knife +52.94, pilot +3.47+-0.95)
+RC|NV|corner|AR20|n5|cnt|finf|f0.6                         R  4000 run1 0.1115 (+-0.0050) ver 0.2115 pps 2.72 ma +0.97+-0.94 mu +36.09 (knife +36.32, pilot +0.22+-0.51)
+RC|NV|corner|AR20|n6|cnt|finf|f0.25                        R  4000 run1 0.1125 (+-0.0050) ver 0.1555 pps 1.46 ma -1.29+-1.27 mu +52.54 (knife +53.21, pilot +0.67+-0.82)
+RC|NV|corner|AR20|n8|cnt|finf|f0.3                         R  4000 run1 0.1135 (+-0.0050) ver 0.2080 pps 2.26 ma -2.00+-1.12 mu +45.50 (knife +44.72, pilot -0.78+-0.55)
+RC|NV|corner|AR20|n8|cnt|finf|f0.15                        R  4000 run1 0.1148 (+-0.0050) ver 0.1227 pps 1.18 ma +1.09+-1.75 mu +58.64 (knife +58.87, pilot +0.23+-1.00)
+RC|NV|corner|AR20|n10|cnt|finf|f0.15                       R  4000 run1 0.1165 (+-0.0051) ver 0.1565 pps 1.46 ma -2.83+-1.31 mu +55.43 (knife +56.91, pilot +1.47+-0.98)
+RC|NV|corner|AR20|n16|cnt|finf|f0.1                        R  4000 run1 0.1197 (+-0.0051) ver 0.1775 pps 1.55 ma +0.53+-1.69 mu +54.64 (knife +55.13, pilot +0.49+-0.72)
+RC|NV|corner|AR20|n14|cnt|finf|f0.6                        R  4000 run1 0.1105 (+-0.0050) ver 0.2040 pps 5.63 ma +0.81+-0.82 mu +16.30 (knife +15.76, pilot -0.54+-0.32)
+RC|NV|corner|AR20|n26|cnt|finf|f0.2                        R  4000 run1 0.1032 (+-0.0048) ver 0.1918 pps 4.28 ma -0.50+-0.90 mu +24.93 (knife +24.96, pilot +0.03+-0.58)
+RC|NV|corner|AR20|n42|cnt|finf|f0.15                       R  4000 run1 0.0958 (+-0.0047) ver 0.1775 pps 4.80 ma -2.18+-0.64 mu +17.70 (knife +17.68, pilot -0.02+-0.63)
+RC|NV|corner|AR20|n42|cnt|finf|f0.3                        R  4000 run1 0.0995 (+-0.0047) ver 0.1750 pps 6.68 ma -0.08+-0.97 mu +7.74 (knife +7.89, pilot +0.15+-0.56)
+RC|NV|corner|AR20|n42|cnt|finf|f0.6                        R  4000 run1 0.0995 (+-0.0047) ver 0.1767 pps 7.63 ma +0.26+-0.77 mu +4.16 (knife +4.42, pilot +0.25+-0.34)
+RC|NV|corner|AR10|n5|cnt|finf|f0.3                         R  4000 run1 0.1200 (+-0.0051) ver 0.1648 pps 1.45 ma +2.02+-1.85 mu +52.27 (knife +52.94, pilot +0.67+-1.00)
+RC|NV|corner|AR20|n42|finf|f0.15 (no cnt)                  R  4000 run1 0.0877 (+-0.0045) ver 0.1740 pps 4.91 ma +0.71+-0.96 mu -1.19 (knife -0.08, pilot +1.10+-0.38)

@@ -1,0 +1,3 @@
+doc spec sha 127c19f36f3811afaf4401c35e7620618a27ca0eb32795d0b19ba45a87522c5b | body bytes 4646 | body sha dda0573b40a6ff0d | max_tokens 400 | worst $0.0078
+news spec sha a82396145a28dd4d98d6878e515cc26c26fd70c6c29f2642d4e1c4241642d694 | body bytes 3572 | body sha b45828a9909beb18 | max_tokens 300 | worst $0.0061
+cap $0.0100; call 2 only if call 1's stated cost + $0.0061 <= cap

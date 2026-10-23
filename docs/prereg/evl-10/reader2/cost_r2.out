@@ -1,0 +1,389 @@
+{
+ "assumptions": {
+  "chars_per_token_prose": [
+   4.2,
+   4.0,
+   3.7
+  ],
+  "chars_per_token_doc": [
+   3.9,
+   3.6,
+   3.3
+  ],
+  "article_chars": [
+   220,
+   300,
+   420
+  ],
+  "news_prior_lines": [
+   4,
+   15,
+   40
+  ],
+  "line_chars": [
+   100,
+   120,
+   175
+  ],
+  "news_prior_filing_lines": [
+   0,
+   2,
+   6
+  ],
+  "filing_line_chars": 48,
+  "doc_text_chars": [
+   9000,
+   14500,
+   16000
+  ],
+  "doc_news_lines": [
+   2,
+   10,
+   25
+  ],
+  "so_overhead_tokens": [
+   150,
+   300,
+   600
+  ],
+  "news_answer_tokens": [
+   55,
+   75,
+   110
+  ],
+  "doc_answer_tokens": [
+   90,
+   115,
+   160
+  ],
+  "news_thinking_tokens": [
+   0,
+   300,
+   800
+  ],
+  "doc_thinking_tokens": [
+   100,
+   500,
+   1200
+  ],
+  "liquid_share": [
+   0.4,
+   0.6,
+   0.8
+  ]
+ },
+ "prices": {
+  "sonnet55": {
+   "in": 2.0,
+   "write": 2.5,
+   "out": 10.0,
+   "geo": 1.1
+  },
+  "opus55": {
+   "in": 4.0,
+   "write": 5.0,
+   "out": 20.0,
+   "geo": 1.1
+  },
+  "haiku45": {
+   "in": 1.0,
+   "write": 1.25,
+   "out": 5.0,
+   "geo": 1.0
+  }
+ },
+ "per_read": {
+  "sonnet55": {
+   "lo": {
+    "news": 0.00227,
+    "8k": 0.0089,
+    "tokens": {
+     "news": [
+      755,
+      55
+     ],
+     "8k": [
+      3098,
+      190
+     ]
+    }
+   },
+   "mid": {
+    "news": 0.00705,
+    "8k": 0.01831,
+    "tokens": {
+     "news": [
+      1330,
+      375
+     ],
+     "8k": [
+      5250,
+      615
+     ]
+    }
+   },
+   "hi": {
+    "news": 0.01706,
+    "8k": 0.03103,
+    "tokens": {
+     "news": [
+      3203,
+      910
+     ],
+     "8k": [
+      7303,
+      1360
+     ]
+    }
+   }
+  },
+  "opus55": {
+   "lo": {
+    "news": 0.00453,
+    "8k": 0.01781,
+    "tokens": {
+     "news": [
+      755,
+      55
+     ],
+     "8k": [
+      3098,
+      190
+     ]
+    }
+   },
+   "mid": {
+    "news": 0.0141,
+    "8k": 0.03663,
+    "tokens": {
+     "news": [
+      1330,
+      375
+     ],
+     "8k": [
+      5250,
+      615
+     ]
+    }
+   },
+   "hi": {
+    "news": 0.03411,
+    "8k": 0.06205,
+    "tokens": {
+     "news": [
+      3203,
+      910
+     ],
+     "8k": [
+      7303,
+      1360
+     ]
+    }
+   }
+  },
+  "haiku45": {
+   "lo": {
+    "news": 0.00103,
+    "8k": 0.00405,
+    "tokens": {
+     "news": [
+      755,
+      55
+     ],
+     "8k": [
+      3098,
+      190
+     ]
+    }
+   },
+   "mid": {
+    "news": 0.0032,
+    "8k": 0.00832,
+    "tokens": {
+     "news": [
+      1330,
+      375
+     ],
+     "8k": [
+      5250,
+      615
+     ]
+    }
+   },
+   "hi": {
+    "news": 0.00775,
+    "8k": 0.0141,
+    "tokens": {
+     "news": [
+      3203,
+      910
+     ],
+     "8k": [
+      7303,
+      1360
+     ]
+    }
+   }
+  }
+ },
+ "hold": {
+  "news_body_bytes_max": 11084,
+  "doc_body_bytes_max": 27055,
+  "sonnet55_news": 0.0549,
+  "sonnet55_doc": 0.1033,
+  "opus55_doc": 0.2065
+ },
+ "daily": {
+  "sonnet55": {
+   "lo": {
+    "reads_mean_oct19_21": {
+     "news": 52.9,
+     "8k": 3.9
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 2.8
+    },
+    "usd_mean_oct19_21": 0.155,
+    "usd_oct21": 0.179
+   },
+   "mid": {
+    "reads_mean_oct19_21": {
+     "news": 61.6,
+     "8k": 5.8
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 4.2
+    },
+    "usd_mean_oct19_21": 0.54,
+    "usd_oct21": 0.556
+   },
+   "hi": {
+    "reads_mean_oct19_21": {
+     "news": 68.0,
+     "8k": 7.7
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 5.6
+    },
+    "usd_mean_oct19_21": 1.4,
+    "usd_oct21": 1.334
+   }
+  },
+  "opus55": {
+   "lo": {
+    "reads_mean_oct19_21": {
+     "news": 52.9,
+     "8k": 3.9
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 2.8
+    },
+    "usd_mean_oct19_21": 0.309,
+    "usd_oct21": 0.358
+   },
+   "mid": {
+    "reads_mean_oct19_21": {
+     "news": 61.6,
+     "8k": 5.8
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 4.2
+    },
+    "usd_mean_oct19_21": 1.081,
+    "usd_oct21": 1.113
+   },
+   "hi": {
+    "reads_mean_oct19_21": {
+     "news": 68.0,
+     "8k": 7.7
+    },
+    "reads_oct21": {
+     "news": 68,
+     "8k": 5.6
+    },
+    "usd_mean_oct19_21": 2.799,
+    "usd_oct21": 2.667
+   }
+  }
+ },
+ "per_traded_event": {
+  "sonnet55": {
+   "10_buys_learning_bp_mid": 14.6,
+   "10_buys_learning_bp_hi": 35.1,
+   "10_buys_probe_bp_mid": 8.4,
+   "10_buys_probe_bp_hi": 20.1,
+   "14_buys_learning_bp_mid": 10.5,
+   "14_buys_learning_bp_hi": 25.1,
+   "14_buys_probe_bp_mid": 6.0,
+   "14_buys_probe_bp_hi": 14.3
+  },
+  "opus55": {
+   "10_buys_learning_bp_mid": 29.3,
+   "10_buys_learning_bp_hi": 70.3,
+   "10_buys_probe_bp_mid": 16.8,
+   "10_buys_probe_bp_hi": 40.1,
+   "14_buys_learning_bp_mid": 20.9,
+   "14_buys_learning_bp_hi": 50.2,
+   "14_buys_probe_bp_mid": 12.0,
+   "14_buys_probe_bp_hi": 28.7
+  }
+ },
+ "on_only": {
+  "lo": {
+   "reads": {
+    "news": 31.8,
+    "8k": 7.4
+   },
+   "sonnet55_usd_day": 0.138,
+   "opus55_usd_day": 0.276,
+   "bp_learning_6buys": 6.1,
+   "bp_probe_6buys": 3.5
+  },
+  "mid": {
+   "reads": {
+    "news": 37.2,
+    "8k": 8.0
+   },
+   "sonnet55_usd_day": 0.409,
+   "opus55_usd_day": 0.818,
+   "bp_learning_6buys": 17.9,
+   "bp_probe_6buys": 10.3
+  },
+  "hi": {
+   "reads": {
+    "news": 42.0,
+    "8k": 8.0
+   },
+   "sonnet55_usd_day": 0.965,
+   "opus55_usd_day": 1.929,
+   "bp_learning_6buys": 42.4,
+   "bp_probe_6buys": 24.2
+  }
+ },
+ "context": {
+  "v1_usd_per_verdict_measured": 0.000896,
+  "v1_day_oct21_volume_evl7_lens": "1.30 (model) to 1.42 (scaled to measured)",
+  "lane_line_usd_day": 3.0,
+  "house_fixed_usd_day_A87": 1.25,
+  "metered_cap_no_profit": 5.0,
+  "real_buys_a_session_all_programs_oct20_21": 23.5
+ },
+ "smoke_test": {
+  "doc": {
+   "max_tokens": 400,
+   "worst_usd": 0.00767,
+   "expected_usd": 0.00426
+  },
+  "news": {
+   "max_tokens": 300,
+   "worst_usd": 0.00598,
+   "expected_usd": 0.00367
+  },
+  "worst_total": 0.01365
+ }
+}

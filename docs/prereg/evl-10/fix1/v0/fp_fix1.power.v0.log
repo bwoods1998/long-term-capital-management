@@ -1,0 +1,13 @@
+power: knife mu / line pilots done for 8 cells
+power: 8/32 23s
+power: 16/32 37s
+power: 24/32 49s
+power: 32/32 64s
+P|alt|base|n42|cnt|finf|sda0.008|c0.5|noline     R  2000 run1 0.1320 (+-0.0076) version 0.2365 picks/s 7.65 mean a +34.37 bp mu -14.00
+P|alt|base|n42|cnt|finf|sda0.008|c0.5|L3.0|V1.42 R  2000 run1 0.1260 (+-0.0074) version 0.2100 picks/s 6.05 mean a +33.10 bp mu -14.00 line0 0.1929
+P|alt|base|n42|cnt|finf|sda0.008|c0.5|L3.0|V1.6  R  2000 run1 0.1075 (+-0.0069) version 0.1545 picks/s 5.12 mean a +30.51 bp mu -14.00 line0 0.298
+P|alt|base|n42|cnt|finf|sda0.008|c0.5|L3.75|V1.6 R  2000 run1 0.1290 (+-0.0075) version 0.2445 picks/s 6.62 mean a +34.22 bp mu -14.00 line0 0.1289
+P|alt|base|n42|cnt|finf|sda0.008|c0.7|noline     R  2000 run1 0.2820 (+-0.0101) version 0.4915 picks/s 7.65 mean a +55.15 bp mu -14.00
+P|alt|base|n42|cnt|finf|sda0.008|c0.7|L3.0|V1.42 R  2000 run1 0.2465 (+-0.0096) version 0.3900 picks/s 6.02 mean a +51.24 bp mu -14.00 line0 0.1929
+P|alt|base|n42|cnt|finf|sda0.008|c0.7|L3.0|V1.6  R  2000 run1 0.2275 (+-0.0094) version 0.3150 picks/s 5.12 mean a +47.42 bp mu -14.00 line0 0.298
+P|alt|base|n42|cnt|finf|sda0.008|c0.7|L3.75|V1.6 R  2000 run1 0.2935 (+-0.0102) version 0.4695 picks/s 6.61 mean a +55.07 bp mu -14.00 line0 0.1289
