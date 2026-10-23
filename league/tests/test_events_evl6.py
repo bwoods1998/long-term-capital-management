@@ -699,6 +699,44 @@ class TheStays(LaneCase):
         self.assertEqual(S.parse_iso(look["at"]), et(self.days[21], 16, 0), "the look is as of the close it fell due at")
         self.assertEqual(SC.key_of6(int(look["k"]))[2], 22)
 
+    def test_a_block_that_reaches_its_close_late_still_gets_the_s22_look_as_of_that_close(self):
+        """Whether a look falls due at a close is decided only on its final record (section 2: late data delays a
+        look, never its as-of close; release 1019i's re-review): a close judged before its block arrived is not
+        marked looked."""
+        for i, day in enumerate(self.days[:21]):
+            self.stay_day(day, [0.002, -0.001], base=100 * i)
+        state = lambda: json.loads(self.st.meta(BA.STAY_KEY.format(program=self.prog.id, version=3, n=1)))
+        with final(self.days[20]):                              # (the 22nd close's block is not in yet)
+            self.assertEqual(BA.review(self.st, now=et(self.days[21], 20, 40)), [])
+        self.assertEqual(state()["looked"], self.days[20].isoformat(), "the 22nd close is not marked looked")
+        self.stay_day(self.days[21], [0.002, -0.001], base=2100)     # (its block reaches the record a night late)
+        self.stay_day(self.days[22], [0.002, -0.001], base=2200)
+        with final(self.days[22]):
+            BA.review(self.st, now=et(self.days[22], 20, 40))
+        [look] = self.stay_looks()
+        self.assertEqual(S.parse_iso(look["at"]), et(self.days[21], 16, 0), "the S 22 look is as of the 22nd close")
+        self.assertEqual(SC.key_of6(int(look["k"]))[2], 22)
+
+    def test_an_older_probe_lot_on_the_ladder_holds_the_look_and_past_it_sized_is_refused(self):
+        """Sized's conditions are judged over every real-money event of the stay due by the look's close (section 3;
+        release 1019i's re-review, the money lens): a lot bought before the look's close and still unsold waits as
+        the close's own lots do; past the ladder the look runs and Sized waits for the next look."""
+        for i, day in enumerate(self.days[:22]):
+            self.stay_day(day, [0.03, 0.028], base=100 * i)
+        [event] = self.lane.settled(self.prog, self.days[18], [("08888", 0.0, 0.0)])
+        BA.record_fill(self.st, program=self.prog.id, version=3, event=event, side="buy", qty=10, price=10.0, fee=0.0,
+                       filled_at=S.iso(et(self.days[18], 9, 30)), band="probe", target_usd=100.0, sized_usd=100.0)
+        for day in self.days[21:18 + BA.STUCK_AFTER]:
+            self.review(day)
+            self.assertEqual(self.stay_looks(), [], "the older lot is still on the ladder: the look waits")
+            self.assertEqual(BA.bands(self.st)[self.prog.key], "probe")
+        self.review(self.days[18 + BA.STUCK_AFTER])
+        [look] = self.stay_looks()
+        self.assertEqual(S.parse_iso(look["at"]), et(self.days[21], 16, 0))
+        sized = SC.look_detail(self.st, *self.prog.key, look["k"])["v6"]["sized"]
+        self.assertEqual((sized["n"], sized["ok"], sized["unsettled"]), (44, False, [event]))
+        self.assertEqual(BA.bands(self.st)[self.prog.key], "probe", "a pass never moves to Sized over an unsold lot")
+
     def test_one_lot_whose_sale_never_fills_never_holds_a_later_closes_reads_and_money_stop(self):
         """A real-money event still unsettled holds only its own close; the stop counts the stay's settled events
         (release 1019i's review, the money lens)."""
@@ -885,6 +923,26 @@ class TheMoneyInTheBook(unittest.TestCase):
             mine = self.summary(h2)["programs"]["EVL-ERN-READ-O1"]
             self.assertEqual((mine["planned"], mine["room"]), (1, 6), "release 1019h's S2: bought under the bar, 6 slots")
 
+    def test_the_reach_bar_row_below_0_8_switches_a_v6_probe_buy_off_and_never_sizes_it_under_the_bar(self):
+        """Section 6, clause 2 is literal (A123, A134): a PREREG-EVL-6 version's Probe and Sized buys are sized and
+        gated on Done's own 0.8 (`V6_SIZE_BAR` = done.PROBE_SIZE_SHARE, the row in force), and the `reach_bar` row can
+        only switch them OFF: at the row's "0" (S2's switch) or anything under 0.8 nothing is bought (release 1019h's
+        S2 would floor the buy under the bar: the reading that trades more)."""
+        from league.events import done as DN
+
+        self.assertEqual(L.V6_SIZE_BAR, D(str(DN.PROBE_SIZE_SHARE)))
+        self.assertEqual(EB.settings().reach_bar("probe"), L.V6_SIZE_BAR, "the row in force is the bar")
+        for row in ("0", "0.5"):
+            off = dataclasses.replace(EB.settings(), reach_bars={"probe": D(row), "sized": D(row)})
+            with mock.patch.object(EB, "settings", lambda *a, **k: off):
+                h = self.fresh()
+                self.probe_pick(h, version=3, prev_close=48.0)      # limit $60: one share reaches 0.8 x $70 at 0.8
+                h.tick(9, 15)
+                mine = self.summary(h)["programs"]["EVL-ERN-READ-O1"]
+                self.assertEqual((mine["picks"], mine.get("planned"), mine.get("skipped")), (1, 0, {"reach_bar_off": 1}),
+                                 f"row {row}: switched off, not floored")
+                self.assertEqual(h.event_intents("buy"), [], row)
+
     def fresh(self):
         case = self.TB.EventTest("run")
         case.setUp()
@@ -1024,10 +1082,15 @@ class TheCount(LaneCase):
 
     def test_r3s_validator_reads_the_restated_charge_and_the_budget_after_every_waiting_run(self):
         self.assertEqual((BI.CHARGE_HUNDREDTHS, BI.BUDGET_HUNDREDTHS), (13, 390))
-        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3):
+        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3), \
+                mock.patch.object(BI, "RESERVED", ()):
             got = BI.budget(self.st)
         self.assertEqual((got["used"], got["waiting_runs"], got["left_for_births"], got["seatable_left_tonight"]),
                          (1.95, 0.39, 1.56, 3))
+        with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 3):
+            got = BI.budget(self.st)
+        self.assertEqual((got["reserved"], got["left_for_births"]), (1.08, 0.48),
+                         "A137: the frozen files' charges held too (league/tests/test_events_births.py TheReservations)")
         with mock.patch.object(SC, "waiting_runs", lambda store, now=None: [{}] * 15):
             self.assertEqual(BI.budget(self.st)["seatable_left_tonight"], 0, "the waiting runs hold the whole room")
 

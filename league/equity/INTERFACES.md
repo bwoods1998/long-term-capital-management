@@ -1911,7 +1911,9 @@ unknown (not the price, the buying power, the size, the account or the gateway).
   `f288d8ec`).
 - **At-size buys** (`book.under_bar(band, target, limit, walls, *, bar)`, `book.at_size_count(...)`; live.py
   `_event_gate`, `_size_event`): a Probe or Sized pick of a PREREG-EVL-6 version that no whole-share count brings to
-  Done's size bar (`reach_bar` x its band target) inside the band's frozen envelope of the walls' equity is skipped
+  Done's size bar (clause 2's own 0.8, live.py `V6_SIZE_BAR` = done.PROBE_SIZE_SHARE, x its band target; NEVER the
+  `reach_bar` row: that row below 0.8 switches these versions' Probe and Sized buys OFF, skipped `reach_bar_off`,
+  A123/A134, release 1019k) inside the band's frozen envelope of the walls' equity is skipped
   `under_bar` before it takes a slot; a pick that remains buys THE FEWEST whole shares that reach the bar (section 6,
   clause 2's words: 11 shares at $5.00 of a $66.43 target, where release 1019h's S2 floor took 13), asked of
   `size_entry` at those dollars so every cap judges them; a cap that cuts the ask under the bar refuses the buy

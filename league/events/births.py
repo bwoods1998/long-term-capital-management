@@ -256,6 +256,15 @@ BUDGET_HUNDREDTHS = SN.V6_BUDGET_HUNDREDTHS
 CHARGE_TENTHS = int(round(SN.FALSE_PASS_RATE * 10))
 BUDGET_TENTHS = int(round(SN.LANE_BUDGET * 10))
 SEATABLE_A_NIGHT = 3
+#: THE CHARGES OF FROZEN FILES WHOSE CODE IS NOT LIVE YET (the captain's A137): (file, its pin in league/events/programs.py,
+#: hundredths). The screen's own sum (`budget6`) counts only what this code registers, so without this a frozen file's
+#: reservation (PREREG-EVL-8's five seats at 0.13 a run, A122; PREREG-EVL-9's 0.30 reserved at registration, A127)
+#: would be spent by births before its code ships, and the lane's stated 3.9 overrun. Each is held from the births'
+#: room while its pin is unset and released when its release pins it (its own versions are then counted by the
+#: screen). PREREG-EVL-10's 0.13 is held in A129's order (the captain's budget order: READER-2's seat before more
+#: seatable births). Records stay free.
+RESERVED = (("PREREG-EVL-8", "REGISTERED_AT_8", 65), ("PREREG-EVL-9", "REGISTERED_AT_9", 30),
+            ("PREREG-EVL-10", "REGISTERED_AT_10", 13))
 
 #: THE PROPOSER (R3-SPEC section 2). THE ARCHITECT (the captain's A109, 06:05Z Oct 22, 2026; release 1019h): Claude
 #: Opus 5.5, in the gateway's CLAUDE_MODELS allowlist (gateway/wrangler.jsonc; a model absent from it is a 403). Release
@@ -1148,6 +1157,11 @@ def budget_waiting_hundredths(store: Any) -> int:
     return CHARGE_HUNDREDTHS * len(SN.waiting_runs(store))
 
 
+def budget_reserved_hundredths() -> int:
+    """What the frozen files whose code is not live hold from the births' room (`RESERVED`, A137)."""
+    return sum(int(h) for _, pin, h in RESERVED if getattr(P, pin, None) is None)
+
+
 def budget_used_tenths(store: Any) -> int:
     """(Release 1019h's name: the charges in tenths, rounded up, for its readers. The validator reads
     `budget_used_hundredths`.)"""
@@ -1168,10 +1182,11 @@ def budget(store: Any, night: dt.date | None = None) -> dict[str, Any]:
     and the seatable births `night` may still register."""
     used = budget_used_hundredths(store)
     waiting = budget_waiting_hundredths(store)
+    reserved = budget_reserved_hundredths()
     tonight = _tonight(store, night)
-    room = BUDGET_HUNDREDTHS - used - waiting
+    room = BUDGET_HUNDREDTHS - used - waiting - reserved
     return {"used": used / 100, "limit": BUDGET_HUNDREDTHS / 100, "left": (BUDGET_HUNDREDTHS - used) / 100,
-            "waiting_runs": waiting / 100, "left_for_births": room / 100,
+            "waiting_runs": waiting / 100, "reserved": reserved / 100, "left_for_births": room / 100,
             "seatable_left_tonight": max(0, min(SEATABLE_A_NIGHT - tonight, room // CHARGE_HUNDREDTHS)),
             "charge": CHARGE_HUNDREDTHS / 100}
 
@@ -1196,7 +1211,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             known_ids.add(str(r["id"]))
             known_ids.add(control_id(str(r["id"])))
             known_sha.add(str(r["sha"]))
-    used = budget_used_hundredths(store) + budget_waiting_hundredths(store)   # (the waiting runs come first: section 3)
+    used = budget_used_hundredths(store) + budget_waiting_hundredths(store) + budget_reserved_hundredths()
+    # (the waiting runs come first: section 3; then the frozen files' reservations, A137)
     tonight_used = _tonight(store, night)
     registered = [(p.id, _events(facts.selected(p))) for p in P.PROGRAMS]
     accepted: list[tuple[str, set[str]]] = []
@@ -1258,7 +1274,8 @@ def validate(store: Any, facts: Facts, proposals: Sequence[Mapping[str, Any]], *
             elif used + CHARGE_HUNDREDTHS > BUDGET_HUNDREDTHS:
                 why.append(f"the false-pass budget: {used / 100:.2f} of {BUDGET_HUNDREDTHS / 100:.2f} used or held for "
                            f"the runs waiting for it, a seatable birth adds {CHARGE_HUNDREDTHS / 100:.2f} "
-                           "(PREREG-EVL-6 section 5)")
+                           "(PREREG-EVL-6 section 5)" + (f"; {budget_reserved_hundredths() / 100:.2f} of it held for the "
+                           "frozen files whose code is not live (A137)" if budget_reserved_hundredths() else ""))
         if why:
             entry["reasons"] = why
             out.append(entry)
@@ -1798,4 +1815,5 @@ __all__ = ["GRAMMAR", "FIELDS", "FAMILIES", "ENTRY", "RULE_FIELDS", "RANKS", "IT
            "K", "NIGHT_USD", "MODEL", "EFFORT", "PRICES", "GEO_MAX", "FACTS_DENY", "DOCS_ROUTE", "JOB", "ID_PREFIX",
            "canonical_name", "renamed", "EXAMPLES", "PARSE_VERSION", "PARSE_VERSION_BEFORE", "RERUN_BY", "rerun_due",
            "STREAM", "THINKING", "CALL_LIMIT", "STREAM_GAP", "LOST", "UNANSWERED", "ASKED", "CHARGE_HUNDREDTHS",
-           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths"]
+           "BUDGET_HUNDREDTHS", "budget_used_hundredths", "budget_waiting_hundredths", "RESERVED",
+           "budget_reserved_hundredths"]

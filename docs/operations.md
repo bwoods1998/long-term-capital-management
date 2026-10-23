@@ -39,7 +39,8 @@ IDENTITIES (the tree's own functions, 3.14 and 3.11, before `rel/1019h` and afte
 `8e63ce64` -> `d52a5af5` AND THE CONSTITUTION `c3026eba` -> `9c8b2221` (PREREG-EVL-6 section 6's one row,
 `equity_money.event.max_open_v6.probe` 14, bound ('0', '14'), its own commit; nothing else moves a money row), so THE
 STANDING GRANT RE-RATIFIES at the House's start; the rollback pair with `equity_money.event.enabled` False `f87d7342` /
-`134d6285`; S2's switch (both `reach_bar` rows "0") `96d986c9` / `8f9abf99`; THE NEW SLOTS' SWITCH
+`134d6285`; S2's switch (both `reach_bar` rows "0"; for a PREREG-EVL-6 version it switches its Probe and Sized buys OFF and
+never sizes one under clause 2's 0.8: A134, release 1019k) `96d986c9` / `8f9abf99`; THE NEW SLOTS' SWITCH
 (`max_open_v6.probe` "0": no Probe buy of a PREREG-EVL-6 version; learning buys go on) `51625225` / `f288d8ec`; the
 options execution fingerprint `b60410ad`, the equity identity `78022ca6`, the xs identity `2f0083bc`, the gate contract
 `397b22b7` and the Done rule `54241925` do not move; `equity_money_problems()` is `[]`. THE BIRTHS PROMPT'S SHA MOVES
