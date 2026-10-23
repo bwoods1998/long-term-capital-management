@@ -25,6 +25,7 @@ from league.swarm.store import SwarmStore
 from league.tests import EMPTY_POLICY_PATH, REAL_POLICY_PATH
 from league.tests import test_swarm_loop as L
 from league.tests.swarm_fakes import Clock
+from league.tests.v2_cost import on_v2_cost
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -273,6 +274,7 @@ class TheCommittedPolicy(L.LoopCase):
         self.assertEqual(loaded["budget"]["source"], "budget.json")
         return loaded
 
+    @on_v2_cost
     def test_at_the_owners_ceiling_it_lets_the_budget_reach_its_knobs(self):
         """The budget only tightens, so the policy's own values are caps it works inside. At the owner's $25 a day they
         let it reach what those dollars buy: seven Gym boxes, the Sail model pace, the policy's own architect cadences
@@ -300,6 +302,7 @@ class TheCommittedPolicy(L.LoopCase):
         caps = B.sail_caps(loaded)
         self.assertEqual((caps["research"], caps["account"], caps["gate_reserve"]), (20.0, 21.0, 2.0))
 
+    @on_v2_cost
     def test_an_operators_tighter_setting_stands_under_the_ceiling(self):
         """swarm.json may run the swarm under what the ceiling's dollars buy (the budget only tightens, and so may the
         operator): fewer boxes and a lower population ceiling stand, and with the start at that ceiling (not held down by
@@ -311,6 +314,7 @@ class TheCommittedPolicy(L.LoopCase):
         self.assertEqual(loaded["researcher"]["sail_usd_per_hour"], 0.333333)
         self.assertEqual(B.sail_caps(loaded)["research"], 20.0, "the day's cap is the rule's, whatever the knobs are")
 
+    @on_v2_cost
     def test_the_paid_model_lines_are_the_gates_and_the_strategists(self):
         """Claude's $5 a day at the ceiling (the operator's split of Oct 9, 2026; $10 before): the gate's review and audit
         and the strategist have a line; the researchers, the rewrites, the diagnostician and the architect have none (the

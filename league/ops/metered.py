@@ -1,7 +1,9 @@
 """MEASURED METERED SPEND (release 1019c; the review of r1/alarms, its majors 1 and 4; the owner's goal of Oct 19, 2026,
 items 4 and 5: "metered compute <= $5 a day plus half the trailing week's realized net profit, never above $25", "alarms
-on ... cap breaches", the daily report's "costs"): what the metered compute of each UTC day COST, read from the meters
-themselves, never from the budget's lines (budget.json says what may be spent, this says what was).
+on ... cap breaches", the daily report's "costs"; from release 1019m-cost his goal V3 of Oct 23, 2026, items 5 and 6:
+"metered compute <= $10 a day plus half the trailing week's realized net profit, never above $50", "self-running with
+alarms and a daily one-screen report"): what the metered compute of each UTC day COST, read from the meters themselves,
+never from the budget's lines (budget.json says what may be spent, this says what was).
 
 ONE DAY FOR EVERY LINE (the review of r2/alarms, its major 1). THE DAY is the UTC day, 00:00-24:00 UTC: the day budget
 rule 3 holds every line on. The Sail guard's research and account caps count from 00:00 UTC (league/swarm/guard.py), the
@@ -36,8 +38,11 @@ CAP THE RULE SET FOR IT (`caps`; the review of r2/alarms, its major 1): the high
 budget.json the stall job read while the day ran, or that the rule computed on that day. The rule sets a day's lines at its first run and only raises them within it (the top-up
 raise, a close whose profit lifted the cap: league/ops/budget.py), so every line of the day was held under that cap at
 the most; judged against the lowest cap seen, a day spent within its raised lines read as a breach. Never above the
-owner's $25; the rule's no-profit $5 when no usable budget.json was read for the day (FAIL CLOSED). The stall job's
-`cap_breach` reads today's figure so far and yesterday's whole one; the daily report reads its day's.
+owner's ceiling (`budget.CEILING_USD_DAY`: $50 under budget rule 4, $25 under rule 3); the rule's no-profit base
+(`budget.BASE_USD_DAY`: $10 under rule 4, $5 under rule 3) when no usable budget.json was read for the day (FAIL
+CLOSED). A day's cap is kept in metered.json as the rule in force then set it, so a day judged under rule 3 keeps its
+$5. The stall job's `cap_breach` reads today's figure so far and yesterday's whole one; the daily report reads its
+day's.
 
 THE CAP BREACH HOLD (the review of r2/alarms, its major 1: a breach only raised an alarm, and a leak went on spending
 all day). While what the readings put inside TODAY for certain is over today's cap (`certainly_over`: each meter's rise
@@ -238,8 +243,8 @@ def observe(ledger: dict[str, Any], *, now: float, sail: tuple[float, float] | N
     """One stall run's readings into the ledger (in place, and returned): each meter's rise since its last raw reading
     added to its running total at the reading's time (Sail's: the guard's own reading time; the gateway's: now), the
     budget's cap kept for the days it was in force at its highest (`cap`: a usable budget.json's `cap_usd_day`, computed
-    at `cap_at`; None, nothing: the day then keeps what it had, the no-profit $5 when it had nothing), old readings and
-    days dropped."""
+    at `cap_at`; None, nothing: the day then keeps what it had, the no-profit base when it had nothing), old readings
+    and days dropped."""
     readings = {"sail": None if sail is None else (sail[0], sail[1]), "claude": None if claude is None else (now, claude),
                 "openai": None if openai is None else (now, dict(openai))}
     began = ledger.setdefault("began", {m: None for m in METERS})
@@ -263,8 +268,9 @@ def observe(ledger: dict[str, Any], *, now: float, sail: tuple[float, float] | N
             keep.insert(0, rows[len(rows) - len(keep) - 1])  # the reading before the horizon: the first day's edge
         ledger["series"][meter] = keep
     # THE CAP THE RULE SET FOR THE DAY: a usable budget.json's cap counts, at its highest, for the day this run read it in
-    # (its lines were in force then) and for the day the rule computed it on; never above the owner's $25. A run with no
-    # usable budget.json lowers nothing: the holders then run on the floor's no-profit lines, under any cap of the day.
+    # (its lines were in force then) and for the day the rule computed it on; never above the owner's ceiling. A run
+    # with no usable budget.json lowers nothing: the holders then run on the floor's no-profit lines, under any cap of
+    # the day.
     value, computed = _num(cap), _num(cap_at)
     if value is not None and value > 0 and (computed is None or computed <= now + 300):   # never one dated ahead
         value = min(value, B.CEILING_USD_DAY)
@@ -317,7 +323,8 @@ def certain(series: list[list[float]], a: float, b: float) -> float:
 
 
 def day_cap(ledger: Mapping[str, Any], day: dt.date) -> float:
-    """THE DAY'S CAP (the module docstring): the highest the rule set for `day`, the no-profit $5 when none was read."""
+    """THE DAY'S CAP (the module docstring): the highest the rule set for `day`, the no-profit base when none was read
+    (`budget.BASE_USD_DAY`)."""
     cap = _num((ledger.get("caps") or {}).get(day.isoformat()))
     return B.BASE_USD_DAY if cap is None or cap <= 0 else min(cap, B.CEILING_USD_DAY)
 
@@ -465,10 +472,10 @@ DOING = ("The budget holds every line it can to the day's cap on the UTC day (th
 def cap_check(ledger: Mapping[str, Any], now: float, *, hold: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """THE STALL JOB'S `cap_breach` (the goal of Oct 19, 2026, item 5: "alarms on ... cap breaches"): today's measured
     metered spend so far, or yesterday's whole day, over that day's cap (`day_figure` `over`: what the readings show at
-    the least, above the cap the rule set for that UTC day, its no-profit $5 when none could be read); or a meter BLIND
-    (`BLIND_HOURS` with no reading of Sail's or Claude's meter, the ledger older than that): the cap cannot be judged,
-    which never passes for under it. INFO, no owner step; `hold` (THE CAP BREACH HOLD this run wrote) is said. Not
-    judged before any meter has a reading."""
+    the least, above the cap the rule set for that UTC day, its no-profit base when none could be read); or a meter
+    BLIND (`BLIND_HOURS` with no reading of Sail's or Claude's meter, the ledger older than that): the cap cannot be
+    judged, which never passes for under it. INFO, no owner step; `hold` (THE CAP BREACH HOLD this run wrote) is said.
+    Not judged before any meter has a reading."""
     series = ledger.get("series") if isinstance(ledger.get("series"), Mapping) else {}
     if not any(series.get(m) for m in METERS):
         return {"stalled": False, "judged": False, "what": "Not judged: no meter has a reading yet (metered.json).",

@@ -99,13 +99,14 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   false stops the old lanes' research causes and research alarms from being judged while their research is off (a
   Sail guard brake is still judged unless it is the budget's own daily stop alone: the House at risk is no research),
   and `underspend` is never judged under budget rule 3 (a cheap day is never a failed day).
-- **The budget rule (D4; rule version 3 from release 1019c, the goal of Oct 19, 2026, item 4).** Every metered compute
-  dollar of a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to min($25, $5 + 0.5 x the
-  trailing week's realized net profit / 7): the trailing week is the last 5 sessions' realized net of every real book
-  (options and equity lots alike, the event lane's among them), and its half is spread over the 7 days a week of compute
-  runs. The fixed costs count inside it, the event lane's verdicts ride the Claude line first (at least $3 a day) and the
-  old research roles share the remainder (Sail 0.8, Claude 0.2). Every line is held, all on the UTC day the cap is judged
-  on: research by the Sail guard and the router, the lane's verdicts by the House's lane itself (its allowance in
+- **The budget rule (D4; rule version 4 from release 1019m-cost, the owner's goal V3 of Oct 23, 2026, item 5; version 3,
+  the goal of Oct 19, 2026's $5 and $25, from release 1019c).** Every metered compute dollar of a day (Sail models and
+  boxes, Claude, OpenAI, market data, Cloudflare) is held to min($50, $10 + 0.5 x the trailing week's realized net profit
+  / 7): the trailing week is the last 5 sessions' realized net of every real book (options and equity lots alike, the
+  event lane's among them), and its half is spread over the 7 days a week of compute runs; prepaid credit first. The
+  fixed costs count inside it, the event lane's verdicts ride the Claude line first (at least $6 a day; $3 under rule 3)
+  and the old research roles share the remainder (Sail 0.8, Claude 0.2). Every line is held, all on the UTC day the cap
+  is judged on: research by the Sail guard and the router, the lane's verdicts by the House's lane itself (its allowance in
   budget.json); a measured breach holds them all at 0 for the rest of the day. A cheap day is never a failed
   day. Each prefunded meter still tapers by itself as its balance falls; unknown earns nothing; no usable budget.json is
   the rule's own no-profit lines (fails closed); applied last and tighten-only to the spend knobs; OpenAI is closed. One
@@ -902,21 +903,24 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 | History, the nightly forward day, fill calibration | ThetaData | four concurrent requests | $80 a month until the owner cancelled it on Oct 18, 2026; the site's costs stop accruing it from Oct 19 (`league/publish.py` `SUBSCRIPTIONS_ENDED_AT`), what accrued before stays |
 | Live quotes, SIP bars, paper and real orders | Alpaca | through the gateway | Algo Trader Plus until the owner cancelled it on Oct 18, 2026, ended in the site's costs the same way; the free Basic plan since (IEX in real time, SIP history 15 minutes back) |
 | The event lane's verdicts | Claude via the gateway | Haiku 4.5, temperature 0 (PREREG-EVL-1 section 4) | the Claude line's first part under budget rule 3: at least $3 a day, held by the House's lane to its allowance |
-| Cloudflare (the gateway and the site) | Workers | one paid plan | $5 a month, a fixed cost inside budget rule 3's cap |
+| Cloudflare (the gateway and the site) | Workers | one paid plan | $5 a month, a fixed cost inside the budget rule's cap |
 
 - **Budgets: the budget rule** (V3-A part 1, live since Oct 3; the owner's D4; `league/ops/budget.py`, protected; rule
-  version 3 from release 1019c, the owner's goal of Oct 19, 2026, item 4; the details are in [operations](operations.md),
-  "The budget rule"). THE CAP: every metered dollar of a day is at most min($25, $5 + 0.5 x max(0, the trailing week's
+  version 4 from release 1019m-cost, the owner's goal V3 of Oct 23, 2026, item 5: "metered compute <= $10 a day plus half
+  the trailing week's realized net profit, never above $50"; version 3, the goal of Oct 19, 2026's $5 and $25, from
+  release 1019c; the details are in [operations](operations.md), "The budget rule"). THE CAP: every metered dollar of a
+  day is at most min($50, $10 + 0.5 x max(0, the trailing week's
   realized net profit) / 7), "the trailing week" being the last 5 closed sessions (one trading week) of every real book
   (the options book's closed positions with the broker's fee corrections, the equity book's closed real lots, where the
   event lane's real lots live) and its half spread over the 7 days a week of compute runs; a losing week lifts nothing
-  and takes nothing from the $5. The fixed costs (the Sail billing of every box of the House's app but the Gym pool's:
+  and takes nothing from the $10. The fixed costs (the Sail billing of every box of the House's app but the Gym pool's:
   the House, the data box and any other the swarm books nowhere; Cloudflare's $5 a month; market data, $0 since the
   owner cancelled ThetaData and Alpaca's Algo Trader Plus on Oct 18) count inside it; the
-  event lane's verdicts (Claude Haiku 4.5) are the Claude line's first part, at least $3 or half as much again as their
-  heaviest day of the last 7, never more than the room; the old research roles share the remainder, Sail 0.8 and Claude
-  0.2 (at the $5 cap with no profit and Sail's fixed $1.50: research $0.34 a day, Sail $0.27 and the Claude roles
-  $0.07). EVERY LINE IS HELD: Sail research by the Sail guard, the Claude roles by the router, the lane's verdicts by the
+  event lane's verdicts (Claude Haiku 4.5) are the Claude line's first part, at least $6 (rule 3: $3) or half as much
+  again as their heaviest day of the last 7, never more than the room; the old research roles share the remainder, Sail
+  0.8 and Claude 0.2 (at the $10 cap with no profit and Sail's fixed $1.50: the lane $6.00, research $2.34 a day, Sail
+  $1.87 and the Claude roles $0.47; rule 3 at its $5: the lane $3.00, research $0.34). Prepaid credit first, as under
+  rule 3: each meter's prefund is spent down by the taper below, nothing is bought. EVERY LINE IS HELD: Sail research by the Sail guard, the Claude roles by the router, the lane's verdicts by the
   House's lane itself (the lower of `events.verdict_usd_day` and its allowance in budget.json); a day whose measured
   spend still goes over the cap (a fixed cost that rose) is the stall job's `cap_breach`. A cheap day is never a failed
   day: the cap is what may be spent, never what must be. Each prefunded meter then tapers by itself (it spends at most a

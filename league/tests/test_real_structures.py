@@ -185,7 +185,8 @@ class OneSourceOfTruth(unittest.TestCase):
 
     def test_a_money_row_outside_its_range_is_refused(self):
         refused = self.tree(replace={'"daily_stop_share": "0.25",': '"daily_stop_share": "0.50",'})   # (V3's 0.25, A138)
-        self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.35]", " ".join(refused))
+        self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.25]", " ".join(refused),
+                      "release 1019m: the bound's loose end is V3's 25%")
         refused = self.tree(replace={'"max_orders_day": 250,': '"max_orders_day": 400,'})
         self.assertIn("order_path.max_orders_day", " ".join(refused))
 

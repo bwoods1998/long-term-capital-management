@@ -1,12 +1,17 @@
-"""THE BUDGET RULE (LTCM v3, the owner's D4, Oct 2026; RULE_VERSION 3, the owner's goal of Oct 19, 2026, item 4): every
-metered compute dollar a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to $5 plus half
-the trailing week's realized net profit, never above $25; the event lane's verdicts ride the Claude line first and the
+"""THE BUDGET RULE (LTCM v3, the owner's D4, Oct 2026; RULE_VERSION 4, his goal V3 of Oct 23, 2026, item 5): every
+metered compute dollar a day (Sail models and boxes, Claude, OpenAI, market data, Cloudflare) is held to $10 plus half
+the trailing week's realized net profit, never above $50; the event lane's verdicts ride the Claude line first and the
 old research roles get the remainder; each prefunded meter still tapers by itself as its balance falls, and the desk
 asks for a card before the taper starts.
 
-THE COST RULE (RULE_VERSION 3; the goal of Oct 19, 2026, item 4, word for word: "Cost follows profit: metered compute <=
-$5 a day plus half the trailing week's realized net profit, never above $25; prepaid credit first"). THE ARITHMETIC, a
-day:
+THE COST RULE (RULE_VERSION 4; the owner's goal V3 of Oct 23, 2026, item 5, word for word: "Cost: metered compute <= $10
+a day plus half the trailing week's realized net profit, never above $50"). RULE_VERSION 3 held the goal of Oct 19,
+2026, item 4: "Cost follows profit: metered compute <= $5 a day plus half the trailing week's realized net profit, never
+above $25; prepaid credit first". Goal V3 raised the base to $10 and the ceiling to $50 and does not restate "prepaid
+credit first"; rule 4 keeps it exactly as rule 3 held it (THE RUNWAY below: each meter spends its prefund, nothing
+here buys anything), and keeps the half of the trailing week's profit, its window and its spread unchanged. These
+constants change only by the owner's decision: goal V3 is his, shipped by the captain's release 1019m-cost (A145).
+THE ARITHMETIC, a day:
 
     week_net = the realized net profit of EVERY real book (the options book's closed positions, fees in, with the
                broker's posted fee corrections; the equity book's closed ":r" lots, fees and dividends in, which is where
@@ -15,14 +20,14 @@ day:
                week; UNKNOWN (an options position closed but unpriced, an order pending or unknown, reconciliation
                frozen, a blocking account reading: `book_p30`'s rules) is no profit
     earned   = PROFIT_SHARE (0.5) x max(0, week_net) / PROFIT_DAYS (7)    HALF the week's profit, spread over the 7
-               calendar days a week of compute runs: seven days at the cap spend at most 7 x $5 plus half the week's
-               profit, never more; a losing week lifts nothing and takes nothing from the $5
-    cap      = min(CEILING_USD_DAY (25), BASE_USD_DAY (5) + earned)       every metered dollar of the day
+               calendar days a week of compute runs: seven days at the cap spend at most 7 x $10 plus half the week's
+               profit, never more; a losing week lifts nothing and takes nothing from the $10
+    cap      = min(CEILING_USD_DAY (50), BASE_USD_DAY (10) + earned)      every metered dollar of the day
     fixed    = Sail's fixed boxes (every box of the House's app but the Gym pool's, as below) + Cloudflare
                (`CLOUDFLARE_USD_DAY`, the Workers plan) + market data (`DATA_USD_DAY`: 0 since the owner cancelled
                ThetaData and Alpaca's Algo Trader Plus on Oct 18, 2026): the fixed costs count INSIDE the cap
     room     = max(0, cap - fixed)
-    lane     = min(room, max(LANE_USD_DAY (3), LANE_HEADROOM (1.5) x the lane's heaviest UTC day of verdicts over the
+    lane     = min(room, max(LANE_USD_DAY (6), LANE_HEADROOM (1.5) x the lane's heaviest UTC day of verdicts over the
                trailing `LANE_WINDOW_DAYS` (7))): the event lane's verdicts (PREREG-EVL-1 section 4), FIRST on the Claude
                line; a lane held at its line one day has half as much again the next, up to the room
     rest     = room - lane, the old research roles' remainder, split SPLIT: Sail 0.8 (models and Gym boxes), Claude 0.2
@@ -30,8 +35,10 @@ day:
 
 so the Claude meter's line is lane + 0.2 x rest and Sail's is 0.8 x rest (each meter's `ceiling_usd_day` in
 budget.json: its share of the day's cap), and every line together with the fixed costs is the cap. With no profit and
-Sail's fixed cost at $1.50 a day: fixed $1.66, the lane $3.00, research $0.34 (Sail $0.27, the Claude roles $0.07), the
-$5 together; THE FLOOR below is exactly these lines.
+Sail's fixed cost at $1.50 a day: fixed $1.66, the lane $6.00, research $2.34 (Sail $1.87, the Claude roles $0.47), the
+$10 together; THE FLOOR below is exactly these lines (rule 3's, at its $5: fixed $1.66, the lane $3.00, research $0.34,
+Sail $0.27 and the Claude roles $0.07). Every $14 of the trailing week's net lifts the cap $1 a day; at $560 it is $50,
+never more.
 
 EVERY LINE IS HELD, so every metered dollar stays under the cap (the review of r1/alarms, its major 1): Sail research by
 the Sail guard (`sail_caps`: the day's research and Sail's own meter), the Claude roles by the router (the settings'
@@ -54,8 +61,8 @@ raises no `underspend` under this rule, and no Done item reads spend). PREPAID C
 
 What RULE_VERSION 2 read and this rule does not: the options-only trailing-30-day p30 (`book_p30` over 30 days, cut by
 the close economics) and the no-forward-edge stop (`edge_state`): both are still gathered and written to budget.json's
-`inputs` for the record, and neither moves a dollar. The owner's $25 ceiling of the goal of Oct 3 is the cap's upper
-bound; its split now applies to the remainder only.
+`inputs` for the record, and neither moves a dollar. THE OWNER'S CEILING ($25 from the goal of Oct 3, kept by the goal
+of Oct 19; $50 from goal V3) is the cap's upper bound; its split now applies to the remainder only.
 
 THE RUNWAY (unchanged from RULE_VERSION 2; changed only by the owner's own deploy; this file is FORBIDDEN to the
 updater, `league/ci.py`). The `budget` job (after the close economics, and daily at 00:30 UTC) reads, for each meter m
@@ -86,7 +93,7 @@ so research runs at its share of the cap while a meter holds `RUNWAY_DAYS` days 
 cost, and below that it tapers by itself: each day a meter may spend one part in `RUNWAY_DAYS` of what it holds above
 the reserve and `RUNWAY_DAYS` days of the House's own fixed cost, neither of which research ever spends. RULE_VERSION
 1's two long terms (a 90-day target and a 60-day card line) are gone: this one short term is the whole runway rule.
-Below, "the ceiling" of a meter is its share of the day's cap, and "THE OWNER'S CEILING" the $25 bound.
+Below, "the ceiling" of a meter is its share of the day's cap, and "THE OWNER'S CEILING" the $50 bound.
 
 THE DAY'S FIGURE IS SET ONCE. The job runs twice on a session day, and its second reading has already paid for the
 day's research: a taper recomputed from it would put the day's cap under what the day has booked, and the guard would
@@ -130,8 +137,8 @@ would have. Only the day's figure reads it: a later run's `would_set_usd_day`, t
 notice are the reading as it stands.
 
 NEVER ABOVE THE CEILING. Nothing lifts a meter over its share of the day's cap, nor the cap over THE OWNER'S CEILING of
-$25: not a budget.json that says more (`read` holds each meter's research to its share of the $25, `ceiling_usd_day`:
-Sail 20, the Claude roles 5, the most rule 3 can ever give either), not a setting (the overlay only tightens), not a
+$50: not a budget.json that says more (`read` holds each meter's research to its share of the $50, `ceiling_usd_day`:
+Sail 40, the Claude roles 10, the most rule 4 can ever give either), not a setting (the overlay only tightens), not a
 `budget` block handed to the Sail guard or the router by any other way (`sail_caps` and `paid_model_room` hold what
 they are handed to the same share).
 
@@ -162,7 +169,7 @@ promotion lifts it. A promotion to Probe is one of two, each counted at its band
   return to Probe on a look already counted are none.
 
 UNKNOWN IS NEVER MONEY. An unreadable balance, fixed cost or reserve gives its meter no research. An unreadable week_net
-earns nothing (the cap is the $5); a lane store that cannot be read sizes the lane's part at `LANE_USD_DAY`.
+earns nothing (the cap is the $10); a lane store that cannot be read sizes the lane's part at `LANE_USD_DAY`.
 
 THE WAIT FOR THE GUARD'S NEXT READING (L4, Oct 15, 2026; `_read_waiting`). A job run whose first read finds no fresh
 guard reading (a House just started after a long outage, before the guard's first check) waits up to
@@ -193,7 +200,7 @@ cap: the swarm's booked Sail today under the Sail research $/day, Sail's own met
 research $/day less today's Claude and OpenAI spend, each model's counted on the day its hold was booked and never under
 0: a hold released after 00:00 UTC lifts no line). A missing, unreadable or malformed budget.json, or one another
 version of the format wrote (`SCHEMA`), is the FLOOR: THE COST RULE's own lines at no profit (`floor_lines`: research
-$0.34, Sail $0.27 and the Claude roles $0.07, and the lane's verdicts $3.00), what runs until the rule has been read: it
+$2.34, Sail $1.87 and the Claude roles $0.47, and the lane's verdicts $6.00), what runs until the rule has been read: it
 FAILS CLOSED, never above what the rule itself gives a day with no profit. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never loosens: each meter is the
 lower of the floor and what the stale file said (0 for a meter it could not read), with a warning. An operator's own
 `budget` key in swarm.json is replaced, never read. The ceiling knob never falls below `population.floor + BIRTH_MARGIN`
@@ -254,23 +261,29 @@ from typing import Any, Callable, Mapping
 REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------------------------- the rule's constants
-#: budget.json's format. 3 with RULE_VERSION 3 (2 with RULE_VERSION 2): a release on either side of the change reads the
-#: other's file as no usable file (the floor) until its own budget job has run, so neither a deploy nor a rollback runs
-#: on the other rule's dollars. The House's start runs the refresh, which runs the full job on another rule's file.
-SCHEMA = 3
+#: budget.json's format. 4 with RULE_VERSION 4 (3 with RULE_VERSION 3, 2 with RULE_VERSION 2): a release on either side
+#: of the change reads the other's file as no usable file (the floor) until its own budget job has run, so neither a
+#: deploy nor a rollback runs on the other rule's dollars. The House's start runs the refresh, which runs the full job
+#: on another rule's file. Rule 4 writes the same fields as rule 3; the number moves with the rule because the readers
+#: that check only the schema (`read`, the daily report's allowance, the stall job's cap) must not take the other rule's
+#: dollars.
+SCHEMA = 4
 #: The rule's version (the constants below); a change is an owner deploy and a new number here. 3: the goal of Oct 19,
-#: 2026, item 5 (THE COST RULE in the module docstring).
-RULE_VERSION = 3
+#: 2026, item 4 ($5 a day, never above $25). 4: the owner's goal V3 of Oct 23, 2026, item 5 ($10 a day, never above $50;
+#: THE COST RULE in the module docstring; release 1019m-cost, A145).
+RULE_VERSION = 4
 METERS = ("sail", "claude")
-#: THE OWNER'S CEILING (his goal of Oct 3, 2026, kept by the goal of Oct 19, 2026: "never above $25"): the most every
-#: metered compute dollar of a day may be, the fixed costs included (RULE_VERSION 2: research only).
-CEILING_USD_DAY = 25.0
-#: THE COST RULE (RULE_VERSION 3; the goal of Oct 19, 2026, item 4): the day's cap with no profit, every metered dollar
-#: together (the fixed costs inside it); half the trailing week's realized net profit is added on top (`PROFIT_SHARE`):
-#: THE TRAILING WEEK is the last `PROFIT_SESSIONS` (5) NYSE sessions that have closed (one trading week), and its half is
-#: spread over the `PROFIT_DAYS` (7) calendar days a week of compute runs, so seven days at the cap spend at most half the
-#: week's profit beyond the $5 a day.
-BASE_USD_DAY = 5.0
+#: THE OWNER'S CEILING: the most every metered compute dollar of a day may be, the fixed costs included (RULE_VERSION 2:
+#: research only). $25 from his goal of Oct 3, 2026, kept by the goal of Oct 19, 2026 ("never above $25"); $50 from his
+#: goal V3 of Oct 23, 2026, item 5 ("never above $50"; RULE_VERSION 4).
+CEILING_USD_DAY = 50.0
+#: THE COST RULE (RULE_VERSION 4; the owner's goal V3 of Oct 23, 2026, item 5: "metered compute <= $10 a day plus half
+#: the trailing week's realized net profit"; $5 under RULE_VERSION 3): the day's cap with no profit, every metered
+#: dollar together (the fixed costs inside it); half the trailing week's realized net profit is added on top
+#: (`PROFIT_SHARE`): THE TRAILING WEEK is the last `PROFIT_SESSIONS` (5) NYSE sessions that have closed (one trading
+#: week), and its half is spread over the `PROFIT_DAYS` (7) calendar days a week of compute runs, so seven days at the
+#: cap spend at most half the week's profit beyond the $10 a day.
+BASE_USD_DAY = 10.0
 PROFIT_SESSIONS = 5
 PROFIT_DAYS = 7
 #: The fixed metered lines that are not a Sail box (both inside the cap): Cloudflare's Workers plan ($5 a month, the
@@ -278,13 +291,22 @@ PROFIT_DAYS = 7
 #: Oct 18, 2026; Alpaca's Basic plan is free; league/publish.py `SUBSCRIPTIONS_ENDED_AT` ends their past costs).
 CLOUDFLARE_USD_DAY = round(5.0 * 12 / 365, 4)
 DATA_USD_DAY = 0.0
-#: THE LANE'S PART of the Claude line: the event lane's verdicts (PREREG-EVL-1 section 4; about $3 a day at the peak of
-#: earnings season, goal-2026-10-19/EVL-DESIGN.md "Costs"), or `LANE_HEADROOM` times its heaviest UTC day of verdicts
-#: over the trailing `LANE_WINDOW_DAYS` when that is more (the lane is held to its part, so its spend can never show a
-#: need above the part: a day held at its line gives the next day half as much again); never more than the day's room.
-#: The House's lane holds its verdicts to it (`lane_allowance`, league/events/house.py). The lane's store is
-#: `<root>/events/events.sqlite` (league/events/store.py; the gateway's settled cost of each verdict in `verdicts.usd`).
-LANE_USD_DAY = 3.0
+#: THE LANE'S PART of the Claude line: the event lane's paid calls (its verdicts, PREREG-EVL-1 section 4, and R3's
+#: births call; the lane's line also holds every reader a later file puts inside it, as PREREG-EVL-10 puts its R2), or
+#: `LANE_HEADROOM` times its heaviest UTC day of verdicts and births calls over the trailing `LANE_WINDOW_DAYS`
+#: (`lane_spend`) when that is more (the lane is held to its part, so its spend can never show a need above the part: a
+#: day held at its line gives the next day half as much again); never more than the day's room. $3 under RULE_VERSION 3:
+#: about $3 a day of verdicts at the peak of earnings season beside a House box of about $1 a day, "inside the $5 cap"
+#: (goal-2026-10-19/EVL-DESIGN.md "Costs"; league/config.json `events.verdict_usd_day`, "the verdicts' $3.00 inside the
+#: $5 base"). It was sized as the base's part, so RULE_VERSION 4 keeps that part of the base: $6 of the $10 (3 of 5),
+#: the same 0.6, with the fixed costs and the old research roles' remainder beside it (at no profit and Sail's fixed
+#: $1.50: fixed $1.66, the lane $6.00, the remainder $2.34). `LANE_HEADROOM`, `SPLIT`, `RESERVE_USD`, `GATE_HOLDS_USD`,
+#: `FLOOR_SAIL_FIXED_USD_DAY` and the births' night cap (league/events/births.py `NIGHT_USD`) are a ratio, a decision, a
+#: prefund's reserve, a hold's worst case or a measured cost, none a part of the $5, and stay. The House's lane holds
+#: its calls to it (`lane_allowance`, league/events/house.py, beside `events.verdict_usd_day`, $6.00 with this rule).
+#: The lane's store is `<root>/events/events.sqlite` (league/events/store.py; the gateway's settled cost of each verdict
+#: in `verdicts.usd`).
+LANE_USD_DAY = 6.0
 LANE_HEADROOM = 1.5
 LANE_WINDOW_DAYS = 7
 LANE_STORE = Path("events") / "events.sqlite"
@@ -308,15 +330,19 @@ LANE_STORE = Path("events") / "events.sqlite"
 #: Claude a day). RULE_VERSION 3 (the goal of Oct 19, 2026): the split applies to THE REMAINDER after the fixed costs and
 #: the lane's part (`rest`, THE COST RULE), so at the $5 cap with no profit and Sail's fixed $1.50 a day the old research
 #: roles share $0.34 a day (Sail $0.27, the Claude roles $0.07); Sail's research is at most 20 and the Claude roles' at
-#: most 5 (the $25 ceiling's split, `ceiling_usd_day`). The floor is the rule's own lines at no profit (`floor_lines`).
+#: most 5 (the $25 ceiling's split, `ceiling_usd_day`). RULE_VERSION 4 (goal V3) keeps the split: at the $10 cap with no
+#: profit the old research roles share $2.34 a day (Sail $1.87, the Claude roles $0.47); Sail's research is at most 40
+#: and the Claude roles' at most 10 (the $50 ceiling's split). The floor is the rule's own lines at no profit
+#: (`floor_lines`).
 SPLIT = {"sail": 0.8, "claude": 0.2}
 #: The one runway term (days): research runs at the ceiling while a meter holds this many days of it above its reserve and
 #: its fixed cost, and below that spends one part in this many of what it holds above them a day.
 RUNWAY_DAYS = 5
 #: THE FLOOR (the review of r1/alarms: it FAILS CLOSED): with no usable budget.json (none, unreadable, malformed, another
 #: rule's) every line is THE COST RULE's own at no profit, on a Sail fixed cost of at least `FLOOR_SAIL_FIXED_USD_DAY`
-#: (above the House box's measured $1.29-$1.50 a day, so the floor's lines and the real fixed cost never pass the $5
-#: together): research $0.34 (Sail $0.27, the Claude roles $0.07) and the lane $3.00 (`floor_lines`); a STALE file gives
+#: (above the House box's measured $1.29-$1.50 a day, so the floor's lines and the real fixed cost never pass the $10
+#: together): research $2.34 (Sail $1.87, the Claude roles $0.47) and the lane $6.00 (`floor_lines`; rule 3's at its $5:
+#: research $0.34, the lane $3.00); a STALE file gives
 #: the lower of the floor and what it said. The rule's own answer is never held to it.
 FLOOR_SAIL_FIXED_USD_DAY = 1.5
 #: The share of trailing realized profit written as earned (inside the ceiling: the module docstring), and the window it is
@@ -403,8 +429,9 @@ CEILING_MIN = 8
 #: The ceiling knob's least margin over the configured `population.floor`: room for births and forks at the floor.
 BIRTH_MARGIN = 4
 #: The architect's cadence follows the research dollars a day (both meters together): a scheduled pass every
-#: `ARCHITECT_USD_SECONDS` / dollars seconds (4 hours at $5, 48 minutes at $25) and a refill pass (the population under
-#: its start) every `REFILL_USD_SECONDS` / dollars seconds (96 minutes at $5, about 19 at $25), never faster than the two
+#: `ARCHITECT_USD_SECONDS` / dollars seconds (4 hours at $5, 48 minutes at $25, its 30-minute least from $40) and a
+#: refill pass (the population under its start) every `REFILL_USD_SECONDS` / dollars seconds (96 minutes at $5, about 19
+#: at $25, its 15-minute least from $32), never faster than the two
 #: minimums, and once a day with no research dollars at all (also the slowest either ever is). RULE_VERSION 1 scaled by
 #: the floor, so no dollars made it faster than 4 hours; these constants hold whatever the ceiling is.
 ARCHITECT_USD_SECONDS = 72000.0
@@ -484,19 +511,20 @@ def _read_only(path: Path) -> sqlite3.Connection:
 
 
 def ceiling_usd_day(meter: str) -> float:
-    """One meter's share of THE OWNER'S CEILING, dollars a day: the most its research ever is (RULE_VERSION 3: Sail's
-    research and the Claude ROLES' line at the $25 cap with nothing fixed; the lane's part rides apart, `cost_rule`)."""
+    """One meter's share of THE OWNER'S CEILING, dollars a day: the most its research ever is (RULE_VERSION 3 and 4:
+    Sail's research and the Claude ROLES' line at the owner's cap, $50 under rule 4, with nothing fixed; the lane's part
+    rides apart, `cost_rule`)."""
     return round(CEILING_USD_DAY * SPLIT[meter], 4)
 
 
 def cost_rule(week_net: Any, sail_fixed: Any, lane_peak: Any = None) -> dict[str, Any]:
-    """THE COST RULE (RULE_VERSION 3; the module docstring's ARITHMETIC) for one reading, pure: from the trailing week's
+    """THE COST RULE (RULE_VERSION 4; the module docstring's ARITHMETIC) for one reading, pure: from the trailing week's
     realized net profit of every real book (`week_net`, the last `PROFIT_SESSIONS` sessions', dollars; None is unknown:
     nothing earned), Sail's fixed cost a day and the lane's heaviest UTC day of verdicts over the trailing week
     (`lane_peak`; None reads as none):
 
-        earned = 0.5 x max(0, week_net) / 7;  cap = min(25, 5 + earned);  room = max(0, cap - fixed);
-        lane = min(room, max(3, 1.5 x lane_peak));  rest = room - lane, split Sail 0.8 and Claude 0.2
+        earned = 0.5 x max(0, week_net) / 7;  cap = min(50, 10 + earned);  room = max(0, cap - fixed);
+        lane = min(room, max(6, 1.5 x lane_peak));  rest = room - lane, split Sail 0.8 and Claude 0.2
 
     as {earned_usd_day, cap_usd_day, fixed_usd_day (every fixed line), fixed (each), room_usd_day, lane_usd_day,
     rest_usd_day, line_usd_day: {sail, claude (lane + roles)}, roles_usd_day: {sail, claude}}. A Sail fixed cost that is
@@ -524,7 +552,7 @@ def cost_rule(week_net: Any, sail_fixed: Any, lane_peak: Any = None) -> dict[str
 def floor_lines(house_burn: Any = None) -> dict[str, Any]:
     """THE FLOOR (no usable budget.json): THE COST RULE's own lines at no profit, on Sail's fixed cost at the larger of
     `house_burn` (the guard's configured `house_burn_usd_day`, when given) and `FLOOR_SAIL_FIXED_USD_DAY`: never more,
-    with the real fixed cost, than the $5 the rule allows a day with no profit (it FAILS CLOSED)."""
+    with the real fixed cost, than the $10 the rule allows a day with no profit (it FAILS CLOSED)."""
     burn = _amount(house_burn)
     return cost_rule(0.0, max(FLOOR_SAIL_FIXED_USD_DAY, burn if burn is not None else 0.0))
 
@@ -2309,7 +2337,7 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
     if meter not in METERS:
         raise ValueError(f"no meter {meter!r}")
     root, now, config = _root(ctx), _now(ctx), _config(ctx)
-    # The meter's wanted rate under THE COST RULE at no profit (fixed + its share of the $5 cap): the cliff holds
+    # The meter's wanted rate under THE COST RULE at no profit (fixed + its share of the $10 cap): the cliff holds
     # `DRILL_DAYS` of it above the reserve.
     wanted = cost_rule(0.0, DRILL_FIXED["sail"])["line_usd_day"][meter] + DRILL_FIXED[meter]
     synthetic = {"week_net_usd": 0.0, "week_net_source": "drill", "lane": {"usd_day": None, "today_usd": 0.0, "source": "drill"},

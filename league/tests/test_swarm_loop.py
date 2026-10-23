@@ -23,6 +23,7 @@ from league.swarm.pool import GymPool
 from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.swarm.store import CLOSEABLE, STRUCTURES, SwarmStore
 from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, provider
+from league.tests.v2_cost import on_v2_cost
 
 GYM = importlib.util.find_spec("league.gym") is not None
 
@@ -377,7 +378,9 @@ class Process(LoopCase):
                     self.assertIsNone(pace["limit_usd_per_hour"])
                     self.assertIn(f"invalid researcher.{key}", pace["reason"])
 
+    @on_v2_cost
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
+        # (On budget rule 3's figures, league/tests/v2_cost.py.)
         # THE BUDGET holds population.start to its ceiling (league/ops/budget.py): at the owner's ceiling of $25 a day
         # that is 25 families, so the 48 founders are over the start and the refill is judged under it.
         from league.ops import budget as B

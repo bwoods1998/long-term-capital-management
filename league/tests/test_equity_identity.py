@@ -26,7 +26,7 @@ EQUITY = REPO / "league" / "equity"
 #: A13, as the captain listed them: the evidence modules (the identity) and the plumbing (out of it).
 EVIDENCE = ("__init__", "config", "store", "program", "ctx", "engine", "results", "runner", "synth", "sizing",
             "screen", "child")
-PLUMBING = ("live", "actions", "schedule", "families", "bands", "kinds")
+PLUMBING = ("live", "actions", "schedule", "families", "bands", "kinds", "bugstop")   # (bugstop: release 1019m's latch)
 
 
 def _imports(path: Path) -> set[str]:

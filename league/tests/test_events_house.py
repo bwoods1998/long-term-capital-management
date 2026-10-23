@@ -694,14 +694,28 @@ class TheBudgetsLine(LaneCase):
         self.budget(4.0)
         self.assertEqual(self.lane.verdict_line(self.clock_dt()), {"usd_day": 0.003, "source": "events.verdict_usd_day"})
         (self.root.parent / "budget.json").unlink()
-        self.lane = self.new_lane(verdict_usd_day=5.0)                   # a config above the floor, whatever the default
+        self.lane = self.new_lane(verdict_usd_day=9.0)                   # a config above the floor, whatever the default
         line = self.lane.verdict_line(self.clock_dt())
-        self.assertEqual(line["usd_day"], 3.0, "no budget.json: the rule's own no-profit lane line, never the config's $5")
+        self.assertEqual(line["usd_day"], 6.0, "no budget.json: the rule's own no-profit lane line (goal V3's rule 4), "
+                                               "never the config's $9")
         self.assertIn("the floor (no budget.json yet)", line["source"])
         self.budget(0.0)                                                 # the rule could not read the Claude meter
         self.assertEqual(self.lane.verdict_line(self.clock_dt())["usd_day"], 0.0)
         with mock.patch("league.ops.budget.lane_allowance", side_effect=RuntimeError("boom")):
             self.assertEqual(self.lane.verdict_line(self.clock_dt())["usd_day"], 0.0, "no allowance read: no paid call")
+
+    def test_goal_v3s_lane_line_is_six_dollars_in_the_config_the_default_and_the_rule(self):
+        """Release 1019m-cost (goal V3, item 5; budget rule 4): the lane's own line is $6.00 in league/config.json and in
+        the House's default, the same as the rule's lane part at no profit (6 of the $10 base, as 3 was of the $5), so with
+        no budget.json the lane's line is $6.00 from either."""
+        from league.ops import budget as B
+
+        config = json.loads((Path(H.__file__).resolve().parents[1] / "config.json").read_text())
+        self.assertEqual((config["events"]["verdict_usd_day"], H.VERDICT_USD_DAY, B.LANE_USD_DAY, B.floor_lane_usd_day()),
+                         (6.0, 6.0, 6.0, 6.0))
+        self.lane = self.new_lane()
+        (self.root.parent / "budget.json").unlink(missing_ok=True)
+        self.assertEqual(self.lane.verdict_line(self.clock_dt()), {"usd_day": 6.0, "source": "events.verdict_usd_day"})
 
     def test_a_line_of_nothing_asks_nothing(self):
         self.three_filings()

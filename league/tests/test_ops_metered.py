@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from league.ops import budget as B
 from league.ops import metered as MT
 from league.swarm.store import SwarmStore
+from league.tests.v2_cost import on_v2_cost
 
 NY = ZoneInfo("America/New_York")
 UTC = dt.timezone.utc
@@ -122,7 +123,7 @@ class Ledger(unittest.TestCase):
         self.see(t + 5400, claude=1.3, cap=None)   # budget.json not usable this run: the holders run on the floor's lines
         self.assertEqual(self.ledger["caps"][TUE.isoformat()], 12.0, "an unusable read lowers nothing")
         self.see(t + 7200, claude=1.4, cap=900.0)
-        self.assertEqual(self.ledger["caps"][TUE.isoformat()], B.CEILING_USD_DAY, "never above the owner's $25")
+        self.assertEqual(self.ledger["caps"][TUE.isoformat()], B.CEILING_USD_DAY, "never above the owner's ceiling")
         self.assertEqual(MT.day_cap(self.ledger, WED), B.BASE_USD_DAY, "no budget.json read for the day: FAIL CLOSED")
         self.assertEqual(MT.day_figure(self.ledger, WED, utc(WED, "01:00"))["cap"], B.BASE_USD_DAY)
         # A budget.json the rule computed before 00:00 UTC and still in force after it counts for both days; one dated
@@ -133,8 +134,9 @@ class Ledger(unittest.TestCase):
         MT.observe(other, now=utc(WED, "00:50"), sail=None, claude=2.1, openai=None, cap=20.0, cap_at=utc(WED, "03:00"))
         self.assertEqual(other["caps"], {TUE.isoformat(): 8.0, WED.isoformat(): 8.0})
 
+    @on_v2_cost
     def test_a_close_that_lifts_the_cap_and_research_mid_day_is_no_breach(self):
-        """The review's case: the day ran at the $5 cap's lines until a profitable close lifted the cap to $12 and the
+        """(On budget rule 3's figures, league/tests/v2_cost.py.) The review's case: the day ran at the $5 cap's lines until a profitable close lifted the cap to $12 and the
         top-up raise lifted research to the new lines; the day then spent $9 in all, inside its raised lines. Judged
         against the lowest cap ($5), that read as a breach; it is under the day's $12."""
         self.see(utc(TUE, "00:20"), sail=10.0, claude=10.0, cap=5.0)
@@ -145,6 +147,24 @@ class Ledger(unittest.TestCase):
         self.assertGreater(figure["at_least"], B.BASE_USD_DAY)
         self.assertEqual((figure["cap"], figure["over"]), (12.0, False))
         self.assertFalse(MT.cap_check(self.ledger, utc(TUE, "23:50"))["stalled"])
+
+    def test_goal_v3s_base_is_the_cap_of_a_day_no_budget_json_was_read_for(self):
+        """Goal V3 (budget rule 4): a day the stall job read no usable budget.json for is judged at the rule's no-profit
+        $10 (FAIL CLOSED at the base, never above it), and no cap is read above the owner's $50; a day the rule set at
+        rule 3's $5 keeps its $5 (metered.json keeps each day's cap as the rule in force then set it)."""
+        self.assertEqual((B.BASE_USD_DAY, B.CEILING_USD_DAY), (10.0, 50.0))
+        self.assertEqual(MT.day_cap(self.ledger, WED), 10.0)
+        t = utc(TUE, "01:00")
+        self.see(t, claude=1.0, cap=5.0)                 # rule 3's file, read before the deploy
+        self.see(t + 3600, claude=7.5, cap=None)         # the deploy: another rule's file is no file, nothing lowered
+        self.assertEqual(MT.day_cap(self.ledger, TUE), 5.0)
+        self.see(t + 7200, claude=7.6, cap=10.0)         # rule 4's first run of the day
+        self.assertEqual(MT.day_cap(self.ledger, TUE), 10.0)
+        self.see(t + 9000, claude=7.7, cap=75.0)
+        self.assertEqual(MT.day_cap(self.ledger, TUE), 50.0, "never above the owner's $50")
+        self.see(utc(TUE, "23:50"), sail=0.0, claude=9.0, cap=50.0)
+        figure = MT.day_figure(self.ledger, TUE, utc(TUE, "23:50"))
+        self.assertEqual((figure["cap"], figure["over"]), (50.0, False))
 
     def test_over_the_cap_is_what_the_readings_show_at_the_least(self):
         t = utc(TUE, "00:10")

@@ -522,15 +522,73 @@ def _learner_next(store: S.Store, program: str, version: int) -> dict[str, Any]:
         return {"k": None, "at_sessions": None, "sessions": 0, "status": f"unreadable ({type(exc).__name__})"}
 
 
+#: How many sessions back the learners' lost live parts are counted (release 1019m, `_parts_lost`).
+PARTS_SESSIONS = 10
+
+
+def _parts_lost(store: S.Store, day: dt.date, line: Mapping[str, Any]) -> dict[str, Any] | None:
+    """RELEASE 1019m (the independent review, A139): a learner's LIVE PARTS that expired or failed over the last
+    `PARTS_SESSIONS` sessions to `day` (league/events/learner.py `PART_KEY`), each beside the House's own decision of the
+    auction it ran after (`house_receipt`: the seconds from its start to its finish), since the part's bound is what the
+    House's run leaves of the task's (120 s at the close, never past the task's bound less `EVL5_FINISH`): a slow House
+    decision starves the part, the decision is then written 'late', and section 1.7 keeps a late decision out of the
+    judged record. Receipts' times only (no outcome); None for a learner with no session on record."""
+    from . import learner as LR
+    from .programs import BY_KEY
+
+    prog = BY_KEY.get((str(line.get("program")), int(line.get("version") or 0)))
+    if prog is None:
+        return None
+    days = [d.day for d in C.previous(store, day, PARTS_SESSIONS - 1)] + ([day] if C.session(store, day) else [])
+    lost: list[dict[str, Any]] = []
+    for d in days:
+        raw = store.meta(LR.PART_KEY.format(program=prog.id, version=prog.version, day=d.isoformat()))
+        if raw is None:
+            continue
+        try:
+            status = str(json.loads(raw).get("status") or "unreadable")
+        except (TypeError, ValueError, AttributeError):
+            status = "unreadable"
+        house = LR.house_receipt(store, prog, d)
+        secs = None
+        if house is not None and house.get("started_at") and house.get("finished_at"):
+            secs = round((S.parse_iso(str(house["finished_at"])) - S.parse_iso(str(house["started_at"]))).total_seconds())
+        lost.append({"day": d.isoformat(), "status": status, "house_s": secs})
+    return {"sessions": len(days), "lost": len(lost), "parts": lost}
+
+
 def _learners(store: S.Store, day: dt.date) -> list[dict[str, Any]]:
     """PREREG-EVL-7's learner lines (league/events/learner.py `report_lines`): each learner's decision of the day, its
-    candidates, picks and training rows (counts only: no fitted figure reaches the report); [] while none is pinned."""
+    candidates, picks and training rows (counts only: no fitted figure reaches the report); [] while none is pinned.
+    Release 1019m: each line also counts the learner's live parts lost to their bound or a failure (`_parts_lost`)."""
     from . import learner as LR
 
     try:
-        return LR.report_lines(store, day)
+        lines = LR.report_lines(store, day)
     except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
         return [{"error": f"{type(exc).__name__}: {str(exc)[:120]}"}]
+    for line in lines:
+        try:
+            got = _parts_lost(store, day, line)
+        except Exception as exc:  # noqa: BLE001 - the report is read whatever this says
+            got = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+        if got is not None:
+            line["parts_lost"] = got
+    return lines
+
+
+def _parts_text(got: Mapping[str, Any] | None) -> str:
+    """The learners' line's tail for `_parts_lost` ("" with none lost)."""
+    if not got:
+        return ""
+    if "error" in got:
+        return f"; live parts lost: unreadable ({got['error']})"
+    if not got.get("lost"):
+        return ""
+    each = ", ".join(f"{p['day']} {p['status']} (House run {p['house_s'] if p['house_s'] is not None else '?'} s)"
+                     for p in got.get("parts") or [])
+    return (f"; live parts lost {got['lost']} of the last {got['sessions']} sessions, out of the judged record "
+            f"(section 1.7): {each}")
 
 
 def _births(store: S.Store) -> dict[str, Any]:
@@ -560,7 +618,10 @@ def render(report: Mapping[str, Any]) -> str:
     for x in report.get("learners") or []:     # (PREREG-EVL-7: counts only)
         from . import learner as LR
 
-        lines.extend(LR.render_lines([x]) if "error" not in x else [f"Learners: {x['error']}"])
+        got = LR.render_lines([x]) if "error" not in x else [f"Learners: {x['error']}"]
+        if got and "error" not in x:
+            got[-1] += _parts_text(x.get("parts_lost"))      # (release 1019m: the live parts lost, `_parts_lost`)
+        lines.extend(got)
     for p in report["programs"]:
         t, st = p["intents_today"], p["settled"]
         today = "/".join(str(t.get(c, 0)) for c in INTENT_CLASSES)
