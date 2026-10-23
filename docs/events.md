@@ -656,10 +656,26 @@ the frozen text wins. As built (league/events/reader2.py; league/tests/test_even
   minute a pass that still waits plans none (binding `window`), and so does one whose learners' pass was decided by
   A140's last-minute rule. EVL-R2-ON is a PREREG-EVL-6 version (`Program.evl6`: 14 Probe slots, the at-size and
   unsettled-stay rules) and its summary goes into the close's own decision row, so A85's reservation reads it.
+  IN THE BOOK'S MINUTE (the money review's fix round): every earlier row's buy of the tick (its first send, a retry,
+  A80's re-send) is sent BEFORE the per-file passes (league/equity/live.py `_event_step`, `_event_send` "earlier"),
+  so it never waits for READER-2's reads; the passes' work in the tick (the account read, the picks' daily bars, the
+  eligible-list POST, their sends) starts nothing at or after `SLOT_TICK_S` (30 s) from the tick's start, a pass
+  starts only with `SLOT_PASS_LEAST_S` (10 s) of it left and no request with less than `SLOT_LEAST_S` (2 s), each
+  request's timeout ending by it (`_timeout_at_most`): so the 15:47 tick never runs past 15:48:03 for this file's work
+  (live/step.py would skip the 15:48 minute, A140's last-minute rule and PREREG-EVL-5's released buys); a pass the
+  bound stops waits for the next tick (at the window's last book minute, its window row), a buy it stops waits too
+  (`SLOT_BOUND`). THE ROOM: a later file's buy is sized with the worst case of every earlier row's buy of the auction
+  still to go (`_event_kept_before`: not sent yet, sent back for a reading the gateway could not make, A80's
+  re-send), out of its cash, invested room, loss budget and name wall; one that fits only but for it waits, keeping
+  nothing (`HELD_EARLIER`, never counted as PREREG-EVL-5's wait), and is sized again at the next tick after every
+  earlier send, so an earlier row's retry is never refused for its cash (league/tests/test_events_evl10_money.py).
 - THE JUDGE (section 3): PREREG-EVL-6 as frozen against EVL-R2-ON-SET (`screen.CONTROLS`); its finality is its slot's
   clock; a run reads the budget once at the close it would start, else it never starts (`screen.start_runs_r2`,
-  `reader2.NORUN_KEY`); three runs at most. Its 0.13 is counted by the screen's own sum and released from
-  births.RESERVED by the pin.
+  `reader2.NORUN_KEY`); three runs at most. THE LANE'S COUNT a run start reads is R3's validator's sum (sections 3 and
+  4: the screen's own `budget6` used, 0.13 for every run still waiting, and births.RESERVED's holds of the files whose
+  pins are unset: PREREG-EVL-8's 0.65 and PREREG-EVL-9's 0.30 on this tree), so with LEFT 0.09 its run 2 never starts
+  unless a restatement made before that close holds it (the judges review's fix round). Its 0.13 is counted by the
+  screen's own sum and released from births.RESERVED by the pin.
 - THE PROOF (league/tests/test_events_evl10.py `TheProof`, league/tests/evl10_week.py): on release 1019e's and
   PREREG-EVL-5's invented week every program's intents, every decision receipt with its times and every seatable
   program's real-money picks are main's (recorded on main 1c87837f, league/tests/fixtures/evl10_week_main.json), and

@@ -84,6 +84,34 @@ them), THE LOOK-AHEAD TEST, no ask when the line is spent or a cap hold names th
 spec's bytes, section 2.5's TEST, the House's slot keeping the close decision's time and receipt. The older mechanism
 tests run on the registries before this file (league/tests/evl10_fakes.py). The test counts and CI are in the PR.
 
+**The money and judges reviews' fix round** (head `ffef5cec`; each fix with a test that fails without it,
+league/tests/test_events_evl10_money.py and test_events_evl10.py `TheJudge`):
+- THE TICK (money, major): READER-2's book pass ran between the earlier rows' planning and their send in the same
+  minute, so every earlier row's buy of the tick waited for its reads (the picks' daily bars, the account, the
+  eligible list): on a slow data host the hotfix's own close (ACME, GAMA, BETA) moved 20 s or was lost, and the 15:47
+  tick could end past 15:48:03, which live/step.py then skips. Now `_event_step` sends every earlier row's buy of the
+  tick BEFORE the per-file passes (`_event_send` "earlier", then the passes, then "later"), and the passes' work in a
+  tick (reads, POST, sends) ends by `SLOT_TICK_S` (30 s from the tick's start; a pass starts only with 10 s of it left,
+  no request with under 2 s, each timeout ending by it, `_timeout_at_most`); a pass or buy the bound stops waits for
+  the next tick, and at the window's last book minute the pass writes its window row. TESTS: the hotfix close with
+  READER-2's bars at 20 s and on a degraded host, every earlier buy at the same time with and without this file; an
+  earlier row's send never waits for READER-2's read; a slow data host never makes the 15:47 tick skip 15:48; a hanging
+  read capped at the bound; a pass with too little of the bound left.
+- THE ROOM (money, major): only PREREG-EVL-5's waiting buys held room from a later file's buy, so an earlier row's buy
+  still to go for any other reason (a 424 reading refusal, A80's re-send, `_symbol_busy`) found its cash taken at its
+  retry. Now a later file's buy is sized with the worst case of every earlier buy of the auction still to go kept out
+  of its cash, invested room, loss budget and name wall (`_event_kept_before`, as PREREG-EVL-8's `_event_kept_8`); one
+  that fits only but for it waits keeping nothing (`HELD_EARLIER`, never counted as PREREG-EVL-5's wait) and is sized
+  again at the next tick, after every earlier send: the reading in which this file gets what is left (section 2.5's
+  CASH effect). TEST: the review's 424 case, BETA's re-send at 15:48 goes with the same body with and without this
+  file.
+- THE LANE'S COUNT (judges, major): `start_runs_r2` read the screen's own sum and left out births.RESERVED's holds of
+  the files whose pins are unset, so run 2 could start where sections 3 and 4 say it never starts. It now reads R3's
+  validator's sum (used + 0.13 a waiting run + RESERVED: PREREG-EVL-8's 0.65 and PREREG-EVL-9's 0.30 here). TEST: on
+  section 4's count (1.95 + 0.26 + 0.52 + this file's 0.13 = 2.86), 2.86 + 0.95 + 0.13 = 3.94 > 3.90: run 2 refused
+  for good; with no reservation it starts. (Main's PREREG-EVL-6 `start_runs` has the same omission; it is outside this
+  release, stated for the captain.)
+
 **Deploy and rollback**: docs/operations.md, **Release 1019n-r2**.
 
 ### Release 1019m-cost: goal V3's compute line, $10 a day + half the week's profit, never above $50 (A145)

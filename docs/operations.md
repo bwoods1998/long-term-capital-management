@@ -24,7 +24,12 @@ on 3.14 and 3.11): the standing grant stands, nothing to ratify. The timing tabl
   House's 'reader' lane, `reader:r2` in health.json's background lanes) and rows in the lane's `r2_scan` and
   `r2_qual`; at 15:40-15:44 ET `slots.close-evl10` `ok` and a `decide-close-r2:<day>` receipt `ok`; the close decision
   `decide-close:<day>` still starts at 15:47:00 ET; the book's `eq_event_decisions` has a `close-evl10` row after its
-  `close` (and `close-lrn`) rows; EVL-R2-ON's buys, if any, after every other close buy. `reads2` dollars appear in the
+  `close` (and `close-lrn`) rows; EVL-R2-ON's buys, if any, after every other close buy (every earlier row's buy of a
+  tick is sent before the per-file passes run; their work in the tick ends by `SLOT_TICK_S`, 30 s from the tick's
+  start: a pass or buy the bound stopped says `SLOT_BOUND`'s words in the minute's `event_decide_evl10` or on its intent
+  and goes at the next tick, and one still stopped at the window's last book minute is the report's `window` binding;
+  a buy of this file that waits for the room an earlier buy still to go keeps carries `HELD_EARLIER`'s words, "earlier
+  rows' buys still to go at this auction"). `reads2` dollars appear in the
   lane's line (`verdict_usd_today` counts them) and the daily report's `costs.verdicts_usd` (the lane's Claude dollars:
   its verdicts', R3's births call's and READER-2's); the lane's own report (`reports/<day>.txt`) has the Reader-2 lines.
 - STOP R2 AT ONCE without a deploy: the lane's `STOP` file (idles the lane and R2's job), or the House's maintenance

@@ -22,6 +22,13 @@ The branch below was built on release 1019h and is merged onto today's main with
   unsettled-stay hold, its summary merged into the auction's own row, the window row at the last book minute, A140's
   late learners' pass read as a pass still waiting); its buys go after every main row's (`_file_rank`) and its entries
   keep the earlier rows' orders on the day's line.
+- **No earlier row waits for, keeps room for or is refused for a later file's buy** (the money review's fix round;
+  PREREG-EVL-10 section 2.5). Every earlier row's buy of a tick is sent BEFORE the per-file passes run (`_event_step`:
+  `_event_send` "earlier", the passes, then `_event_send` "later"); the passes' reads, POST and sends in a tick end by
+  `SLOT_TICK_S` (30 s) from its start, each request's timeout ending by it, so the minute is never run into the next one
+  by a later file (live/step.py would skip it); and a later file's buy is sized with the worst case of every earlier
+  buy of the auction still to go kept out of its room (`_event_kept_before`), waiting (`HELD_EARLIER`) when it fits only
+  but for it.
 - **A file may have no catch-up** (`catchup` None: PREREG-EVL-10's session with no live run has no decision).
 - **A slot never takes an earlier file's turn**: after a clock-started slot before the main decision the House's turn goes
   on into the task that was due (house.py `_clock_slot`).
@@ -73,7 +80,8 @@ for the rows behind it.
   `eq_event_decisions`), made once the main pass is done and the file's live receipt is made, inside the file's own
   window: its picks from `book.picks`, every name given at the auction already passed over, the room left, planned as
   buys sent after every main row in ROOM's order and ONLY inside `[send_from, send_until)` (`_event_send`). A file's
-  buy never keeps room from a main row (`HeldAhead` is the main pass's, unchanged); a receipt final without being made,
+  buy never keeps room from a main row (`HeldAhead` is the main pass's, unchanged; as merged, the room every main buy
+  still to go keeps is kept from the file's buy, `_event_kept_before`); a receipt final without being made,
   or a window that closed first, decides the file with no buy and says why.
 - **Pre-passes.** A row with `prepass` True is a file's reads ahead of its decision on data knowable then, run as the
   plan's last task inside `[start, never_past]`, bounded to end before any decision, its receipt its kind itself

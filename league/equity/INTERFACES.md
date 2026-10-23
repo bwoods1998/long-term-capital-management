@@ -1998,8 +1998,29 @@ learners and R3's births).
   last book minute (`HELD_OVERDUE_S` before the cut-off) a pass that still waits writes both rows with planned 0 and
   binding `EVENT_SLOT_WINDOW` ("window"). A receipt `failed`, `cut` or `missed` decides the file with no buy.
 - `_event_send` orders an auction's buys by `_file_rank` (0 for the main file, then the timing table's order) before
-  `book.send_key`, so every later file's buy is sent after every main row's; a later file's buy goes only inside its
-  own window (`book.send_window`).
+  `book.send_key` (`_event_buy_order`), so every later file's buy is sent after every main row's; a later file's buy
+  goes only inside its own window (`book.send_window`). `which` (the money review's fix round): "earlier" sends the
+  main file's buys alone, "later" the later files' alone, "all" both. `_event_step` sends "earlier" BEFORE
+  `_event_decide_slots` and "later" after it, so no earlier row's buy of a tick waits for a later file's reads.
+- THE TICK'S BOUND (`SLOT_TICK_S` 30 s from the tick's `now`; `SLOT_PASS_LEAST_S` 10 s, `SLOT_LEAST_S` 2 s; words
+  `SLOT_BOUND`): `_event_decide_slots(..., bound=)` and `_event_decide_slot(..., bound=)` start a pass only with
+  `SLOT_PASS_LEAST_S` left (else it waits for the next tick; at the window's last book minute its window row), bound its
+  market readers, its `_event_gate` (account) and `_event_sigmas(..., until=)` reads and its
+  `_event_publish(..., until=)` POST (no request with less than `SLOT_LEAST_S` left; each timeout at most what is left,
+  `_timeout_at_most(holder, seconds)`, which shortens `holder.client.timeout` for the block, as league/live/venue.py
+  `MarketData._get` does for one read); `_event_send(..., which="later", bound=)` and `_event_work_entry(..., bound=)`
+  send a later file's buy only with `SLOT_LEAST_S` left, its order's timeout at most what is left, else it waits
+  (`SLOT_BOUND` on its why). `book.publish`'s own timeout is `PUBLISH_TIMEOUT_S` (20 s), which the bound only shortens.
+- THE ROOM EARLIER BUYS STILL TO GO KEEP (`_event_kept_before(day, at, s, adapter, rank, file_of)`, a `HeldAhead` with
+  `words` `HELD_EARLIER`): every buy of a lower `_file_rank` at the auction whose `_event_last(entry=True)` may still
+  send, in ROOM's order, keeps its worst case at its limit (`_event_keep_room`; unreadable: `book.most_ask`), out of a
+  later file's cash, invested room, loss budget and name wall (`orders` 0: `_event_line_keep` keeps their lines). Read
+  once a file a call, after every earlier file's buy of the call. A later file's buy that fits only but for it waits
+  (its why `HELD_ROOM (n HELD_EARLIER): ...`), keeping nothing. `HeldAhead.words` (default `HELD_AHEAD`) names the room
+  a wait is for, so PREREG-EVL-5's counts (`ROOM_WAIT`) never count a later file's. PREREG-EVL-8's feat/evl-8 b81de952
+  carries the same `HELD_EARLIER`, `HeldAhead.words` and `_timeout_at_most` and its own `_event_kept_8`,
+  `EIGHT_TICK_S` and `_event_send(which="earlier"|"eight")`: merged, its late passes and this scheduler's passes come
+  after one "earlier" send and share one bound from the tick's start.
 - `_event_line_keep` gives a later file's entry the keep of every order the auction's main rows may still send there
   (planned buys 2 each at the close, a sent one with no re-send 1, plus its own exit), so the day's line refuses its
   entries after every earlier row's; a learner's keep counts no later file's row.
