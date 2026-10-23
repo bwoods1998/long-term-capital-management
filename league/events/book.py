@@ -649,9 +649,10 @@ LIVE_ROWS = ("SELECT u.* FROM universe u JOIN eligibility e ON e.day=u.day AND e
 def eligible(lane: Lane, day: dt.date) -> list[str]:
     """THE ELIGIBLE LIST of entry session `day`: the symbols of the live rule's eligible universe rows the lane wrote for
     it (`LIVE_ROWS`; PREREG-EVL-1 section 2, the issuers with events), sorted. The gateway admits an event buy only for
-    a name on it."""
-    names = {str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))}
-    return sorted(names | eligible_8(lane, day))
+    a name on it. PREREG-EVL-8's names are NOT here (`eligible_8`): the book sends them with this list only in that
+    file's own pass and send (league/equity/live.py `_event_publish`, release 1019n's second money review), so the
+    earlier rows' list, and when it is sent, are exactly as without that file."""
+    return sorted({str(r["symbol"]).upper() for r in lane.db.execute(LIVE_ROWS, (day.isoformat(),))})
 
 
 def universe_rows(lane: Lane, day: dt.date) -> dict[str, dict[str, Any]]:

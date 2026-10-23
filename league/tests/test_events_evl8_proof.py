@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from decimal import Decimal as D
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from league.equity import live as L
@@ -260,9 +261,13 @@ class TheEarlierBuysFirst(TB.EventTest):
         self.assertLess(sent.index("PXA"), len(sent) - 1, "PXA went at 15:47, sized beside ACME's kept room")
         self.assertEqual([(b["symbol"], b["qty"]) for b in on.bodies() if b["side"] == "buy"],
                          [("ACME", "5"), ("PXA", "2"), ("ACME", "5")],
-                         "at 15:47 PXA takes two shares beside ACME's kept $100, PXB to PXD wait for it")
-        waits = [r["why"] for r in on.event_intents("buy") if r["symbol"] in ("PXB", "PXC", "PXD")]
-        self.assertTrue(all("sizing" in w for w in waits), waits)
+                         "at 15:47 PXA takes two shares beside ACME's kept $100, PXB to PXD are refused there")
+        # (release 1019n's second money review, sections 4.2 and 4.6: a buy of this file that fits only but for the
+        # room earlier rows' buys keep is refused IN ITS TICK, never left waiting for a later one)
+        held = [r for r in on.event_intents("buy") if r["symbol"] in ("PXB", "PXC", "PXD")]
+        self.assertEqual([r["status"] for r in held], ["refused"] * 3)
+        self.assertTrue(all(w.startswith("sizing") and L.HELD_EARLIER in w for w in (r["why"] for r in held)),
+                        [r["why"] for r in held])
 
     def slow_day(self, *, eight: bool):
         from league.tests import test_events_venue_cancel as VC
@@ -300,6 +305,263 @@ class TheEarlierBuysFirst(TB.EventTest):
         self.assertEqual([b["symbol"] for b in on.bodies() if b["side"] == "buy" and P.is_8(
             next(r["program"] for r in on.event_intents("buy") if r["symbol"] == b["symbol"]))], [],
             "this file's buys, planned after a read that ended past 15:49:00, are not sent")
+
+
+def next_tick(ended: float) -> float:
+    """When live/step.py `_loop` runs the next minute() after one that ENDED at `ended` (its own formula: the next
+    minute's `MINUTE_OFFSET` counted from the end, so a tick ending past it skips that minute)."""
+    from league.live.step import MINUTE_OFFSET
+
+    wait = 60.0 - (ended % 60.0) + MINUTE_OFFSET
+    if wait >= 60.0:
+        wait -= 60.0
+    return ended + wait
+
+
+class TimedClient:
+    """A venue client's timeout as league/live/venue.py's is read (`timeout`, per request), for the slow fakes below:
+    a request that takes longer than it raises TimeoutError once it has taken it (the fake clock moves)."""
+
+    def __init__(self, clock, timeout: float = 20.0):
+        self.clock, self.timeout, self.seen = clock, float(timeout), []
+
+    def take(self, seconds: float) -> None:
+        self.seen.append(self.timeout)
+        if seconds > self.timeout:
+            self.clock.set(self.clock() + self.timeout)
+            raise TimeoutError("timed out")
+        self.clock.set(self.clock() + seconds)
+
+
+class TheEarlierList(TB.EventTest):
+    """SECTIONS 4.2 AND 4.3 IN THE BOOK (release 1019n's second money review, its major 2): THE EARLIER ROWS' ELIGIBLE
+    LIST, AND WHEN IT IS SENT, ARE EXACTLY AS WITHOUT THIS FILE. `book.eligible` is the lane's live rows alone; this
+    file's names (`book.eligible_8`) are sent with them only in its own pass and send (league/equity/live.py
+    `_event_publish` `eight`), after every earlier send of the tick, and a list they widened never makes an earlier row
+    POST again. The review's case: ACME's 15:47 buy cancelled by the venue (A80), an EVL-META-ON pick that is no lane
+    name landing before the 15:48 tick, the gateway's eligible route down at 15:48."""
+
+    def land_meta_on(self, h) -> None:
+        MT.ensure(h.lane.st)
+        h.lane.st.db.execute("INSERT INTO mrl_decisions(program, version, day, kind, receipt, started_at, finished_at, "
+                             "status, code_sha, members, eligible, picks) VALUES('EVL-META-ON', 1, ?, 'live', 1, 'x', "
+                             "'x', 'ok', 'c', 1, 1, 1)", (TB.DAY.isoformat(),))
+        h.lane.st.db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, entry_at, "
+                             "exit_day, exit_at, rank_key, mode, status, why) VALUES('EVL-META-ON', 1, 'px:x', 'MZZ', "
+                             "'0000007999', ?, ?, 'close', ?, 'open', 16.0, 'shadow', 'planned', 'mrl')",
+                             (TB.iso(TB.DAY, 15, 46), TB.DAY.isoformat(), TB.NEXT.isoformat()))
+        h.lane.st.set_meta(PXL.RAN_KEY.format(key="close-meta", day=TB.DAY.isoformat()), "{}")
+
+    def close_day(self, *, eight: bool):
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            root = self.root / ("on" if eight else "off")
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's first buy, cancelled 5 ms after it: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=False)     # (ACME for the earlier close row only)
+            learners_failed(h, "on")
+            self.ready(h)
+            log: list[tuple[str, Any]] = []
+            post, submit = h.venue.client.request, h.venue.submit
+
+            def request(method, url, *, headers, body, timeout):
+                log.append(("list", tuple(json.loads(body)["symbols"])))
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                log.append(("order", body["symbol"]))
+                return submit(body, exit=exit)
+            h.venue.client.request, h.venue.submit = request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46), (15, 47)):
+                h.tick(hh, mm)
+            if eight:
+                self.land_meta_on(h)
+            h.venue.client.fail = True              # (the gateway's eligible route fails at 15:48)
+            mark = len(log)
+            h.tick(15, 48)
+            acme = [r for r in h.event_intents("buy") if r["symbol"] == "ACME"]
+            return log[mark:], acme
+
+    def test_the_earlier_rows_re_send_goes_as_without_this_file(self):
+        off, off_acme = self.close_day(eight=False)
+        on, on_acme = self.close_day(eight=True)
+        self.assertEqual(off, [("order", "ACME")], "without PREREG-EVL-8: A80's re-send at 15:48, no POST")
+        self.assertEqual(on[:1], [("order", "ACME")], "with it: the same re-send, first, with no POST before it")
+        self.assertNotIn(("list", ("ACME",)), on, "the earlier rows' list is never sent again")
+        self.assertEqual([r["status"] for r in on_acme], [r["status"] for r in off_acme])
+        self.assertFalse(any("eligible list" in str(r["why"]) for r in on_acme), [r["why"] for r in on_acme])
+
+    def test_the_earlier_path_never_reads_this_files_names(self):
+        """`book.eligible` is the lane's live rows alone: the earlier rows' path reads no store of this file."""
+        with W.pinned():
+            root = self.root / "names"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            lane = EB.Lane(h.lane.st.root / S.DB_NAME)
+            self.addCleanup(lane.close)
+            with mock.patch.object(EB, "eligible_8", side_effect=AssertionError("read on the earlier path")):
+                self.assertEqual(EB.eligible(lane, TB.DAY), ["ACME"])
+            self.assertEqual(EB.eligible_8(lane, TB.DAY), {"ACME", "PXA", "PXB", "PXC", "PXD", "PXE"})
+
+    def test_this_files_names_go_in_its_own_pass_and_an_earlier_buy_needs_no_post_after_them(self):
+        with W.pinned():
+            root = self.root / "own"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)
+            h.day(upto=(15, 48))
+            lists = [tuple(x["symbols"]) for x in h.venue.client.lists]
+            self.assertEqual(lists[0], ("ACME",), "the earlier rows' list first, alone")
+            self.assertIn(("ACME", "PXA", "PXB", "PXC", "PXD", "PXE"), lists, "this file's names in its own pass")
+            self.assertEqual(lists.count(("ACME",)), 1, "never the earlier rows' list again once widened")
+
+
+class TheTickBound(TB.EventTest):
+    """SECTIONS 4.2 AND 4.6 IN THE BOOK'S MINUTE (release 1019n's second money review, its major 3): this file's work
+    in a tick (its late pass's reads, its POST, its sends) is bounded from THE TICK'S START (`live.EIGHT_TICK_S`, each
+    request's timeout ending by it), so it never runs the minute into the next one: live/step.py `_loop` starts the next
+    minute() at the next :03 counted from the tick's END, and a 15:47 tick ending past 15:48:03 skips the 15:48 tick,
+    where the earlier rows' A80 re-sends go. Slow fakes honour the clients' timeouts; with the lane's close receipt in
+    before the 15:47 tick, PX's close pass runs there."""
+
+    def day(self, name: str, *, eight: bool, bars_s: float = 0.0, list_s: float = 0.0, order_s: float = 0.0):
+        from league.live.venue import Submitted
+        from league.tests import test_events_venue_cancel as VC
+
+        ctx = W.pinned() if eight else W.pinned(None)
+        with ctx:
+            root = self.root / name
+            root.mkdir()
+            h = TB.Harness(root)
+            h.venue = VC.CancellingVenue(h.market, h.clock)
+            h.venue.venue_cancels = [0.005]         # (ACME's 15:47 buy, cancelled by the venue: A80's re-send at 15:48)
+            h.book = h.new_book()
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=eight)
+            learners_failed(h, "on")
+            h.lane.decided(TB.DAY, "open")
+            data = h.market.client = TimedClient(h.clock, 45.0)     # (a market data client of 45 s, as the lane's)
+            h.venue.client.timeout = 20.0                       # (the real account's client, as the book caps it)
+            real_bars, post, submit = h.market.bars, h.venue.client.request, h.venue.submit
+            self.order_timeouts: list[float] = []
+
+            def bars(symbols, **kw):
+                if bars_s and any(str(x).startswith("PX") for x in symbols):
+                    data.take(bars_s)
+                return real_bars(symbols, **kw)
+
+            def request(method, url, *, headers, body, timeout):
+                if list_s and any(x.startswith("PX") for x in json.loads(body)["symbols"]):
+                    TimedClient(h.clock, timeout).take(list_s)
+                return post(method, url, headers=headers, body=body, timeout=timeout)
+
+            def sent(body, *, exit):
+                if order_s and str(body["symbol"]).startswith("PX"):
+                    self.order_timeouts.append(h.venue.client.timeout)
+                    try:
+                        TimedClient(h.clock, h.venue.client.timeout).take(order_s)
+                    except TimeoutError as exc:
+                        return Submitted(False, None, f"no answer: {exc}", unknown=True)
+                return submit(body, exit=exit)
+            h.market.bars, h.venue.client.request, h.venue.submit = bars, request, sent
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46)):
+                h.tick(hh, mm)
+            h.lane.decided(TB.DAY, "close")         # (the lane's close receipt in before the 15:47 tick)
+            start = TB.at(TB.DAY, 15, 47)
+            h.tick(15, 47)
+            ended = h.clock() + 0.5                 # (the tick's own work: the fake clock does not move for it)
+            nxt = next_tick(ended)
+            stamp = dt.datetime.fromtimestamp(nxt, TB.NY)
+            h.tick(stamp.hour, stamp.minute, stamp.second)
+            return h, start, ended, nxt
+
+    def acme(self, h) -> int:
+        return len([b for b in h.bodies() if b["side"] == "buy" and b["symbol"] == "ACME"])
+
+    def test_a_slow_read_and_post_of_this_files_pass_end_by_the_bound_and_the_next_minute_runs(self):
+        """Its picks' bars read hanging (the data client's 45 s) and its eligible-list POST hanging (`book.publish`'s 20
+        s): without the bound the 15:47 tick ends at 15:48:08 and the 15:48 tick, with ACME's re-send, is skipped."""
+        off, start, ended, nxt = self.day("off", eight=False, bars_s=61.0, list_s=61.0)
+        self.assertEqual((self.acme(off), nxt), (2, TB.at(TB.DAY, 15, 48)), "without PREREG-EVL-8: 15:47 and 15:48")
+        on, start, ended, nxt = self.day("on", eight=True, bars_s=61.0, list_s=61.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5, "this file's work ended by the tick's bound")
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48), "the 15:48 tick runs")
+        self.assertEqual(self.acme(on), 2, "ACME's A80 re-send goes at 15:48, as without this file")
+        self.assertLessEqual(max(on.market.client.seen), L.EIGHT_TICK_S, "the read's timeout capped at the bound")
+        px = [r for r in on.event_intents("buy") if P.is_8(r["program"])]
+        self.assertTrue(px, "PX's pass was planned at 15:47")
+        self.assertEqual({r["status"] for r in px}, {"refused"}, "not sent in their tick: refused, never sent at 15:48")
+        self.assertTrue(all(r["why"].startswith(L.EIGHT_UNSENT) for r in px), [r["why"] for r in px])
+        self.assertEqual([b for b in on.bodies() if str(b["symbol"]).startswith("PX")], [])
+
+    def test_slow_sends_of_this_file_stop_at_the_bound(self):
+        """Each of its orders hanging past the account client's 20 s: the first takes its 20 s, the second only what
+        the bound leaves (its timeout capped), the rest are not sent in the tick and are refused."""
+        on, start, ended, nxt = self.day("sends", eight=True, order_s=25.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5)
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48))
+        self.assertEqual(self.acme(on), 2, "ACME's A80 re-send goes at 15:48")
+        self.assertEqual(len(self.order_timeouts), 2, self.order_timeouts)
+        self.assertEqual(self.order_timeouts[0], 20.0)
+        self.assertLess(self.order_timeouts[1], 20.0, "the second order's timeout ends by the bound")
+        px = {r["symbol"]: r for r in on.event_intents("buy") if P.is_8(r["program"])}
+        unsent = [r for r in px.values() if not on.book._intent_orders(int(r["iid"]))]
+        self.assertEqual(len(unsent), len(px) - 2)
+        self.assertEqual({r["status"] for r in unsent}, {"refused"})
+        self.assertTrue(all(L.EIGHT_BOUND in r["why"] for r in unsent), [r["why"] for r in unsent])
+
+    def test_a_slow_post_of_this_files_names_ends_by_the_bound(self):
+        on, start, ended, nxt = self.day("post", eight=True, list_s=61.0)
+        self.assertLessEqual(ended, start + L.EIGHT_TICK_S + 0.5)
+        self.assertEqual(nxt, TB.at(TB.DAY, 15, 48))
+        self.assertEqual(self.acme(on), 2)
+        self.assertEqual({r["status"] for r in on.event_intents("buy") if P.is_8(r["program"])}, {"refused"})
+        self.assertEqual([b for b in on.bodies() if str(b["symbol"]).startswith("PX")], [])
+
+    def test_a_pass_with_too_little_of_the_bound_left_waits_for_the_next_tick(self):
+        """A late pass starts only with `EIGHT_PASS_LEAST_S` of the tick's bound left; else nothing of it is read or
+        written in that tick, and it is planned, and its buys sent, at the next tick inside the window."""
+        with W.pinned():
+            root = self.root / "least"
+            root.mkdir()
+            h = TB.Harness(root)
+            self.addCleanup(h.state.close)
+            self.addCleanup(h.lane.st.close)
+            self.addCleanup(lambda: h.book._event_lane is not None and h.book._event_lane.close())
+            TheBookWithAndWithout.seed(self, h, eight=True)
+            learners_failed(h, "on")
+            self.ready(h)
+            for hh, mm in ((9, 15), (9, 16), (9, 17), (9, 31), (9, 33), (15, 46)):
+                h.tick(hh, mm)
+            out: dict = {}
+            em = L.S.event_moments(TB.DAY, EB.settings().offsets)
+            start = TB.at(TB.DAY, 15, 47)
+            h.clock.set(start + L.EIGHT_TICK_S - L.EIGHT_PASS_LEAST_S + 1)
+            h.book._event_decide_8(start, em, "close", EB.settings(), h.book._event_adapter(), out,
+                                   bound=start + L.EIGHT_TICK_S)
+            self.assertIn("waits for the next tick", out["event_decide_8"])
+            self.assertEqual([r for r in h.event_intents("buy") if P.is_8(r["program"])], [])
+            h.tick(15, 48)
+            sent = [b["symbol"] for b in h.bodies() if str(b["symbol"]).startswith("PX")]
+            self.assertEqual(sent, ["PXA", "PXB", "PXC", "PXD"], "planned and sent at the 15:48 tick")
 
 
 class TheLookAhead(unittest.TestCase):
@@ -1516,7 +1778,9 @@ class TheLine8(TB.EventTest):
             self.assertGreater(keep, int(s.max_orders_day))
             for r in h.event_intents("buy"):
                 if r["program"] == "PX-GAP-O1":
-                    self.assertEqual(r["status"], "planned")
+                    # (section 4.6: not sent in the tick its late pass planned it, so refused there, never sent later)
+                    self.assertEqual(r["status"], "refused")
+                    self.assertIn(L.EIGHT_UNSENT, r["why"])
                     self.assertIn("the event kind's day order count", r["why"])
             self.assertEqual([b for b in h.bodies() if b.get("side") == "buy"], [])
 
