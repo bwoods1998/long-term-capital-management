@@ -1183,6 +1183,36 @@ class TheMetaLook(unittest.TestCase):
             finally:
                 st.close()
 
+    def test_the_daily_report_carries_no_figure_of_the_pool(self):
+        """Section 10 (F8, the no-leaderboard test; release 1019n's second judges review): a META look written over a
+        non-empty POOL reaches the daily report's JSON (house.py `_report` writes `report.build` whole) with its
+        control's NAME AND BLOCK COUNT only, never the POOL's mean block (an mrl_* figure) nor any other figure of it;
+        an earlier file's look keeps its whole control detail."""
+        days = self.days(24)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                self.build(st, days, now_day)
+                prog = P.BY_KEY[("EVL-META-ON", 1)]
+                got = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual([w["S"] for w in got["written"]], [22])
+                detail = SN.look_detail(st, prog.id, prog.version, S8.look_key("run", 1, 22)) or {}
+                pool_mean = detail["control"]["mean_block"]
+                self.assertIsNotNone(pool_mean, "the judge's own detail holds the POOL's mean block (machine-only)")
+                report = RP.build(st, now_day, now=now)
+                row = next(p for p in report["programs"] if p["program"] == "EVL-META-ON")
+                self.assertEqual(row["last_look"]["control"], {"program": "POOL", "blocks": 22})
+                text = json.dumps(report, default=str)
+                self.assertNotIn("mean_block", text)
+                self.assertNotIn(repr(pool_mean), text)
+                self.assertNotIn(f"{pool_mean:.6f}"[:7], RP.render(report))
+                earlier = {"program": "EVL-CTRL-ALL-O1", "mean_block": 0.001, "blocks": 12, "program_mean_block": 0.002}
+                self.assertEqual(RP.control_of_look("EVL-ERN-REACT-ON", earlier), earlier, "an earlier file's: whole")
+            finally:
+                st.close()
+
 
 class TheAudit(unittest.TestCase):
     def test_an_edge_no_selection_made_alarms_the_canary_and_the_placebos_and_moves_no_band(self):
@@ -1454,12 +1484,16 @@ class TheSecrecy(WorldCase):
         self.assertEqual(len(walk), len(intents))
         hashes = {r["rule_h"] for r in walk}
         text = json.dumps([dict(r) for r in self.w.st.db.execute("SELECT job, summary FROM receipts")])
-        report = RP.render(RP.build(self.w.st, D_DAY, now=et(D_DAY, 21)))
+        built = RP.build(self.w.st, D_DAY, now=et(D_DAY, 21))
+        report = RP.render(built)
+        data = json.dumps(built, default=str)      # (the daily report's JSON, which house.py `_report` writes whole)
         for h in hashes:
             self.assertNotIn(h, text)
             self.assertNotIn(h, report)
+            self.assertNotIn(h, data)
         for word in ("lcb", "LCB", "g:", "x:PXR", "rule_h"):
             self.assertNotIn(word, report)
+            self.assertNotIn(word, data)
             self.assertNotIn(word, json.dumps([r["why"] for r in intents]))
         self.assertIn("META: EVL-META-O1 live/ok", report)
 

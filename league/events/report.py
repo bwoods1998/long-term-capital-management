@@ -206,6 +206,24 @@ def late_rows(store: S.Store, program: str, version: int, day: dt.date) -> dict[
     return out
 
 
+#: PREREG-EVL-8 SECTION 10 (F8, THE NO-LEADERBOARD TEST; release 1019n's second judges review): a look of this file's
+#: versions names its control and that control's block count, NEVER A FIGURE OF IT. A META look's control is its POOL
+#: (EVL-META-*-POOL, section 7.1: a free record built from `mrl_pool`'s members, whose mean block is an mrl_* figure no
+#: report, site page or births read may carry), and a PX seat's is a free record of section 3.2 (CTRL-PX-ALL-*); so of
+#: the judge's control detail ({program, mean_block, blocks, program_mean_block}) only these keys reach the report.
+EIGHT_CONTROL_KEYS = ("program", "blocks")
+
+
+def control_of_look(program: str, control: Any) -> Any:
+    """A look's control detail as the report carries it (`program_status`): every earlier file's whole, as before; for a
+    version of PREREG-EVL-8 (`programs.is_8`) only `EIGHT_CONTROL_KEYS` (its name and block count: counts only)."""
+    from . import programs as P
+
+    if not isinstance(control, Mapping) or not P.is_8(program):
+        return control
+    return {k: control.get(k) for k in EIGHT_CONTROL_KEYS}
+
+
 def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
                    left: Mapping[str, Mapping[str, set[str]]] | None = None) -> dict[str, Any]:
     today = {c: 0 for c in INTENT_CLASSES}
@@ -241,7 +259,7 @@ def program_status(store: S.Store, program: str, version: int, day: dt.date, *,
         detail = SC.look_detail(store, program, version, int(last["k"])) or {}
         last_out = {k: last[k] for k in ("k", "held", "passed", "p", "alpha", "fp_check", "n", "issuers", "blocks", "why")}
         last_out["issuer"] = detail.get("issuer")
-        last_out["control"] = detail.get("control")
+        last_out["control"] = control_of_look(program, detail.get("control"))
     from .bands import bands as _bands
     from .programs import BY_KEY
 
