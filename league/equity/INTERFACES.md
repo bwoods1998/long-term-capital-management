@@ -2001,8 +2001,31 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   live and `_event_last` letting a new order go: not sent yet, refused for a reading the gateway could not make, A80's
   re-send to come): its worst case at its limit by `_event_keep_room` (as PREREG-EVL-5's waiting buys keep theirs) out
   of the cash, the invested room, the loss budget and its name's wall; the orders those buys may still send are kept on
-  the lines by `_event_line_keep` already (`kept.orders` 0). A buy of the file that fits only but for that room waits,
-  its why `HELD_ROOM (n HELD_EARLIER)`, words of its own that PREREG-EVL-5's counts of its wait never read.
+  the lines by `_event_line_keep` already (`kept.orders` 0). A buy of the file that fits only but for that room is
+  REFUSED IN ITS TICK (sizing, its why naming `HELD_EARLIER`, words of their own that PREREG-EVL-5's counts of its wait
+  never read): the room is arithmetic only, never `HeldAhead`'s waiting room (section 4.2).
+- **Sent in the same tick** (section 4.6's table; release 1019n's second money review; `_event_send(which="eight")`,
+  `EIGHT_UNSENT`): a buy of the file goes only in the tick its late pass planned it (`created_at` is that tick's
+  `now`); one with no order after that tick's send, whatever held it (the bound, the eligible list, a gate, the room
+  above), is refused with `EIGHT_UNSENT` and its last why, never sent at a later tick. A buy that was sent follows every
+  row's machinery (A80's one re-send, a refused reading's retry), at a later tick only inside that tick's bound.
+- **The tick's bound** (section 4.6, release 1019n's second money review; `EIGHT_TICK_S` 30 s, `EIGHT_PASS_LEAST_S` 10
+  s, `EIGHT_LEAST_S` 2 s, `_timeout_at_most`, `EIGHT_BOUND`): measured from the tick's start (the minute's `now`), the
+  file's work in a tick, its pass's account read (`_event_gate`), its picks' bars read (`_event_sigmas(until=)`), its
+  eligible-list POST (`_event_publish(eight=True, until=)`, `book.publish`'s `timeout`) and its orders (`_send` under
+  the account client's capped timeout), starts nothing at or after the bound, each request's timeout ends by it, and a
+  pass starts only with 10 s of it left (else the next tick inside the window). live/step.py `_loop` starts the next
+  minute() at the next :03 counted from the tick's END, so without it a slow gateway at the 15:47 tick skipped the 15:48
+  tick (the earlier rows' A80 re-sends there) and at the open a minute of sends; the minute's later steps (the proof,
+  the windows, the exports) keep the rest. The file's passes are planned only at a tick that sends (from 09:16 and
+  15:47).
+- **The eligible list** (sections 4.2-4.3, release 1019n's second money review; book.py `eligible`, `eligible_8`;
+  `_event_publish`): `book.eligible` is the earlier rows' list alone (the lane's live rows, exactly release 1019l's),
+  and every earlier path (the main pass, the learners' pass, the earlier sends) sends it when the gateway's copy is
+  neither that list (`sha`) nor a list made of it and the file's names (`base`), so an earlier row's buy never waits for
+  a POST the file's names caused and the earlier path never reads the file's stores. The file's pass and its own send
+  (`eight`) send that list with `book.eligible_8`'s names when the gateway's copy is not that union, after every
+  earlier send of the tick; kv `eq_event_list` is {day, sha, base, count, at}.
 - **The line** (section 4.3; `_event_line_keep`): an entry of the file keeps every order every earlier PREREG row, the
   learners included, may still send on the day's line across its auctions (section 28's rule, A130 R5's reading), so the
   line refuses the file's entries first among the PREREG rows, after PREREG-EVL-7's; an exit is never stopped by it.
@@ -2029,5 +2052,10 @@ is None; A125 pins it at 2026-10-22T20:14:13Z) trade through the event kind's ow
   the other auction alone never holds the pass; the open pass after the open run), `TheLine8` (an open entry's keep
   is a learner's plus EVL-LRN-ON's close room; the stated effect), `ThePromotedSizing` (16 shares at goal V3's 5%, S2's
   18 without section 4.1's sizing), `TheEarlierBuysFirst` (an earlier row's 424 retry sized as without the file, PXA
-  beside its kept room; A80's re-send at 15:48:03 before a 70 s read of the file's pass), `TheMetaMoney` (EVL-META-ON's
-  guard is E10's, the late filing barring its issuer); league/tests/test_events_evl8.py `TheMoneyRow`, `TheRoom`.
+  beside its kept room, PXB to PXD refused in their tick; A80's re-send at 15:48:03 before a 70 s read of the file's
+  pass), `TheEarlierList` (the review's case: ACME's A80 re-send at 15:48 with an EVL-META-ON pick landed and the
+  gateway's eligible route down, as without the file; `book.eligible` reads no store of the file; its names in its own
+  pass only), `TheTickBound` (slow fakes honouring the clients' timeouts: a hanging bars read and POST, hanging orders,
+  a hanging POST: the 15:47 tick ends by 15:47:33 and the 15:48 tick runs; a pass with under 10 s left waits for the
+  next tick), `TheMetaMoney` (EVL-META-ON's guard is E10's, the late filing barring its issuer; EVL-META-O1's is E8's
+  `ern_issuer`, called); league/tests/test_events_evl8.py `TheMoneyRow`, `TheRoom`.

@@ -746,7 +746,11 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   PXU(D) (h52: none). The morning pass makes the full re-read of every name and benchmark FLAGGED at D, then of those
   FLAGGED on a window session after their latest full re-read, before it decides PXU(D); one it cannot make leaves the
   name out (a missed morning costs one pass of re-reads, never 61 sessions of the lane). A benchmark FLAGGED at D (an
-  ETF's dividend) is on one basis by its re-read, else no value that needs it exists.
+  ETF's dividend) is on one basis by its re-read. THE BENCHMARK NEVER TAKES A NAME OUT OF PXU(D) (release 1019n's second
+  fix round; section 1.1 decides PXU(D) by the issuer's own state, section 1.3 only removes a value): cb*_P is the
+  morning's own read, so zd, zg and zo exist whenever it was stored; a benchmark FLAGGED at D, or on a window session,
+  with no full re-read leaves only the values that read its stored closes (z1, z5, z20, the DRIFT values) unmade, the
+  reason in the name's `bench_why`.
 - THE DATA (release 1019i's recorders, harness H2): `events.px_data` ON from this release (league/config.json), now that
   A128's major is closed: every recorder read goes through the lane's one slot DATA_INTERVAL (0.5 s) after its last
   market-data read (pxdata.py `PxGateway`'s `space`, house.py `_px`), and this file's decision runs keep the same
@@ -786,12 +790,15 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   every catch-up write the same `mrl_pool` rows. The state as of 09:00 ET or the close - 30 minutes (pre-passed
   `prepass-meta:<open|close>:<D>`, yielding, written whole), pool-relative, from outcomes settled before it (F9: the
   first tag's intent of the issuer at the member's auctions, PREREG-EVL-2's limit at entry read where the member's own
-  settlement read the print: the lane's marks, or px.sqlite's `px_marks` for a PX event). EVL-META-O1 decides inside
+  settlement read the print: the lane's marks, or px.sqlite's `px_marks` for a PX event; ONE READING for the state and
+  the POOL, release 1019n's second fix round: while a tag ahead may still settle, the member is pending, never the next
+  tag's outcome). EVL-META-O1 decides inside
   the open run after PX-GAP-O1 (`decide-open-meta8:<D>`), EVL-META-ON on the lane's close receipt
   (`decide-close-meta8:<D>`, 15 s, never past the close - 11:20); catch-ups `decide-meta:<open|close>:<D>`, oldest
   first, once the lane's first finished decision of (D, X) is in. EVL-META-ON's 8-K guard is PREREG-EVL-7's E10 itself
   (book.py `meta_on_guard` calls `issuer_8k_guard`: every 8-K stored before tau, no upper bound on its knowable time,
-  A131). F8: an intent's rank_key is K + 1 - its walk position
+  A131); EVL-META-O1's ERN guard is PREREG-EVL-7's E8 itself (`meta_o1_guard` calls `ern_issuer`). F8: an intent's
+  rank_key is K + 1 - its walk position
   and its why "mrl"; no LCB, sub-rule or figure leaves the mrl_* tables (births' `FACTS_DENY`, the report's deny list).
   The draft's successor versions v2 and v3 are withdrawn (section 7.7): runs take their place.
 - THE JUDGE (section 5; screen8.py): PREREG-EVL-6 sections 1.2-3 as frozen, word for word, through one narrow
@@ -821,14 +828,27 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   file's late pass (its first send, a retry, A80's re-send: no earlier row waits for this file's reads), this file's
   after it; and each buy of this file is sized against the room every earlier row's buy of the auction still to go
   keeps (live.py `_event_kept_8`: one held for a retryable reading or A80's re-send keeps its worst case at its limit),
-  so an earlier row's retry is sized as without this file; a buy of this file that fits only but for it waits. ROOM's order: Sized, Probe, learning, then PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON,
+  so an earlier row's retry is sized as without this file. THE SECOND FIX ROUND (release 1019n's second money
+  review): (1) THE ELIGIBLE LIST: `book.eligible` is the earlier rows' list alone (the lane's live rows) and the earlier
+  rows' path sends it exactly when it would without this file; this file's names (`book.eligible_8`) go with it only in
+  this file's own pass and send (`_event_publish` `eight`, after every earlier send of the tick), and a list they
+  widened never makes an earlier row POST again (kv `eq_event_list`'s `base`). (2) THE TICK'S BOUND: this file's work in
+  a tick (its pass's account and bars reads, its POST, its sends) starts nothing at or after `EIGHT_TICK_S` (30 s) from
+  the tick's start and every request's timeout ends by it (`_timeout_at_most`), so it never runs the minute into the next
+  one (live/step.py `_loop` counts the next minute's :03 from the tick's end: the close's 15:48 tick and the open's ticks
+  are kept); a pass with less than `EIGHT_PASS_LEAST_S` (10 s) of it left waits for the next tick inside the window.
+  (3) SENT IN THE SAME TICK: a buy of this file goes only in the tick its late pass planned it; one not sent there (the
+  bound, the eligible list, a gate, or the room earlier rows' buys keep: `HELD_EARLIER`, sizing) is refused
+  (`EIGHT_UNSENT`), never left waiting (section 4.2: this file does not use `live.HeldAhead`'s waiting room); a buy that
+  was sent follows every row's machinery (A80's one re-send, a refused reading's retry), inside each tick's bound.
+  ROOM's order: Sized, Probe, learning, then PX-DROP-ON, PX-SURGE-ON, PX-GAP-O1, EVL-META-O1, EVL-META-ON,
   after every earlier file's row and before the births at learning. A85: a promoted version is among the other
   auction's Probe and Sized programs the reservation keeps room for. THE 150-ORDER LINE (section 4.3) refuses this
   file's entries first among the PREREG rows, after PREREG-EVL-7's: an entry of this file keeps every order every
   earlier PREREG row, the learners included, may still send on the day's line, across the day's auctions
   (`_event_line_keep`, A130 R5's reading). THE STATED EFFECT: with the ten close-entry rows' learning room alone above
-  150, PX-GAP-O1's and EVL-META-O1's open entries buy nothing in real money on an empty day, as EVL-LRN-O1's do; their
-  shadow records, the judged ones, are untouched.
+  150, PX-GAP-O1's and EVL-META-O1's open entries buy nothing in real money on an empty day (refused in their tick),
+  as EVL-LRN-O1's do; their shadow records, the judged ones, are untouched.
 - THE HOUSE (section 4.6; house.py's PREREG-EVL-8 comment): the lead holds whether or not PREREG-EVL-5 has programs;
   inside it a record or verdict task started before tau ends by tau (PREREG-EVL-5's pre-pass keeps its own bound);
   the PX close run is the lead's next task at or after tau, after PREREG-EVL-5's pre-pass while `evl5:pre:<D>` is not
@@ -843,7 +863,9 @@ Operating steps: docs/operations.md, **PREREG-EVL-8**.
   the House's own book the earlier rows' buys are the same and this file's come after them; a planted future minute
   bar and a planted future member outcome are ignored; a meta-learner fed noise picks noise.
 - THE REPORT AND THE ALARM: the daily report's PX and META lines (counts only, the auctions lost to a late morning pass,
-  the share of each run's sessions decided live), the late passes that did not come (live.sqlite's own rows), the
+  the share of each run's sessions decided live), the late passes that did not come (live.sqlite's own rows), a look
+  of this file's versions with its control's name and block count only (`report.control_of_look`: a META look's POOL
+  is an mrl_* record, section 10's no-leaderboard test, the report's JSON included), the
   one-mechanism pairs beside Done's ">= 3 programs" line, and beside Done's issuer-block bound the session-block bound
   and the market-direction share; the stall cause `evl_price` (league/ops/evl_price.py: a part not decided live with
   whether its catch-up came, a recorder lagging, the placebo audit's alarm). The site names each of the seven rows
