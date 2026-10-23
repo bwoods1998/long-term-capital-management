@@ -1032,6 +1032,41 @@ class TheBook(TB.EventTest):
         inst = h.book._instance(L.instance_key(P.R2_ON, 1))
         self.assertEqual(h.book._event_recent(inst, "close", 5)[0], [3])
 
+    def test_every_earlier_rows_real_money_buys_and_sends_are_the_same_with_and_without_this_file(self):
+        """THE PROOF IN REAL MONEY: the same day's book with this file's live decision and without the file (its rows in
+        no registry): every earlier row's buy intents, their sizes, their order and the bodies sent are the same; this
+        file's buys come after them."""
+        from league.tests import evl10_fakes as F10
+
+        def run(pinned: bool) -> tuple[list, list]:
+            with (contextlib.nullcontext() if pinned else F10.unpinned_10()), tempfile.TemporaryDirectory() as tmp:
+                h = TB.Harness(Path(tmp))
+                try:
+                    LR.ensure(h.lane.st.db)
+                    day_news(h.lane, "n-1", "BETA", TB.CIK2)
+                    day_news(h.lane, "n-2", "EPSI", "0000000011")
+                    r2_live(h.lane, [(TB.CIK2, "BETA", 16.0), (TB.CIK3, "GAMA", 16.0)])
+                    self.ready(h)
+                    for sym in ("BETA", "GAMA", "EPSI"):
+                        h.symbol(sym, last=17.0, sd=0.02)
+                    for hh, mm in ((9, 15), (9, 16), (15, 46), (15, 47), (15, 48)):
+                        h.tick(hh, mm)
+                    buys = [(r["program"], r["symbol"], r["band"], r["limit_px"], r["status"]) for r in h.event_intents("buy")]
+                    bodies = [(b["symbol"], b["qty"], b.get("limit_price")) for b in h.bodies() if b.get("side") == "buy"]
+                    return buys, bodies
+                finally:
+                    h.state.close()
+                    h.lane.st.close()
+                    if h.book._event_lane is not None:
+                        h.book._event_lane.close()
+        T7.pin(self, None)
+        with_, without = run(True), run(False)
+        mine = [b for b in with_[0] if P.is_reader2(b[0])]
+        self.assertEqual([b for b in with_[0] if not P.is_reader2(b[0])], without[0], "every earlier row's buys")
+        self.assertEqual(with_[1][:len(without[1])], without[1], "the same bodies, sent first, in the same order")
+        self.assertEqual([(p, s) for p, s, *_ in mine], [(P.R2_ON, "GAMA")], "then this file's, BETA given before it")
+        self.assertEqual(len(with_[1]), len(without[1]) + 1)
+
     def test_with_evl7s_receipt_at_154820_no_buy_of_it_at_the_1548_tick_nor_at_that_close(self):
         """Section 2.5's TEST: a learner live at the close whose own receipt comes only at 15:48:20 keeps the learners'
         pass undecided until the window's last book minute (A140 then decides it without the learner): this file's pass
@@ -1118,3 +1153,162 @@ class TheBookRules(TB.EventTest):
         row = h.book._event_summary(TB.DAY.isoformat(), "close-evl10")["programs"][P.R2_ON]
         self.assertEqual((row["picks"], row["room"], row["held"]), (None, 0, "unsettled"))
         self.assertEqual([r for r in h.event_intents("buy") if r["program"] == P.R2_ON], [])
+
+
+# ------------------------------------------------------------------------------------------------------- the proof
+from league.tests import evl10_week as WK  # noqa: E402
+
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "evl10_week_main.json"
+
+
+def reads_and_slot(w, day: dt.date) -> None:
+    """PREREG-EVL-10 in the invented week at its own times: scans from 07:31 ET to 15:38 ET (every 20 minutes and after
+    the lane's 15:17 asks), every due call asked and answered before tau (a fake gateway: no metered call), then its
+    slot's decision at tau + 5 s with its receipt."""
+    session = C.session(w.st, day)
+    gw = Gateway()
+    t = session.at(dt.time(7, 31))
+    while t <= R2.ask_until(session):
+        R2.scan(w.st, day, t)
+        due = R2.next_due(w.st, day, session)
+        while due is not None:
+            R2.ask(w.st, gw, due, day, now=lambda t=t: t + dt.timedelta(seconds=30))
+            due = R2.next_due(w.st, day, session)
+        t += dt.timedelta(minutes=20)
+    when = R2.tau(session) + dt.timedelta(seconds=5)
+    rid = w.st.start_receipt(f"{R2.JOB}:{day.isoformat()}", now=when)
+    out = R2.decide(w.st, day, now=when, rid=rid)
+    w.st.finish_receipt(rid, "ok", out, now=when)
+
+
+def earlier(program: str) -> bool:
+    return not P.is_reader2(program)
+
+
+class TheProof(unittest.TestCase):
+    """THE PROOF ON AN INVENTED WEEK (league/tests/evl10_week.py: release 1019e's and PREREG-EVL-5's week with two births
+    of R3): (1) on this tree, with the scheduler and this file pinned, every program's intents, every decision receipt
+    (job, status, start, finish, summary: the earlier files' decisions and their timing) and every seatable program's
+    real-money picks are main's, recorded on main 1c87837f (a test that fails if the scheduler, or this file's code,
+    moves any of them); (2) with this file reading and deciding in its slot, every earlier program's shadow intents,
+    real-money picks and the House's receipts are the same as without it, and this file's rows did decide."""
+
+    def test_the_week_on_this_tree_is_mains_recorded_byte_for_byte(self):
+        want = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            got = json.loads(json.dumps(WK.run(Path(tmp) / "lane"), default=str))
+        self.assertEqual(got["intents"], want["intents"], "every intent, main's")
+        self.assertEqual(got["receipts"], want["receipts"], "every decision receipt and its times, main's")
+        mine = {k: v for k, v in got["picks"].items() if k.split("@")[0] in R2.meta_sources()}
+        self.assertEqual({k: v for k, v in got["picks"].items() if k not in mine}, want["picks"])
+        self.assertEqual(set(mine), {f"{P.R2_ON}@v1@2026-10-27", f"{P.R2_ON}@v1@2026-10-28"})
+        self.assertEqual(list(mine.values()), [[], []], "no slot ran: no reading of this file's rows")
+
+    def test_every_earlier_programs_shadow_intents_and_real_money_picks_are_the_same_with_and_without_this_file(self):
+        from league.tests import evl10_fakes as F10
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with_ = WK.run(Path(tmp) / "with", during=reads_and_slot)
+            mine = WK.run(Path(tmp) / "mine", during=reads_and_slot, keep=P.is_reader2)
+            with F10.unpinned_10():
+                without = WK.run(Path(tmp) / "without")
+        P.refresh_7()
+        own = [r for r in mine["intents"]]
+        self.assertTrue(any(r[0] == P.R2_ON for r in own), "this file's seat did pick: the proof is not vacuous")
+        self.assertTrue(any(v for k, v in mine["picks"].items()), "and real money read its picks")
+        keep = {k: v for k, v in with_["picks"].items() if earlier(k.split("@")[0])}
+        self.assertEqual([r for r in with_["intents"] if earlier(r[0])], without["intents"])
+        self.assertEqual(keep, without["picks"])
+        self.assertEqual(with_["receipts"], without["receipts"], "the House's receipts, naming no row of this file")
+        for job, _, _, _, summary in with_["receipts"]:
+            self.assertNotIn("EVL-R2", summary, job)
+
+
+# ------------------------------------------------------------------------------------------------------- the judge
+class TheJudge(Case):
+    """Section 3: PREREG-EVL-6's screen as frozen judges EVL-R2-ON against EVL-R2-ON-SET; its finality is its slot's
+    clock (live only, no catch-up); a run reads the budget once, at the close it would start, and never more than three."""
+
+    def test_its_judge_its_control_and_its_finality(self):
+        self.assertIn(P.BY_KEY[(P.R2_ON, 1)], SN._v6_programs())
+        self.assertNotIn(P.BY_KEY[(P.R2_SET, 1)], SN._v6_programs())
+        self.assertEqual(SN.control_of(P.R2_ON), P.R2_SET)
+        day, why = SN.final_until(self.st, P.R2_ON, 1, D_DAY, et(D_DAY, 15, 44, 0))
+        self.assertEqual(day, P_DAY, why)
+        day, why = SN.final_until(self.st, P.R2_ON, 1, D_DAY, et(D_DAY, 15, 44, 21))
+        self.assertEqual(day, D_DAY, "its slot can no longer run after 15:44:20: final, decided or not")
+
+    def end(self, n: int) -> None:
+        self.st.set_meta(SN.V6_END_KEY.format(program=P.R2_ON, version=1, n=n),
+                         json.dumps({"at": S.iso(et(D_DAY, 16, 0)), "last_day": D_DAY.isoformat()}))
+
+    def test_a_run_starts_when_the_budget_holds_it_at_that_close_else_never(self):
+        self.end(1)
+        got = SN.start_runs(self.st, et(D_DAY, 20, 40))
+        self.assertIn((P.R2_ON, 1, 2), [(r["program"], r["version"], r["n"]) for r in got])
+        self.assertNotIn(P.R2_ON, [r["program"] for r in SN.waiting_runs(self.st)], "it never waits")
+        self.end(2)
+        real = SN.budget6
+        with mock.patch.object(SN, "budget6", lambda store: real(store) | {"used": 385, "waiting": 0}):
+            self.assertEqual([r for r in SN.start_runs(self.st, et(N_DAY, 20, 40)) if r["program"] == P.R2_ON], [])
+        refused = R2._meta_json(self.st, R2.NORUN_KEY.format(program=P.R2_ON, version=1, n=3))
+        self.assertIn("cannot hold 0.13", refused["why"])
+        self.assertEqual(SN.start_runs(self.st, et(N_DAY + dt.timedelta(days=1), 20, 40)), [],
+                         "no later restatement revives it")
+        self.assertEqual(R2.stopped(self.st)["kind"], "seat", "a shadow record only: R2 asks nothing more")
+
+    def test_never_more_than_three_runs(self):
+        for n in (1, 2, 3):
+            if n > 1:
+                self.st.set_meta(SN.V6_RUN_KEY.format(program=P.R2_ON, version=1, n=n),
+                                 json.dumps({"n": n, "after_day": None, "after": None, "started": "x"}))
+            self.end(n)
+        self.assertEqual(SN.start_runs_r2(self.st, et(D_DAY, 20, 40)), [])
+        refused = R2._meta_json(self.st, R2.NORUN_KEY.format(program=P.R2_ON, version=1, n=4))
+        self.assertIn("3 runs are spent", refused["why"])
+
+
+# ------------------------------------------------------------------------------------------ the report and the facts
+class TheReport(Case):
+    def test_the_reader_block_counts_only_and_the_alarms(self):
+        cik, symbol = self.issuer()
+        self.w.news_item("n-1", symbol, knowable=et(D_DAY, 9, 30), score=3, headline="A SECRET HEADLINE")
+        self.w.scans(D_DAY, until=et(D_DAY, 10, 0))
+        self.read_all(Gateway())
+        self.decide()
+        got = R2.session_counts(self.st, D_DAY)
+        self.assertEqual((got["chosen"], got["reads"], got["decision"], got["answered_by_tau"]),
+                         ({"news": 1, "doc": 0}, {"ok": 1}, "ok", 1))
+        lines = R2.report_lines(self.st, D_DAY, et(D_DAY, 17, 0))
+        text = "\n".join(lines)
+        self.assertNotIn("SECRET", text)
+        self.assertNotIn(symbol, text, "no symbol, headline or field of any read")
+        from league.events import report as RP
+
+        report = RP.build(self.st, D_DAY, now=et(D_DAY, 17, 0))
+        self.assertEqual(report["reader2"]["decision"], "ok")
+        rendered = RP.render(report)
+        self.assertIn("Reader-2: scans", rendered)
+        self.assertNotIn("SECRET", rendered)
+
+    def test_r2_starve_reader_missing_and_r2_cap(self):
+        kinds = {a["kind"] for a in R2.alarms(self.st, et(D_DAY, 16, 30))}
+        self.assertIn("r2_starve", kinds, "no live decision of the session: no intent, block, record or money")
+        self.decide()
+        self.assertNotIn("r2_starve", {a["kind"] for a in R2.alarms(self.st, et(D_DAY, 16, 30))})
+        for day in (C.previous(self.st, D_DAY, 1)[0].day, D_DAY):
+            for i in range(10):
+                self.st.db.execute("INSERT INTO r2_qual(window, day, cik, event, kind, qualified_at, v1_score, h, q, chosen) "
+                                   "VALUES('ON', ?, ?, ?, 'news', '2026-10-01T00:00:00Z', 3, 0.1, 0.5, 1)",
+                                   (day.isoformat(), f"c{i}", f"news:{day}-{i}"))
+        self.assertIn("reader_missing", {a["kind"] for a in R2.alarms(self.st, et(D_DAY, 16, 30))})
+        self.st.set_meta(R2.CAP_KEY.format(day=D_DAY.isoformat()), "x")
+        self.assertIn("r2_cap", {a["kind"] for a in R2.alarms(self.st, et(D_DAY, 16, 30))})
+
+    def test_births_facts_refuse_r2s_tables(self):
+        for table in ("reads2", "r2_qual", "r2_scan", "r2_features"):
+            self.assertIn(table, BI.FACTS_DENY)
+        with BI.outcome_free(self.st.db):
+            for table in ("reads2", "r2_qual", "r2_scan", "r2_features"):
+                with self.assertRaises(Exception):
+                    self.st.db.execute(f"SELECT * FROM {table}").fetchall()
