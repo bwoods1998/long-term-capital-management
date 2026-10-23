@@ -331,6 +331,38 @@ def control_rows(store: Any, prog: Any) -> list[dict[str, Any]] | None:
     return [] if c is None else record_rows(store, c)
 
 
+# ----------------------------------------------------------------------------------------------------- finality
+#: THE FEEDS' FINALITY OF AN AUCTION (section 3.4: "A PX look as of the close X waits for the finality of the NO STORED
+#: ITEM feeds (screen.final_until, as EVL-NEWS-NIGHT2-ON's does)"): the lane's own controls entering at that auction,
+#: whose records read those feeds and which the lane's re-decisions move (league/events/screen.py `final_until` of each
+#: registered one; A69's fast path judges all three feeds, 8-K, Form 4 and news, for any program).
+FEED_CONTROLS = {"close": ("EVL-CTRL-NEWS-DAY-ON", "EVL-CTRL-8K-ON", "EVL-CTRL-NEWSPM-ON", "EVL-CTRL-ERN-UNDER-ON"),
+                 "open": ("EVL-CTRL-NEWS-ALL-O1", "EVL-CTRL-8K-ALL-O1", "EVL-CTRL-ERN-ALL-O1")}
+
+
+def final(store: Any, prog: Any, today: dt.date, now: dt.datetime) -> tuple[dt.date | None, str]:
+    """THE LAST CLOSE FINAL FOR A LOOK OF ONE OF THIS FILE'S VERSIONS (PREREG-EVL-6 section 2's finality with section
+    3.4's words): the earliest final close of `FEED_CONTROLS` of its entry auction (screen.py `final_until` of each
+    registered one, the reading that waits). This file's own decisions are written once by their own runs and never
+    decided again; what can still move a PX record after its decision is the hourly re-decision's NO STORED ITEM
+    removals, which follow the lane's re-decisions and those feeds, and what can move a meta-learner's POOL is its
+    sources' records, the same. (screen.py `final_until` of this file's own ids reads the lane's decision receipts,
+    which never name them: every close inside its 45-day look-back read as not made, so the first build's looks fell
+    due only once their close had left it, about 45 days late.) None when no control is registered or one has no final
+    close."""
+    horizon: dt.date | None = None
+    why = "no feed control is registered"
+    for pid in FEED_CONTROLS["open" if getattr(prog, "entry_at", "") == "open" else "close"]:
+        if P.BY_KEY.get((pid, 1)) is None:
+            continue
+        day, reason = SN.final_until(store, pid, 1, today, now)
+        if day is None:
+            return None, f"{pid}: {reason}"
+        if horizon is None or day < horizon:
+            horizon, why = day, f"{pid}: {reason}"
+    return horizon, why
+
+
 # ----------------------------------------------------------------------------------------------------- the runs
 def _meta_json(store: Any, key: str) -> dict[str, Any] | None:
     raw = store.meta(key) if hasattr(store, "meta") else None
@@ -520,7 +552,7 @@ def run_looks(store: S.Store, prog: Any, today: dt.date, *, now: dt.datetime, dr
     on = written(store, prog, "run", run["n"])
     tg = tag("run", run["n"])
     plan = schedule(store, record, today, pending=pend, consumed=on["consumed"], after=on["last"],
-                    final=SN.final_until(store, prog.id, prog.version, today, now))
+                    final=final(store, prog, today, now))
     if plan["stopped"] is not None:
         out["waiting"].append({"program": prog.id, "version": prog.version, "k": None, "why": plan["why"]})
     cap = cap_of(prog, "run")
@@ -811,7 +843,7 @@ def review8(store: S.Store, prog: Any, *, now: Any = None, draws: int = B) -> li
         start_runs(store, now)
         return changes
 
-    final = None
+    fin = None
     waiting = False
     for x in closes:
         if through is not None and x.day <= through and looked is not None and x.day <= looked:
@@ -836,9 +868,9 @@ def review8(store: S.Store, prog: Any, *, now: Any = None, draws: int = B) -> li
         if not ready:
             waiting = True
             continue
-        if final is None:
-            final = SN.final_until(store, prog.id, prog.version, today, now)
-        if final[0] is None or x.day > final[0] or any(d <= x.day for _, d in pend):
+        if fin is None:
+            fin = final(store, prog, today, now)
+        if fin[0] is None or x.day > fin[0] or any(d <= x.day for _, d in pend):
             waiting = True
             continue
         why = judge(x)
@@ -1059,4 +1091,4 @@ __all__ = ["LOOKS", "ALPHAS", "MARGIN", "MIN_EVENTS", "MIN_ISSUERS", "MIN_BLOCKS
            "cap_of", "record_rows", "control_rows", "runs", "run_record", "written", "schedule", "look_row", "on_look",
            "run_looks", "budget", "waiting_runs", "start_runs", "charges", "stays", "stay_events", "read_p",
            "money_stop", "sized_conditions", "review8", "next_look", "seating8", "run", "review", "audit",
-           "ONE_MECHANISM_SESSIONS", "PX_SOURCED", "PAIRED", "one_mechanism"]
+           "ONE_MECHANISM_SESSIONS", "PX_SOURCED", "PAIRED", "one_mechanism", "FEED_CONTROLS", "final"]

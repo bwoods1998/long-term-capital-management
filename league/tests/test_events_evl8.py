@@ -806,6 +806,90 @@ class ThePlacebos(unittest.TestCase):
                 st.close()
 
 
+class TheLookFallsDue(unittest.TestCase):
+    """Section 3.4 and 5.1: a PX look waits for the finality of the NO STORED ITEM feeds (screen8 `final`: the earliest
+    final close of the lane's controls of its auction), then falls due at the frozen 22nd block, is written with its
+    band move (PREREG-EVL-6 section 1.4 with CAP 4) and is never written again. With screen.py `final_until` of the
+    seat's own id (the first build's), the lane's receipts never name it, so every close inside the 45-day look-back
+    reads as not made and a look falls due only once its close has left the look-back, about 45 days late."""
+
+    def build(self, st, days, now_day):
+        cal = []
+        d = days[0] - dt.timedelta(days=7)
+        while d <= now_day:
+            if d.weekday() < 5:
+                cal.append(d)
+            d += dt.timedelta(days=1)
+        # (the lane's receipts name every program it decided: never this file's, which decide in their own runs)
+        keys = {SN.program_key(p.id, p.version): {"intents": 0} for p in P.PROGRAMS if not P.is_8(p)}
+        rng = random.Random(81)
+        with st.tx() as db:
+            for x in cal:
+                db.execute("INSERT INTO sessions(day, open_at, close_at, early) VALUES(?, ?, ?, 0)",
+                           (x.isoformat(), S.iso(et(x, 9, 30)), S.iso(et(x, 16, 0))))
+        for x in cal:
+            for kind, at in (("open", et(x, 9, 15)), ("close", et(x, 15, 47))):
+                rid = st.start_receipt(f"decide-{kind}:{x.isoformat()}", now=at)
+                st.finish_receipt(rid, "ok", keys, now=at + dt.timedelta(seconds=30))
+            st.set_meta(f"evl:backfill:{x.isoformat()}", "done")
+        px = PXL.open_px(st.root)
+        try:
+            with st.tx() as db:
+                for k, day in enumerate(days):
+                    for pid, edge, n in (("PX-DROP-ON", 0.03, 3), ("CTRL-PX-ALL-ON", 0.0, 6)):
+                        for i in range(n):
+                            cik = str(30000 + 100 * k + i + (50 if pid.startswith("CTRL") else 0))
+                            event = PXL.event_id(pid, day, cik)
+                            a = edge + rng.gauss(0, 0.002)
+                            db.execute("INSERT INTO intents(program, version, event, symbol, cik, decided_at, entry_day, "
+                                       "entry_at, exit_day, exit_at, rank_key, mode, status, why) VALUES(?, 1, ?, ?, ?, ?, "
+                                       "?, 'close', ?, 'open', ?, 'shadow', 'exited', 'px8 live')",
+                                       (pid, event, f"S{cik}", cik, S.iso(et(day, 15, 46)), day.isoformat(),
+                                        day.isoformat(), None if pid.startswith("CTRL") else 10.0 - i))
+                            db.execute("INSERT INTO outcomes(program, version, event, entry_px, exit_px, bench, "
+                                       "bench_entry, bench_exit, cost_entry_bp, cost_exit_bp, r, b, a, tradable, "
+                                       "settled_at, status) VALUES(?, 1, ?, 20, 21, 'SPY', 1, 1, 7, 7, ?, 0, ?, 1, ?, "
+                                       "'settled')", (pid, event, a + 0.001, a, S.iso(et(day, 20, 30))))
+                    px.set_meta(PXL.DECIDED_KEY.format(auction="on", day=day.isoformat()),
+                                json.dumps({"run": f"r{k}", "kind": "live", "receipt": k, "at": "x"}))
+        finally:
+            px.close()
+
+    def test_the_22nd_block_look_is_written_once_its_close_is_final(self):
+        days = []
+        d = dt.date(2026, 10, 26)
+        while len(days) < 22:
+            if d.weekday() < 5:
+                days.append(d)
+            d += dt.timedelta(days=1)
+        now_day = dt.date(2026, 12, 15)
+        now = et(now_day, 21, 0)
+        with W.pinned(), tempfile.TemporaryDirectory() as tmp:
+            st = S.Store(Path(tmp) / "lane")
+            try:
+                self.build(st, days, now_day)
+                prog = P.BY_KEY[("PX-DROP-ON", 1)]
+                horizon, why = S8.final(st, prog, now_day, now)
+                self.assertIsNotNone(horizon, why)
+                self.assertGreater(horizon, days[-1], why)
+                own, _ = SN.final_until(st, prog.id, prog.version, now_day, now)
+                self.assertTrue(own is None or own < days[-1], "the lane's receipts never name this file's rows: "
+                                "final_until of its own id stops at the 45-day look-back, behind the record")
+                with mock.patch.object(S8, "final", lambda store, p, today, now: SN.final_until(store, p.id, p.version,
+                                                                                               today, now)):
+                    before = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual(before["written"], [], "the first build's finality: the look not yet due")
+                got = S8.run_looks(st, prog, now_day, now=now, draws=999)
+                self.assertEqual([w["S"] for w in got["written"]], [22], got)
+                self.assertEqual(got["written"][0]["cap"], 4)
+                self.assertEqual(got["written"][0]["band"], "probe", got["written"][0]["why"])
+                self.assertEqual(BA.bands(st)[("PX-DROP-ON", 1)], "probe")
+                self.assertEqual(S8.run_looks(st, prog, now_day, now=now, draws=999)["written"], [],
+                                 "a written look is never written again (and the version is in Probe now)")
+            finally:
+                st.close()
+
+
 class TheAudit(unittest.TestCase):
     def test_an_edge_no_selection_made_alarms_the_canary_and_the_placebos_and_moves_no_band(self):
         """Section 3.3's AUDIT (screen8 `audit`, records only): a control whose own no-news pool earns (an invented +5%
