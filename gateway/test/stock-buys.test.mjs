@@ -37,7 +37,7 @@ const STOCK_VARS = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK
   STOCK_DAY_EQUITY_MULTIPLE: '4' };
 //: The stock vars exactly as wrangler.jsonc deploys them (release R2: a single stock at 10% of equity, the book at 1x
 //: equity; release 1019b: the event lane's buys on).
-const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.12', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_EVENT_BUYS: 'on' };
+const DEPLOYED = { ...STOCK_VARS, STOCK_SINGLE_EQUITY_SHARE: '0.12', STOCK_MAX_EQUITY_MULTIPLE: '2', STOCK_EVENT_BUYS: 'on' };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
   OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put',
@@ -81,20 +81,20 @@ const refused = (result, status, cap, pattern, message = '') => {
 
 // ------------------------------------------------------------------------------------------------ the numbers
 
-test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 12%, the book at most 1x (no margin), a day 4x, event buys off', () => {
+test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 12%, the book at most 2x (Reg T margin, Oct 28, 2026), a day 4x, event buys off', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const deployed = name => {
     const lines = config.split('\n').filter(line => line.includes(`"${name}"`));
     return lines.length === 1 ? JSON.parse(/:\s*("(?:[^"\\]|\\.)*")/.exec(lines[0])[1]) : lines.length;
   };
   for (const [name, value] of Object.entries(DEPLOYED)) assert.equal(deployed(name), value, name);
-  assert.deepEqual(stockCaps(DEPLOYED), { etfShare: 500000n, stockShare: 120000n, maxMultiple: 1000000n, dayMultiple: 4000000n });
+  assert.deepEqual(stockCaps(DEPLOYED), { etfShare: 500000n, stockShare: 120000n, maxMultiple: 2000000n, dayMultiple: 4000000n });
   assert.equal(stockBuysEnabled(DEPLOYED), true);
 });
 
-test('the deployed book line holds on a margin account: every long position and resting buy at most 1x equity, whatever the multiplier', async () => {
+test('a 1x book line holds on a margin account: every long position and resting buy at most 1x equity, whatever the multiplier', async () => {
   const full = [long('SPY', '18', '9000.00')];
-  const settings = { STOCK_MAX_EQUITY_MULTIPLE: DEPLOYED.STOCK_MAX_EQUITY_MULTIPLE };
+  const settings = { STOCK_MAX_EQUITY_MULTIPLE: '1' };   // the 1x line (deployed is 2x since Oct 28, 2026)
   admitted(await send(buy('AAPL', '4', '250'), { settings, tape: alpacaVenue({ account: { ...MARGIN, buying_power: '50000' }, positions: full }) }),
     '$9,000 held + $1,000: exactly 1x');
   refused(await send(buy('AAPL', '4.00004', '250'), { settings, tape: alpacaVenue({ account: { ...MARGIN, multiplier: '4', buying_power: '50000' }, positions: full }) }),

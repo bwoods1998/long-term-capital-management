@@ -218,7 +218,7 @@
     "STOCK_BUYS_REAL": "on",
     "STOCK_ETF_EQUITY_SHARE": "0.5",
     "STOCK_SINGLE_EQUITY_SHARE": "0.12",
-    "STOCK_MAX_EQUITY_MULTIPLE": "1",
+    "STOCK_MAX_EQUITY_MULTIPLE": "2",
     "STOCK_DAY_EQUITY_MULTIPLE": "4",
     // THE EVENT LANE'S BUYS (release R2, gateway G2; PREREG-EVL-1 section 8; lib/caps.mjs "event-lane stock buys"): a
     // whole-share limit-on-open or limit-on-close buy (time_in_force "opg" or "cls") of a US common stock the House's
