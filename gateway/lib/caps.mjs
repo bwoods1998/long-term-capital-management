@@ -803,7 +803,7 @@ export const STOCK_UNIVERSE = Object.freeze({
   V: 'stock', UNH: 'stock', XOM: 'stock', JNJ: 'stock', PG: 'stock', MA: 'stock', HD: 'stock', AVGO: 'stock', LLY: 'stock',
   COST: 'stock',
   // The owner's AI build-out portfolio (Oct 23, 2026 restart): two leveraged funds and the single names the House did not list.
-  SOXL: 'etf', NVDL: 'etf',
+  SOXL: 'etf', NVDL: 'etf', SSO: 'etf', QLD: 'etf',
   MU: 'stock', TSM: 'stock', AMD: 'stock', SKHY: 'stock', ALAB: 'stock', LITE: 'stock', DELL: 'stock', VRT: 'stock', GEV: 'stock',
   SNDK: 'stock', INTC: 'stock', NBIS: 'stock', ASML: 'stock', BE: 'stock', PLTR: 'stock', CAMT: 'stock', IREN: 'stock', ASX: 'stock',
   AMAT: 'stock', SMCI: 'stock',

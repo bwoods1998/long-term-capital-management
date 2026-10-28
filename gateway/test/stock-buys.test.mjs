@@ -148,10 +148,10 @@ test('the switch: only "on" (any case, trimmed) admits buys; anything else, a ty
   for (const raw of ['off', '', 'yes', 'true', '1', 'onn', undefined, null]) assert.equal(stockBuysEnabled({ STOCK_BUYS_REAL: raw }), false, String(raw));
 });
 
-test('the list: 19 ETFs (the index four, the eleven SPDR sectors, TLT, GLD, SOXL, NVDL) and 38 US stocks, each flagged', () => {
+test('the list: 21 ETFs (the index four, the eleven SPDR sectors, TLT, GLD, SOXL, NVDL, SSO, QLD) and 38 US stocks, each flagged', () => {
   const etfs = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'etf');
   const stocks = Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'stock');
-  assert.deepEqual(etfs, ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL']);
+  assert.deepEqual(etfs, ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL', 'SSO', 'QLD']);
   assert.deepEqual(stocks, ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
     'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI']);
   assert.ok(Object.isFrozen(STOCK_UNIVERSE));
@@ -1152,7 +1152,7 @@ test('health reports the stock route: the switch, the shares, the list, today\'s
     enabled: true, event_buys: { enabled: false, equity_share: '0.1', eligible: { day: null, count: 0, sha: null, at: null }, admitted: false },
     etf_equity_share: '0.5', stock_equity_share: '0.2', max_equity_multiple: '2', day_equity_multiple: '4',
     symbols: {
-      etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL'],
+      etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD', 'SOXL', 'NVDL', 'SSO', 'QLD'],
       stock: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST',
         'MU', 'TSM', 'AMD', 'SKHY', 'ALAB', 'LITE', 'DELL', 'VRT', 'GEV', 'SNDK', 'INTC', 'NBIS', 'ASML', 'BE', 'PLTR', 'CAMT', 'IREN', 'ASX', 'AMAT', 'SMCI'],
     },
